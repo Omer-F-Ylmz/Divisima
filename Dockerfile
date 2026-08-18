@@ -1,5 +1,5 @@
 # Açıklayıcı yorum: Çok aşamalı güvenli build. Non-root kullanıcı, minimal runtime image, secret gömülmez.
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 COPY ["Divisima-Backend.sln", "./"]
 COPY ["Divisima.Core/Divisima.Core.csproj", "Divisima.Core/"]
