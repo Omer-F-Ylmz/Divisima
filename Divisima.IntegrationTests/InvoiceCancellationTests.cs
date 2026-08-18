@@ -12,17 +12,22 @@ using Xunit;
 
 namespace Divisima.IntegrationTests
 {
-    // Açıklayıcı yorum: FATURA İPTALİ doğrulaması. Docker/Testcontainers yerine yerel LocalDB (gerçek SQL Server)
-    // kullanır; gerçek EF DAL'ları + gerçek InvoiceManager çalışır, sonuç DB'den TAZE context ile okunur.
+    // Açıklayıcı yorum: FATURA İPTALİ doğrulaması. GERÇEK SQL Server'a karşı koşar - CI'da workflow'un
+    // sqlserver service container'ı (DIVISIMA_TEST_SQL), yerelde LocalDB. Gerçek EF DAL'ları + gerçek
+    // InvoiceManager çalışır, sonuç DB'den TAZE context ile okunur (tracked nesne değil).
     // Doğrulanan: iptal edilmiş siparişin faturası status=3 (InvoiceStatusEnum.Cancelled) olur.
     public class InvoiceCancellationTests : IAsyncLifetime
     {
-        // SQL Server bağlantısı: CI'da DIVISIMA_TEST_SQL ile gerçek bir sunucuya yönlendirilebilir;
-        // yerelde LocalDB'ye düşer. Erişilemiyorsa (ör. Linux CI runner'ında LocalDB yok) testler
-        // ATLANIR - yeşil CI'yı kırmaz, ama SQL olan her yerde gerçek regresyon koruması sağlar.
-        private static readonly string ConnStr =
-            Environment.GetEnvironmentVariable("DIVISIMA_TEST_SQL")
-            ?? @"Server=(localdb)\MSSQLLocalDB;Database=DivisimaInvoiceCancelTest;Trusted_Connection=True;TrustServerCertificate=True;";
+        // SQL Server bağlantısı iki modda çalışır:
+        //  - DIVISIMA_TEST_SQL VERİLMİŞSE (CI): SQL Server BEKLENİYOR demektir. Bağlanılamazsa testler
+        //    sessizce atlanmaz, PATLAR - yoksa yanlış yapılandırılmış bir CI "yeşil" görünür ama aslında
+        //    hiçbir şey doğrulamamış olurdu (atlanan test ile geçen test çıktıda ayırt edilemez).
+        //  - VERİLMEMİŞSE (yerel): LocalDB denenir; yoksa testler atlanır (Windows dışı geliştirici makinesi).
+        private static readonly string? ExplicitConn = Environment.GetEnvironmentVariable("DIVISIMA_TEST_SQL");
+
+        private static readonly string ConnStr = string.IsNullOrWhiteSpace(ExplicitConn)
+            ? @"Server=(localdb)\MSSQLLocalDB;Database=DivisimaInvoiceCancelTest;Trusted_Connection=True;TrustServerCertificate=True;"
+            : ExplicitConn;
 
         private bool _sqlAvailable;
 
@@ -55,9 +60,17 @@ namespace Divisima.IntegrationTests
                 await ctx.Database.EnsureCreatedAsync();
                 _sqlAvailable = true;
             }
+            catch (Exception ex) when (!string.IsNullOrWhiteSpace(ExplicitConn))
+            {
+                // CI: bağlantı AÇIKÇA verildi ama SQL Server'a ulaşılamadı -> sessizce atlama, PATLA.
+                // (Aksi halde yanlış yapılandırılmış CI hiçbir şey doğrulamadan yeşil görünürdü.)
+                throw new InvalidOperationException(
+                    "DIVISIMA_TEST_SQL verildi ancak SQL Server'a baglanilamadi - fatura iptali testleri " +
+                    "ATLANMAMALI. Service container saglikli mi kontrol edin. Hedef: " + ConnStr, ex);
+            }
             catch
             {
-                // SQL Server yok -> testler atlanır (aşağıdaki Skipped() koruması).
+                // Yerel makine (bağlantı verilmemiş): SQL yok -> testler atlanır (Skipped() koruması).
                 _sqlAvailable = false;
             }
         }
@@ -73,7 +86,7 @@ namespace Divisima.IntegrationTests
             catch { /* temizlik best-effort */ }
         }
 
-        // SQL yoksa test gövdesi çalıştırılmaz (xUnit 2.6'da çalışma anı Skip yok).
+        // SQL yoksa test gövdesi çalıştırılmaz (yalnız yerel; CIda yukarıdaki guard patlar).
         private bool Skipped() => !_sqlAvailable;
 
         // Sipariş + faturayı kur; faturanın başlangıç durumu parametrik.

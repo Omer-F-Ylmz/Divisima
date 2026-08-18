@@ -12,8 +12,32 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
-    # Integration testleri gercek SQL Server'a ihtiyac duyar (Testcontainers zaten kullaniyor,
-    # ama servis olarak da saglanabilir). Testcontainers Docker'i kullanir - ubuntu runner'da mevcut.
+    # Integration testleri gercek SQL Server'a ihtiyac duyar. OrderEndpointTests bunu Testcontainers ile
+    # kendi ayaga kaldirir (Docker ubuntu runner'da mevcut). InvoiceCancellationTests ise hazir bir sunucu
+    # bekler - LocalDB yalniz Windows'ta oldugundan burada service container ile saglanir.
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          # NOT: gercek bir sir DEGIL. Yalniz bu is icin ayaga kalkan, is bitince yok olan, sadece
+          # runner'a acik ephemeral container'in parolasi. SQL Server karmasiklik kuralini karsilar.
+          MSSQL_SA_PASSWORD: "Divisima_CI_Str0ng!Pass"
+          MSSQL_PID: Developer
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "bash -c 'exec 3<>/dev/tcp/localhost/1433'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 30s
+
+    env:
+      # Fatura iptali testleri bu degiskeni okur. VERILDIGI ICIN testler artik ATLANAMAZ:
+      # baglanilamazsa test sinifi InvalidOperationException firlatir (sessiz "yesil" imkansiz).
+      DIVISIMA_TEST_SQL: "Server=localhost,1433;Database=DivisimaCiTest;User Id=sa;Password=Divisima_CI_Str0ng!Pass;TrustServerCertificate=True;Encrypt=False;"
+
     steps:
       - uses: actions/checkout@v4
 
@@ -27,6 +51,31 @@ jobs:
 
       - name: Derle (Release, uyarilar gorunur)
         run: dotnet build Divisima-Backend.sln --configuration Release --no-restore
+
+      # Aciklayici yorum: SQL Server'in gercekten dinledigini ADIM OLARAK gorunur kil (bagimliliksiz TCP
+      # kontrolu - sqlcmd kurulumuna/imaj ici yola guvenmez). Gercek kimlik dogrulama zaten testlerde yapilir.
+      - name: SQL Server hazir mi (service container)
+        run: |
+          for i in $(seq 1 60); do
+            if (exec 3<>/dev/tcp/localhost/1433) 2>/dev/null; then
+              echo "SQL Server localhost:1433 dinliyor (deneme $i)."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "HATA: SQL Server 120 sn icinde ayaga kalkmadi."
+          exit 1
+
+      # Aciklayici yorum: FATURA IPTALI testleri AYRI adimda ve -v normal ile kosar; boylece 5 testin
+      # adi tek tek Actions log'una basilir. Atlanmis olsalardi baglanti hatasiyla bu adim KIRMIZI olurdu.
+      - name: Fatura iptali testleri (SQL Server service - ATLANMAMALI)
+        run: >
+          dotnet test Divisima.IntegrationTests/Divisima.IntegrationTests.csproj
+          --configuration Release
+          --no-build
+          --verbosity normal
+          --logger "console;verbosity=detailed"
+          --filter "FullyQualifiedName~InvoiceCancellationTests"
 
       - name: Testler + coverage
         run: >
