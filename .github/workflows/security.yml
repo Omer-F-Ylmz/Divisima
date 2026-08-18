@@ -22,6 +22,10 @@ jobs:
   # yeşil bir kapı, YENİ çıkan her zafiyeti anında görünür kılar.
   dependency-scan:
     runs-on: ubuntu-latest
+    env:
+      # Kapı mantığı `dotnet list` ÇIKTI METNİNE (İngilizce) grep atıyor.
+      # Runner locale'i değişirse grep sessizce eşleşmez -> locale SABİTLENDİ.
+      DOTNET_CLI_UI_LANGUAGE: en
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -39,15 +43,49 @@ jobs:
       # Kapı: yalnız üretime çıkan projeler + açık istisna listesi.
       - name: Açık bağımlılık KAPISI (üretim projeleri)
         run: |
-          # Divisima.IntegrationTests KAPSAM DIŞI. Oradaki SSH.NET,
-          # System.Net.Http 4.3.0 ve System.Text.RegularExpressions 4.3.0
-          # Testcontainers zincirinden gelen test-only transitive'ler; ÜRETİME ÇIKMIYOR.
-          # Yukarıdaki RAPOR adımında görünmeye devam ediyorlar.
+          # Üretim projeleri ÇÖZÜMDEN TÜRETİLİR - elle liste TUTULMAZ. Elle liste,
+          # çözüme sonradan eklenen bir projenin kapıdan SESSİZCE muaf kalmasına
+          # yol açardı (güvenlik kapılarını zamanla işlevsiz kılan klasik tuzak).
+          # NOT: `dotnet sln list` yolları ters bölü + CRLF ile veriyor (sln Windows'ta
+          # üretildi). Linux runner'da çalışması için ikisi de normalize ediliyor -
+          # normalize edilmezse `dotnet list` hiçbir projeyi bulamazdı.
+          ALL=$(dotnet sln Divisima-Backend.sln list | tr -d '\r' | tr '\134' '/' | grep -E '\.csproj$')
+          PROD=$(echo "$ALL" | grep -viE '[^/]*tests[^/]*\.csproj$' || true)
+          SKIPPED=$(echo "$ALL" | grep -iE '[^/]*tests[^/]*\.csproj$' || true)
+
+          # SAVUNMA 2 (görünürlük): hangi projelerin tarandığı her run'da log'a yazılır.
+          echo "== KAPI KAPSAMINDAKİ ÜRETİM PROJELERİ =="
+          echo "$PROD"
+          echo "== KAPSAM DIŞI (test projeleri - RAPOR adımında taranıyorlar) =="
+          echo "${SKIPPED:-<yok>}"
+
+          # SAVUNMA 1 (boş/eksik liste): türetme bozulursa (sln formatı değişir, komut
+          # hata verir, grep tutmaz) liste boşalır ve kapı HİÇBİR ŞEY TARAMADAN yeşil
+          # görünürdü. Bu sessiz başarısızlık en tehlikeli durum - güvenli taraf KIRMAK.
+          COUNT=$(printf '%s\n' "$PROD" | grep -c . || true)
+          echo "Türetilen üretim projesi sayısı: $COUNT"
+          if [ "$COUNT" -lt 3 ]; then
+            echo "::error::Üretim proje listesi türetilemedi veya beklenenden az ($COUNT < 3). Çözüm yapısı değişmiş olabilir; kapı güvenli tarafta KIRIYOR."
+            exit 1
+          fi
+
           : > gate.txt
-          for p in Divisima.Core Divisima.Entity Divisima.Dal Divisima.Bussiness Divisima.API; do
-            echo "---- $p ----"
-            dotnet list "$p/$p.csproj" package --vulnerable --include-transitive 2>&1 | tee -a gate.txt
+          echo "$PROD" | while read -r proj; do
+            [ -n "$proj" ] || continue
+            echo "---- $proj ----"
+            dotnet list "$proj" package --vulnerable --include-transitive 2>&1 | tee -a gate.txt
           done
+
+          # SAVUNMA 3 (tarama gerçekten koştu mu): her proje için `dotnet list` ya
+          # "has the following vulnerable packages" ya da "has no vulnerable packages"
+          # basar. Sayı tutmuyorsa bazı projeler taranamamış demektir; boş çıktıyı
+          # "temiz" saymak yerine KIR.
+          SCANNED=$(grep -cE "has the following vulnerable packages|has no vulnerable packages" gate.txt || true)
+          echo "Tarama çıktısı üretilen proje sayısı: $SCANNED / $COUNT"
+          if [ "$SCANNED" -lt "$COUNT" ]; then
+            echo "::error::Bazı projeler taranamadı ($SCANNED < $COUNT). Kapı güvenli tarafta KIRIYOR."
+            exit 1
+          fi
 
           # ---------------------------------------------------------------
           # AÇIK İSTİSNA LİSTESİ (allow-list)
