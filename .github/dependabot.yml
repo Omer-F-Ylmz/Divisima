@@ -1,4 +1,11 @@
 # Divisima - bagimlilik guncelleme otomasyonu (guvenlik yamalarini erken yakalar)
+#
+# GURULTU AYARI: ilk kosuda 17 acik PR olustu ve CI kuyrugu tikandi. Sebep uctu:
+#   1) major guncellemeler gruplanmaz -> her paket icin ayri PR (AutoMapper, Autofac,
+#      EF Core, FluentValidation, FluentAssertions... hepsi tek tek),
+#   2) github-actions ve docker icin ne grup ne limit vardi (varsayilan 5'er PR),
+#   3) proje net8.0'a sabitken 9.x/10.x major onerileri geliyordu - bunlar TFM
+#      yukseltilmeden ZATEN merge edilemez (bkz. NU1605 paket dusurme hatalari).
 version: 2
 updates:
   # NuGet paketleri
@@ -6,11 +13,26 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 10
+    # 10 -> 5: kuyrugu bogmadan haftalik makul bir inceleme yuku
+    open-pull-requests-limit: 5
     groups:
       # Kucuk/yama guncellemelerini tek PR'da topla (gurultuyu azalt)
       minor-and-patch:
         update-types: ["minor", "patch"]
+      # Major'lari da TEK PR'da topla - ayri ayri 10 PR yerine tek inceleme kalemi.
+      # Icerigi riskli oldugu icin otomatik merge edilmez; bilerek incelenir.
+      major-updates:
+        update-types: ["major"]
+    ignore:
+      # Proje net8.0. Bu ailelerin 9.x/10.x major'lari TFM yukseltilmeden merge
+      # EDILEMEZ (transitive Microsoft.Extensions.* 10.x -> NU1605). TFM 9/10'a
+      # cikarilirsa bu uc kural kaldirilmali.
+      - dependency-name: "Microsoft.EntityFrameworkCore*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.AspNetCore.*"
+        update-types: ["version-update:semver-major"]
     labels:
       - "dependencies"
 
@@ -19,6 +41,11 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      # Action bump'lari birbirinden bagimsiz ve dusuk riskli - tek PR yeterli.
+      github-actions:
+        patterns: ["*"]
     labels:
       - "ci"
 
@@ -27,3 +54,9 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 2
+    groups:
+      docker-images:
+        patterns: ["*"]
+    labels:
+      - "ci"
