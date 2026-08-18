@@ -16,6 +16,10 @@ permissions:
 
 jobs:
   # 1) Bağımlılık açığı taraması (dotnet list --vulnerable)
+  #
+  # KAPI KAPSAMI (2026-08-19): Kapı yalnız ÜRETİME ÇIKAN projeleri kırar.
+  # Amaç, kapının kalıcı kırmızıda kalıp sinyal değerini yitirmesini önlemek:
+  # yeşil bir kapı, YENİ çıkan her zafiyeti anında görünür kılar.
   dependency-scan:
     runs-on: ubuntu-latest
     steps:
@@ -25,14 +29,61 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Restore
         run: dotnet restore Divisima-Backend.sln
-      - name: Açık bağımlılık taraması (transitive dahil)
+
+      # Rapor: TÜM çözüm (test projesi dahil). Bilgi amaçlı - build'i KIRMAZ.
+      - name: Açık bağımlılık taraması - RAPOR (tüm çözüm)
         run: |
-          echo "== Doğrudan + geçişli açık paketler =="
-          dotnet list Divisima-Backend.sln package --vulnerable --include-transitive 2>&1 | tee vuln.txt
-          # Açıklayıcı yorum: Açık bulunursa build'i kır
-          if grep -q "has the following vulnerable packages" vuln.txt; then
-            echo "::error::Açık bağımlılık bulundu"; exit 1
+          echo "== Doğrudan + geçişli açık paketler (tüm çözüm, raporlama) =="
+          dotnet list Divisima-Backend.sln package --vulnerable --include-transitive 2>&1 | tee vuln-full.txt
+
+      # Kapı: yalnız üretime çıkan projeler + açık istisna listesi.
+      - name: Açık bağımlılık KAPISI (üretim projeleri)
+        run: |
+          # Divisima.IntegrationTests KAPSAM DIŞI. Oradaki SSH.NET,
+          # System.Net.Http 4.3.0 ve System.Text.RegularExpressions 4.3.0
+          # Testcontainers zincirinden gelen test-only transitive'ler; ÜRETİME ÇIKMIYOR.
+          # Yukarıdaki RAPOR adımında görünmeye devam ediyorlar.
+          : > gate.txt
+          for p in Divisima.Core Divisima.Entity Divisima.Dal Divisima.Bussiness Divisima.API; do
+            echo "---- $p ----"
+            dotnet list "$p/$p.csproj" package --vulnerable --include-transitive 2>&1 | tee -a gate.txt
+          done
+
+          # ---------------------------------------------------------------
+          # AÇIK İSTİSNA LİSTESİ (allow-list)
+          #
+          # GHSA-rvv3-g6hj-g44x  —  AutoMapper 12.0.1 (High)
+          #   Eklendi      : 2026-08-19
+          #   Gerekçe      : Tek düzeltme 12 -> 16 major sıçraması. AutoMapper v15+
+          #                  ticari lisansa geçtiği için bu TEKNİK DEĞİL, TİCARİ karar.
+          #                  12.0.2 / 13.0.1 / 14.0.0 denendi: üçü de derlenmiyor (2x CS
+          #                  hatası) ve advisory'yi zaten kapatmıyor, çünkü
+          #                  AutoMapper.Extensions.Microsoft.DependencyInjection 12.0.1
+          #                  paketi AutoMapper 12.0.1'i transitive olarak pinliyor.
+          #   AYRI İŞ      : major bump + lisans kararı. Çözülünce bu satır SİLİNMELİ
+          #                  (ve kapı kendiliğinden bu advisory'yi de kırmaya başlar).
+          #
+          # İstisna BİLEREK advisory-id bazında dar tutuldu: paket adı veya severity
+          # bazlı geniş bir muafiyet YOK. Böylece AutoMapper'da çıkacak YENİ bir
+          # advisory bile kapıyı kırmızı yapar.
+          # ---------------------------------------------------------------
+          ALLOW_IDS="GHSA-rvv3-g6hj-g44x"
+          printf '%s\n' $ALLOW_IDS > allow.txt
+
+          grep -oE 'GHSA-[A-Za-z0-9-]+' gate.txt | sort -u > found.txt
+          echo "== Üretim projelerinde bulunan advisory'ler =="
+          cat found.txt || true
+          echo "== Açık istisnalar =="
+          cat allow.txt
+
+          REMAINING=$(grep -vxF -f allow.txt found.txt || true)
+          if [ -n "$REMAINING" ]; then
+            echo "::error::İstisna listesinde OLMAYAN açık bağımlılık bulundu:"
+            echo "$REMAINING"
+            exit 1
           fi
+          echo "KAPI GEÇTİ - kalan advisory'lerin tamamı açık istisna listesinde."
+
       - name: Kullanımdan kalkmış paket kontrolü
         run: dotnet list Divisima-Backend.sln package --deprecated 2>&1 | tee deprecated.txt || true
 
@@ -65,8 +116,37 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # 4) Testler (iş mantığı simülasyonu + entegrasyon)
+  #
+  # SQL SERVER (2026-08-19): ci.yml'daki build-and-test ile AYNI kurulum. Öncesinde
+  # burada service container yoktu; DIVISIMA_TEST_SQL tanımsız olduğu için
+  # InvoiceCancellationTests bu job'da SESSİZCE ATLANIYORDU (Linux'ta LocalDB yok).
+  # Aynı testlerin iki workflow'da farklı koşullarda çalışması yanıltıcıydı.
   tests:
     runs-on: ubuntu-latest
+
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          # NOT: gerçek bir sır DEĞİL - yalnız bu iş için ayağa kalkan, iş bitince
+          # yok olan, sadece runner'a açık ephemeral container'ın parolası.
+          MSSQL_SA_PASSWORD: "Divisima_CI_Str0ng!Pass"
+          MSSQL_PID: Developer
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "bash -c 'exec 3<>/dev/tcp/localhost/1433'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 30s
+
+    env:
+      # Tanımlı olduğu için testler ARTIK ATLANAMAZ: bağlanılamazsa test sınıfı
+      # InvalidOperationException fırlatır (sessiz "yeşil" imkansız).
+      DIVISIMA_TEST_SQL: "Server=localhost,1433;Database=DivisimaSecTest;User Id=sa;Password=Divisima_CI_Str0ng!Pass;TrustServerCertificate=True;Encrypt=False;"
+
     steps:
       - uses: actions/checkout@v4
       - name: İş mantığı güvenlik simülasyonu
@@ -74,5 +154,18 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+
+      - name: SQL Server hazır mı (service container)
+        run: |
+          for i in $(seq 1 60); do
+            if (exec 3<>/dev/tcp/localhost/1433) 2>/dev/null; then
+              echo "SQL Server localhost:1433 dinliyor (deneme $i)."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "HATA: SQL Server 120 sn içinde ayağa kalkmadı."
+          exit 1
+
       - name: Entegrasyon testleri
         run: dotnet test Divisima.IntegrationTests/Divisima.IntegrationTests.csproj --configuration Release
