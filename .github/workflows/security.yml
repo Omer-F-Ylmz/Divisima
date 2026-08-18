@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
       - name: Restore
@@ -45,7 +45,7 @@ jobs:
         with:
           languages: csharp
           queries: security-extended
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
       - name: Build
@@ -71,7 +71,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: İş mantığı güvenlik simülasyonu
         run: python3 tests/business_logic_sim.py
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
       - name: Entegrasyon testleri
