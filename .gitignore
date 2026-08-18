@@ -131,3 +131,11 @@ ClientBin/
 ~$*
 *.dbmdl
 *.jfm
+
+# Guvenlik taramasi calisma dosyalari (dependency-scan adimi runner'da uretir)
+vuln.txt
+vuln-full.txt
+gate.txt
+found.txt
+allow.txt
+deprecated.txt
