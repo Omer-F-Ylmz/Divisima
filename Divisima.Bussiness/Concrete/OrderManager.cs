@@ -601,6 +601,11 @@ Tarih: {order.created_at:dd.MM.yyyy}</p>
                     // FARMING ENGELİ: iptal edilen siparişte ödemede KAZANILAN loyalty puanını GERİ AL. Aksi halde müşteri
                     // sipariş ver -> puan kazan -> iptal et -> refund AL + puanı krediye çevir ile sınırsız bedava kredi üretirdi.
                     await _loyaltyService.ReverseForOrder(order.customer_id, order.id);
+
+                    // FATURA İPTALİ: sipariş iptal edildiğinde faturası da iptal edilmeliydi (InvoiceStatusEnum.Cancelled
+                    // tanımlıydı ama hiçbir kod yazmıyordu) - iptal edilen sipariş muhasebe raporunda ciroda kalıyordu.
+                    // Sipariş durumu bu noktada zaten kalıcı (yukarıda UpdateAsync ile kaydedildi), fatura onu görebilir.
+                    await _orderConfirmation.ApplyCancelledSideEffectsAsync(order.id);
                 }
 
                 // Açıklayıcı yorum: Kargoya verilince / teslim edilince müşteriye bildir (MERKEZİ servis - DRY).
@@ -738,6 +743,8 @@ Tarih: {order.created_at:dd.MM.yyyy}</p>
 
             await _unitOfWork.BeginTransactionAsync();
             decimal refundedTotal = 0m;
+            // Sipariş bu çağrıyla tümüyle iptale döndü mü - fatura iptali commit SONRASI tetiklenecek.
+            bool orderFullyCancelled = false;
             try
             {
                 // Açıklayıcı yorum: Stoğu iade et (IncreaseStock kendi transaction'ını açmaz - ambient'e katılır)
@@ -791,6 +798,7 @@ Tarih: {order.created_at:dd.MM.yyyy}</p>
                 if (!hasRemaining)
                 {
                     order.status = (byte)OrderStatusEnum.Cancelled;
+                    orderFullyCancelled = true;
                     // TUTARLILIK FIX (H44): son kalem iptaliyle sipariş TÜMÜYLE iptal -> kalan tutarı (kargo) da iade et
                     // (tüm-sipariş iptali yolu total'in tamamını=kargo dahil iade eder; yoksa müşteri kargoyu kaybederdi).
                     // Yine yalnız ÖDENEN pay: online->kalan total_price, COD/cüzdan->kalan store_credit_used kadar (nakit ödenmedi).
@@ -828,6 +836,14 @@ Tarih: {order.created_at:dd.MM.yyyy}</p>
                 await _unitOfWork.RollbackAsync();
                 return (HttpStatusCode.InternalServerError, new ErrorResult(Messages.OrderItemCancelFailed));
             }
+
+            // FATURA İPTALİ: son kalem de iptal edilip sipariş tümüyle Cancelled'a döndüyse faturasını da iptal et.
+            // TRANSACTION DIŞINDA (CommitAsync'ten SONRA): fatura iptali ayrı bir SaveChanges'tır ve sipariş
+            // durumunun KALICI olmasına dayanır - transaction içinde çağrılsaydı CancelForOrder'ın okuduğu
+            // sipariş henüz commit edilmemiş olurdu ve rollback halinde fatura yanlışlıkla iptalde kalırdı.
+            if (orderFullyCancelled)
+                await _orderConfirmation.ApplyCancelledSideEffectsAsync(order.id);
+
             var iptalMesaji = refundedTotal > 0m
                 ? Messages.OrderItemCancelled
                 : "Kalem iptal edildi. Ödeme alınmadığı için iade oluşmadı.";

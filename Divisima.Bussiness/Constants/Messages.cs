@@ -211,6 +211,12 @@ namespace Divisima.Core.Utilities.Constants
         public static string InvoiceAlreadyExists = "Bu sipariş için fatura zaten oluşturulmuş.";
         public static string InvoiceGenerated = "Fatura oluşturuldu.";
 
+        // ── Fatura iptali (sipariş iptal edilince) ──
+        public static string InvoiceCancelled = "Fatura iptal edildi.";
+        public static string InvoiceAlreadyCancelled = "Fatura zaten iptal edilmiş.";
+        public static string InvoiceCancelNotNeeded = "İptal edilecek fatura bulunmuyor.";
+        public static string InvoiceCancelOrderNotCancelled = "Sipariş iptal edilmediği için fatura iptal edilemez.";
+
         // ── Cihaz/push ──
         public static string DeviceTokenRequired = "Cihaz token gerekli.";
         public static string DeviceRegistered = "Cihaz kaydedildi.";

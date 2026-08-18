@@ -113,6 +113,38 @@ namespace Divisima.Bussiness.Concrete
             return (HttpStatusCode.OK, new SuccessResult(Messages.InvoiceGenerated));
         }
 
+        // Açıklayıcı yorum: FATURA İPTALİ - sipariş iptal edilince faturası da iptal edilmeliydi ama hiçbir kod
+        // InvoiceStatusEnum.Cancelled yazmıyordu: iptal edilen siparişin faturası Sent/Approved kalıyor, muhasebe
+        // raporu iptal edilmiş siparişi ciroda sayıyordu. Idempotent (yan etki tekrar çağrılabilir olmalı).
+        public async Task<(HttpStatusCode, Result)> CancelForOrder(int orderId)
+        {
+            var order = await _orderDal.GetAsync(o => o.id == orderId);
+            if (order == null)
+                return (HttpStatusCode.NotFound, new ErrorResult(Messages.OrderNotFound));
+
+            // Açıklayıcı yorum: GÜVENLİK - yalnız gerçekten iptal edilmiş siparişin faturası iptal edilebilir.
+            // (Aktif siparişin faturası yanlışlıkla/kötü niyetle iptal edilemesin.)
+            if (order.status != (byte)OrderStatusEnum.Cancelled)
+                return (HttpStatusCode.BadRequest, new ErrorResult(Messages.InvoiceCancelOrderNotCancelled));
+
+            var invoice = await _invoiceDal.GetAsync(i => i.order_id == orderId);
+            // Açıklayıcı yorum: Fatura hiç üretilmemişse (ör. Pending sipariş iptali) yapacak bir şey yok - başarı dön.
+            if (invoice == null)
+                return (HttpStatusCode.OK, new SuccessResult(Messages.InvoiceCancelNotNeeded));
+
+            // Açıklayıcı yorum: Zaten iptalse tekrar yazma (idempotent - HandleStatusSideEffects + CancelItem
+            // yollarının ikisi de aynı siparişte tetiklenebilir).
+            if (invoice.status == (byte)InvoiceStatusEnum.Cancelled)
+                return (HttpStatusCode.OK, new SuccessResult(Messages.InvoiceAlreadyCancelled));
+
+            // DİKKAT: Invoice entity'sinde updated_at/cancelled_at kolonu YOK -> yalnız status güncellenir
+            // (olmayan alana atama CS1061 ile build'i patlatırdı).
+            invoice.status = (byte)InvoiceStatusEnum.Cancelled;
+            await _invoiceDal.UpdateAsync(invoice);
+
+            return (HttpStatusCode.OK, new SuccessResult(Messages.InvoiceCancelled));
+        }
+
         public async Task<(HttpStatusCode, Result)> GetMyInvoices(int customerId)
         {
             var invoices = await _invoiceDal.GetListAsync(i => i.customer_id == customerId);

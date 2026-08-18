@@ -34,5 +34,22 @@ namespace Divisima.Bussiness.Concrete
                 _logger.LogError(ex, "Siparis onay yan etkileri basarisiz. orderId={OrderId}", orderId);
             }
         }
+
+        // Best-effort: onay yolundaki kalıbın aynısı. Fatura iptali başarısız olsa bile sipariş iptali
+        // geri alınmaz (iptal ana akış, fatura ikincil) ama SESSİZ kalmaz - loglanır.
+        public async Task ApplyCancelledSideEffectsAsync(int orderId)
+        {
+            try
+            {
+                // InvoiceManager idempotent - fatura yoksa veya zaten iptalse başarı döner.
+                var (_, result) = await _invoiceService.CancelForOrder(orderId);
+                if (result != null && !result.Success)
+                    _logger.LogError("Fatura iptal edilemedi. orderId={OrderId} mesaj={Mesaj}", orderId, result.Message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Siparis iptal yan etkileri basarisiz. orderId={OrderId}", orderId);
+            }
+        }
     }
 }

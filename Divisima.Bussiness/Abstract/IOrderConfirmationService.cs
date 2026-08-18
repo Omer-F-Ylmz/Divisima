@@ -12,5 +12,10 @@ namespace Divisima.Bussiness.Abstract
     public interface IOrderConfirmationService
     {
         Task ApplyConfirmedSideEffectsAsync(int orderId);
+
+        // Açıklayıcı yorum: "Sipariş Cancelled olunca ne olur" - faturanın da iptal edilmesi.
+        // İptal iki ayrı yoldan olabiliyor (admin durum değişimi, son kalemin CancelItem ile iptali)
+        // ve fatura iptali bunların HİÇBİRİNDE çağrılmıyordu.
+        Task ApplyCancelledSideEffectsAsync(int orderId);
     }
 }
