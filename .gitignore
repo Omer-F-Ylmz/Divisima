@@ -1,0 +1,133 @@
+# ---------------------------------------------------------------
+# Divisima .NET / ASP.NET Core 8 .gitignore
+# ---------------------------------------------------------------
+
+# Build çıktıları
+bin/
+obj/
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+build/
+bld/
+[Ll]og/
+[Ll]ogs/
+artifacts/
+
+# Publish çıktıları
+publish/
+[Pp]ublish/
+*.[Pp]ublish.xml
+*.publishsettings
+*.pubxml
+*.pubxml.user
+*.azurePubxml
+PublishScripts/
+**/Properties/PublishProfiles/*.pubxml.user
+
+# Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.sln.iml
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.svclog
+*.VC.db
+*.VC.VC.opendb
+*.psess
+*.vsp
+*.vspx
+*.sap
+
+# Test / coverage
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.trx
+*.coverage
+*.coveragexml
+*.VisualState.xml
+TestResult.xml
+coverage*.json
+coverage*.xml
+coverage*.info
+nunit-*.xml
+
+# NuGet
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+.nuget/
+
+# ---------------------------------------------------------------
+# SECRETS - asla commit edilmez
+# ---------------------------------------------------------------
+appsettings.Development.json
+**/appsettings.Development.json
+appsettings.Local.json
+**/appsettings.*.Local.json
+**/appsettings.Production.json
+secrets.json
+*.secrets.json
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.key
+*.pem
+*.snk
+
+# Node / frontend
+node_modules/
+npm-debug.log*
+yarn-error.log
+dist/
+.cache/
+
+# EF Core / veritabanı yerel dosyaları
+*.mdf
+*.ldf
+*.ndf
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# İşletim sistemi
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+*.swp
+*~
+
+# Çeşitli
+*.tmp
+*.bak
+*.cache
+*.log
+ClientBin/
+~$*
+*.dbmdl
+*.jfm

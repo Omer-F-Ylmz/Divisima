@@ -1,0 +1,17 @@
+<Project>
+  <!-- Aciklayici yorum: Tum projelere uygulanan ortak ayarlar (kod kalitesi zorlamasi). -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <!-- .NET analizorleri: guvenlik + kalite kurallari acik -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisMode>Recommended</AnalysisMode>
+    <!-- Uyarilari raporla; CI'da -warnaserror ile bloklanabilir -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- Deterministik build (reproducible) -->
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,54 @@
+# Divisima - yerel gelistirme ortami. Tek komutla ayaga kalkar:  docker compose up
+# Yeni gelistirici 5 dakikada calistirir (SQL Server + Redis + API).
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${DB_PASSWORD:-Your_strong_Pass123}"
+      MSSQL_PID: Developer
+    ports:
+      # GUVENLIK: yalniz localhost - zayif-default-sifreli DB agdaki diger makinelere ACILMASIN (host araci hala baglanabilir).
+      - "127.0.0.1:1433:1433"
+    volumes:
+      - mssql_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      # GUVENLIK: yalniz localhost - auth'suz Redis agdaki diger makinelere ACILMASIN (unauth-access engeli).
+      - "127.0.0.1:6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DivisimaDb: "Server=sqlserver;Database=Divisima;User Id=sa;Password=${DB_PASSWORD:-Your_strong_Pass123};TrustServerCertificate=True"
+      Redis__Enabled: "true"
+      Redis__Configuration: "redis:6379"
+    ports:
+      - "5000:5000"
+
+volumes:
+  mssql_data:
+  redis_data:

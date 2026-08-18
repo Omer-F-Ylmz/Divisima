@@ -1,0 +1,23 @@
+{
+  "name": "Divisima",
+  "short_name": "Divisima",
+  "description": "Divisima kadın moda - alışveriş uygulaması",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#faf8f5",
+  "theme_color": "#111111",
+  "lang": "tr",
+  "categories": ["shopping", "lifestyle"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Sepetim", "url": "/?view=cart", "description": "Sepete git" },
+    { "name": "Siparişlerim", "url": "/?view=orders", "description": "Siparişleri gör" }
+  ]
+}

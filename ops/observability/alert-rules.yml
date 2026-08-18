@@ -1,0 +1,36 @@
+# Divisima - Prometheus uyari kurallari. OTLP -> Prometheus/Tempo export'u zaten mevcut.
+# Grafana Alerting veya Prometheus alertmanager ile kullanilir.
+groups:
+  - name: divisima-api
+    rules:
+      - alert: YuksekHataOrani
+        expr: sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m])) / sum(rate(http_server_request_duration_seconds_count[5m])) > 0.05
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "5xx hata orani %5'i asti"
+          description: "Son 5 dakikada sunucu hatalari esigin uzerinde."
+
+      - alert: YuksekGecikme
+        expr: histogram_quantile(0.95, sum(rate(http_server_request_duration_seconds_bucket[5m])) by (le)) > 1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "p95 gecikme 1sn'yi asti"
+          description: "Istekelerin %95'i 1 saniyeden uzun suruyor."
+
+      - alert: ServisKapali
+        expr: up{job="divisima-api"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Divisima API erisilemiyor"
+          description: "Servis 1 dakikadir yanit vermiyor."
+
+      - alert: VeritabaniYavas
+        expr: histogram_quantile(0.95, sum(rate(db_client_operation_duration_seconds_bucket[5m])) by (le)) > 0.5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "DB sorgu p95 500ms'yi asti"
+          description: "Veritabani sorgulari yavasliyor - N+1 veya index eksigi olabilir."

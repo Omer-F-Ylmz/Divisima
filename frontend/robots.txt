@@ -1,0 +1,8 @@
+# Divisima robots.txt
+User-agent: *
+Allow: /
+Disallow: /admin.html
+Disallow: /api/
+
+# Sitemap (frontend host, backend'den proxy'lenir)
+Sitemap: https://divisima.com/sitemap.xml

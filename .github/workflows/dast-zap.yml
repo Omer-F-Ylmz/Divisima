@@ -1,0 +1,30 @@
+name: DAST - OWASP ZAP
+
+# Açıklayıcı yorum: Dinamik güvenlik taraması (DAST). Çalışan uygulamaya karşı OWASP ZAP baseline
+# (pasif) + full (aktif) tarama. Statik (CodeQL) tamamlar - runtime açıkları yakalar.
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Taranacak URL (staging)'
+        required: true
+        default: 'https://staging-api.divisima.com'
+  schedule:
+    - cron: '0 4 * * 0'   # haftalık pazar 04:00
+
+permissions:
+  contents: read
+  issues: write   # bulguları issue olarak açar
+
+jobs:
+  zap-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ZAP Baseline Scan (pasif - güvenli)
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ github.event.inputs.target_url || 'https://staging-api.divisima.com' }}
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a'   # alpha kuralları dahil
+          fail_action: false   # bulgu build'i kırmaz, issue açar

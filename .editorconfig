@@ -1,0 +1,34 @@
+# Divisima - kod stili ve analiz kurallari (tum projeler)
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml,csproj,props}]
+indent_size = 2
+
+[*.cs]
+# using duzeni
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+# nullable ve derleme kalitesi
+dotnet_diagnostic.CS8600.severity = warning   # null-atanamaz'a null
+dotnet_diagnostic.CS8602.severity = warning   # olasi null referans dereference
+dotnet_diagnostic.CS8618.severity = warning   # non-nullable alan init edilmedi
+# async isimlendirme
+dotnet_diagnostic.CA2007.severity = none      # ConfigureAwait (ASP.NET Core'da gereksiz)
+# guvenlik/kalite analizleri (uyari)
+dotnet_diagnostic.CA2100.severity = warning   # SQL injection riski
+dotnet_diagnostic.CA5350.severity = warning   # zayif kripto
+dotnet_diagnostic.CA5351.severity = warning   # kirik kripto (MD5/DES)
+dotnet_diagnostic.CA3075.severity = warning   # XML XXE
+# stil (oneri)
+csharp_prefer_braces = true:suggestion
+csharp_style_var_for_built_in_types = false:suggestion
+dotnet_style_null_propagation = true:suggestion
+dotnet_style_coalesce_expression = true:suggestion

@@ -1,0 +1,58 @@
+name: CI - Build & Test
+
+# Aciklayici yorum: Her push/PR'da: restore -> build -> test (coverage). Kirmizi ise merge engellenir.
+# Guvenlik taramalari ayri workflow'da (security.yml).
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    # Integration testleri gercek SQL Server'a ihtiyac duyar (Testcontainers zaten kullaniyor,
+    # ama servis olarak da saglanabilir). Testcontainers Docker'i kullanir - ubuntu runner'da mevcut.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: .NET 8 kurulumu
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Bagimliliklari geri yukle
+        run: dotnet restore Divisima-Backend.sln
+
+      - name: Derle (Release, uyarilar gorunur)
+        run: dotnet build Divisima-Backend.sln --configuration Release --no-restore
+
+      - name: Testler + coverage
+        run: >
+          dotnet test Divisima-Backend.sln
+          --configuration Release
+          --no-build
+          --verbosity normal
+          --collect:"XPlat Code Coverage"
+          --results-directory ./coverage
+
+      - name: Coverage raporunu yukle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: ./coverage
+          retention-days: 14
+
+  # Aciklayici yorum: Kod formati/analiz kontrolu (editorconfig'e uyum).
+  format-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Format dogrulama
+        run: dotnet format Divisima-Backend.sln --verify-no-changes --verbosity diagnostic
+        continue-on-error: true   # ilk asamada uyari; ekip duzelttikce zorunlu yapilabilir

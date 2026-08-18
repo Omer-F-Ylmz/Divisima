@@ -1,0 +1,36 @@
+{
+  "title": "Divisima API - Genel Bakis",
+  "description": "Istek orani, hata orani, gecikme ve DB saglik gostergeleri (OTLP -> Prometheus).",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "timeseries", "title": "Istek orani (req/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [{ "expr": "sum(rate(http_server_request_duration_seconds_count[1m]))", "legendFormat": "toplam" }]
+    },
+    {
+      "id": 2, "type": "timeseries", "title": "Hata orani (5xx %)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.05 } ] } } },
+      "targets": [{ "expr": "sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~\"5..\"}[5m])) / sum(rate(http_server_request_duration_seconds_count[5m]))", "legendFormat": "5xx orani" }]
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "Gecikme p95 / p99 (s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(http_server_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "DB sorgu suresi p95 (s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(db_client_operation_duration_seconds_bucket[5m])) by (le))", "legendFormat": "DB p95" }]
+    }
+  ]
+}

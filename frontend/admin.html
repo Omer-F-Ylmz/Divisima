@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' http://localhost:5000 https://api.divisima.com; font-src 'self' data:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Divisima Yönetim Paneli</title>
+<!-- SRI: yayına almadan önce jsdelivr SRI hash ekle (integrity="sha384-...") -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+<style>
+  :root{--bg:#faf8f5;--surface:#fff;--ink:#1a1a1a;--muted:#6b6b6b;--line:#e8e4de;--accent:#111;--ok:#0f6e56;--warn:#ba7517;--danger:#a32d2d;--radius:10px}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.5}
+  .layout{display:flex;min-height:100vh}
+  aside{width:230px;background:var(--surface);border-right:1px solid var(--line);padding:20px 0;position:sticky;top:0;height:100vh;flex-shrink:0}
+  aside h1{font-size:20px;font-weight:600;padding:0 22px 20px;letter-spacing:2px}
+  nav a{display:flex;align-items:center;gap:10px;padding:11px 22px;color:var(--muted);text-decoration:none;cursor:pointer;font-weight:500;border-left:3px solid transparent}
+  nav a:hover{background:var(--bg);color:var(--ink)}
+  nav a.active{color:var(--ink);border-left-color:var(--accent);background:var(--bg)}
+  main{flex:1;padding:26px 32px;max-width:100%;overflow-x:hidden}
+  .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
+  .topbar h2{font-size:22px;font-weight:600}
+  .btn{background:var(--accent);color:#fff;border:none;padding:9px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500}
+  .btn:hover{opacity:.88}
+  .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  .btn.sm{padding:6px 11px;font-size:12px}
+  .btn.ok{background:var(--ok)}.btn.danger{background:var(--danger)}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+  .card .label{color:var(--muted);font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:.5px}
+  .card .value{font-size:26px;font-weight:600;margin-top:6px}
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px;margin-bottom:20px}
+  .panel h3{font-size:15px;font-weight:600;margin-bottom:14px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;color:var(--muted);font-weight:500;padding:9px 10px;border-bottom:1px solid var(--line);font-size:12px}
+  td{padding:10px;border-bottom:1px solid var(--line)}
+  tr:last-child td{border-bottom:none}
+  .badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600}
+  .badge.ok{background:#e1f5ee;color:var(--ok)}.badge.warn{background:#faeeda;color:var(--warn)}.badge.danger{background:#fcebeb;color:var(--danger)}.badge.muted{background:#f0efe9;color:var(--muted)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  input,select,textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit;background:var(--surface)}
+  label.f{display:block;margin-bottom:12px}
+  label.f span{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;font-weight:500}
+  .login{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:100}
+  .login .box{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:34px;width:340px}
+  .login h1{font-size:24px;text-align:center;letter-spacing:2px;margin-bottom:24px}
+  .hidden{display:none!important}
+  .toast{position:fixed;bottom:22px;right:22px;background:var(--ink);color:#fff;padding:12px 18px;border-radius:8px;font-size:13px;z-index:200;opacity:0;transition:opacity .3s;pointer-events:none}
+  .toast.show{opacity:1}
+  .toast.err{background:var(--danger)}
+  .muted{color:var(--muted)}
+  .row-actions{display:flex;gap:6px}
+  @media(max-width:760px){aside{width:60px}aside h1{font-size:0;padding:0 0 18px}aside h1::first-letter{font-size:22px}nav a span{display:none}.grid2{grid-template-columns:1fr}main{padding:18px}}
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div class="login" id="loginScreen">
+  <div class="box">
+    <h1>DIVISIMA</h1>
+    <label class="f"><span>E-posta</span><input id="loginEmail" type="email" placeholder="admin@divisima.com"></label>
+    <label class="f"><span>Şifre</span><input id="loginPass" type="password" placeholder="••••••••"></label>
+    <button class="btn" style="width:100%;margin-top:8px" onclick="doLogin()">Giriş Yap</button>
+    <p class="muted" style="text-align:center;margin-top:14px;font-size:12px">Yönetici hesabıyla giriş yapın</p>
+  </div>
+</div>
+
+<!-- App -->
+<div class="layout hidden" id="app">
+  <aside>
+    <h1>DIVISIMA</h1>
+    <nav id="nav">
+      <a data-view="dashboard" class="active">◈ <span>Panel</span></a>
+      <a data-view="products">▤ <span>Ürünler</span></a>
+      <a data-view="orders">▦ <span>Siparişler</span></a>
+      <a data-view="returns">↩ <span>İadeler</span></a>
+      <a data-view="shipments">▶ <span>Kargo</span></a>
+      <a data-view="coupons">◊ <span>Kuponlar</span></a>
+      <a onclick="doLogout()" style="margin-top:20px;color:var(--danger)">⏻ <span>Çıkış</span></a>
+    </nav>
+  </aside>
+  <main>
+    <div id="views"></div>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="api-client.js"></script>
+<script>
+// ── Yapılandırma ── API adresini kendi ortamına göre değiştir
+const API_BASE = localStorage.getItem("divisima_api_base") || "http://localhost:5000";
+const api = new DivisimaAPI(API_BASE);
+let chartRefs = {};
+
+// ── Yardımcılar ──
+function toast(msg, isErr){const t=document.getElementById("toast");t.textContent=msg;t.className="toast show"+(isErr?" err":"");setTimeout(()=>t.className="toast",2600);}
+function money(n){return "₺"+Number(n||0).toLocaleString("tr-TR",{minimumFractionDigits:2,maximumFractionDigits:2});}
+function unwrap(r){return r && r.data !== undefined ? r.data : r;}
+const ORDER_STATUS={0:["Bekliyor","warn"],1:["Onaylandı","ok"],2:["Hazırlanıyor","muted"],3:["Kargoda","warn"],4:["Teslim","ok"],5:["İptal","danger"]};
+const RETURN_STATUS={0:["Bekliyor","warn"],1:["Onaylandı","ok"],2:["Reddedildi","danger"],3:["Tamamlandı","ok"]};
+
+// ── Auth ──
+async function doLogin(){
+  const email=document.getElementById("loginEmail").value.trim();
+  const pass=document.getElementById("loginPass").value;
+  if(!email||!pass) return toast("E-posta ve şifre girin",true);
+  try{
+    await api.auth.login(email,pass);
+    showApp();
+  }catch(e){toast(e.message||"Giriş başarısız",true);}
+}
+async function doLogout(){await api.auth.logout();location.reload();}
+function showApp(){
+  document.getElementById("loginScreen").classList.add("hidden");
+  document.getElementById("app").classList.remove("hidden");
+  render("dashboard");
+}
+
+// ── Navigasyon ──
+document.getElementById("nav").addEventListener("click",e=>{
+  const a=e.target.closest("a[data-view]");if(!a)return;
+  document.querySelectorAll("#nav a").forEach(x=>x.classList.remove("active"));
+  a.classList.add("active");
+  render(a.dataset.view);
+});
+
+// ── Görünüm yönlendirici ──
+async function render(view){
+  const el=document.getElementById("views");
+  el.innerHTML='<p class="muted">Yükleniyor…</p>';
+  try{
+    if(view==="dashboard") await renderDashboard(el);
+    else if(view==="products") await renderProducts(el);
+    else if(view==="orders") await renderOrders(el);
+    else if(view==="returns") await renderReturns(el);
+    else if(view==="shipments") await renderShipments(el);
+    else if(view==="coupons") await renderCoupons(el);
+  }catch(e){
+    el.innerHTML='<div class="panel"><p class="muted">Veri alınamadı: '+(e.message||"hata")+'</p></div>';
+    if(e.status===401){toast("Oturum sona erdi",true);setTimeout(()=>location.reload(),1500);}
+  }
+}
+
+// ── Dashboard ──
+async function renderDashboard(el){
+  const [sum,daily,top,status,low]=await Promise.all([
+    api.admin.summary().then(unwrap),
+    api.admin.dailySales().then(unwrap),
+    api.admin.topProducts(5).then(unwrap),
+    api.admin.orderStatus().then(unwrap),
+    api.admin.lowStock(5).then(unwrap),
+  ]);
+  el.innerHTML=`
+    <div class="topbar"><h2>Panel</h2><button class="btn ghost sm" onclick="render('dashboard')">↻ Yenile</button></div>
+    <div class="cards">
+      <div class="card"><div class="label">Toplam Ciro</div><div class="value">${money(sum.total_revenue)}</div></div>
+      <div class="card"><div class="label">Sipariş</div><div class="value">${sum.total_orders}</div></div>
+      <div class="card"><div class="label">Bekleyen</div><div class="value">${sum.pending_orders}</div></div>
+      <div class="card"><div class="label">Ort. Sepet</div><div class="value">${money(sum.average_order_value)}</div></div>
+      <div class="card"><div class="label">Müşteri</div><div class="value">${sum.total_customers}</div></div>
+      <div class="card"><div class="label">Stok Uyarısı</div><div class="value" style="color:${sum.low_stock_count>0?'var(--warn)':'inherit'}">${sum.low_stock_count}</div></div>
+    </div>
+    <div class="grid2">
+      <div class="panel"><h3>Günlük Ciro (30 gün)</h3><canvas id="chDaily" height="140"></canvas></div>
+      <div class="panel"><h3>Sipariş Durumu</h3><canvas id="chStatus" height="140"></canvas></div>
+    </div>
+    <div class="grid2">
+      <div class="panel"><h3>En Çok Satan Ürünler</h3><table><thead><tr><th>Ürün</th><th>Adet</th><th>Ciro</th></tr></thead><tbody>
+        ${(top||[]).map(p=>`<tr><td>${p.product_name}</td><td>${p.total_quantity}</td><td>${money(p.total_revenue)}</td></tr>`).join("")||'<tr><td colspan=3 class=muted>Veri yok</td></tr>'}
+      </tbody></table></div>
+      <div class="panel"><h3>Stok Uyarıları</h3><table><thead><tr><th>Ürün</th><th>Beden</th><th>Stok</th></tr></thead><tbody>
+        ${(low||[]).map(s=>`<tr><td>${s.product_name}</td><td>${s.size}</td><td><span class="badge warn">${s.quantity}</span></td></tr>`).join("")||'<tr><td colspan=3 class=muted>Kritik stok yok</td></tr>'}
+      </tbody></table></div>
+    </div>`;
+  // Grafikler
+  Object.values(chartRefs).forEach(c=>c&&c.destroy());chartRefs={};
+  chartRefs.daily=new Chart(document.getElementById("chDaily"),{type:"line",data:{labels:(daily||[]).map(d=>new Date(d.date).toLocaleDateString("tr-TR",{day:"2-digit",month:"2-digit"})),datasets:[{label:"Ciro",data:(daily||[]).map(d=>d.revenue),borderColor:"#111",backgroundColor:"rgba(17,17,17,.06)",fill:true,tension:.3}]},options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}});
+  chartRefs.status=new Chart(document.getElementById("chStatus"),{type:"doughnut",data:{labels:(status||[]).map(s=>ORDER_STATUS[s.status]?ORDER_STATUS[s.status][0]:s.status_name),datasets:[{data:(status||[]).map(s=>s.count),backgroundColor:["#f2c94c","#0f6e56","#b4b2a9","#ba7517","#1d9e75","#a32d2d"]}]},options:{plugins:{legend:{position:"right"}}}});
+}
+
+// ── Ürünler ──
+async function renderProducts(el){
+  const products=unwrap(await api.products.list())||[];
+  el.innerHTML=`
+    <div class="topbar"><h2>Ürünler (${products.length})</h2><button class="btn" onclick="productForm()">+ Yeni Ürün</button></div>
+    <div class="panel"><table><thead><tr><th>ID</th><th>Ad</th><th>Marka</th><th>Fiyat</th><th></th></tr></thead><tbody>
+      ${products.map(p=>`<tr><td>${p.id}</td><td>${p.name}</td><td class=muted>${p.brand||"-"}</td><td>${money(p.price)}</td>
+        <td class=row-actions><button class="btn ghost sm" onclick='productForm(${JSON.stringify(p).replace(/'/g,"&#39;")})'>Düzenle</button>
+        <button class="btn danger sm" onclick="delProduct(${p.id})">Sil</button></td></tr>`).join("")}
+    </tbody></table></div>`;
+}
+function productForm(p){
+  p=p||{};const edit=!!p.id;
+  const el=document.getElementById("views");
+  el.innerHTML=`<div class="topbar"><h2>${edit?"Ürün Düzenle":"Yeni Ürün"}</h2><button class="btn ghost sm" onclick="render('products')">← Geri</button></div>
+    <div class="panel" style="max-width:560px">
+      <label class="f"><span>Ürün Adı</span><input id="p_name" value="${p.name||""}"></label>
+      <label class="f"><span>Marka</span><input id="p_brand" value="${p.brand||""}"></label>
+      <div class="grid2">
+        <label class="f"><span>Fiyat (₺)</span><input id="p_price" type="number" step="0.01" value="${p.price||""}"></label>
+        <label class="f"><span>Kategori ID</span><input id="p_cat" type="number" value="${p.category_id||""}"></label>
+      </div>
+      <label class="f"><span>Açıklama</span><textarea id="p_desc" rows="3">${p.description||""}</textarea></label>
+      <button class="btn" onclick="saveProduct(${edit?p.id:"null"})">${edit?"Güncelle":"Kaydet"}</button>
+    </div>`;
+}
+async function saveProduct(id){
+  const payload={name:document.getElementById("p_name").value.trim(),brand:document.getElementById("p_brand").value.trim(),
+    price:parseFloat(document.getElementById("p_price").value),category_id:parseInt(document.getElementById("p_cat").value)||null,
+    description:document.getElementById("p_desc").value.trim()};
+  try{
+    if(id){payload.id=id;await api.admin.updateProduct(payload);toast("Ürün güncellendi");}
+    else{await api.admin.addProduct(payload);toast("Ürün eklendi");}
+    render("products");
+  }catch(e){toast(e.message,true);}
+}
+async function delProduct(id){if(!confirm("Ürün silinsin mi?"))return;try{await api.admin.deleteProduct(id);toast("Silindi");render("products");}catch(e){toast(e.message,true);}}
+
+// ── Siparişler ──
+async function renderOrders(el){
+  const res=unwrap(await api.admin.allOrders({page:1,page_size:50}).catch(()=>({Items:[]})));
+  const orders=(res&&res.Items)||[];
+  el.innerHTML=`<div class="topbar"><h2>Siparişler (${(res&&res.TotalCount)||orders.length})</h2><button class="btn ghost sm" onclick="render('orders')">↻</button></div>
+    <div class="panel"><p class="muted" style="margin-bottom:14px">Sipariş no ile işlem: durum değiştir, fatura oluştur, kargo ekle.</p>
+      <div class="grid2">
+        <label class="f"><span>Sipariş ID</span><input id="o_id" type="number" placeholder="123"></label>
+        <label class="f"><span>Yeni Durum</span><select id="o_status">
+          <option value="1">Onaylandı</option><option value="2">Hazırlanıyor</option><option value="3">Kargoda</option><option value="4">Teslim</option><option value="5">İptal</option>
+        </select></label>
+      </div>
+      <div class="row-actions">
+        <button class="btn" onclick="changeOrderStatus()">Durumu Güncelle</button>
+        <button class="btn ghost" onclick="genInvoice()">Fatura Oluştur</button>
+      </div>
+    </div>
+    <div class="panel"><h3>Tüm Siparişler</h3><table><thead><tr><th>No</th><th>Müşteri</th><th>Tutar</th><th>Durum</th><th>Tarih</th></tr></thead><tbody>
+      ${orders.map(o=>{const st=ORDER_STATUS[o.status]||["?","muted"];return `<tr><td>${o.order_number||o.id}</td><td class=muted>#${o.customer_id}</td><td>${money(o.total_price)}</td><td><span class="badge ${st[1]}">${st[0]}</span></td><td class=muted>${new Date(o.created_at).toLocaleDateString("tr-TR")}</td></tr>`;}).join("")||'<tr><td colspan=5 class=muted>Sipariş yok</td></tr>'}
+    </tbody></table></div>`;
+}
+async function changeOrderStatus(){
+  const id=parseInt(document.getElementById("o_id").value);const status=parseInt(document.getElementById("o_status").value);
+  if(!id)return toast("Sipariş ID girin",true);
+  try{await api.admin.changeOrderStatus(id,status);toast("Durum güncellendi");}
+  catch(e){toast(e.message,true);}
+}
+async function genInvoice(){const id=parseInt(document.getElementById("o_id").value);if(!id)return toast("Sipariş ID girin",true);try{await api.admin.generateInvoice(id);toast("Fatura oluşturuldu");}catch(e){toast(e.message,true);}}
+
+// ── İadeler ──
+async function renderReturns(el){
+  const pending=unwrap(await api.admin.pendingReturns())||[];
+  el.innerHTML=`<div class="topbar"><h2>Bekleyen İadeler (${pending.length})</h2><button class="btn ghost sm" onclick="render('returns')">↻</button></div>
+    <div class="panel"><table><thead><tr><th>ID</th><th>Sipariş</th><th>Ürün</th><th>Adet</th><th>Tutar</th><th></th></tr></thead><tbody>
+      ${pending.map(r=>`<tr><td>${r.id}</td><td>${r.order_id}</td><td>${r.product_id} (${r.size})</td><td>${r.quantity}</td><td>${money(r.refund_amount)}</td>
+        <td class=row-actions><button class="btn ok sm" onclick="procReturn(${r.id},true)">Onayla</button><button class="btn danger sm" onclick="procReturn(${r.id},false)">Reddet</button></td></tr>`).join("")||'<tr><td colspan=6 class=muted>Bekleyen iade yok</td></tr>'}
+    </tbody></table></div>`;
+}
+async function procReturn(id,approve){
+  const note=approve?"":prompt("Ret nedeni (opsiyonel):")||"";
+  try{await api.admin.processReturn(id,approve,note);toast(approve?"İade onaylandı (refund + stok)":"İade reddedildi");render("returns");}
+  catch(e){toast(e.message,true);}
+}
+
+// ── Kargo ──
+async function renderShipments(el){
+  el.innerHTML=`<div class="topbar"><h2>Kargo</h2></div>
+    <div class="panel" style="max-width:560px"><h3>Kargo Oluştur</h3>
+      <label class="f"><span>Sipariş ID</span><input id="s_order" type="number"></label>
+      <div class="grid2">
+        <label class="f"><span>Kargo Firması</span><select id="s_carrier"><option value="0">Yurtiçi</option><option value="1">Aras</option><option value="2">MNG</option><option value="3">PTT</option><option value="4">Sürat</option></select></label>
+        <label class="f"><span>Takip No</span><input id="s_track" placeholder="YT1234567890"></label>
+      </div>
+      <button class="btn" onclick="createShipment()">Kargo Oluştur (sipariş → Kargoda)</button>
+    </div>
+    <div class="panel" style="max-width:560px"><h3>Kargo Sorgula</h3>
+      <label class="f"><span>Sipariş ID</span><input id="s_q" type="number"></label>
+      <button class="btn ghost" onclick="queryShipment()">Sorgula</button>
+      <div id="s_result" style="margin-top:14px"></div>
+    </div>`;
+}
+async function createShipment(){
+  const payload={order_id:parseInt(document.getElementById("s_order").value),carrier:parseInt(document.getElementById("s_carrier").value),tracking_number:document.getElementById("s_track").value.trim()};
+  if(!payload.order_id||!payload.tracking_number)return toast("Sipariş ID + takip no girin",true);
+  try{await api.admin.createShipment(payload);toast("Kargo oluşturuldu");}catch(e){toast(e.message,true);}
+}
+async function queryShipment(){
+  const id=parseInt(document.getElementById("s_q").value);if(!id)return;
+  try{const s=unwrap(await api.admin.shipmentByOrder(id));document.getElementById("s_result").innerHTML=`<div class="card"><b>${s.carrier_name}</b> — ${s.tracking_number}<br><span class="badge warn">${s.status_name}</span> ${s.last_status_text||""}</div>`;}
+  catch(e){document.getElementById("s_result").innerHTML='<p class=muted>'+e.message+'</p>';}
+}
+
+// ── Kuponlar ──
+async function renderCoupons(el){
+  const coupons=unwrap(await api.admin.listCoupons())||[];
+  el.innerHTML=`<div class="topbar"><h2>Kuponlar (${coupons.length})</h2><button class="btn" onclick="couponForm()">+ Yeni Kupon</button></div>
+    <div class="panel"><table><thead><tr><th>Kod</th><th>Tip</th><th>Değer</th><th>Min. Sepet</th><th></th></tr></thead><tbody>
+      ${coupons.map(c=>`<tr><td><b>${c.code}</b></td><td class=muted>${c.discount_type==0?"Yüzde":c.discount_type==1?"Sabit":"Kargo"}</td><td>${c.discount_value||"-"}</td><td>${money(c.min_amount||0)}</td>
+        <td><button class="btn danger sm" onclick="delCoupon(${c.id})">Sil</button></td></tr>`).join("")||'<tr><td colspan=5 class=muted>Kupon yok</td></tr>'}
+    </tbody></table></div>`;
+}
+function couponForm(){
+  document.getElementById("views").innerHTML=`<div class="topbar"><h2>Yeni Kupon</h2><button class="btn ghost sm" onclick="render('coupons')">← Geri</button></div>
+    <div class="panel" style="max-width:480px">
+      <label class="f"><span>Kod</span><input id="c_code" placeholder="HOSGELDIN"></label>
+      <div class="grid2">
+        <label class="f"><span>İndirim Tipi</span><select id="c_type"><option value="0">Yüzde (%)</option><option value="1">Sabit (₺)</option><option value="2">Ücretsiz Kargo</option></select></label>
+        <label class="f"><span>Değer</span><input id="c_val" type="number" step="0.01"></label>
+      </div>
+      <label class="f"><span>Min. Sepet (₺)</span><input id="c_min" type="number" step="0.01" value="0"></label>
+      <button class="btn" onclick="saveCoupon()">Kaydet</button>
+    </div>`;
+}
+async function saveCoupon(){
+  const payload={code:document.getElementById("c_code").value.trim().toUpperCase(),discount_type:parseInt(document.getElementById("c_type").value),discount_value:parseFloat(document.getElementById("c_val").value)||0,min_amount:parseFloat(document.getElementById("c_min").value)||0,is_active:true};
+  if(!payload.code)return toast("Kod girin",true);
+  try{await api.admin.addCoupon(payload);toast("Kupon eklendi");render("coupons");}catch(e){toast(e.message,true);}
+}
+async function delCoupon(id){if(!confirm("Kupon silinsin mi?"))return;try{await api.admin.deleteCoupon(id);toast("Silindi");render("coupons");}catch(e){toast(e.message,true);}}
+
+// ── Başlangıç: token varsa doğrudan panele ──
+if(api.isLoggedIn()) showApp();
+</script>
+</body>
+</html>

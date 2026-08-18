@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Divisima.Core\Divisima.Core.csproj" />
+  </ItemGroup>
+</Project>

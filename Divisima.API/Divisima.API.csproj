@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>945dac1f-31fb-40a8-83e9-c61d3f3ce1ba</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Autofac.Extensions.DependencyInjection" Version="9.0.0" />
+    <PackageReference Include="AutoMapper" Version="12.0.1" />
+    <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1" />
+    <PackageReference Include="FluentValidation.AspNetCore" Version="11.3.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.17.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore.Annotations" Version="6.5.0" />
+    <PackageReference Include="Microsoft.Extensions.Http.Polly" Version="8.0.0" />
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="5.0.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
+    <PackageReference Include="Hangfire.AspNetCore" Version="1.8.6" />
+    <PackageReference Include="Hangfire.SqlServer" Version="1.8.6" />
+    <PackageReference Include="Asp.Versioning.Mvc" Version="8.0.0" />
+    <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="8.0.0" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.7.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.7.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" Version="1.0.0-beta.10" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.7.0" />
+    <PackageReference Include="StackExchange.Redis" Version="2.7.33" />
+    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="8.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Divisima.Core\Divisima.Core.csproj" />
+    <ProjectReference Include="..\Divisima.Entity\Divisima.Entity.csproj" />
+    <ProjectReference Include="..\Divisima.Dal\Divisima.Dal.csproj" />
+    <ProjectReference Include="..\Divisima.Bussiness\Divisima.Bussiness.csproj" />
+  </ItemGroup>
+</Project>

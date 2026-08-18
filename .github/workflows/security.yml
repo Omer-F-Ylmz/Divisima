@@ -1,0 +1,78 @@
+name: Security CI
+
+# Açıklayıcı yorum: Her push/PR'da güvenlik kontrolleri: bağımlılık açıkları, statik analiz (CodeQL),
+# secret taraması, container taraması. Kırmızıysa merge engellenir.
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 6 * * 1'   # her Pazartesi 06:00 - yeni açıklar için düzenli tarama
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  # 1) Bağımlılık açığı taraması (dotnet list --vulnerable)
+  dependency-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore Divisima-Backend.sln
+      - name: Açık bağımlılık taraması (transitive dahil)
+        run: |
+          echo "== Doğrudan + geçişli açık paketler =="
+          dotnet list Divisima-Backend.sln package --vulnerable --include-transitive 2>&1 | tee vuln.txt
+          # Açıklayıcı yorum: Açık bulunursa build'i kır
+          if grep -q "has the following vulnerable packages" vuln.txt; then
+            echo "::error::Açık bağımlılık bulundu"; exit 1
+          fi
+      - name: Kullanımdan kalkmış paket kontrolü
+        run: dotnet list Divisima-Backend.sln package --deprecated 2>&1 | tee deprecated.txt || true
+
+  # 2) Statik güvenlik analizi (CodeQL - SQL injection, XSS, hardcoded secret vb.)
+  codeql:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: csharp
+          queries: security-extended
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build
+        run: dotnet build Divisima-Backend.sln --configuration Release
+      - uses: github/codeql-action/analyze@v3
+
+  # 3) Secret taraması (koda sızmış API key/şifre)
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks (secret taraması)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 4) Testler (iş mantığı simülasyonu + entegrasyon)
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: İş mantığı güvenlik simülasyonu
+        run: python3 tests/business_logic_sim.py
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Entegrasyon testleri
+        run: dotnet test Divisima.IntegrationTests/Divisima.IntegrationTests.csproj --configuration Release

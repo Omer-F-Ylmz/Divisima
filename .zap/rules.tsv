@@ -1,0 +1,8 @@
+# OWASP ZAP kural ayarları (sekme ile ayrılmış). WARN=uyar, IGNORE=yoksay, FAIL=kır
+# Kolon: ruleId	action	açıklama
+10021	WARN	X-Content-Type-Options eksik
+10020	WARN	X-Frame-Options eksik
+10038	FAIL	CSP eksik (sıkı - kırar)
+40012	FAIL	XSS (reflected) - kritik
+40018	FAIL	SQL Injection - kritik
+90022	WARN	Uygulama hata bilgisi sızıntısı

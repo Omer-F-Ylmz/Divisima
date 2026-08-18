@@ -1,0 +1,29 @@
+# Divisima - bagimlilik guncelleme otomasyonu (guvenlik yamalarini erken yakalar)
+version: 2
+updates:
+  # NuGet paketleri
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      # Kucuk/yama guncellemelerini tek PR'da topla (gurultuyu azalt)
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+    labels:
+      - "dependencies"
+
+  # GitHub Actions surumleri
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "ci"
+
+  # Docker base image
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
