@@ -11,7 +11,7 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.4" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.0" />
     <PackageReference Include="Testcontainers.MsSql" Version="3.6.0" />
-    <PackageReference Include="FluentAssertions" Version="6.12.0" />
+    <PackageReference Include="FluentAssertions" Version="8.10.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Divisima.API\Divisima.API.csproj" />
