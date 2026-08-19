@@ -21,6 +21,17 @@ Kurallar kullanici tarafindan konulmustur; asistan bunlari kendi basina gevsetem
 - Run izleme **SHA bazlidir** (`head_sha=` ya da `?branch=main` + SHA eslesmesi).
   "En son run" ile calisilmaz — Dependabot kosulari araya girer ve yanlis run raporlanir.
 
+### Izleyici adabi (GitHub API kotasi)
+
+Anonim GitHub API kotasi **60 istek/saat**. Izleyici bunu yakarsa hicbir kanit
+okunamaz hale gelir. Bu yuzden:
+
+- Izleyici nabzi **>= 300 saniye**. Kisa nabizli yoklama yasak.
+- Tur basina **TEK konsolide cagri**: run listesi + jobs + annotations ayni turda
+  toplanir, ayri ayri turlara bolunmez.
+- Kota yandiysa **beklenir** (yeniden denemeye devam edilmez).
+- PAT veya tarayici eklentisi **asla** istenmez — kota siniri bir gerekce degildir.
+
 ## 2. Push disiplini
 
 - **Tek push -> tek run -> tek rapor.** Ayni is icin arka arkaya push edilmez.
@@ -49,6 +60,23 @@ Kurallar kullanici tarafindan konulmustur; asistan bunlari kendi basina gevsetem
   `--filter "Category=Sql"` ile kosar. Yeni sinif eklenince workflow degismez.
 - **Randomize veri izolasyonu:** her test kendi musterisini/urununu/siparisini `Guid` ile
   uretir. Var olan satirlara guvenilmez.
+
+### Yerel SQL testleri (skip modu KULLANILMAZ)
+
+Yerelde testler **her zaman** `DIVISIMA_TEST_SQL` ile kosulur:
+
+```
+export DIVISIMA_TEST_SQL="Server=localhost;Database=DivisimaCiTest;Trusted_Connection=True;TrustServerCertificate=True;Encrypt=False;"
+```
+
+Gerekcesi: degisken set DEGILSE taban sinif LocalDB'ye duser ve baglanamazsa **sessizce**
+`Skipped()` moduna gecer - testler `< 1 ms` icinde YESIL gorunur, hicbir sey olculmez.
+Bu tuzak bir kez yasandi (LocalDB ornegi cokmustu, 6 test yalanci yesil verdi). Degisken
+verildiginde ise baglanti hatasi `InvalidOperationException` ile gurultulu sekilde patlar.
+
+Dizgede `Database=` **bulunmalidir**: `InvoiceCancellationTests` degiskeni ham kullanir
+(diger siniflar `InitialCatalog`'u kendileri set eder), veritabani adi yoksa
+`EnsureDeleted` "database name could not be determined" ile duser.
 
 ## 5. Bilinen tuzaklar (bir kez bedeli odendi, tekrar edilmez)
 
