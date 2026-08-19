@@ -10,6 +10,12 @@ on:
   schedule:
     - cron: '0 6 * * 1'   # her Pazartesi 06:00 - yeni açıklar için düzenli tarama
 
+# ASILAN JOB KORUMASI / KUYRUK: ayni ref icin eszamanli kosulari tekille.
+# cancel-in-progress YALNIZ pull_request'te true - main push'lari birbirini iptal etmesin.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
   security-events: write
@@ -22,6 +28,7 @@ jobs:
   # yeşil bir kapı, YENİ çıkan her zafiyeti anında görünür kılar.
   dependency-scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       # Kapı mantığı `dotnet list` ÇIKTI METNİNE (İngilizce) grep atıyor.
       # Runner locale'i değişirse grep sessizce eşleşmez -> locale SABİTLENDİ.
@@ -128,6 +135,7 @@ jobs:
   # 2) Statik güvenlik analizi (CodeQL - SQL injection, XSS, hardcoded secret vb.)
   codeql:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: github/codeql-action/init@v3
@@ -144,6 +152,7 @@ jobs:
   # 3) Secret taraması (koda sızmış API key/şifre)
   secret-scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -161,6 +170,7 @@ jobs:
   # Aynı testlerin iki workflow'da farklı koşullarda çalışması yanıltıcıydı.
   tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     services:
       sqlserver:
@@ -206,4 +216,12 @@ jobs:
           exit 1
 
       - name: Entegrasyon testleri
-        run: dotnet test Divisima.IntegrationTests/Divisima.IntegrationTests.csproj --configuration Release
+        # ASILMA KORUMASI: 8 dk hareketsiz kalan test host'u sonlandirilir, ASILAN
+        # TESTIN ADI log'a basilir ve adim KIRMIZI duser. dump-type none - dosya
+        # uretmeden sadece sonlandirir (dump yazmak CI'da dakikalar surebiliyor).
+        run: >
+          dotnet test Divisima.IntegrationTests/Divisima.IntegrationTests.csproj
+          --configuration Release
+          --blame-hang
+          --blame-hang-timeout 8m
+          --blame-hang-dump-type none

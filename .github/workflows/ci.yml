@@ -8,9 +8,18 @@ on:
   pull_request:
     branches: [ main, develop ]
 
+# ASILAN JOB KORUMASI / KUYRUK: ayni ref icin eszamanli kosulari tekille.
+# cancel-in-progress YALNIZ pull_request'te true - main'e ard arda push edilen
+# commit'lerin birbirinin kosusunu iptal etmesi istenmiyor (her commit'in kendi
+# sonucu olsun). PR'larda ise eski kosu bosuna slot tutmasin.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     # Integration testleri gercek SQL Server'a ihtiyac duyar. OrderEndpointTests bunu Testcontainers ile
     # kendi ayaga kaldirir (Docker ubuntu runner'da mevcut). InvoiceCancellationTests ise hazir bir sunucu
@@ -76,6 +85,9 @@ jobs:
           --verbosity normal
           --logger "console;verbosity=detailed"
           --filter "FullyQualifiedName~InvoiceCancellationTests"
+          --blame-hang
+          --blame-hang-timeout 8m
+          --blame-hang-dump-type none
 
       - name: Testler + coverage
         run: >
@@ -85,6 +97,9 @@ jobs:
           --verbosity normal
           --collect:"XPlat Code Coverage"
           --results-directory ./coverage
+          --blame-hang
+          --blame-hang-timeout 8m
+          --blame-hang-dump-type none
 
       - name: Coverage raporunu yukle
         if: always()
@@ -97,6 +112,7 @@ jobs:
   # Aciklayici yorum: Kod formati/analiz kontrolu (editorconfig'e uyum).
   format-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
