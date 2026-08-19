@@ -70,10 +70,10 @@ jobs:
       ConnectionStrings__DivisimaDb: "Server=localhost,1433;Database=master;User Id=sa;Password=Divisima_CI_Str0ng!Pass;TrustServerCertificate=True;Encrypt=False;"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: .NET 8 kurulumu
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
 
@@ -125,7 +125,7 @@ jobs:
 
       - name: Coverage raporunu yukle
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: ./coverage
@@ -136,8 +136,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
       - name: Format dogrulama
