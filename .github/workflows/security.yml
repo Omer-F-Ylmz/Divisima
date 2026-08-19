@@ -273,3 +273,12 @@ jobs:
               echo '```'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+          # ANNOTATION KANALI: annotation'lar check-runs API'sinden ANONIM okunabilir (Summary
+          # okunamiyor - kimlik dogrulamasi istiyor). Bu yuzden kirmizinin sebebi buraya da basilir.
+          # DIKKAT - annotation'lar PUBLIC: YALNIZ Failed/assert satirlari basilir; cikti kuyrugu
+          # ve ortam bilgisi Summary'de kalir, buraya SIZDIRILMAZ.
+          if [ -f "$F" ]; then
+            grep -aE "^[[:space:]]*(Failed|X) |^[[:space:]]*(Expected|Actual) " "$F" | head -10 \
+              | while IFS= read -r line; do echo "::error::${line}"; done
+          fi

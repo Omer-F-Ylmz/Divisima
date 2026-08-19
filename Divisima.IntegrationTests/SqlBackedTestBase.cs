@@ -112,6 +112,57 @@ namespace Divisima.IntegrationTests
             return o;
         }
 
+
+        // Aciklayici yorum: Urun + beden bazli stok tohumla. Her cagri KENDI kategorisini ve urununu
+        // yaratir - testler ayni satiri paylasmaz. description/color_hex zorunlu alanlar dolu.
+        protected async Task<int> NewProductWithStockAsync(int stockQuantity, params string[] sizes)
+        {
+            if (sizes == null || sizes.Length == 0) sizes = new[] { "M" };
+            await using var ctx = NewContext();
+            var cat = new Category
+            {
+                name = $"Stok Kategori {Guid.NewGuid():N}",
+                slug = $"stok-{Guid.NewGuid():N}",
+                is_active = true,
+                created_at = DateTime.Now
+            };
+            ctx.Set<Category>().Add(cat);
+            await ctx.SaveChangesAsync();
+
+            var p = new Product
+            {
+                name = "Stok Test Urun",
+                brand = "T",
+                category_id = cat.id,
+                price = 100m,
+                description = "stok testi urunu",
+                color_hex = "#123456",
+                product_type = 0,
+                is_active = true,
+                created_at = DateTime.Now
+            };
+            ctx.Products.Add(p);
+            await ctx.SaveChangesAsync();
+
+            foreach (var s in sizes)
+            {
+                ctx.ProductStocks.Add(new ProductStock
+                {
+                    product_id = p.id, size = s, stock_quantity = stockQuantity, reserved_quantity = 0,
+                    is_active = true, created_at = DateTime.Now
+                });
+            }
+            await ctx.SaveChangesAsync();
+            return p.id;
+        }
+
+        // Aciklayici yorum: Uc sayac BIRLIKTE okunur - fiziksel, rezerve ve musait ayni anda dogrulanmali.
+        protected async Task<(int physical, int reserved, int available)> ReadStockAsync(int productId, string size = "M")
+        {
+            await using var ctx = NewContext();
+            var s = await ctx.ProductStocks.AsNoTracking().SingleAsync(x => x.product_id == productId && x.size == size);
+            return (s.stock_quantity, s.reserved_quantity, s.stock_quantity - s.reserved_quantity);
+        }
         protected async Task<decimal> ReadCreditAsync(int customerId)
         {
             await using var ctx = NewContext();
