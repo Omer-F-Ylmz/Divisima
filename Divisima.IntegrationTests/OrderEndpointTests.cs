@@ -90,6 +90,7 @@ namespace Divisima.IntegrationTests
             var dto = new OrderCreateRequestDto
             {
                 customer_id = auth.CustomerId,
+                coupon_code = "",   // zorunlu binding: DTO alani nullable degil (bkz. rapor)
                 items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = 2 } }
             };
 
@@ -115,6 +116,7 @@ namespace Divisima.IntegrationTests
             var dto = new OrderCreateRequestDto
             {
                 customer_id = auth.CustomerId,
+                coupon_code = "",   // zorunlu binding: DTO alani nullable degil (bkz. rapor)
                 items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = 999 } }
             };
 
@@ -159,6 +161,7 @@ namespace Divisima.IntegrationTests
             OrderCreateRequestDto Make(int customerId) => new()
             {
                 customer_id = customerId,
+                coupon_code = "",   // zorunlu binding: DTO alani nullable degil (bkz. rapor)
                 items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = perOrder } }
             };
 

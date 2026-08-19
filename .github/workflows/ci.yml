@@ -61,7 +61,13 @@ jobs:
       # DIKKAT: DIVISIMA_TEST_SQL'den FARKLI bir veritabani adi - InvoiceCancellationTests
       # kendi DB'sini EnsureDeleted/EnsureCreated ile silip yeniden kuruyor; ayni DB olsaydi
       # Hangfire baglantisi acikken DROP DATABASE denenir ve testler birbirini bozardi.
-      ConnectionStrings__DivisimaDb: "Server=localhost,1433;Database=DivisimaAppTest;User Id=sa;Password=Divisima_CI_Str0ng!Pass;TrustServerCertificate=True;Encrypt=False;"
+      # DIKKAT - Database=master BILINCLI TERCIH: Hangfire veritabani OLUSTURMAZ, var olani
+      # kullanir. Onceki deger (DivisimaAppTest) hicbir sey tarafindan olusturulmuyordu ve
+      # acilista "Cannot open database" ile host kurulamiyordu. Service container her job'da
+      # SIFIRDAN dogup is bitince yok oldugu icin Hangfire'in master'a kendi semasini acmasi
+      # zararsiz. DIVISIMA_TEST_SQL'deki DB'lerden (DivisimaCiTest/DivisimaSecTest) ayri
+      # oldugu icin fatura testlerinin EnsureDeleted/EnsureCreated dongusuyle de cakismaz.
+      ConnectionStrings__DivisimaDb: "Server=localhost,1433;Database=master;User Id=sa;Password=Divisima_CI_Str0ng!Pass;TrustServerCertificate=True;Encrypt=False;"
 
     steps:
       - uses: actions/checkout@v4
