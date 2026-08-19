@@ -237,13 +237,39 @@ jobs:
           echo "HATA: SQL Server 120 sn içinde ayağa kalkmadı."
           exit 1
 
+      # ASILMA KORUMASI: 8 dk hareketsiz kalan test host sonlandirilir, ASILAN TESTIN ADI log'a
+      # basilir ve adim KIRMIZI duser. dump-type none - dosya uretmeden sonlandirir.
+      # Cikti ayrica dosyaya yazilir (tee); asagidaki TESHIS adimi kirmizida bunu Summary'ye koyar.
+      # set -o pipefail SART: yoksa tee, dotnet test cikis kodunu maskeler ve kirmizi adim YESIL gorunur.
       - name: Entegrasyon testleri
-        # ASILMA KORUMASI: 8 dk hareketsiz kalan test host'u sonlandirilir, ASILAN
-        # TESTIN ADI log'a basilir ve adim KIRMIZI duser. dump-type none - dosya
-        # uretmeden sadece sonlandirir (dump yazmak CI'da dakikalar surebiliyor).
-        run: >
-          dotnet test Divisima.IntegrationTests/Divisima.IntegrationTests.csproj
-          --configuration Release
-          --blame-hang
-          --blame-hang-timeout 8m
-          --blame-hang-dump-type none
+        run: |
+          set -o pipefail
+          dotnet test Divisima.IntegrationTests/Divisima.IntegrationTests.csproj \
+            --configuration Release \
+            --blame-hang --blame-hang-timeout 8m --blame-hang-dump-type none \
+            2>&1 | tee test-output.txt
+
+      # Aciklayici yorum: TESHIS - kirmizi durumda hata ozetini run Summary sayfasina yazar.
+      # Public repoda Summary anonim GORUNUR (log indirme yetki ister).
+      - name: TESHIS - basarisiz test ozeti (Summary)
+        if: failure()
+        run: |
+          F=test-output.txt
+          {
+            echo "## Entegrasyon testleri - hata ozeti"
+            echo ""
+            if [ ! -f "$F" ]; then
+              echo "Cikti dosyasi yok - adim testlere gelmeden dusmus olabilir."
+            else
+              echo "### Basarisiz testler / hatalar"
+              echo '```'
+              grep -aE "^[[:space:]]*(Failed|X) |error CS|error NU|Assert\.|Expected |Actual " "$F" | head -60 \
+                || echo "(eslesen satir yok)"
+              echo '```'
+              echo ""
+              echo "### Cikti kuyrugu (son 100 satir)"
+              echo '```'
+              tail -n 100 "$F"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

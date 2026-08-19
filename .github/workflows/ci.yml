@@ -97,31 +97,62 @@ jobs:
           echo "HATA: SQL Server 120 sn icinde ayaga kalkmadi."
           exit 1
 
-      # Aciklayici yorum: FATURA IPTALI testleri AYRI adimda ve -v normal ile kosar; boylece 5 testin
-      # adi tek tek Actions log'una basilir. Atlanmis olsalardi baglanti hatasiyla bu adim KIRMIZI olurdu.
-      - name: Fatura iptali testleri (SQL Server service - ATLANMAMALI)
+      # Aciklayici yorum: GERCEK SQL gerektiren testler AYRI adimda ve -v normal ile kosar; boylece her
+      # testin adi tek tek Actions log'una basilir. [Trait("Category","Sql")] tasiyan TUM siniflar buraya
+      # dahil - yeni bir SQL sinifi eklenince workflow degismez, yalniz trait eklenir.
+      # Atlanmis olsalardi baglanti hatasiyla bu adim KIRMIZI olurdu.
+      - name: SQL gerektiren testler (ATLANMAMALI)
         run: >
           dotnet test Divisima.IntegrationTests/Divisima.IntegrationTests.csproj
           --configuration Release
           --no-build
           --verbosity normal
           --logger "console;verbosity=detailed"
-          --filter "FullyQualifiedName~InvoiceCancellationTests"
+          --filter "Category=Sql"
           --blame-hang
           --blame-hang-timeout 8m
           --blame-hang-dump-type none
 
+      # Aciklayici yorum: Cikti bir dosyaya da yazilir (tee) - asagidaki TESHIS adimi kirmizi durumda
+      # bunu suzup Summary sayfasina koyar. set -o pipefail SART: tee olmadan dotnet test cikis kodu
+      # maskelenir ve BASARISIZ test adimi YESIL gorunurdu.
       - name: Testler + coverage
-        run: >
-          dotnet test Divisima-Backend.sln
-          --configuration Release
-          --no-build
-          --verbosity normal
-          --collect:"XPlat Code Coverage"
-          --results-directory ./coverage
-          --blame-hang
-          --blame-hang-timeout 8m
-          --blame-hang-dump-type none
+        run: |
+          set -o pipefail
+          dotnet test Divisima-Backend.sln \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./coverage \
+            --blame-hang --blame-hang-timeout 8m --blame-hang-dump-type none \
+            2>&1 | tee test-output.txt
+
+      # Aciklayici yorum: TESHIS - kirmizi durumda hata ozetini run Summary sayfasina yazar.
+      # Public repoda Summary anonim GORUNUR (log indirme yetki ister). Boylece her kirmizi
+      # kendi sebebini soyler ve log erisimi olmadan da teshis edilebilir.
+      - name: TESHIS - basarisiz test ozeti (Summary)
+        if: failure()
+        run: |
+          F=test-output.txt
+          {
+            echo "## Testler + coverage - hata ozeti"
+            echo ""
+            if [ ! -f "$F" ]; then
+              echo "Cikti dosyasi yok - adim testlere gelmeden dusmus olabilir."
+            else
+              echo "### Basarisiz testler / hatalar"
+              echo '```'
+              grep -aE "^[[:space:]]*(Failed|X) |error CS|error NU|Assert\.|Expected |Actual " "$F" | head -60 \
+                || echo "(eslesen satir yok)"
+              echo '```'
+              echo ""
+              echo "### Cikti kuyrugu (son 100 satir)"
+              echo '```'
+              tail -n 100 "$F"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Coverage raporunu yukle
         if: always()

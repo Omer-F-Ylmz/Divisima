@@ -16,6 +16,8 @@ namespace Divisima.IntegrationTests
     // sqlserver service container'ı (DIVISIMA_TEST_SQL), yerelde LocalDB. Gerçek EF DAL'ları + gerçek
     // InvoiceManager çalışır, sonuç DB'den TAZE context ile okunur (tracked nesne değil).
     // Doğrulanan: iptal edilmiş siparişin faturası status=3 (InvoiceStatusEnum.Cancelled) olur.
+    // Aciklayici yorum: GERCEK SQL gerektirir - ci.yml adanmis adimi bu trait ile suzuyor.
+    [Trait("Category", "Sql")]
     public class InvoiceCancellationTests : IAsyncLifetime
     {
         // SQL Server bağlantısı iki modda çalışır:
