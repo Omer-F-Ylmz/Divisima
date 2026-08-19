@@ -27,7 +27,7 @@ jobs:
       # Runner locale'i değişirse grep sessizce eşleşmez -> locale SABİTLENDİ.
       DOTNET_CLI_UI_LANGUAGE: en
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
@@ -129,7 +129,7 @@ jobs:
   codeql:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: github/codeql-action/init@v3
         with:
           languages: csharp
@@ -145,7 +145,7 @@ jobs:
   secret-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Gitleaks (secret taraması)
@@ -186,7 +186,7 @@ jobs:
       DIVISIMA_TEST_SQL: "Server=localhost,1433;Database=DivisimaSecTest;User Id=sa;Password=Divisima_CI_Str0ng!Pass;TrustServerCertificate=True;Encrypt=False;"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: İş mantığı güvenlik simülasyonu
         run: python3 tests/business_logic_sim.py
       - uses: actions/setup-dotnet@v4

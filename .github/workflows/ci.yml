@@ -39,7 +39,7 @@ jobs:
       DIVISIMA_TEST_SQL: "Server=localhost,1433;Database=DivisimaCiTest;User Id=sa;Password=Divisima_CI_Str0ng!Pass;TrustServerCertificate=True;Encrypt=False;"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: .NET 8 kurulumu
         uses: actions/setup-dotnet@v4
@@ -98,7 +98,7 @@ jobs:
   format-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
