@@ -11,6 +11,8 @@ using Xunit;
 namespace Divisima.IntegrationTests
 {
     // Açıklayıcı yorum: Sipariş endpoint'i gerçek entegrasyon testleri (gerçek DB container'ı).
+    // İstekler TestAuthHelper ile alınan GERÇEK JWT ile atılır - /api/order/place
+    // [RequireUserType(Customer)] taşıyor, yetkisiz istek 401 döner.
     public class OrderEndpointTests : IClassFixture<CustomWebApplicationFactory>
     {
         private readonly CustomWebApplicationFactory _factory;
@@ -20,90 +22,159 @@ namespace Divisima.IntegrationTests
             _factory = factory;
         }
 
-        // Açıklayıcı yorum: Test verisi tohumla (ürün + stok)
-        private async Task<(int productId, int customerId)> SeedAsync()
+        // Açıklayıcı yorum: Ürün + stok tohumla. Müşteri ARTIK burada üretilmiyor: sipariş sahibi
+        // controller'da token'dan alınıyor (dto.customer_id = _currentUser.GetRequiredUserId()),
+        // yani seed'lenmiş bir müşteri id'si zaten yok sayılırdı.
+        // Her test kendi ürününü yaratır -> testler birbirinin stoğunu etkilemez.
+        private async Task<int> SeedProductAsync(int stockQuantity = 10)
         {
             using var scope = _factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<DivisimaDbContext>();
-            var product = new Product { name = "Test Elbise", brand = "Test", category_id = 1, price = 500, product_type = 0, is_active = true, created_at = DateTime.Now };
+
+            var category = new Category
+            {
+                name = $"Test Kategori {Guid.NewGuid():N}",
+                slug = $"test-{Guid.NewGuid():N}",
+                is_active = true,
+                created_at = DateTime.Now
+            };
+            db.Set<Category>().Add(category);
+            await db.SaveChangesAsync();
+
+            var product = new Product
+            {
+                name = "Test Elbise",
+                brand = "Test",
+                category_id = category.id,
+                price = 500,
+                description = "Test urun aciklamasi",
+                color_hex = "#000000",
+                product_type = 0,
+                is_active = true,
+                created_at = DateTime.Now
+            };
             db.Products.Add(product);
-            var customer = new Customer { name = "Test Müşteri", email = $"t{Guid.NewGuid():N}@test.com", phone = "5550000000", password_hash = new byte[1], password_salt = new byte[1], is_active = true, created_at = DateTime.Now };
-            db.Customers.Add(customer);
             await db.SaveChangesAsync();
-            db.ProductStocks.Add(new ProductStock { product_id = product.id, size = "M", stock_quantity = 10, is_active = true, created_at = DateTime.Now });
+
+            db.ProductStocks.Add(new ProductStock
+            {
+                product_id = product.id,
+                size = "M",
+                stock_quantity = stockQuantity,
+                reserved_quantity = 0,
+                is_active = true,
+                created_at = DateTime.Now
+            });
             await db.SaveChangesAsync();
-            return (product.id, customer.id);
+
+            return product.id;
+        }
+
+        // Açıklayıcı yorum: Satılabilir stok = fiziksel - rezerve. PlaceOrder fiziksel stoğu DÜŞÜRMEZ,
+        // REZERVE eder (ödeme onaylanınca fiziksel düşer). "Stok düştü" bu yüzden müsait stok üzerinden
+        // doğrulanır - niyet aynı, model güncel.
+        private async Task<(int physical, int reserved, int available)> ReadStockAsync(int productId)
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<DivisimaDbContext>();
+            var s = await db.ProductStocks.AsNoTracking().FirstAsync(x => x.product_id == productId && x.size == "M");
+            return (s.stock_quantity, s.reserved_quantity, s.stock_quantity - s.reserved_quantity);
         }
 
         [Fact]
         public async Task PlaceOrder_ValidCart_Returns201_And_DecrementsStock()
         {
-            // Arrange
-            var (productId, customerId) = await SeedAsync();
-            var client = _factory.CreateClient();
+            var productId = await SeedProductAsync();                        // müsait stok 10
+            var auth = await TestAuthHelper.CreateCustomerClientAsync(_factory);
+
             var dto = new OrderCreateRequestDto
             {
-                customer_id = customerId,
+                customer_id = auth.CustomerId,
                 items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = 2 } }
             };
 
-            // Act — not: gerçek testte JWT token header'ı eklenir; burada akış örneği
-            var response = await client.PostAsJsonAsync("/api/order/place", dto);
+            var response = await auth.Client.PostAsJsonAsync("/api/order/place", dto);
 
-            // Assert
             response.StatusCode.Should().Be(HttpStatusCode.Created);
+
+            var (_, _, available) = await ReadStockAsync(productId);
+            available.Should().Be(8, "2 adet sipariş müsait stoktan düşmeli (10 - 2)");
+
             using var scope = _factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<DivisimaDbContext>();
-            var stock = await db.ProductStocks.FirstAsync(s => s.product_id == productId && s.size == "M");
-            stock.stock_quantity.Should().Be(8); // 10 - 2
-            (await db.Orders.CountAsync(o => o.customer_id == customerId)).Should().Be(1);
-            (await db.OrderSnapshots.CountAsync()).Should().BeGreaterThan(0); // snapshot alındı
+            (await db.Orders.CountAsync(o => o.customer_id == auth.CustomerId)).Should().Be(1);
+            (await db.OrderSnapshots.CountAsync()).Should().BeGreaterThan(0);
         }
 
         [Fact]
         public async Task PlaceOrder_InsufficientStock_Returns400_And_NoPartialData()
         {
-            var (productId, customerId) = await SeedAsync();
-            var client = _factory.CreateClient();
+            var productId = await SeedProductAsync();                        // müsait stok 10
+            var auth = await TestAuthHelper.CreateCustomerClientAsync(_factory);
+
             var dto = new OrderCreateRequestDto
             {
-                customer_id = customerId,
+                customer_id = auth.CustomerId,
                 items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = 999 } }
             };
 
-            var response = await client.PostAsJsonAsync("/api/order/place", dto);
+            var response = await auth.Client.PostAsJsonAsync("/api/order/place", dto);
 
             response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+            // Aciklayici yorum: SADECE 400 gormek YETMEZ - FluentValidation otomatik dogrulamasi da
+            // 400 doner (AddFluentValidationAutoValidation acik). Gelen 400'un GERCEKTEN stok
+            // yetersizliginden geldigi govdeden dogrulanir; yoksa test yanlis sebeple yesil kalabilir.
+            var body = await response.Content.ReadAsStringAsync();
+            body.Should().Contain("Yetersiz stok", "400, dogrulama hatasindan degil stok yetersizliginden gelmeli");
+
+            // Açıklayıcı yorum: Transaction sayesinde yarım sipariş/rezervasyon kalmamalı
             using var scope = _factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<DivisimaDbContext>();
-            // Açıklayıcı yorum: Transaction sayesinde yarım sipariş/stok kalmamalı
-            (await db.Orders.CountAsync(o => o.customer_id == customerId)).Should().Be(0);
-            var stock = await db.ProductStocks.FirstAsync(s => s.product_id == productId);
-            stock.stock_quantity.Should().Be(10); // değişmemiş
+            (await db.Orders.CountAsync(o => o.customer_id == auth.CustomerId)).Should().Be(0);
+
+            var (physical, reserved, available) = await ReadStockAsync(productId);
+            physical.Should().Be(10, "fiziksel stok değişmemeli");
+            reserved.Should().Be(0, "başarısız siparişten rezervasyon kalmamalı");
+            available.Should().Be(10);
         }
 
         [Fact]
         public async Task PlaceOrder_ConcurrentRequests_NoOverselling()
         {
-            var (productId, customerId) = await SeedAsync(); // stok 10
-            var client = _factory.CreateClient();
-            OrderCreateRequestDto Make(int qty) => new()
+            const int stock = 10;
+            const int perOrder = 2;
+            const int shoppers = 8;                                          // 8 x 2 = 16 talep > 10 stok
+
+            var productId = await SeedProductAsync(stock);
+
+            // Açıklayıcı yorum: AYRI MÜŞTERİLER - gerçek overselling senaryosu farklı alıcıların son
+            // stok için yarışmasıdır. Tek müşteriyle de stok yarışı olurdu, ama ayrı müşteriler
+            // senaryoyu gerçekçi kılar ve müşteri bazlı herhangi bir serileştirmenin yarışı
+            // gizlemesini engeller. (Sipariş sahibi token'dan geldiği için her istemci kendi
+            // müşterisi adına sipariş verir.)
+            var clients = await Task.WhenAll(
+                Enumerable.Range(0, shoppers).Select(_ => TestAuthHelper.CreateCustomerClientAsync(_factory)));
+
+            OrderCreateRequestDto Make(int customerId) => new()
             {
                 customer_id = customerId,
-                items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = qty } }
+                items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = perOrder } }
             };
 
-            // Açıklayıcı yorum: 8 paralel sipariş x 2 adet = 16 talep, stok 10 -> en fazla 5 başarılı olmalı
-            var tasks = Enumerable.Range(0, 8).Select(_ => client.PostAsJsonAsync("/api/order/place", Make(2)));
-            var results = await Task.WhenAll(tasks);
+            var results = await Task.WhenAll(clients.Select(c => c.Client.PostAsJsonAsync("/api/order/place", Make(c.CustomerId))));
 
-            using var scope = _factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<DivisimaDbContext>();
-            var stock = await db.ProductStocks.FirstAsync(s => s.product_id == productId);
-            // Açıklayıcı yorum: Optimistic concurrency sayesinde stok asla negatife düşmez
-            stock.stock_quantity.Should().BeGreaterThanOrEqualTo(0);
             var successCount = results.Count(r => r.StatusCode == HttpStatusCode.Created);
-            (successCount * 2).Should().BeLessThanOrEqualTo(10); // toplam satılan <= başlangıç stoğu
+            var (physical, reserved, available) = await ReadStockAsync(productId);
+
+            // Açıklayıcı yorum: Bu üç iddia birlikte "oversell yok"u GERÇEKTEN sınar. Tek başına
+            // "satılan <= stok" iddiası HİÇBİR sipariş geçmese de doğru olurdu (vakum geçiş) -
+            // bu yüzden en az bir siparişin başarılı olduğu ayrıca zorunlu tutuluyor.
+            successCount.Should().BeGreaterThan(0, "en az bir sipariş başarılı olmalı; hiçbiri geçmezse test hiçbir şey kanıtlamaz");
+            successCount.Should().BeLessThanOrEqualTo(stock / perOrder, "stok 10 iken 2 adetlik en fazla 5 siparis karsilanabilir");
+            reserved.Should().Be(successCount * perOrder, "rezerve edilen miktar basarili siparis sayisiyla birebir tutmali (ne eksik ne fazla)");
+            available.Should().BeGreaterThanOrEqualTo(0, "musait stok asla negatife dusmemeli");
+            physical.Should().Be(stock, "odeme onaylanmadan fiziksel stok dusmemeli");
         }
     }
 }
