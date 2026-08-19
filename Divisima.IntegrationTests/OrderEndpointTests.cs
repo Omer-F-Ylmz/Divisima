@@ -117,13 +117,16 @@ namespace Divisima.IntegrationTests
             {
                 customer_id = auth.CustomerId,
                 coupon_code = "",   // zorunlu binding: DTO alani nullable degil (bkz. rapor)
-                items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = 999 } }
+                items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = 50 } }
             };
 
             var response = await auth.Client.PostAsJsonAsync("/api/order/place", dto);
 
             response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
 
+            // NOT: adet 50 - stok 10, yani stok YETMEZ. 999 kullanilamaz cunku validator tek urunde
+            // en fazla 100 adet birakiyor ve istek stok kontrolune VARMADAN dogrulama 400u aliyordu
+            // (CI annotations ile teshis edildi).
             // Aciklayici yorum: SADECE 400 gormek YETMEZ - FluentValidation otomatik dogrulamasi da
             // 400 doner (AddFluentValidationAutoValidation acik). Gelen 400'un GERCEKTEN stok
             // yetersizliginden geldigi govdeden dogrulanir; yoksa test yanlis sebeple yesil kalabilir.

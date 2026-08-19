@@ -92,7 +92,7 @@ namespace Divisima.IntegrationTests
         }
 
         protected async Task<Order> NewOrderAsync(int customerId, decimal total, decimal storeCreditUsed = 0m,
-            byte status = 1, bool onlinePaid = false)
+            byte status = 1, bool onlinePaid = false, string? couponCode = null)
         {
             await using var ctx = NewContext();
             var o = new Order
@@ -104,6 +104,7 @@ namespace Divisima.IntegrationTests
                 total_price = total,
                 store_credit_used = storeCreditUsed,
                 is_online_payment_done = onlinePaid,
+                coupon_code = couponCode,
                 currency = "TRY",
                 created_at = DateTime.Now
             };
