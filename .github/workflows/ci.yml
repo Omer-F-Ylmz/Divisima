@@ -47,6 +47,22 @@ jobs:
       # baglanilamazsa test sinifi InvalidOperationException firlatir (sessiz "yesil" imkansiz).
       DIVISIMA_TEST_SQL: "Server=localhost,1433;Database=DivisimaCiTest;User Id=sa;Password=Divisima_CI_Str0ng!Pass;TrustServerCertificate=True;Encrypt=False;"
 
+      # --- OrderEndpointTests icin uygulama config'i (WebApplicationFactory Program.cs'i ayaga kaldirir) ---
+      # Program.cs BASLANGICTA fail-fast yapiyor: SecurityKey >= 32 bayt olmali. Depodaki
+      # appsettings.json'da bu deger "CHANGE_ME" (9 bayt) ve appsettings.Development.json
+      # gitignore'da oldugu icin CI'da YOK -> host kurulamiyordu. Env ile saglaniyor.
+      #
+      # CI-only test degeri, GERCEK SECRET DEGIL. Bilerek okunabilir ve dusuk entropili secildi:
+      #  - Program.cs'in placeholder listesine (CHANGE_ME/placeholder/your-/xxxxx/TODO) takilmaz
+      #  - rastgele gorunmedigi icin kendi gitleaks secret-scan'imizi tetiklemez
+      TokenOptions__SecurityKey: "divisima-ci-test-key-do-not-use-outside-ci-tests"
+      # Hangfire (Program.cs) DbContext'ten BAGIMSIZ olarak bu baglantiyi kullaniyor;
+      # CustomWebApplicationFactory yalniz DbContextOptions'i degistirdigi icin Hangfire buraya gider.
+      # DIKKAT: DIVISIMA_TEST_SQL'den FARKLI bir veritabani adi - InvoiceCancellationTests
+      # kendi DB'sini EnsureDeleted/EnsureCreated ile silip yeniden kuruyor; ayni DB olsaydi
+      # Hangfire baglantisi acikken DROP DATABASE denenir ve testler birbirini bozardi.
+      ConnectionStrings__DivisimaDb: "Server=localhost,1433;Database=DivisimaAppTest;User Id=sa;Password=Divisima_CI_Str0ng!Pass;TrustServerCertificate=True;Encrypt=False;"
+
     steps:
       - uses: actions/checkout@v4
 

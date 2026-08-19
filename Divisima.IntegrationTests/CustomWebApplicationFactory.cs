@@ -30,15 +30,39 @@ namespace Divisima.IntegrationTests
             });
         }
 
-        // Açıklayıcı yorum: Test başlamadan container'ı başlat + şemayı oluştur
+        // A BULGUSU (sinir): StartAsync varsayilan olarak SINIRSIZ bekler - imaj cekme takilirsa
+        // ya da container hazir olmazsa test sonsuza kadar asili kalir (CI'da 6 saat slot tutan
+        // job'larin sebebi buydu). Artik 5 dakika sinir var ve asilirsa NET mesajla patliyor.
         public async Task InitializeAsync()
         {
-            await _dbContainer.StartAsync();
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            try
+            {
+                await _dbContainer.StartAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    "SQL Server test container'i 5 dakika icinde ayaga kalkmadi (imaj cekme veya Docker " +
+                    "sorunu olabilir). Sessiz sonsuz bekleme yerine bilerek basarisiz olundu.");
+            }
+
             using var scope = Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<DivisimaDbContext>();
             await db.Database.EnsureCreatedAsync();
         }
 
-        public new async Task DisposeAsync() => await _dbContainer.DisposeAsync();
+        // D BULGUSU (gizleme kaldirildi): eskiden "public new async Task DisposeAsync()" vardi.
+        // "new", taban WebApplicationFactory.DisposeAsync()'i GIZLIYORDU; host, TestServer ve arka
+        // plan servisleri (Hangfire server, SignalR, Serilog dosya sink'i) hic kapanmiyordu - testler
+        // bittikten sonra test host process'inin sonlanmamasinin sebebi buydu.
+        // Cozum: IAsyncLifetime.DisposeAsync ACIK arayuz implementasyonu olarak yazildi. Boylece
+        // taban sinifin ValueTask donen DisposeAsync'i ile isim cakismasi olmuyor ve GIZLEME kalkiyor.
+        // Sira onemli: ONCE taban (host + arka plan servisleri), SONRA container.
+        async Task IAsyncLifetime.DisposeAsync()
+        {
+            await base.DisposeAsync();
+            await _dbContainer.DisposeAsync();
+        }
     }
 }
