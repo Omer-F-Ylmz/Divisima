@@ -319,6 +319,9 @@ namespace Divisima.DataAccess.Concrete.Context
                 b.Property(o => o.discount_amount).HasColumnName("discount_amount").HasColumnType("decimal(18,2)");
                 b.Property(o => o.shipping_cost).HasColumnName("shipping_cost").HasColumnType("decimal(18,2)");
                 b.Property(o => o.total_price).HasColumnName("total_price").HasColumnType("decimal(18,2)");
+                // Kumulatif iade sayaci - varsayilan 0 (mevcut satirlar icin de).
+                b.Property(o => o.refunded_amount).HasColumnName("refunded_amount")
+                    .HasColumnType("decimal(18,2)").HasDefaultValue(0m);
                 b.Property(o => o.currency).HasColumnName("currency").HasMaxLength(10).HasDefaultValue("TRY");
                 b.Property(o => o.coupon_code).HasColumnName("coupon_code").HasMaxLength(40);
                 b.Property(o => o.address_id).HasColumnName("address_id");
@@ -793,6 +796,16 @@ namespace Divisima.DataAccess.Concrete.Context
                 b.Property(t => t.order_id).HasColumnName("order_id");
                 b.Property(t => t.created_at).HasColumnName("created_at");
                 b.HasIndex(t => new { t.customer_id, t.created_at });
+                // SIPARIS BASINA TEK KAZANIM (filtreli UNIQUE): bir siparis icin yalnizca BIR Earn
+                // satiri olabilir. Uygulama katmaninda atomik durum gecisi (payments Pending->Success)
+                // zaten tek kazanan biraktigi icin bu indeks ikinci savunma hattidir - "asagi katman
+                // zaten emiyor" varsayimina GUVENILMEZ, kural veritabaninda da durur.
+                // Filtre: yalniz Earn (type=0) ve order_id NOT NULL. Redeem (geri alim) ayni order_id
+                // ile yazilabilir; siparissiz manuel kazanimlar (order_id NULL) sinirlanmaz.
+                b.HasIndex(t => t.order_id)
+                    .IsUnique()
+                    .HasFilter("[order_id] IS NOT NULL AND [type] = 0")
+                    .HasDatabaseName("UX_loyalty_transactions_order_earn");
             });
             modelBuilder.Entity<StoreCreditTransaction>(b =>
             {

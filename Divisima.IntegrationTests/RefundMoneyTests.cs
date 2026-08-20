@@ -38,7 +38,7 @@ namespace Divisima.IntegrationTests
         {
             var ctx = NewContext();
             var iyz = new FakeIyzico();
-            var mgr = new RefundManager(new EfPaymentDal(ctx), iyz, new EfCustomerDal(ctx), new EfStoreCreditTransactionDal(ctx));
+            var mgr = new RefundManager(new EfPaymentDal(ctx), iyz, new EfCustomerDal(ctx), new EfStoreCreditTransactionDal(ctx), new EfOrderDal(ctx));
             return (mgr, iyz, ctx);
         }
 
@@ -161,6 +161,45 @@ namespace Divisima.IntegrationTests
             real.Success.Should().BeTrue();
             (await ReadCreditAsync(c.id)).Should().Be(50m, "gercek iade bakiyeyi artirmali");
             (await LedgerCountAsync(c.id)).Should().Be(1);
+        }
+
+        // SPRINT 6 - KUMULATIF SAYAC BAYAT NESNEYE KURBAN GITMEZ.
+        // refunded_amount atomik UPDATE ile (ExecuteUpdateAsync) artiyor; bu change-tracker'i ATLAR.
+        // Cagiran elindeki Order nesnesini tam-varlik olarak guncellerse (UpdateAsync tum kolonlari
+        // yazar) sayac SIFIRA donerdi ve kumulatif sinir sessizce kaybolurdu. Bu test o yolu surer.
+        [Fact]
+        public async Task KumulatifSayac_CagiranSiparisiGuncellese_de_KAYBOLMAZ()
+        {
+            if (Skipped()) return;
+            var c = await NewCustomerAsync();
+            var o = await NewOrderAsync(c.id, total: 120m);
+
+            var (mgr, _, ctx) = NewManager();
+            await using var __ = ctx;
+            var orderDal = new EfOrderDal(ctx);
+
+            var ilk = await mgr.RefundToSourceAsync(o, 50m, "kismi-iade");
+            ilk.Success.Should().BeTrue("kismi iade calismali");
+            ilk.CreditRefunded.Should().Be(50m);
+
+            // Cagiran, ELINDEKI nesne uzerinden siparisi guncelliyor (gercek iptal akisinin yaptigi sey).
+            o.status = (byte)OrderStatusEnum.Cancelled;
+            await orderDal.UpdateAsync(o);
+
+            await using (var fresh = NewContext())
+                (await fresh.Set<Order>().AsNoTracking().SingleAsync(x => x.id == o.id)).refunded_amount
+                    .Should().Be(50m, "tam-varlik guncellemesi kumulatif sayaci SIFIRLAMAMALI");
+
+            // CIFT-ANLAM KIRICI: sayac yalniz "duruyor" degil, SINIR olarak da isliyor.
+            var ikinci = await mgr.RefundToSourceAsync(o, 999m, "kalan-iade");
+            ikinci.Success.Should().BeTrue();
+            ikinci.CreditRefunded.Should().Be(70m, "kalan hak (120-50) kadar kirpilmali");
+            (await ReadCreditAsync(c.id)).Should().Be(120m,
+                "toplam bakiye artisi siparis tutarini ASMAMALI");
+
+            var ucuncu = await mgr.RefundToSourceAsync(o, 10m, "hak-bitti");
+            ucuncu.Success.Should().BeFalse("hak tukendi - ucuncu iade REDDEDILMELI");
+            (await ReadCreditAsync(c.id)).Should().Be(120m, "reddedilen iade bakiyeyi degistirmemeli");
         }
     }
 }

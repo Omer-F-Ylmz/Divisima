@@ -79,13 +79,20 @@ namespace Divisima.IntegrationTests
                 return RetrieveOverride != null ? RetrieveOverride(token) : await _real.RetrievePaymentResultAsync(token);
             }
 
+            // RefundedTotal = DENENEN toplam; RefundedTotalBasarili = saglayicinin KABUL ettigi toplam.
+            // Ikisi ayri olmali: saglayici reddettiginde para GITMEZ, "fazla iade gitti mi" sorusunun
+            // dogru cevabi yalniz basarili toplamdir (denenen toplam yaniltir).
+            public static decimal RefundedTotalBasarili { get; set; }
+
             public Task<IyzicoRefundResult> RefundAsync(string paymentTransactionId, decimal amount)
             {
                 RefundCallCount++;
                 RefundedTotal += amount;
-                return Task.FromResult(RefundOverride != null
+                var sonuc = RefundOverride != null
                     ? RefundOverride(paymentTransactionId, amount)
-                    : new IyzicoRefundResult { Success = true, RefundId = Guid.NewGuid().ToString("N") });
+                    : new IyzicoRefundResult { Success = true, RefundId = Guid.NewGuid().ToString("N") };
+                if (sonuc.Success) RefundedTotalBasarili += amount;
+                return Task.FromResult(sonuc);
             }
         }
 
@@ -120,6 +127,7 @@ namespace Divisima.IntegrationTests
             ControllableIyzicoClient.RefundOverride = null;
             ControllableIyzicoClient.RefundCallCount = 0;
             ControllableIyzicoClient.RefundedTotal = 0m;
+            ControllableIyzicoClient.RefundedTotalBasarili = 0m;
             try
             {
                 await using (var pre = NewContext())
@@ -346,7 +354,7 @@ namespace Divisima.IntegrationTests
         // ── 4) KILIT YARISI ──────────────────────────────────────────────────────────────
         // D5c'nin asli: ayni siparise 8 paralel callback -> TAM BIR isleme.
         [Fact]
-        public async Task AyniSiparise_SekizParalelCallback_KILIT_SERILESTIRMIYOR_SADAKAT_CIFTLENIYOR_PINLENIR()
+        public async Task AyniSiparise_SekizParalelCallback_TEK_ISLENIR_SADAKAT_TEK_SATIR()
         {
             if (Skipped()) return;
             const int callers = 8;
@@ -390,34 +398,71 @@ namespace Divisima.IntegrationTests
                     .Should().BeLessThanOrEqualTo(1, "kupon kullanimi cift kaydedilmemeli");
             }
 
-            // ── PINLENEN OLCUM (SUPHELI - DUZELTILMEDI, RAPOR EDILDI) ────────────────────
-            // Beklenen: kilit + kilit-sonrasi durum kontrolu sayesinde YALNIZ BIR cagri
-            // sunucu-sunucu sorguya ulasir. OLCULEN: SEKIZININ SEKIZI de ulasiyor ve hepsi
-            // 200 donuyor - yani basari dali sekiz kez calisiyor.
-            //
-            // Yan etkilerin cogunu ASAGI KATMANLAR soguruyor (yukaridaki assert'ler bunu
-            // dogruluyor): rezervasyon bir kez tuketildigi icin stok bir kez dusuyor, odeme
-            // kaydi insert degil UPDATE oldugu icin tekil kaliyor, fatura uretimi idempotent.
-            // Ama bu bir TASARIM guvencesi degil, TESADUF: sogurmeyen bir yan etki eklendigi
-            // gun (or. kupon used_count artisi, sadakat puani, referans odulu) sekiz kez
-            // uygulanir. Bu yuzden mevcut davranis acikca pinleniyor.
-            ControllableIyzicoClient.RetrieveCallCount.Should().Be(callers,
-                $"MEVCUT DAVRANIS: kilit serilestirmiyor, tum cagrilar sorguya ulasiyor. " +
+            // ── SPRINT 6: TEK KAZANAN ────────────────────────────────────────────────────
+            // ONCEKI PIN (S5) buraya "sekizinin sekizi de sorguya ulasiyor" yaziyordu ve
+            // adinda KILIT_SERILESTIRMIYOR gecerdi. S6 teshisi bunun TESHISI YANLIS oldugunu
+            // olctu: kilit MUKEMMEL serilestiriyordu (kritik bolumde ayni anda en fazla 1
+            // cagri, sure = 8 x yapay gecikme). Kirik olan sey kilitten SONRAKI "durumu tekrar
+            // oku" satiriydi: DAL.GetAsync TRACKED oldugu icin EF identity resolution ayni
+            // bayat nesneyi donduruyor, guard hic atesleniyordu. Simdi hem okuma NoTracking
+            // hem de Pending->Success gecisi ATOMIK - yan etki hakki TEK cagriya ait.
+            ControllableIyzicoClient.RetrieveCallCount.Should().Be(1,
+                $"kilit + atomik durum gecisi yalniz BIR cagriyi sunucu-sunucu sorguya birakmali. " +
                 $"Ulasan: {ControllableIyzicoClient.RetrieveCallCount}, kodlar: {kodlar}");
 
-            // ── SUPHELI: PARA ETKISI GERCEKTEN CIFTLENIYOR ───────────────────────────────
-            // Sogurulmayan yan etki bulundu: SADAKAT PUANI her cagri icin ayri veriliyor.
-            // Tek siparis, sekiz paralel callback -> SEKIZ loyalty_transactions satiri.
-            // Bu bir tahmin degil olcum; asagida MEVCUT DAVRANIS olarak pinleniyor ki
-            // duzeltildigi gun test KIRMIZI olsun ve guncellenmesi zorunlu kalsin.
-            // DUZELTILMEDI - rapor edildi (kapsam disi: uretim davranisi degistirilmedi).
+            // ── ASIL PIN: PARA ETKISI TEKIL ──────────────────────────────────────────────
+            // Sadakat puani sogurulmayan yan etkiydi (S5'te tek siparise SEKIZ satir yaziyordu).
+            // Artik TAM 1 satir olmali - hem uygulama katmani (atomik gecis) hem veritabani
+            // (filtreli UNIQUE indeks) bunu garanti eder.
             await using (var ctx = NewContext())
             {
-                (await ctx.Set<LoyaltyTransaction>().CountAsync(t => t.order_id == orderId))
-                    .Should().Be(callers,
-                        "MEVCUT DAVRANIS: sadakat puani her paralel callback icin AYRI veriliyor " +
-                        "(tek siparise sekiz kazanim kaydi). Bu bir PARA etkisi ciftlenmesidir.");
+                (await ctx.Set<LoyaltyTransaction>()
+                    .CountAsync(t => t.order_id == orderId && t.type == (byte)LedgerEntryTypeEnum.Earn))
+                    .Should().Be(1,
+                        $"sekiz paralel callback -> TAM BIR kazanim satiri. Kodlar: {kodlar}");
             }
+
+            // Puan bakiyesi de tek kazanim kadar artmali (defter ile bakiye mutabik).
+            await using (var ctx = NewContext())
+            {
+                var kazanim = await ctx.Set<LoyaltyTransaction>().AsNoTracking()
+                    .SingleAsync(t => t.order_id == orderId && t.type == (byte)LedgerEntryTypeEnum.Earn);
+                var musteriId = (await ReadOrderAsync(orderId)).customer_id;
+                var musteri = await ctx.Set<Customer>().AsNoTracking().SingleAsync(c => c.id == musteriId);
+                musteri.loyalty_points.Should().Be(kazanim.points,
+                    "bakiye TEK kazanim kadar artmali - defter ile bakiye ayrismamali");
+            }
+        }
+
+        // CIFT-ANLAM KIRICI: yukaridaki test "retrieve=1" goruyor diye kilit/gecis dogru demek
+        // yetmez - sekiz cagrinin hepsi 200 alsa da yalnizca BIRI gercek isi yapmis olmali.
+        // Burada ayni siparise SIRAYLA (paralel degil) iki callback gonderilir: ikincisi
+        // "zaten islendi" yolundan doner ve sorguya HIC ulasmaz.
+        [Fact]
+        public async Task ArdisikIkinciCallback_SorguyaULASMAZ_ZatenIslendi_Doner()
+        {
+            if (Skipped()) return;
+            var (orderId, token, amount) = await NewPendingPaymentAsync();
+            ControllableIyzicoClient.RetrieveCallCount = 0;
+            ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
+            {
+                Success = true, PaymentId = "PAY-SIRA", PaidPrice = amount,
+                Currency = "TRY", FraudStatus = "1", Installment = 1
+            };
+
+            var ilk = await CallbackAsync(token, Sign(token));
+            ilk.result.Success.Should().BeTrue("ilk callback isi yapmali");
+            ControllableIyzicoClient.RetrieveCallCount.Should().Be(1);
+
+            var ikinci = await CallbackAsync(token, Sign(token));
+            ikinci.code.Should().Be(HttpStatusCode.OK);
+            ControllableIyzicoClient.RetrieveCallCount.Should().Be(1,
+                "ikinci callback idempotency guard'inda durmali - sorguya ULASMAMALI");
+
+            await using var ctx = NewContext();
+            (await ctx.Set<LoyaltyTransaction>()
+                .CountAsync(t => t.order_id == orderId && t.type == (byte)LedgerEntryTypeEnum.Earn))
+                .Should().Be(1, "ardisik cagri ikinci kazanim yazmamali");
         }
 
         private static string Messages_PaymentSuccess() => Divisima.Core.Utilities.Constants.Messages.PaymentSuccess;
@@ -515,6 +560,7 @@ namespace Divisima.IntegrationTests
 
             ControllableIyzicoClient.RefundCallCount = 0;
             ControllableIyzicoClient.RefundedTotal = 0m;
+            ControllableIyzicoClient.RefundedTotalBasarili = 0m;
 
             var order = await ReadOrderAsync(orderId);
             var iade = await WithScopeAsync(sp => sp.GetRequiredService<IRefundService>()
@@ -527,13 +573,13 @@ namespace Divisima.IntegrationTests
             iade.CreditRefunded.Should().Be(0m, "cuzdan payi yok");
         }
 
-        // ── 10) KUMULATIF IADE (SUPHELI - OLCUM) ─────────────────────────────────────────
-        // RefundToSourceAsync TEK CAGRI icinde refundAmount > order.total_price ise kirpiyor.
-        // Ama KUMULATIF bir sinir YOK: ardisik kismi iadelerin toplami takip edilmiyor.
-        // Bu test mevcut davranisi olcup pinler - duzeltme YAPILMADI (refunded_amount kolonu
-        // karari icin girdi olacak, bkz. rapor).
+        // ── 10) KUMULATIF IADE SINIRI (SPRINT 6 DUZELTMESI) ──────────────────────────────
+        // ONCEKI PIN (S5): "kumulatif sinir YOK" - iki ardisik tam iade siparis tutarinin IKI
+        // KATINI geri odeyebiliyordu ve Iyzico'ya da iki kez iade gidiyordu. S6'da
+        // orders.refunded_amount eklendi; RefundToSourceAsync kalan hakki ATOMIK rezerve ediyor.
+        // Bu test o pini BILINCLI kirar ve yeni sozlesmeyi pinler.
         [Fact]
-        public async Task KumulatifIade_ToplamTotalPriceI_ASABILIYOR_PINLENIR()
+        public async Task KumulatifIade_ToplamTotalPriceI_ASAMAZ_IYZICOYA_FAZLA_IADE_GITMEZ()
         {
             if (Skipped()) return;
             var (orderId, token, amount) = await NewPendingPaymentAsync(qty: 2, stock: 10);
@@ -548,26 +594,177 @@ namespace Divisima.IntegrationTests
             var order = await ReadOrderAsync(orderId);
             ControllableIyzicoClient.RefundCallCount = 0;
             ControllableIyzicoClient.RefundedTotal = 0m;
+            ControllableIyzicoClient.RefundedTotalBasarili = 0m;
 
-            // TEK cagri kirpiliyor - once bunu dogrula (pozitif olay + kirpmanin calistigi kaniti).
+            // POZITIF OLAY: ilk (asiri) cagri TEK cagri kirpmasiyla tam tutara iniyor ve GERCEKTEN oduyor.
             var asiri = await WithScopeAsync(sp => sp.GetRequiredService<IRefundService>()
                 .RefundToSourceAsync(order, order.total_price + 500m, "asiri iade denemesi"));
-            asiri.Success.Should().BeTrue();
+            asiri.Success.Should().BeTrue("ilk iade mesru - siparis tutarina kirpilarak odenmeli");
             (asiri.OnlineRefunded + asiri.CreditRefunded).Should().Be(order.total_price,
                 "TEK cagri siparis toplamina kirpilmali");
 
-            // ARDISIK ikinci tam iade: kumulatif sinir olsaydi bu 0 olurdu.
+            // ASIL SINAV: ardisik ikinci TAM iade artik REDDEDILIR (kalan hak = 0).
             var ikinci = await WithScopeAsync(sp => sp.GetRequiredService<IRefundService>()
                 .RefundToSourceAsync(order, order.total_price, "ikinci tam iade"));
-            ikinci.Success.Should().BeTrue();
+            ikinci.Success.Should().BeFalse(
+                "kumulatif hak tukendi - ikinci tam iade REDDEDILMELI (cagiran rollback eder)");
+            (ikinci.OnlineRefunded + ikinci.CreditRefunded).Should().Be(0m, "reddedilen iade para hareketi URETMEZ");
 
-            // MEVCUT DAVRANIS PINLENIR: toplam iade siparis tutarinin IKI KATI oldu.
-            var toplamIade = asiri.OnlineRefunded + asiri.CreditRefunded
-                           + ikinci.OnlineRefunded + ikinci.CreditRefunded;
-            toplamIade.Should().Be(order.total_price * 2m,
-                "MEVCUT DAVRANIS: kumulatif iade siniri YOK - ardisik iadeler siparis toplamini asabiliyor");
-            ControllableIyzicoClient.RefundedTotal.Should().Be(order.total_price * 2m,
-                "Iyzico'ya da toplam tutarin iki kati iade gonderildi");
+            // CIFT-ANLAM KIRICI: yalniz donen nesneye bakmak yetmez - SAGLAYICIYA giden tutar da olculur.
+            ControllableIyzicoClient.RefundedTotalBasarili.Should().Be(order.total_price,
+                "Iyzico'ya toplamda siparis tutarindan FAZLA iade GITMEMELI");
+            ControllableIyzicoClient.RefundCallCount.Should().Be(1,
+                "ikinci iade saglayiciya hic ulasmamali (rezervasyon saglayici cagrisindan ONCE)");
+
+            // Sayac kalici: DB'de kumulatif toplam tam olarak siparis tutari.
+            await using var ctx = NewContext();
+            (await ctx.Set<Order>().AsNoTracking().SingleAsync(o => o.id == orderId)).refunded_amount
+                .Should().Be(order.total_price, "kumulatif sayac kalici ve tam olmali");
+        }
+
+        // KISMI IADELER: ucuncu cagri kalan hakka KIRPILIR (reddedilmez) - "hep ya hep yok" degil.
+        [Fact]
+        public async Task KismiIadeler_UcuncuCagri_KalanHakka_KIRPILIR()
+        {
+            if (Skipped()) return;
+            var (orderId, token, amount) = await NewPendingPaymentAsync(qty: 2, stock: 10);
+            ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
+            {
+                Success = true, PaymentId = "PAY-IADE-3", PaidPrice = amount,
+                Currency = "TRY", FraudStatus = "1", Installment = 1
+            };
+            (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue();
+
+            var order = await ReadOrderAsync(orderId);
+            ControllableIyzicoClient.RefundCallCount = 0;
+            ControllableIyzicoClient.RefundedTotal = 0m;
+            ControllableIyzicoClient.RefundedTotalBasarili = 0m;
+
+            var ucte = decimal.Round(order.total_price / 3m, 2);
+            var birinci = await WithScopeAsync(sp => sp.GetRequiredService<IRefundService>()
+                .RefundToSourceAsync(order, ucte, "kismi-1"));
+            var ikinci = await WithScopeAsync(sp => sp.GetRequiredService<IRefundService>()
+                .RefundToSourceAsync(order, ucte, "kismi-2"));
+            birinci.Success.Should().BeTrue(); ikinci.Success.Should().BeTrue();
+
+            // Ucuncu cagri kalandan COK fazla ister - kirpilarak KABUL edilmeli.
+            var ucuncu = await WithScopeAsync(sp => sp.GetRequiredService<IRefundService>()
+                .RefundToSourceAsync(order, order.total_price, "kismi-3-asiri"));
+            ucuncu.Success.Should().BeTrue("kalan hak > 0 oldugu icin kirpilarak odenmeli");
+            (ucuncu.OnlineRefunded + ucuncu.CreditRefunded).Should().Be(order.total_price - (ucte * 2m),
+                "ucuncu iade TAM OLARAK kalan hak kadar olmali");
+
+            ControllableIyzicoClient.RefundedTotalBasarili.Should().Be(order.total_price,
+                "uc iadenin saglayici toplami tam olarak siparis tutari");
+
+            await using var ctx = NewContext();
+            (await ctx.Set<Order>().AsNoTracking().SingleAsync(o => o.id == orderId)).refunded_amount
+                .Should().Be(order.total_price);
+        }
+
+        // SAGLAYICI HATASI: para GITMEDIYSE iade hakki BLOKE KALMAZ (rezervasyon geri birakilir).
+        // Vakum kirici: sonraki mesru iade GERCEKTEN calisir.
+        [Fact]
+        public async Task SaglayiciIadesi_BASARISIZSA_IadeHakki_BLOKE_KALMAZ()
+        {
+            if (Skipped()) return;
+            var (orderId, token, amount) = await NewPendingPaymentAsync(qty: 2, stock: 10);
+            ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
+            {
+                Success = true, PaymentId = "PAY-IADE-4", PaidPrice = amount,
+                Currency = "TRY", FraudStatus = "1", Installment = 1
+            };
+            (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue();
+
+            var order = await ReadOrderAsync(orderId);
+            ControllableIyzicoClient.RefundCallCount = 0;
+            ControllableIyzicoClient.RefundedTotal = 0m;
+            ControllableIyzicoClient.RefundedTotalBasarili = 0m;
+
+            // 1) Saglayici REDDEDIYOR -> iade basarisiz, sayac ARTMAMALI.
+            ControllableIyzicoClient.RefundOverride = (_, __) => new IyzicoRefundResult { Success = false };
+            var basarisiz = await WithScopeAsync(sp => sp.GetRequiredService<IRefundService>()
+                .RefundToSourceAsync(order, order.total_price, "saglayici-hatasi"));
+            basarisiz.Success.Should().BeFalse("saglayici reddettiyse iade basarisiz olmali");
+
+            await using (var ctx = NewContext())
+                (await ctx.Set<Order>().AsNoTracking().SingleAsync(o => o.id == orderId)).refunded_amount
+                    .Should().Be(0m, "para GITMEDI - tahsis geri birakilmali, sayac 0 kalmali");
+
+            // 2) Ayni siparise mesru iade hala YAPILABILMELI (hak bloke degil).
+            ControllableIyzicoClient.RefundOverride = null;
+            var mesru = await WithScopeAsync(sp => sp.GetRequiredService<IRefundService>()
+                .RefundToSourceAsync(order, order.total_price, "yeniden deneme"));
+            mesru.Success.Should().BeTrue("hak bloke kalmamali - yeniden deneme calismali");
+            ControllableIyzicoClient.RefundCallCount.Should().Be(2, "iki deneme yapildi (biri reddedildi)");
+            ControllableIyzicoClient.RefundedTotalBasarili.Should().Be(order.total_price,
+                "saglayicinin KABUL ettigi toplam yalniz basarili deneme kadar olmali");
+
+            await using (var ctx = NewContext())
+                (await ctx.Set<Order>().AsNoTracking().SingleAsync(o => o.id == orderId)).refunded_amount
+                    .Should().Be(order.total_price);
+        }
+
+        // ESZAMANLI IKI TAM IADE: CAS gercekten calisiyor mu (kirpma tek-is-parcacikli bir tesaduf degil).
+        [Fact]
+        public async Task EszamanliIkiTamIade_ToplamTotalPriceI_ASAMAZ()
+        {
+            if (Skipped()) return;
+            var (orderId, token, amount) = await NewPendingPaymentAsync(qty: 2, stock: 10);
+            ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
+            {
+                Success = true, PaymentId = "PAY-IADE-5", PaidPrice = amount,
+                Currency = "TRY", FraudStatus = "1", Installment = 1
+            };
+            (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue();
+
+            var order = await ReadOrderAsync(orderId);
+            ControllableIyzicoClient.RefundCallCount = 0;
+            ControllableIyzicoClient.RefundedTotal = 0m;
+            ControllableIyzicoClient.RefundedTotalBasarili = 0m;
+
+            var sonuclar = await Task.WhenAll(Enumerable.Range(0, 2).Select(_ =>
+                WithScopeAsync(sp => sp.GetRequiredService<IRefundService>()
+                    .RefundToSourceAsync(order, order.total_price, "eszamanli tam iade"))));
+
+            sonuclar.Count(s => s.Success).Should().Be(1, "eszamanli iki tam iadeden yalniz BIRI kazanmali");
+            ControllableIyzicoClient.RefundedTotalBasarili.Should().BeLessThanOrEqualTo(order.total_price,
+                "saglayiciya toplamda siparis tutarindan fazla iade GITMEMELI");
+
+            await using var ctx = NewContext();
+            (await ctx.Set<Order>().AsNoTracking().SingleAsync(o => o.id == orderId)).refunded_amount
+                .Should().Be(order.total_price, "kumulatif sayac tam olarak siparis tutarinda durmali");
+        }
+
+        // ── SUPHELI DAVRANIS PINI (S6'DA DUZELTILMEDI - RAPOR EDILDI) ────────────────────
+        // ApplyConfirmedSideEffectsAsync, odeme sonucu DOGRULANMADAN ONCE cagriliyor
+        // (IyzicoPaymentManager satir ~184). Fraud reddi / tutar uyusmazligi ile siparis
+        // Cancelled olsa bile FATURA uretiliyor ve saglayiciya "Sent" olarak isaretleniyor;
+        // basarisiz dal ApplyCancelledSideEffectsAsync CAGIRMIYOR - fatura acikta kaliyor.
+        // Kapsam disi (uretim davranisi degistirilmedi); mevcut davranis pinlenir.
+        [Fact]
+        public async Task BASARISIZ_ODEMEDE_FATURA_URETILIYOR_PINLENIR()
+        {
+            if (Skipped()) return;
+            var (orderId, token, amount) = await NewPendingPaymentAsync();
+            ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
+            {
+                Success = true, PaymentId = "PAY-FRAUD-FATURA", PaidPrice = amount,
+                Currency = "TRY", FraudStatus = "0", Installment = 1
+            };
+
+            var r = await CallbackAsync(token, Sign(token));
+            r.code.Should().Be(HttpStatusCode.BadRequest, "fraud reddi 400 donmeli");
+
+            await using var ctx = NewContext();
+            (await ctx.Set<Order>().AsNoTracking().SingleAsync(o => o.id == orderId)).status
+                .Should().Be((byte)OrderStatusEnum.Cancelled, "fraud reddedilen siparis iptal edilmeli");
+
+            var fatura = await ctx.Set<Invoice>().AsNoTracking().SingleOrDefaultAsync(i => i.order_id == orderId);
+            fatura.Should().NotBeNull(
+                "MEVCUT DAVRANIS: iptal edilen siparise fatura URETILIYOR (dogrulamadan once cagriliyor)");
+            fatura!.status.Should().Be((byte)InvoiceStatusEnum.Sent,
+                "MEVCUT DAVRANIS: fatura ayrica saglayiciya gonderilmis isaretleniyor ve iptal EDILMIYOR");
         }
 
         // Para birimi uyusmazligi da ayni dala duser (cift-anlam kirici: "her sey fraud degil").

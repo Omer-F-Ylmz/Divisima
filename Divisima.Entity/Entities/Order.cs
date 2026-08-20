@@ -19,6 +19,11 @@ namespace Divisima.Entity.Entities
         public int? address_id { get; set; }
         public byte payment_type { get; set; } // Online Ödeme (0), Kapıda Ödeme (1)
         public decimal store_credit_used { get; set; } = 0m; // checkout'ta uygulanan cuzdan/mağaza kredisi
+        // KUMULATIF IADE SAYACI: bu siparis icin bugune kadar iade edilen TOPLAM tutar.
+        // RefundToSourceAsync her iadede atomik olarak artirir ve toplam total_price'i ASLA asamaz.
+        // Onceden yalnizca TEK cagri icinde kirpma vardi -> ardisik iki tam iade siparis tutarinin
+        // iki katini geri odeyebiliyordu (Iyzico'ya da iki kez gidiyordu).
+        public decimal refunded_amount { get; set; } = 0m;
         public byte installment_count { get; set; } = 1;   // taksit sayisi (1 = tek cekim)
         public bool is_online_payment_done { get; set; }
         public string? payment_id { get; set; }

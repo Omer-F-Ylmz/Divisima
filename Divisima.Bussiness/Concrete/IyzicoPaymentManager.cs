@@ -140,7 +140,11 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
             if (!_iyzico.VerifyCallbackSignature(dto.token, dto.signature))
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.PaymentSignatureInvalid));
 
-            var payment = await _paymentDal.GetAsync(p => p.token == dto.token);
+            // NoTracking (S6): bu ilk okuma yalniz GUARD icin. Tracked okunursa DbContext bu satiri
+            // izlemeye alir ve kilit sonrasindaki TAZE okuma identity resolution ile ayni bayat
+            // nesneye duser (kok sebep buydu). Guncelleme yollarinda UpdateAsync detached nesneyi
+            // zaten Attach+Modified yapiyor - davranis degismiyor.
+            var payment = (await _paymentDal.GetListNoTrackingAsync(p => p.token == dto.token)).FirstOrDefault();
             if (payment == null)
                 return (HttpStatusCode.NotFound, new ErrorResult(Messages.PaymentNotFound));
 
@@ -166,8 +170,17 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
             if (orderLock == null)
                 return (HttpStatusCode.Conflict, new ErrorResult(Messages.PaymentProcessingBusy));
 
-            // Açıklayıcı yorum: Kilit sonrası durumu TEKRAR oku (kilit beklerken başka callback işlemiş olabilir)
-            payment = await _paymentDal.GetAsync(p => p.token == dto.token);
+            // Açıklayıcı yorum: Kilit sonrası durumu TEKRAR oku (kilit beklerken başka callback işlemiş olabilir).
+            // BAYAT OKUMA FIX (S6): burada eskiden GetAsync (TRACKED) kullaniliyordu. Ayni DbContext
+            // yukarida (satir ~143) ayni Payment satirini zaten izlemeye almisti; EF Core identity
+            // resolution yuzunden ikinci sorgu DB'den taze degeri okusa bile AYNI bayat nesneyi
+            // donduruyordu (olculdu: ilkOkuma=Pending, ikinciOkuma=Pending, dbGercek=Success,
+            // referansAyni=True). Yani bu savunma satiri OLU idi: kilit sekiz callback'i duzgun
+            // serilestirdigi halde (olculdu: kritik bolumde max esmanli=1) sekizi de basari dalini
+            // calistiriyor, sadakat puani sekiz kez yaziliyordu. NoTracking okuma bunu duzeltir.
+            payment = (await _paymentDal.GetListNoTrackingAsync(p => p.token == dto.token)).FirstOrDefault();
+            if (payment == null)
+                return (HttpStatusCode.NotFound, new ErrorResult(Messages.PaymentNotFound));
             if (payment.payment_status != (byte)PaymentStatusEnum.Pending)
                 return (HttpStatusCode.OK, new SuccessResult(Messages.PaymentAlreadyProcessed));
 
@@ -197,6 +210,16 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
                 bool currencyOk = string.Equals(result.Currency, order.currency ?? "TRY", StringComparison.OrdinalIgnoreCase);
                 if (result.Success && amountMatches && fraudOk && currencyOk)
                 {
+                    // ATOMIK DURUM GECISI (S6) - TEK KAZANAN. Pending->Success gecisini veritabani
+                    // yapar (WHERE payment_status=Pending). Kilit tek sunucuda serilestiriyor, ama
+                    // kilit dagitik ortamda suresi dolabilir / Redis kopabilir; para etkisi olan yan
+                    // etkilerin (sadakat puani, kupon sayaci, referans odulu) tek kez uygulanmasi
+                    // KILIDE DEGIL bu gecise baglidir. 0 donen cagri hicbir yan etki uygulamaz.
+                    var kazanan = await _paymentDal.TryTransitionStatusAsync(payment.id,
+                        (byte)PaymentStatusEnum.Pending, (byte)PaymentStatusEnum.Success);
+                    if (kazanan == 0)
+                        return (HttpStatusCode.OK, new SuccessResult(Messages.PaymentAlreadyProcessed));
+
                     payment.payment_status = (byte)PaymentStatusEnum.Success;
                     payment.paid_price = result.PaidPrice;
                     // Aciklayici yorum: TAKSIT - secilen taksit + komisyon. Komisyon = PaidPrice - amountDue (karta cekilen tutar).
@@ -258,6 +281,15 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
                 }
                 else
                 {
+                    // ATOMIK DURUM GECISI (S6) - basarisiz dalda da TEK KAZANAN. Aksi halde eszamanli
+                    // callback'ler iptal yan etkilerini (rezervasyon serbest, cuzdan iadesi) tekrar
+                    // tekrar uygulardi: cuzdan iadesi sogurulmayan bir yan etkidir, ikinci calisma
+                    // musteriye ikinci kez kredi yazardi.
+                    var kaybeden = await _paymentDal.TryTransitionStatusAsync(payment.id,
+                        (byte)PaymentStatusEnum.Pending, (byte)PaymentStatusEnum.Failed);
+                    if (kaybeden == 0)
+                        return (HttpStatusCode.OK, new SuccessResult(Messages.PaymentAlreadyProcessed));
+
                     // Açıklayıcı yorum: Başarısız/tutar uyuşmuyor/fraud - sipariş iptal + stok iade
                     payment.payment_status = (byte)PaymentStatusEnum.Failed;
                     payment.paid_price = result.PaidPrice;

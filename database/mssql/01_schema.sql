@@ -240,6 +240,10 @@ CREATE TABLE loyalty_transactions (
     order_id INT NULL,
     created_at DATETIME2 NOT NULL
 );
+-- Siparis basina TEK kazanim (filtreli UNIQUE): eszamanli odeme callback'leri ayni siparise
+-- ikinci bir Earn satiri yazamaz. Redeem (geri alim) ayni order_id ile serbesttir.
+CREATE UNIQUE INDEX UX_loyalty_transactions_order_earn ON loyalty_transactions (order_id)
+    WHERE order_id IS NOT NULL AND type = 0;
 
 CREATE TABLE orders (
     id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
@@ -256,6 +260,9 @@ CREATE TABLE orders (
     address_id INT NULL,
     payment_type TINYINT NOT NULL,
     store_credit_used DECIMAL(18,2) NOT NULL DEFAULT 0,
+    -- Kumulatif iade sayaci: bu siparis icin bugune kadar iade edilen TOPLAM tutar.
+    -- RefundToSourceAsync atomik artirir; toplam total_price'i asamaz.
+    refunded_amount DECIMAL(18,2) NOT NULL DEFAULT 0,
     installment_count TINYINT NOT NULL DEFAULT 1,
     is_online_payment_done BIT NOT NULL,
     payment_id NVARCHAR(256) NULL,

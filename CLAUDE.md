@@ -90,6 +90,15 @@ Dizgede `Database=` **bulunmalidir**: `InvoiceCancellationTests` degiskeni ham k
 - Stok assertleri **`available` / `reserved`** uzerinden yapilir; tek basina
   `stock_quantity` rezervasyon modelini yanlis okur
   (`available = stock_quantity - reserved_quantity`).
+- **`EfEntityRepositoryBase.GetAsync` TRACKED'dir.** Ayni `DbContext` icinde bir satiri
+  ikinci kez okumak DB'deki taze degeri getirmez - EF identity resolution ilk okunan
+  (bayat) nesneyi dondurur. "Kilit aldiktan sonra durumu tekrar oku" gibi her savunma
+  satiri bu yuzden SESSIZCE olu kalabilir. Taze deger gerektiginde
+  `GetListNoTrackingAsync` kullanilir. (Sprint 6 kok sebebi buydu.)
+- **`ExecuteUpdateAsync` change-tracker'i ATLAR.** Atomik CAS ile guncellenen bir kolon,
+  cagiranin elindeki izlenen varlikta ESKI degerde kalir; o varlik uzerinden yapilan
+  tam-varlik `UpdateAsync` (tum kolonlari yazar) atomik guncellemeyi SESSIZCE geri alir.
+  Bellekteki deger de esitlenmelidir.
 
 ## 6. Assert kalitesi
 
@@ -121,88 +130,94 @@ Bu bolum, yeni bir oturumun tek basina devam edebilmesi icin yazildi.
 
 ## DURUM
 
-- **Son push: `153cf01`** — Sprint 4: kalem bazli KDV (`Category.vat_rate` +
-  `Product.vat_rate` + `invoice_items` tablosu + oran snapshot'i), `phone` NULL'lanabilir
-  (S-del Secenek A), `Seller:RegistrationEnabled` kapisi (varsayilan false),
-  `CHANGE_IN_PRODUCTION` placeholder listesine eklendi.
-- **Sprint 4 CI: HER IKI WORKFLOW TAMAMEN YESIL.** `SQL gerektiren testler` SUCCESS,
-  `Testler + coverage` SUCCESS, `Coverage raporunu yukle` SUCCESS (coverlet.collector
-  eklendikten sonra gercekten dosya uretiyor), codeql/dependency-scan/secret-scan/
-  format-check SUCCESS. `TESHIS` adimi skipped (kirmizi yok).
-- **Yerel (Sprint 4 sonrasi): 115/115 `Category=Sql`, 236/236 tam suit.**
+- **Sprint 5 push `383f4f2` — HER IKI WORKFLOW TAMAMEN YESIL** (run 32376145363 CI +
+  32376145406 Security; adim bazinda dogrulandi). `SQL gerektiren testler` SUCCESS,
+  `Testler + coverage` SUCCESS, `Coverage raporunu yukle` SUCCESS,
+  codeql/dependency-scan/secret-scan/format-check SUCCESS, `TESHIS` skipped, annotation BOS.
+- **Sprint 6 (para duzeltmeleri) TAMAMLANDI ve push edildi** — asagidaki bolume bak.
+- **Yerel (Sprint 6 sonrasi): 137/137 `Category=Sql`, 258/258 tam suit** (Testcontainers'li
+  `OrderEndpointTests` HARIC - yerelde Docker kapali, CI'da yesil kosuyor).
 
-## SPRINT 5 - PUSH EDILDI, RUN RAPORU BEKLENIYOR
+## SPRINT 5 - KAPANDI (run yesil)
 
-Sprint 5 (odeme guvenlik dalgasi) tamamlandi, dogrulandi ve **PUSH EDILDI** -
-commit `test: payment security wave 5 + accepted-risk & handover docs`
-(SHA icin `git log --oneline -3`; bir commit kendi SHA'sini iceremedigi icin
-buraya yazilamadi).
+Sprint 5 (odeme guvenlik dalgasi) push `383f4f2`; her iki workflow tamamen yesil.
+16 test (`PaymentCallbackSecurityTests` 11 + `WebhookAndSessionSecurityTests` 5).
+On kalemin karsiligi commit mesajinda ve test isimlerinde duruyor. Sprint 5'in iki
+"SUPHELI" olcumu Sprint 6'da KAPATILDI (asagi).
 
-**RUN RAPORU BEKLENIYOR.** Beklenti: `SQL gerektiren testler` adiminda **131 test**.
-Kanit = adimin **SUCCESS** olmasi + yereldeki sayi - sayilar CI ciktisindan okunamaz.
+## SPRINT 6 - PARA DUZELTMELERI (TAMAMLANDI)
 
-Commit'teki iki test dosyasi:
+### KOK SEBEP (olculdu, tahmin degil)
 
-```
-Divisima.IntegrationTests/PaymentCallbackSecurityTests.cs      (11 test)
-Divisima.IntegrationTests/WebhookAndSessionSecurityTests.cs     (5 test)
-```
+Uc gecici teshis testi kosuldu, sonra kaldirildi:
 
-**Yerel dogrulama (Sprint 5 dahil): Release build 0 hata, `Category=Sql` 131/131,
-tam suit 252/252, dis kontrolu 4 assert ters cevrilip 4 isimli kirmizi gozlendi ve
-geri alindi.** Yani push on-onayinin dort kosulu da saglandi.
+| Teshis | Olcum | Sonuc |
+|---|---|---|
+| Kilit serilestiriyor mu? | `retrieve=8 maxEszamanli=1 sure=2242ms` (her cagri icerde 250 ms uyutuldu) | Kilit **CALISIYOR** - kritik bolumde hicbir an >1 cagri yok |
+| Kilit sonrasi okuma taze mi? | `ilkOkuma=0 ikinciOkuma=0 dbGercek=1 referansAyni=True` | Guard **OLU** |
+| Basarisiz odemede fatura? | `kod=400 siparisDurum=5 fatura=1 faturaDurum=1(Sent)` | Yeni SUPHELI (asagi) |
 
-On kalemin karsiligi:
-1. HMAC reddi -> `GecersizImza_...` + `ImzaYOKSA_Reddedilir`
-2. Replay yan-etkisizligi -> `BasariliCallback_IkinciKez_YanEtki_SIFIR`
-3. 30 dk timeout -> `Token30dkdanEskiyse_Reddedilir_OdemeFailed`
-4. payment-order kilidi 8-paralel -> `AyniSiparise_SekizParalelCallback_KILIT_SERILESTIRMIYOR_SADAKAT_CIFTLENIYOR_PINLENIR`
-5. Tutar uyusmazligi -> `EksikOdeme_...` + `FazlaOdeme_MakulTaksitKomisyonu_KABUL_...`
-6. Basarisiz odeme -> `FraudRed_...` + `ParaBirimiUyusmazligi_Reddedilir`
-7. Webhook AllowedIps -> `WebhookAllowlist_BOS_...` + `..._DOLU_...` + `..._DigerUclar_Etkilenmez`
-8. RefundAsync yolu -> `KartIadesi_Iyzicoya_DogruTutarla_Gonderilir`
-9. Refresh rotasyonu -> `Refresh_YeniCiftUretir_ESKI_RefreshToken_REDDEDILIR` + `PasifHesabin_RefreshToken_i_Reddedilir`
-10. Kumulatif iade -> `KumulatifIade_ToplamTotalPriceI_ASABILIYOR_PINLENIR`
+**Kok sebep: `EfEntityRepositoryBase.GetAsync` TRACKED.** `HandleCallback` basinda
+odeme satiri Pending olarak okunup DbContext'e izlemeye aliniyordu; kilitten sonraki
+"durumu TEKRAR oku" satiri EF identity resolution yuzunden **ayni bayat nesneyi**
+donduruyordu. Yani kilidin kapsami dar degildi, kilit bozuk degildi - **kilitten
+sonraki tek savunma satiri oluydu**. S5 pininin adi (`KILIT_SERILESTIRMIYOR`) YANLIS
+teshisti; S6'da olcumle duzeltildi.
 
-## SPRINT 6 - PARA DUZELTMELERI (SIRADAKI; E4a'dan ONCE)
+### YAPILAN (uretim)
 
-Sprint 5'te OLCULEN iki para bulgusu kapatilir. Kurallar onceki sprintlerle ayni
-(tek push -> tek run -> tek rapor; push on-onayinin dort kosulu; dis kontrolu).
+1. **Bayat okuma kapatildi** - `HandleCallback`'te iki okuma da `GetListNoTrackingAsync`.
+2. **Atomik durum gecisi** - `IPaymentDal.TryTransitionStatusAsync(id, from, to)`
+   (`ExecuteUpdateAsync`, `EfReturnRequestDal.TryTransitionAsync` kalibi). Basari VE
+   basarisizlik dallarinin ikisi de TEK KAZANAN birakiyor. Yan etki hakki artik
+   KILIDE degil bu gecise bagli (Redis kopsa/kilit sursesi dolsa da tekil).
+3. **Filtreli UNIQUE indeks** - `UX_loyalty_transactions_order_earn` on
+   `loyalty_transactions(order_id) WHERE order_id IS NOT NULL AND type = 0`.
+   Ikinci savunma hatti; Redeem ayni order_id ile serbest.
+4. **`orders.refunded_amount`** + `IOrderDal.TryAddRefundedAmountAsync` (CAS: hem
+   beklenen deger hem `+amount <= total_price` WHERE'de) ve `ReleaseRefundedAmountAsync`.
+   `RefundToSourceAsync` kalan hakki **saglayici cagrisindan ONCE** rezerve ediyor.
+   Saglayici reddederse tahsis geri birakiliyor (hak bloke kalmiyor).
+5. **Bayat nesne tuzagi** - `ExecuteUpdateAsync` change-tracker'i atladigi icin
+   cagiranin elindeki `Order` bayat kaliyordu; `UpdateAsync(order)` tum kolonlari
+   yazdigindan sayaci SIFIRLARDI. `order.refunded_amount += granted` ile bellekteki
+   deger de esitleniyor (dis kontrolu: satir kaldirilinca test `found 0.00M` ile kirildi).
 
-**(1) Kumulatif iade siniri.** `orders.refunded_amount` kolonu eklenir ve
-`RefundToSourceAsync` bu degere gore KUMULATIF clamp yapar: toplam iade
-`order.total_price`'i **ASLA** asamaz. Ikinci tam iade reddedilir ya da kalan
-kadar kirpilir. Pin: **Iyzico'ya fazla iade GITMEZ** (saglayici cagri tutari da
-dogrulanir, yalniz donen deger degil).
+Migration: `20260820141003_CumulativeRefundAndLoyaltyEarnUniqueness`. Indeks
+kurulmadan ONCE ciftlenmis kazanim var mi diye bakan bir `RAISERROR` on kontrolu var -
+**satir SILMIYOR** (silmek `customers.loyalty_points` ile defteri ayirirdi); kirli bir
+veritabaninda migration gurultulu duruyor, mutabakat karari operatorun.
+`database/mssql/01_schema.sql` de guncellendi (deploy varligi yalan soylemesin).
 
-**(2) Sadakat kazanimi siparis basina TAM BIR KEZ.**
-Once **KOK SEBEP**: `payment-order:{id}` kilidi 8 paraleli neden gecirdi -
-kilidin kapsami mi dar (yanlis anahtar / erken birakma / kilit disinda kalan
-bolum), yoksa `InMemoryDistributedLock` mu beklemeden donuyor? Teshis edilmeden
-yama yazilmaz.
-Sonra mekanizma onerisi: filtreli-unique indeks (`loyalty_transactions` uzerinde
-order_id + Earn tipi) **ya da** kazanimi idempotent bir durum-gecisinin icine
-almak. **Tesadufi sogurmaya guven YOK** - "asagi katman zaten emiyor" bir tasarim
-guvencesi degildir.
-Pin: 8 paralel callback -> `loyalty_transactions` **TAM 1 satir**.
+### PINLER
 
-**(3) Eski iki pin BILINCLI kirilir**, yenileri AYNI commit'te gelir:
+Kirilan (bilincli, ayni commit'te yenisi geldi):
 - `KumulatifIade_ToplamTotalPriceI_ASABILIYOR_PINLENIR`
 - `AyniSiparise_SekizParalelCallback_KILIT_SERILESTIRMIYOR_SADAKAT_CIFTLENIYOR_PINLENIR`
 
+Yeni:
+- `AyniSiparise_SekizParalelCallback_TEK_ISLENIR_SADAKAT_TEK_SATIR` - retrieve=1,
+  `loyalty_transactions` TAM 1 satir, bakiye = tek kazanim
+- `ArdisikIkinciCallback_SorguyaULASMAZ_ZatenIslendi_Doner`
+- `KumulatifIade_ToplamTotalPriceI_ASAMAZ_IYZICOYA_FAZLA_IADE_GITMEZ`
+- `KismiIadeler_UcuncuCagri_KalanHakka_KIRPILIR`
+- `SaglayiciIadesi_BASARISIZSA_IadeHakki_BLOKE_KALMAZ`
+- `EszamanliIkiTamIade_ToplamTotalPriceI_ASAMAZ`
+- `KumulatifSayac_CagiranSiparisiGuncellese_de_KAYBOLMAZ` (RefundMoneyTests)
+- `BASARISIZ_ODEMEDE_FATURA_URETILIYOR_PINLENIR` (SUPHELI pini - duzeltilmedi)
+
 ## SIRA
 
-1. **Sprint 5 run raporu** (push edildi, rapor bekleniyor)
-2. **SPRINT 6 - para duzeltmeleri** (yukaridaki bolum) - E4a'dan ONCE
-3. **E4a** - stok-adjust + gorsel-yukleme admin ekranlari (LAUNCH ON KOSULU:
+1. **Sprint 6 run raporu** (push edildi, rapor bekleniyor)
+2. **E4a** - stok-adjust + gorsel-yukleme admin ekranlari (LAUNCH ON KOSULU:
    ucler var, arayuz yok; operator bunlari panelden yapamiyor)
 3. **E1** auth + katalog -> **E2** sepet+checkout+odeme -> **E3** hesap+siparis takibi
    - E2'nin iki somut isi: `checkout_form_content` gomme + `#/odeme/sonuc` donus sayfasi
      (callback bugun ham JSON donuyor)
    - E3: CMS sanitizasyonu IKI katman (yazma `InputSanitizer` + okuma DOMPurify)
-4. **Sema kapanis dalgasi** - Sprint 5 sonuclariyla birlikte degerlendirilecek
-   (seller migration DEGIL: `sellers` ve `seller_id` zaten `InitialCreate`'te;
-   aday kalemler: `refunded_amount`, gift-card expiry)
+4. **Sema kapanis dalgasi** - kalan tek aday: **gift-card expiry**
+   (`refunded_amount` Sprint 6'da kapandi; seller migration DEGIL - `sellers` ve
+   `seller_id` zaten `InitialCreate`'te)
 5. **E4b** (musteri askiya alma, kategori, CMS ekranlari) - launch sonrasi olabilir
 
 ## KARARLAR (kapanmis)
@@ -223,19 +238,23 @@ Pin: 8 paralel callback -> `loyalty_transactions` **TAM 1 satir**.
 
 ## SUPHELI DAVRANISLAR - KARAR BEKLEYENLER
 
-Bu ikisi Sprint 5'te OLCULDU ve mevcut davranis olarak PINLENDI; duzeltilmedi.
+Sprint 5'in iki maddesi (kilit/sadakat ciftlenmesi + kumulatif iade siniri)
+**Sprint 6'da KAPANDI**. Acik kalan / yeni bulunanlar:
 
-1. **Odeme callback kilidi serilestirmiyor + sadakat puani ciftleniyor.**
-   Ayni siparise 8 paralel callback -> **8'inin 8'i** sunucu-sunucu sorguya ulasiyor
-   ve hepsi 200 donuyor. Stok/odeme kaydi/fatura tarafini asagi katmanlar soguruyor
-   (rezervasyon bir kez tuketiliyor, odeme UPDATE, fatura idempotent) ama
-   **`loyalty_transactions` tek siparis icin 8 satir** olusuyor - para etkisi ciftleniyor.
-   Sogurma bir tasarim guvencesi degil tesaduf: sogurmeyen bir yan etki eklendigi gun
-   sekiz kez uygulanir.
-2. **Kumulatif iade siniri YOK.** `RefundToSourceAsync` TEK cagride
-   `refundAmount > order.total_price` ise kirpiyor ama ardisik iadelerin toplamini
-   takip etmiyor. Olculdu: iki ardisik tam iade -> toplam **siparis tutarinin 2 kati**,
-   ve Iyzico'ya da iki kat iade gonderiliyor. (`refunded_amount` kolonu karari icin girdi.)
+1. **Basarisiz odemede FATURA uretiliyor ve iptal edilmiyor.** (S6'da olculdu, pinlendi)
+   `IyzicoPaymentManager.HandleCallback` icinde `ApplyConfirmedSideEffectsAsync`,
+   odeme sonucu DOGRULANMADAN ONCE cagriliyor (satir ~184). Fraud reddi / tutar
+   uyusmazliginda siparis `Cancelled` oluyor ama fatura kesilmis ve `Sent` (saglayiciya
+   gonderildi) durumunda kaliyor; basarisiz dal `ApplyCancelledSideEffectsAsync`
+   CAGIRMIYOR. Yani iptal edilen siparis muhasebe ciro raporunda kaliyor.
+   Pin: `BASARISIZ_ODEMEDE_FATURA_URETILIYOR_PINLENIR`.
+2. **Callback kritik bolumu TRANSACTION'SIZ calisiyor.** (S6'da fark edildi, dokunulmadi)
+   Ayni yerde `BeginTransactionAsync()` hemen ardindan `CommitAsync()` geliyor
+   (satir ~177-178) - BOS bir transaction acilip kapaniyor. Sonraki tum yazmalar
+   (odeme guncelleme, siparis onayi, kupon kullanimi, cuzdan iadesi) ambient
+   transaction OLMADAN, her DAL cagrisinda ayri SaveChanges ile kaliciliyor; alt
+   taraftaki `CommitAsync()` ve `catch` icindeki `RollbackAsync()` **no-op**.
+   Yani yarida kalan bir callback kismi durum birakabilir. Duzeltme karari kullanicinin.
 
 ## SUREC (degismez)
 
