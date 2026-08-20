@@ -22,7 +22,9 @@ namespace Divisima.IntegrationTests
     public static class TestAuthHelper
     {
         // Şifre politikası (CustomerRegisterRequestValidator): >=8 karakter, büyük+küçük harf, rakam.
-        private const string TestPassword = "TestPass123";
+        // PUBLIC: hesap silme sonrası "artık giriş yapılamıyor" gibi testler aynı şifreyi
+        // tekrar kullanmak zorunda; sabiti kopyalamak yerine buradan okunur.
+        public const string TestPassword = "TestPass123";
 
         public sealed record AuthenticatedCustomer(int CustomerId, string Email, string Token, HttpClient Client);
 

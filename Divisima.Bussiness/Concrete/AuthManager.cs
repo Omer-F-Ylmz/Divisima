@@ -6,6 +6,7 @@ using Divisima.Core.Security.Hashing;
 using Divisima.Core.Security.Tokens;
 using Divisima.Core.Security.JWT;
 using Divisima.Core.Utilities.Constants;
+using Divisima.Core.Utilities.Caching;
 using Divisima.Core.Utilities.Results;
 using Divisima.Core.Utilities.Mail;
 using Divisima.DataAccess.Abstract;
@@ -25,10 +26,12 @@ namespace Divisima.Bussiness.Concrete
         private readonly ITokenHelper _tokenHelper;
         private readonly IMailService _mailService;
         private readonly ISecurityEventService _securityEvents;
+        private readonly ICacheService _cache;
 
         public AuthManager(ICustomerDal customerDal, IUserSessionDal userSessionDal, ITokenHelper tokenHelper, IMailService mailService, ISecurityEventService securityEvents,
-            IReferralService referralService, IConsentRecordDal consentDal)
+            IReferralService referralService, IConsentRecordDal consentDal, ICacheService cache)
         {
+            _cache = cache;
             _referralService = referralService;
             _consentDal = consentDal;
             _customerDal = customerDal;
@@ -389,7 +392,9 @@ namespace Divisima.Bussiness.Concrete
             // Sipariş/fatura FK bütünlüğü için hard-delete yerine anonimleştirme.
             customer.name = "Silinmiş Kullanıcı";
             customer.email = $"deleted-{Guid.NewGuid():N}@anonymized.local";
-            customer.phone = null;
+            // NOT NULL TUZAGI (AccountManager.DeleteAccount ile ayni): customers.phone NOT NULL.
+            // null yazmak silme ucunu 500 ile dusuruyordu. Anonim yer tutucu yazilir.
+            customer.phone = AccountManager.AnonymizedPlaceholder;
             customer.address = null;
             customer.city = null;
             customer.birthdate = null;
@@ -411,6 +416,10 @@ namespace Divisima.Bussiness.Concrete
             // Açıklayıcı yorum: Tüm oturumları kapat
             var sessions = await _userSessionDal.GetListAsync(us => us.customer_id == customerId && us.is_active);
             foreach (var s in sessions) { s.is_active = false; await _userSessionDal.UpdateAsync(s); }
+
+            // Hesap durumu cache'ini düşür - silinen hesabın access token'ı bir sonraki istekte
+            // TokenBlacklistMiddleware tarafından reddedilsin (TTL beklenmesin).
+            _cache.Remove(CacheKeys.CustomerActive(customerId));
 
             await _securityEvents.LogAsync("AccountDeleted", "Warning", customerId, null, null, "Kullanıcı hesabını sildi (anonimleştirildi)");
             return (HttpStatusCode.OK, new SuccessResult(Messages.AccountDeleted));

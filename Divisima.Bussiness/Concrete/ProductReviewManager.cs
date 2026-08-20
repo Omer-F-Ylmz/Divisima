@@ -12,6 +12,7 @@ using Divisima.Core.Utilities.Sanitization;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.ProductReview;
 using Divisima.Entity.Entities;
+using Microsoft.EntityFrameworkCore;
 
 namespace Divisima.Bussiness.Concrete
 {
@@ -56,14 +57,46 @@ namespace Divisima.Bussiness.Concrete
             // Açıklayıcı yorum: Doğrulanmış alıcı kontrolü - müşteri bu ürünü teslim edilmiş bir siparişte almış mı
             bool verified = await HasPurchasedAsync(dto.customer_id, dto.product_id);
 
-            var review = _mapper.Map<ProductReview>(dto);
-            review.comment = InputSanitizer.Sanitize(dto.comment ?? "");
-            review.is_verified_purchase = verified;
-            review.helpful_count = 0;
-            review.review_status = (byte)ReviewStatusEnum.Pending;
-            review.is_active = true;
-            review.created_at = DateTime.Now;
-            await _productReviewDal.AddAsync(review);
+            // DTO -> entity esleme AutoMapper ile YAPILMAZ. Iki sebep:
+            //  1) ProductReviewProfile yalnizca ProductReview -> ListResponseDto yonunu tanimliyordu;
+            //     ters yon hicbir profilde yoktu ve HER yorum ekleme AutoMapperMappingException ile
+            //     500 donuyordu (yorum ozelligi uctan uca oluydu).
+            //  2) Elle kurmak alan sizintisini kalici olarak kapatir: DTO'ya ileride bir alan eklense
+            //     bile entity'ye gecemez. review_status / is_active / is_verified_purchase gibi
+            //     SUNUCU alanlari istemciden ASLA gelmez.
+            var review = new ProductReview
+            {
+                product_id = dto.product_id,
+                customer_id = dto.customer_id,
+                rating = dto.rating,
+                comment = InputSanitizer.Sanitize(dto.comment ?? ""),
+                is_verified_purchase = verified,
+                helpful_count = 0,
+                review_status = (byte)ReviewStatusEnum.Pending,
+                is_active = true,
+                created_at = DateTime.Now
+            };
+
+            try
+            {
+                await _productReviewDal.AddAsync(review);
+            }
+            catch (DbUpdateException)
+            {
+                // YARIS: yukaridaki "zaten yorumu var mi" kontrolu ile bu insert arasinda baska bir
+                // istek ayni cifti yazmis olabilir (check-then-act, arada kilit yok). Tek gercek
+                // koruma filtreli tekil indeks: (customer_id, product_id) WHERE is_active = 1.
+                // Kaybeden cagri 500 degil, check-then-act yolunun verdigi AYNI yaniti almali.
+                //
+                // Hatayi KORU KORUNE yutmuyoruz: gercekten o yaris mi oldu diye DB'ye soruyoruz.
+                // Aktif satir olustuysa yaris kaybedildi (409); olusmadiysa sebep baska bir DB
+                // hatasidir ve yukari birakilir.
+                var raced = await _productReviewDal.GetAsync(r => r.customer_id == dto.customer_id
+                    && r.product_id == dto.product_id && r.is_active);
+                if (raced != null)
+                    return (HttpStatusCode.Conflict, new ErrorResult(Messages.ReviewAlreadyExists));
+                throw;
+            }
 
             return (HttpStatusCode.Created, new SuccessResult(Messages.ReviewAdded));
         }

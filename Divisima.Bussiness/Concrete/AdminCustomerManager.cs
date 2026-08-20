@@ -1,5 +1,6 @@
 using System.Net;
 using Divisima.Bussiness.Abstract;
+using Divisima.Core.Utilities.Caching;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Dtos;
 using Divisima.Core.Utilities.Results;
@@ -16,12 +17,15 @@ namespace Divisima.Bussiness.Concrete
         private readonly ICustomerDal _customerDal;
         private readonly IOrderDal _orderDal;
         private readonly IUserSessionDal _userSessionDal;
+        private readonly ICacheService _cache;
 
-        public AdminCustomerManager(ICustomerDal customerDal, IOrderDal orderDal, IUserSessionDal userSessionDal)
+        public AdminCustomerManager(ICustomerDal customerDal, IOrderDal orderDal, IUserSessionDal userSessionDal,
+            ICacheService cache)
         {
             _customerDal = customerDal;
             _orderDal = orderDal;
             _userSessionDal = userSessionDal;
+            _cache = cache;
         }
 
         public async Task<(HttpStatusCode, Result)> ListCustomers(AdminCustomerFilterDto filter)
@@ -67,11 +71,18 @@ namespace Divisima.Bussiness.Concrete
             customer.updated_at = DateTime.Now;
             await _customerDal.UpdateAsync(customer);
 
-            // Açıklayıcı yorum: ASKIYA ALINDIYSA aktif oturumları HEMEN iptal et (JWT stateless olduğundan token expiry'e
-            // kadar erişim sürerdi -> ban ANLIK olmalı). InvalidateAll + session-tarafı revocation ile banlanan kullanıcı
-            // mevcut token'ıyla devam edemez (TokenBlacklist/refresh reddi). Yalnız suspend'de (aktivasyonda gerek yok).
+            // ASKIYA ALINDIYSA aktif oturumları iptal et (refresh akışı reddedilsin).
+            // DUZELTILEN YANLIS GARANTI: buradaki eski yorum "banlanan kullanıcı mevcut token'ıyla
+            // devam edemez" diyordu. DOGRU DEGILDI - user_sessions yalnız refresh tarafını kapatır;
+            // ACCESS token JWT olduğu için süresi dolana kadar geçerli kalıyordu ve pasif müşteri
+            // veri YAZABILIYORDU (testle kanıtlandı). Access token tarafındaki gerçek engel
+            // TokenBlacklistMiddleware'deki hesap-durumu kontrolüdür; aşağıdaki cache düşürme
+            // o kontrolün ANINDA devreye girmesini sağlar (TTL beklemeden).
             if (!dto.is_active)
                 await _userSessionDal.InvalidateAllForCustomerAsync(customer.id);
+
+            // Durum her iki yönde de değişmiş olabilir - cache'i düşür ki middleware taze okusun.
+            _cache.Remove(CacheKeys.CustomerActive(customer.id));
 
             return (HttpStatusCode.OK, new SuccessResult(dto.is_active ? Messages.CustomerActivated : Messages.CustomerSuspended));
         }

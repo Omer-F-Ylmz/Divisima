@@ -20,9 +20,9 @@ namespace Divisima.IntegrationTests
     //     ProductReview -> (customer_id, product_id) UNIQUE, HasFilter("[is_active] = 1")
     // Bu indeks migration surecinde SONRADAN eklenmisti; asil sinavi bu test.
     //
-    // BULUNAN: yaris HIC olusamiyor - Add metodu eksik AutoMapper eslemesi yuzunden HER cagrida
-    // istisna atiyor (uretim hatasi, asagida pinlendi). Indeks bu yuzden ikinci testte veritabani
-    // seviyesinde dogrudan sinaniyor.
+    // Add metodu artik DTO yu ELLE entity ye ceviriyor (AutoMapper eslemesi yoktu ve her cagri
+    // 500 doner du) ve indeks ihlalini dogrulayip 409 e ceviriyor. Indeks ayrica ikinci testte
+    // veritabani seviyesinde dogrudan sinaniyor.
     [Trait("Category", "Sql")]
     public class ProductReviewRaceTests : IAsyncLifetime
     {
@@ -125,7 +125,7 @@ namespace Divisima.IntegrationTests
         }
 
         [Fact]
-        public async Task YorumEkleme_HER_CAGRIDA_ISTISNA_URETIM_HATASI_PINLENIR()
+        public async Task AyniMusteriUrune_SekizParalelYorum_TAM_BIR_AKTIF_Kaybedenler409()
         {
             if (Skipped()) return;
             const int callers = 8;
@@ -161,25 +161,22 @@ namespace Divisima.IntegrationTests
             // donen kodlarin ve istisna tiplerinin dokumu.
             var dokum = string.Join(" | ", outcomes.Select(o => o.Item2 ?? o.Item1.ToString()));
 
-            // URETIM HATASI PINLENIR - DUZELTILMEDI, RAPOR EDILDI.
-            // ProductReviewManager.Add satir 59: _mapper.Map<ProductReview>(dto). Fakat
-            // ProductReviewProfile YALNIZCA ProductReview -> ProductReviewListResponseDto esleme-
-            // sini tanimliyor; ProductReviewAddRequestDto -> ProductReview esleme HIC YOK.
-            // Sonuc: HER yorum ekleme AutoMapperMappingException ile 500 doner - yorum ozelligi
-            // uctan uca CALISMIYOR. Yaris bu yuzden hic olusamiyor.
-            threw.Should().Be(callers,
-                $"mevcut uretim davranisi: cagrilarin HEPSI istisna atiyor. Cagri sonuclari: {dokum}");
-            outcomes.Should().OnlyContain(o => o.Item2 == "AutoMapperMappingException",
-                $"istisna tipi eksik AutoMapper eslemesini isaret etmeli. Cagri sonuclari: {dokum}");
-            created.Should().Be(0, "hicbir cagri yorum olusturamiyor");
-            conflict.Should().Be(0, "cift-yorum engeline HIC sira gelmiyor");
-
+            // ASIL SINAV: 8 paralel cagridan sonra veritabaninda TAM 1 aktif yorum.
+            // Filtreli tekil indeks tutmazsa buraya birden fazla satir duser.
             await using (var ctx = NewContext())
             {
-                (await ctx.Set<ProductReview>().CountAsync(r =>
-                    r.customer_id == customerId && r.product_id == productId))
-                    .Should().Be(0, $"tek satir bile yazilamiyor. Cagri sonuclari: {dokum}");
+                (await ctx.Set<ProductReview>().IgnoreQueryFilters().CountAsync(r =>
+                    r.customer_id == customerId && r.product_id == productId && r.is_active))
+                    .Should().Be(1, $"filtreli tekil indeks yalniz BIR aktif yorum birakmali. Cagri sonuclari: {dokum}");
             }
+
+            // VAKUM KIRICI: bir cagri GERCEKTEN yorum olusturmus olmali.
+            created.Should().Be(1, $"tam bir cagri 201 Created almali. Cagri sonuclari: {dokum}");
+
+            // KAYBEDENLER TEMIZ 409 ALIR - ne 500, ne istisna. Add icindeki DbUpdateException
+            // yakalamasi (yaris dogrulanip 409'a cevrilmesi) tam olarak bunu saglar.
+            conflict.Should().Be(callers - 1, $"kaybeden yedi cagri 409 almali. Cagri sonuclari: {dokum}");
+            threw.Should().Be(0, $"hicbir cagri istisna ile dusmemeli. Cagri sonuclari: {dokum}");
         }
 
         // Yukaridaki uretim hatasi yuzunden servis yolundan indekse HIC ulasilamiyor. Indeksin

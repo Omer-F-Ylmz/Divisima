@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Net;
 using Divisima.Bussiness.Abstract;
+using Divisima.Core.Utilities.Caching;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Results;
 using Divisima.Core.Security.Hashing;
@@ -13,15 +14,23 @@ namespace Divisima.Bussiness.Concrete
     // Açıklayıcı yorum: Hesap yönetimi iş kuralları. Profil/şifre/tercih/silme.
     public class AccountManager : IAccountService
     {
+        // Aciklayici yorum: Anonimlestirmede NOT NULL kolonlara yazilan yer tutucu (telefon).
+        // Kisisel veri degil; "bu alan silindi" anlamina gelir. Mevcut anonimlestirme
+        // uslubuyla ayni (full_address = "-", title = "-").
+        internal const string AnonymizedPlaceholder = "-";
+
         private readonly ICustomerDal _customerDal;
         private readonly IUserSessionDal _userSessionDal;
         private readonly IAddressDal _addressDal;
+        private readonly ICacheService _cache;
 
-        public AccountManager(ICustomerDal customerDal, IUserSessionDal userSessionDal, IAddressDal addressDal)
+        public AccountManager(ICustomerDal customerDal, IUserSessionDal userSessionDal, IAddressDal addressDal,
+            ICacheService cache)
         {
             _customerDal = customerDal;
             _userSessionDal = userSessionDal;
             _addressDal = addressDal;
+            _cache = cache;
         }
 
         public async Task<(HttpStatusCode, Result)> GetSummary(int customerId)
@@ -104,7 +113,11 @@ namespace Divisima.Bussiness.Concrete
             // Hard-delete yerine anonimleştirme: sipariş/fatura geçmişi bütünlüğü (FK) korunur, PII silinir.
             c.name = "Silinmiş Kullanıcı";
             c.email = $"deleted_{c.id}@divisima.invalid";
-            c.phone = null;
+            // NOT NULL TUZAGI: customers.phone kolonu NOT NULL (Customer.phone non-nullable string).
+            // Buraya null yazmak SqlException uretiyordu -> silme ucu HER cagrida 500 donuyor ve
+            // KVKK silme hakki uctan uca calismiyordu. Anonim yer tutucu yaziliyor; ayni kalip
+            // asagidaki adres kaskadinda da gecerli (addresses.phone da NOT NULL).
+            c.phone = AnonymizedPlaceholder;
             c.address = null;
             c.city = null;
             c.birthdate = null;
@@ -128,7 +141,7 @@ namespace Divisima.Bussiness.Concrete
             foreach (var a in addresses)
             {
                 a.full_name = "Silinmiş";
-                a.phone = null;
+                a.phone = AnonymizedPlaceholder;   // addresses.phone da NOT NULL - null yazilamaz
                 a.full_address = "-";
                 a.title = "-";
                 a.is_active = false;
@@ -139,6 +152,10 @@ namespace Divisima.Bussiness.Concrete
             // Açıklayıcı yorum: Tüm oturumları kapat
             // Tum aktif oturumlari TEK atomik sorgu ile kapat (foreach N+1 yerine - DRY + performans)
                 await _userSessionDal.InvalidateAllForCustomerAsync(customerId);
+
+            // Hesap durumu cache'ini düşür - silinen hesabın token'ı bir sonraki istekte
+            // TokenBlacklistMiddleware tarafından reddedilsin (TTL beklenmesin).
+            _cache.Remove(CacheKeys.CustomerActive(customerId));
 
             return (HttpStatusCode.OK, new SuccessResult(Messages.AccountDeleted));
         }

@@ -490,76 +490,89 @@ namespace Divisima.IntegrationTests
         // GRUP 5 - Hesap silme ve silinmis hesabin token i
         // =====================================================================
 
-        // URETIM HATASI PINLENIR - DUZELTILMEDI, RAPOR EDILDI.
-        // DELETE /api/Account/delete step-up (sifre/2FA) ISTEMIYOR; ama istek 500 ile dusuyor:
-        // AccountManager.DeleteAccount anonimlestirme sirasinda customers.phone alanina NULL
-        // yaziyor, kolon ise NOT NULL. Sonuc: KVKK/GDPR silme hakki UCTAN UCA CALISMIYOR.
-        // Bu test mevcut davranisi kilitler; hata duzeltilince KIRMIZI olur ve guncellenmesi gerekir.
+        // KVKK/GDPR SILME - step-up (sifre/2FA) ISTENMEZ, tek Bearer token yeterli (sozlesme pinlenir).
+        // Eskiden bu uc HER cagrida 500 doner du: anonimlestirme customers.phone alanina NULL
+        // yaziyordu, kolon ise NOT NULL. Ayni tuzak adres defteri kaskadinda da vardi ve yalniz
+        // ilki duzeltilseydi 500 oraya kayardi - YARIM SILME (musteri anonim, adresler PII dolu).
+        // Bu test ikisini BIRLIKTE dogrular.
         [Fact]
-        public async Task DeleteAccount_500_DONUYOR_HESAP_SILINMIYOR_URETIM_HATASI_PINLENIR()
+        public async Task DeleteAccount_StepUpISTENMEZ_PII_Anonimlesir_AdresKaskadiKorunur()
         {
             if (Skipped()) return;
 
-            // POZITIF OLAY: cagridan once hesap gercekten canli.
+            // Silinecek hesabin adres defteri OLSUN - kaskad gercekten calisiyor mu gorelim.
+            var upsert = await A.Client.PostAsJsonAsync("/api/Address/upsert", new AddressRequestDto
+            {
+                customer_id = A.CustomerId, title = "Ev", full_name = "A Musteri", phone = "5551112233",
+                city = "Istanbul", district = "Kadikoy", full_address = "Silme testi adresi", is_default = true
+            });
+            upsert.IsSuccessStatusCode.Should().BeTrue($"adres eklenebilmeli: {await upsert.Content.ReadAsStringAsync()}");
+
+            // POZITIF OLAY: cagridan once hesap gercekten canli ve oturumu var.
             (await A.Client.GetAsync("/api/Account/summary")).StatusCode.Should().Be(HttpStatusCode.OK);
+            await using (var pre = NewContext())
+                (await pre.Set<UserSession>().CountAsync(s => s.customer_id == A.CustomerId && s.is_active))
+                    .Should().BeGreaterThan(0, "giris yapilmis oldugu icin aktif oturum bulunmali");
 
+            // Govde YOK - sifre, ikinci faktor, yeniden kimlik dogrulama hicbiri istenmiyor.
             var del = await A.Client.DeleteAsync("/api/Account/delete");
-            del.StatusCode.Should().Be(HttpStatusCode.InternalServerError,
-                "mevcut uretim davranisi: silme 500 veriyor (phone NOT NULL ihlali)");
+            del.StatusCode.Should().Be(HttpStatusCode.OK,
+                $"silme basarili olmali: {await del.Content.ReadAsStringAsync()}");
 
-            // Silme GERCEKTEN olmadi - hata kozmetik degil, veri hic degismemis.
             await using var ctx = NewContext();
-            var c = await ctx.Set<Customer>().AsNoTracking().SingleAsync(x => x.id == A.CustomerId);
-            c.is_active.Should().BeTrue("hesap hala aktif - silme islemedi");
-            c.email.Should().Be(A.Email.ToLowerInvariant(), "e-posta anonimlestirilMEMIS");
-            c.name.Should().Be("Test Musteri", "ad anonimlestirilMEMIS");
+            // Musteri satiri: global is_active filtresi pasif satiri gizler - filtresiz okunur.
+            var c = await ctx.Set<Customer>().IgnoreQueryFilters().AsNoTracking()
+                .SingleAsync(x => x.id == A.CustomerId);
+            c.is_active.Should().BeFalse("hesap pasiflesmeli");
+            c.email.Should().NotBe(A.Email.ToLowerInvariant(), "e-posta anonimlestirilmeli");
+            c.email.Should().StartWith("deleted_", "anonimlestirme kalibi korunmali");
+            c.name.Should().NotBe("Test Musteri", "ad anonimlestirilmeli");
+            c.phone.Should().NotBe("5550000000", "telefon anonimlestirilmeli");
+            c.password_hash.Should().BeEmpty("parola ozeti temizlenmeli");
+
+            // H27 ADRES KASKADI: adres defteri de PII tasir - anonimlesmis ve pasiflesmis olmali.
+            var addresses = await ctx.Set<Address>().IgnoreQueryFilters().AsNoTracking()
+                .Where(a => a.customer_id == A.CustomerId).ToListAsync();
+            addresses.Should().NotBeEmpty("kaskadin uzerinde calistigi adres bulunmali");
+            addresses.Should().OnlyContain(a => !a.is_active, "adresler pasiflesmeli");
+            addresses.Should().NotContain(a => a.phone == "5551112233", "adres telefonu anonimlestirilmeli");
+            addresses.Should().NotContain(a => a.full_address == "Silme testi adresi", "adres metni temizlenmeli");
+
+            // Oturumlar dusmus olmali.
+            (await ctx.Set<UserSession>().CountAsync(s => s.customer_id == A.CustomerId && s.is_active))
+                .Should().Be(0, "silme tum oturumlari kapatmali");
         }
 
-        // MEVCUT DAVRANIS PINLENIR: pasiflestirilmis (askiya alinmis) musterinin ESKI Bearer
-        // token i sonraki isteklerde ne oluyor. Silme ucu 500 verdigi icin pasiflestirme
-        // dogrudan veritabanindan yapiliyor - admin askiya almasiyla ayni son durum.
+        // Silme sonrasi: ayni cagri tekrar edilirse ne olur, ve eski parolayla giris yapilabilir mi.
         [Fact]
-        public async Task PasiflestirilmisMusterinin_ESKI_TOKENI_DAVRANIS_PINLENIR()
+        public async Task DeleteAccount_IkinciCagri_Idempotent_VeSilmeSonrasi_LoginREDDEDILIR()
         {
             if (Skipped()) return;
 
-            var before = await A.Client.GetAsync("/api/Account/summary");
-            before.StatusCode.Should().Be(HttpStatusCode.OK, "pasiflestirmeden once token calisiyor olmali");
+            (await A.Client.DeleteAsync("/api/Account/delete")).StatusCode.Should().Be(HttpStatusCode.OK);
 
+            // IKINCI cagri: hesap artik pasif oldugu icin token hesap-durumu kontrolune takilir.
+            // Onemli olan sunucunun COKMEMESI ve verinin bir daha degismemesi.
+            string emailAfterFirst;
             await using (var ctx = NewContext())
-            {
-                var c = await ctx.Set<Customer>().SingleAsync(x => x.id == A.CustomerId);
-                c.is_active = false;
-                await ctx.SaveChangesAsync();
+                emailAfterFirst = (await ctx.Set<Customer>().IgnoreQueryFilters().AsNoTracking()
+                    .SingleAsync(x => x.id == A.CustomerId)).email;
 
-                foreach (var s in await ctx.Set<UserSession>().Where(u => u.customer_id == A.CustomerId).ToListAsync())
-                    s.is_active = false;
-                await ctx.SaveChangesAsync();
-            }
+            var ikinci = await A.Client.DeleteAsync("/api/Account/delete");
+            ((int)ikinci.StatusCode).Should().BeLessThan(500,
+                $"ikinci cagri sunucu hatasi URETMEMELI: {(int)ikinci.StatusCode}");
 
-            // POZITIF OLAY: pasiflestirme gercekten yazildi.
             await using (var ctx = NewContext())
                 (await ctx.Set<Customer>().IgnoreQueryFilters().AsNoTracking()
-                    .SingleAsync(x => x.id == A.CustomerId)).is_active.Should().BeFalse();
+                    .SingleAsync(x => x.id == A.CustomerId)).email
+                    .Should().Be(emailAfterFirst, "ikinci cagri veriyi TEKRAR degistirmemeli");
 
-            // AYNI token, pasiflestirme SONRASI.
-            // PINLENEN DAVRANIS: token REDDEDILMIYOR. 401 degil 404 geliyor - yani istek kimlik
-            // dogrulamasindan GECIYOR, sadece Customer uzerindeki global is_active sorgu filtresi
-            // satiri gizledigi icin "bulunamadi" ile bitiyor. Engel yetkilendirme degil, tesadufi.
-            var after = await A.Client.GetAsync("/api/Account/summary");
-            after.StatusCode.Should().Be(HttpStatusCode.NotFound,
-                "pasif hesabin token i 401 ile REDDEDILMIYOR - istek isleniyor, veri filtresine takiliyor");
-            after.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized,
-                "guvenli davranis 401 olurdu; mevcut sozlesme bu degil");
-
-            // SIVRI UC: Customer satirini okumayan bir YAZMA ucu pasif token ile hala isliyor mu.
-            var productId = await NewProductAsync(price: 55m, stock: 5);
-            var write = await A.Client.PostAsync($"/api/Wishlist/toggle?productId={productId}", null);
-            write.IsSuccessStatusCode.Should().BeTrue(
-                $"pasiflestirilmis musteri hala YAZMA yapabiliyor (mevcut davranis): {await write.Content.ReadAsStringAsync()}");
-            await using (var ctx = NewContext())
-                (await ctx.Set<WishlistItem>().CountAsync(w => w.customer_id == A.CustomerId))
-                    .Should().Be(1, "yazma gercekten veritabanina islendi - reddedilmedi");
+            // Silinen hesabin eski parolasiyla giris ARTIK yapilamaz.
+            var anon = _hostA!.CreateClient();
+            var login = await anon.PostAsJsonAsync("/api/auth/login",
+                new { email = A.Email, password = TestAuthHelper.TestPassword });
+            login.IsSuccessStatusCode.Should().BeFalse("silinmis hesaba giris yapilamamali");
         }
+
     }
 }
