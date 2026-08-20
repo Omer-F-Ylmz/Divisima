@@ -146,8 +146,9 @@ Bu bolum, yeni bir oturumun tek basina devam edebilmesi icin yazildi.
   `Testler + coverage` SUCCESS (Testcontainers'li `OrderEndpointTests` DAHIL),
   `Coverage raporunu yukle` SUCCESS, codeql/dependency-scan/secret-scan/format-check
   SUCCESS, `TESHIS` skipped, annotation BOS. (Sprint 5 `383f4f2` de tamamen yesildi.)
-- **Sprint 7 (callback kapanisi) TAMAMLANDI ve push edildi** — asagidaki bolume bak.
-- **Yerel (Sprint 7 sonrasi): 141/141 `Category=Sql`, 262/262 tam suit** (Testcontainers'li
+- **Sprint 7 push `4ee6318` — HER IKI WORKFLOW TAMAMEN YESIL** (run 32386448987 CI + 32386447800 Security).
+- **E4a (admin ekran bosluklari) TAMAMLANDI ve push edildi** — asagidaki bolume bak.
+- **Yerel (E4a sonrasi): 146/146 `Category=Sql`, 267/267 tam suit** (Testcontainers'li
   `OrderEndpointTests` HARIC - yerelde Docker kapali, CI'da yesil kosuyor).
 
 ## SPRINT 5 - KAPANDI (run yesil)
@@ -278,19 +279,67 @@ mutasyonu) `ExecuteInTransactionAsync` -> transaction'siz kosucu ile yapildi ve 
 zarari birebir yeniden uretti**: odeme `Success` kaldi (kalici kismi durum) ve cuzdan
 bakiyesi **100.00** artip defterde iz kalmadi (ayrisma). Hepsi geri alindi.
 
+## E4a - ADMIN EKRAN BOSLUKLARI (TAMAMLANDI)
+
+Launch on kosulu kapandi: stok duzeltme ve gorsel yukleme uclari VARDI, arayuz YOKTU.
+
+### YAPILAN
+
+**Yeni admin ucu** `GET /api/Stock/{productId}` -> beden basina `stock_quantity` +
+`reserved_quantity` + `available`. AYRI DTO (`ProductStockDetailDto`) acildi; mevcut
+`ProductStockDto` ANONIM uclarda donuyor, oraya `reserved_quantity` eklemek "kac kisi
+sepetinde tutuyor" bilgisini herkese acardi. `StockController` sinif duzeyinde
+`[RequireUserType(Admin)]` oldugu icin yeni uc otomatik korumali.
+
+**api-client.js**: `stock.byProduct` / `stock.adjust` / `productImage.upload` (FormData) /
+`productImage.byProduct` + `setPrimary` / `remove`.
+
+**admin.html**: STOK ekrani (urun+beden sec -> fiziksel/rezerve/satilabilir -> delta+sebep
+-> uygula) ve GORSEL ekrani (coklu yukleme + mevcut gorseller + birincil yap/sil).
+
+### ROTA VE SEMANTIK DUZELTMELERI (kod okunarak, varsayim degil)
+
+- Gorsel ucu `api/product-image` (TIRELI). `/api/ProductImage/upload` **404** doner.
+- `StockAdjustDto.new_quantity` **MUTLAK yeni deger**, delta DEGIL. Panel operatorden
+  FARK aliyor, mutlaga cevirip gonderiyor ve sonucu gondermeden ONCE ekranda gosteriyor.
+- Gorsel alani `is_primary` (`is_main` degil); birincil ucu `POST /api/product-image/{id}/primary`.
+
+### PINLER (AdminStockAndImageTests - 5 test)
+
+- `StokDetayi_Admin_200_VeUcAlanDaDOGRU` - 10 fiziksel / 3 rezerve / **7 satilabilir**
+- `StokDetayi_MusteriTokeni_403_Anonim_401` - cift-anlam kirici
+- `AdminDuzeltme_StokDegisir_VeHareketKaydi_OLUSUR` - stok 25, rezerve DEGISMEZ,
+  `StockMovement` tipi Adjustment ve miktari **FARK** (15), notta operatorun sebebi
+- `MusteriTokeni_StokDuzeltmede_403_VeStok_DEGISMEZ` - 403 kozmetik degil
+- `UploadedImage_NosniffVeMagicByte_PINLENIR` - sahte content-type 400 + kayit yok;
+  gercek imzali 200; istemci dosya adi URL'de YOK; servis edilen gorselde `nosniff`
+
+### DIS KONTROLU
+
+4 assert ters -> 4 AYRI isimli kirmizi. 5. kontrol: `available = stock - reserved`
+ifadesindeki rezerve dususu kaldirildi -> iki pin kirildi (`beklenen 7, bulunan 10` ve
+`beklenen 23, bulunan 25`). Hepsi geri alindi.
+
+### ELLE DOGRULAMA (yol raporda; ozet)
+
+`dotnet ef database update` -> `dotnet run --urls http://localhost:5000` -> gercek
+register/verify/login ile admin (user_type DB'de 1 yapildi) -> kategori+urun+stok gercek
+admin uclarindan -> musteri siparisi ile GERCEK rezervasyon -> `GET /api/Stock/{id}`
+10/3/7 -> adjust 25 -> hareket kaydi -> 403/401 yetki matrisi -> sahte/gercek gorsel
+yukleme -> statik servis + `nosniff`. Ardindan panel `http://localhost:5173`'te (CORS
+`AllowedOrigins` listesinde) surulup STOK ve GORSEL ekranlari elle kullanildi.
+
 ## SIRA
 
-1. **Sprint 7 run raporu** (push edildi, rapor bekleniyor)
-2. **E4a** - stok-adjust + gorsel-yukleme admin ekranlari (LAUNCH ON KOSULU:
-   ucler var, arayuz yok; operator bunlari panelden yapamiyor)
-3. **E1** auth + katalog -> **E2** sepet+checkout+odeme -> **E3** hesap+siparis takibi
+1. **E4a run raporu** (push edildi, rapor bekleniyor)
+2. **E1** auth + katalog -> **E2** sepet+checkout+odeme -> **E3** hesap+siparis takibi
    - E2'nin iki somut isi: `checkout_form_content` gomme + `#/odeme/sonuc` donus sayfasi
      (callback bugun ham JSON donuyor)
    - E3: CMS sanitizasyonu IKI katman (yazma `InputSanitizer` + okuma DOMPurify)
-4. **Sema kapanis dalgasi** - kalan tek aday: **gift-card expiry**
+3. **Sema kapanis dalgasi** - kalan tek aday: **gift-card expiry**
    (`refunded_amount` Sprint 6'da kapandi; seller migration DEGIL - `sellers` ve
    `seller_id` zaten `InitialCreate`'te)
-5. **E4b** (musteri askiya alma, kategori, CMS ekranlari) - launch sonrasi olabilir
+4. **E4b** (musteri askiya alma, kategori, CMS ekranlari) - launch sonrasi olabilir
 
 ## KARARLAR (kapanmis)
 
@@ -334,6 +383,26 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    okundu, dokunulmadi) Var olan herhangi bir siparis id'si icin fatura kesiyor;
    tek koruma cagiranin dogru yerden cagirmasi. S7'de cagri onay dalina tasindigi
    icin bugun sorun yok, ama uc kendi basina korumasiz. Duzeltme karari kullanicinin.
+3. **`LocalImageStorage` dosyayi CWD'ye yaziyor, `UseStaticFiles` ContentRoot'tan sunuyor.**
+   (E4a'da OLCULDU) `PhysicalRoot = Directory.GetCurrentDirectory()/wwwroot/uploads/products`,
+   sunum ise `IWebHostEnvironment.WebRootPath` (= ContentRoot/wwwroot). Ikisi yalniz
+   CALISMA DIZINI content root ile AYNI oldugunda ortusur - `dotnet run --project` ve
+   normal yayinlarda ortusuyor, ama calisma dizini farkli baslatilan bir servis (systemd
+   `WorkingDirectory` verilmemis, Windows Service) yuklemeleri hic servis edilmeyen bir
+   dizine yazar: yukleme "basarili" doner, gorsel SONSUZA KADAR 404. Testte bu ayrisma
+   birebir gozlendi (dosya test bin'ine yazildi, 404 alindi) ve test host'unda
+   `UseContentRoot(CWD)` ile hizalandi. Uretim duzeltmesi `WebRootPath` kullanmak olurdu -
+   YAPILMADI, karar kullanicinin.
+4. **`Divisima.API/wwwroot/` `.gitignore`'da DEGIL.** Yuklenen urun gorselleri calisma
+   agacinda takipsiz dosya olarak birikiyor; dikkatsiz bir `git add -A` musteri
+   gorsellerini depoya sokabilir. E4a elle dogrulamasinda uretilen 3 dosya elle silindi.
+   Aday satir: `Divisima.API/wwwroot/uploads/`.
+5. **`api-client.js` login/refresh sozlesmesi API ile UYUSMUYOR.** (E4a elle
+   dogrulamasinda olculdu) API `data.token` donuyor, istemci `data.data.access_token`
+   okuyor ([api-client.js:173](frontend/api-client.js:173) ve `:136`) -> token hic
+   saklanmiyor, panele girilemiyor (login 200, sonraki her cagri 401). Ayrica
+   `_tryRefresh` govdesiz POST atiyor ve uc **415** donuyor. E1'in birinci isi budur;
+   E4a kapsaminda DUZELTILMEDI.
 
 ## SUREC (degismez)
 

@@ -44,6 +44,8 @@
       this.device = this._buildDevice();
       this.stockNotification = this._buildStockNotification();
       this.recentlyViewed = this._buildRecentlyViewed();
+      this.stock = this._buildStock();
+      this.productImage = this._buildProductImage();
       this.admin = this._buildAdmin();
     }
 
@@ -322,6 +324,47 @@
     }
 
     // ─────────────────────── Admin ───────────────────────
+    // ─────────────────────── Stok yönetimi (admin) ───────────────────────
+    // Açıklama: Uçların TAMAMI admin yetkisi ister (StockController sınıf düzeyinde
+    // [RequireUserType(Admin)]). Müşteri token'ı ile çağrılırsa 403 döner.
+    _buildStock() {
+      const api = this;
+      return {
+        // Beden bazında fiziksel stok + rezerve + satılabilir (E4a admin ucu)
+        byProduct(productId) { return api._get("/api/Stock/" + productId); },
+        // DİKKAT: new_quantity MUTLAK yeni değerdir, fark (delta) DEĞİL.
+        // Backend farkı kendisi hesaplayıp StockMovement'a Adjustment olarak yazar.
+        // Panelde operatör delta giriyor; mutlak değere ekran çeviriyor (bkz. admin.html).
+        adjust(productId, size, newQuantity, note) {
+          return api._post("/api/Stock/adjust", {
+            product_id: productId, size: size, new_quantity: newQuantity, note: note || ""
+          });
+        },
+      };
+    }
+
+    // ─────────────────────── Ürün görselleri ───────────────────────
+    // Açıklama: Route "api/product-image" (TİRELİ) - "api/productimage" 404 döner.
+    _buildProductImage() {
+      const api = this;
+      return {
+        // Görselleri herkes görebilir (ürün detayı)
+        byProduct(productId) { return api._get("/api/product-image/product/" + productId); },
+        // Yükleme admin. multipart/form-data: Content-Type'ı ELLE KOYMA - tarayıcı
+        // boundary ile birlikte kendisi yazar. _request FormData'yı zaten olduğu gibi
+        // gövdeye koyuyor ve Authorization/CSRF başlıklarını ekliyor.
+        upload(productId, file, isPrimary) {
+          const fd = new FormData();
+          fd.append("productId", String(productId));
+          fd.append("file", file);
+          fd.append("isPrimary", isPrimary ? "true" : "false");
+          return api._post("/api/product-image/upload", fd);
+        },
+        setPrimary(imageId) { return api._post("/api/product-image/" + imageId + "/primary"); },
+        remove(imageId) { return api._del("/api/product-image/" + imageId); },
+      };
+    }
+
     _buildAdmin() {
       const api = this;
       return {

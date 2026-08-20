@@ -5,6 +5,7 @@ using Divisima.Core.Utilities.Enums;
 using Divisima.Core.Utilities.Results;
 using Divisima.DataAccess.Abstract;
 using Microsoft.EntityFrameworkCore;
+using Divisima.Entity.Dtos.Stock;
 using Divisima.Entity.Entities;
 
 // BEDEN NORMALIZASYONU (H48): tum stok islemleri ayni normalize edilmis bedeni kullanir.
@@ -303,5 +304,27 @@ namespace Divisima.Bussiness.Concrete
             return (HttpStatusCode.OK, new SuccessResult(Messages.StockAdjusted));
         }
 
+        // ADMIN STOK DETAYI (E4a): beden basina fiziksel + rezerve + satilabilir.
+        // Rezerve edilmis adet fiziksel stokta DURUR ama satilamaz; operator yalniz stock_quantity
+        // gorursa "10 var ama 3 satamiyorum" farkini anlayamaz. NoTracking - salt okuma.
+        // Yalniz aktif stok satirlari (is_active) - pasifler urun yonetiminden gelir, stok ekraninda degil.
+        public async Task<(HttpStatusCode, Result)> GetStockDetail(int productId)
+        {
+            var rows = await _productStockDal.GetListNoTrackingAsync(s => s.product_id == productId && s.is_active);
+            var dtos = rows
+                .OrderBy(s => s.size)
+                .Select(s => new ProductStockDetailDto
+                {
+                    size = s.size,
+                    stock_quantity = s.stock_quantity,
+                    reserved_quantity = s.reserved_quantity,
+                    available = s.stock_quantity - s.reserved_quantity
+                })
+                .ToList();
+
+            // Bos liste HATA DEGIL: urunun henuz beden satiri olmayabilir. Cagiran ayirt edebilsin
+            // diye 200 + bos dizi doner (404 "urun yok" ile karistirilirdi).
+            return (HttpStatusCode.OK, new SuccessDataResult<List<ProductStockDetailDto>>(dtos));
+        }
     }
 }

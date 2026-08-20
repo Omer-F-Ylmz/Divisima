@@ -20,6 +20,11 @@ namespace Divisima.Bussiness.Abstract
         // Açıklayıcı yorum: Admin stok düzeltme (mutlak yeni değer + denetim notu)
         Task<(HttpStatusCode, Result)> AdjustStock(int productId, string size, int newQuantity, string note);
 
+        // Aciklayici yorum: ADMIN stok detayi - beden basina fiziksel/rezerve/satilabilir.
+        // Operator duzeltme yapmadan once mevcut durumu gormeli; rezerve gorunmeden "10 stok var
+        // ama 3 satamiyorum" farki ekranda anlasilmaz.
+        Task<(HttpStatusCode, Result)> GetStockDetail(int productId);
+
         // Açıklayıcı yorum: Stok artır + In hareketi kaydet (iade/iptal anında)
         Task<(HttpStatusCode, Result)> IncreaseStock(int productId, string size, int quantity, int? referenceId);
     }

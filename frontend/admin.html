@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' http://localhost:5000 https://api.divisima.com; font-src 'self' data:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http://localhost:5000; connect-src 'self' http://localhost:5000 https://api.divisima.com; font-src 'self' data:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Divisima Yönetim Paneli</title>
 <!-- SRI: yayına almadan önce jsdelivr SRI hash ekle (integrity="sha384-...") -->
@@ -77,6 +77,8 @@
       <a data-view="returns">↩ <span>İadeler</span></a>
       <a data-view="shipments">▶ <span>Kargo</span></a>
       <a data-view="coupons">◊ <span>Kuponlar</span></a>
+      <a data-view="stock">▣ <span>Stok</span></a>
+      <a data-view="images">▧ <span>Görseller</span></a>
       <a onclick="doLogout()" style="margin-top:20px;color:var(--danger)">⏻ <span>Çıkış</span></a>
     </nav>
   </aside>
@@ -137,6 +139,8 @@ async function render(view){
     else if(view==="returns") await renderReturns(el);
     else if(view==="shipments") await renderShipments(el);
     else if(view==="coupons") await renderCoupons(el);
+    else if(view==="stock") await renderStock(el);
+    else if(view==="images") await renderImages(el);
   }catch(e){
     el.innerHTML='<div class="panel"><p class="muted">Veri alınamadı: '+(e.message||"hata")+'</p></div>';
     if(e.status===401){toast("Oturum sona erdi",true);setTimeout(()=>location.reload(),1500);}
@@ -317,6 +321,197 @@ async function saveCoupon(){
   try{await api.admin.addCoupon(payload);toast("Kupon eklendi");render("coupons");}catch(e){toast(e.message,true);}
 }
 async function delCoupon(id){if(!confirm("Kupon silinsin mi?"))return;try{await api.admin.deleteCoupon(id);toast("Silindi");render("coupons");}catch(e){toast(e.message,true);}}
+
+
+// ── Stok yönetimi (E4a) ──────────────────────────────────────────────────────
+// Operatör bugüne kadar stok düzeltmesini panelden YAPAMIYORDU (uç vardı, ekran yoktu).
+// KRİTİK ayrım: fiziksel stok ≠ satılabilir. Rezerve edilmiş adet fiziksel stokta DURUR
+// ama satılamaz; bu yüzden üç sütun da gösteriliyor (admin ucu GET /api/Stock/{id}).
+let stockState = { productId: null, size: null, rows: [] };
+
+// HTML kaçışı - ürün adı/beden veritabanından geliyor, innerHTML'e girmeden önce nötrle.
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+
+// Görsel URL'i API tabanına göre çöz. Backend, Storage:PublicBaseUrl boşken GÖRELİ URL
+// döndürüyor ("/uploads/products/x.png"). Panel API'den AYRI origin'de çalıştığında bu
+// göreli adres panelin kendi origin'ine çözülür ve 404 verir (ölçüldü: 5173 → 404).
+// Mutlak URL geldiğinde (CDN/PublicBaseUrl ayarlı) olduğu gibi kullanılır.
+function imgUrl(u){
+  u=String(u||"");
+  return /^https?:\/\//i.test(u) ? u : API_BASE.replace(/\/+$/,"")+(u.startsWith("/")?u:"/"+u);
+}
+
+async function renderStock(el){
+  const products=unwrap(await api.products.list())||[];
+  el.innerHTML=`
+    <div class="topbar"><h2>Stok Yönetimi</h2><button class="btn ghost sm" onclick="render('stock')">↻ Yenile</button></div>
+    <div class="panel" style="max-width:760px">
+      <label class="f"><span>Ürün</span>
+        <select id="st_product" onchange="loadStock()">
+          <option value="">— ürün seçin —</option>
+          ${products.map(p=>`<option value="${p.id}">#${p.id} · ${esc(p.name)}</option>`).join("")}
+        </select>
+      </label>
+      <div id="st_rows"><p class="muted">Ürün seçildiğinde beden bazında stok listelenir.</p></div>
+    </div>
+    <div class="panel hidden" id="st_form" style="max-width:760px">
+      <h3>Düzeltme — <span id="st_label" class="muted"></span></h3>
+      <div class="grid2">
+        <label class="f"><span>Değişim (+ giriş / − çıkış)</span>
+          <input id="st_delta" type="number" step="1" value="0" oninput="previewStock()"></label>
+        <label class="f"><span>Sonuç (yeni fiziksel stok)</span>
+          <input id="st_result" disabled value="—"></label>
+      </div>
+      <label class="f"><span>Sebep (denetim izine yazılır)</span>
+        <input id="st_note" placeholder="Yeni sevkiyat / sayım düzeltmesi / hasarlı iade"></label>
+      <p class="muted" id="st_warn"></p>
+      <button class="btn" onclick="applyStock()">Uygula</button>
+    </div>`;
+}
+
+async function loadStock(){
+  const id=parseInt(document.getElementById("st_product").value)||0;
+  const box=document.getElementById("st_rows");
+  document.getElementById("st_form").classList.add("hidden");
+  stockState={productId:id,size:null,rows:[]};
+  if(!id){box.innerHTML='<p class="muted">Ürün seçildiğinde beden bazında stok listelenir.</p>';return;}
+  try{
+    const rows=unwrap(await api.stock.byProduct(id))||[];
+    stockState.rows=rows;
+    if(!rows.length){box.innerHTML='<p class="muted">Bu ürünün aktif beden/stok satırı yok.</p>';return;}
+    box.innerHTML=`<table><thead><tr><th>Beden</th><th>Fiziksel</th><th>Rezerve</th><th>Satılabilir</th><th></th></tr></thead><tbody>
+      ${rows.map(r=>`<tr><td><b>${esc(r.size)}</b></td><td>${r.stock_quantity}</td>
+        <td class="${r.reserved_quantity>0?"warn":"muted"}">${r.reserved_quantity}</td>
+        <td class="${r.available<=0?"danger":"ok"}"><b>${r.available}</b></td>
+        <td class=row-actions><button class="btn ghost sm" onclick="pickSize('${esc(r.size)}')">Düzelt</button></td></tr>`).join("")}
+    </tbody></table>`;
+  }catch(e){
+    // 403 = admin değil; ayırt edilebilir mesaj (401 "oturum yok" ile karıştırılmasın)
+    box.innerHTML='<p class="muted">Stok okunamadı: '+esc(e.message||"hata")+'</p>';
+  }
+}
+
+function pickSize(size){
+  stockState.size=size;
+  const row=stockState.rows.find(r=>r.size===size);
+  if(!row)return;
+  document.getElementById("st_form").classList.remove("hidden");
+  document.getElementById("st_label").textContent=
+    `beden ${size} · fiziksel ${row.stock_quantity} · rezerve ${row.reserved_quantity} · satılabilir ${row.available}`;
+  document.getElementById("st_delta").value=0;
+  document.getElementById("st_note").value="";
+  previewStock();
+}
+
+// Panelde operatör FARK giriyor; uç MUTLAK yeni değer istiyor (StockAdjustDto.new_quantity).
+// Çeviri burada yapılır ve sonuç gönderilmeden ÖNCE ekranda gösterilir - operatör ne
+// yazılacağını görmeden onaylamasın.
+function previewStock(){
+  const row=stockState.rows.find(r=>r.size===stockState.size);
+  if(!row)return;
+  const delta=parseInt(document.getElementById("st_delta").value)||0;
+  const next=row.stock_quantity+delta;
+  document.getElementById("st_result").value=next;
+  const w=document.getElementById("st_warn");
+  if(next<0) w.innerHTML='<span class="danger">Negatif stok olamaz — uç 400 döner.</span>';
+  else if(next<row.reserved_quantity) w.innerHTML=`<span class="danger">Rezerve (${row.reserved_quantity}) altına inilemez — uç 400 döner.</span>`;
+  else w.textContent="";
+}
+
+async function applyStock(){
+  const row=stockState.rows.find(r=>r.size===stockState.size);
+  if(!row)return toast("Beden seçin",true);
+  const delta=parseInt(document.getElementById("st_delta").value)||0;
+  if(delta===0)return toast("Değişim 0 - yapacak bir şey yok",true);
+  const note=document.getElementById("st_note").value.trim();
+  if(!note)return toast("Sebep zorunlu (denetim izi)",true);
+  try{
+    await api.stock.adjust(stockState.productId,row.size,row.stock_quantity+delta,note);
+    toast("Stok güncellendi");
+    await loadStock();
+  }catch(e){toast(e.message||"Düzeltme başarısız",true);}
+}
+
+// ── Ürün görselleri (E4a) ────────────────────────────────────────────────────
+// Yükleme ucu: POST /api/product-image/upload (TİRELİ route), multipart + Bearer.
+// Backend savunmaları: MIME beyaz listesi + magic-byte imzası + 5 MB sınır; dosya adı
+// istemciden ALINMAZ (Guid + doğrulanmış content-type'tan uzantı).
+async function renderImages(el){
+  const products=unwrap(await api.products.list())||[];
+  el.innerHTML=`
+    <div class="topbar"><h2>Ürün Görselleri</h2><button class="btn ghost sm" onclick="render('images')">↻ Yenile</button></div>
+    <div class="panel" style="max-width:760px">
+      <label class="f"><span>Ürün</span>
+        <select id="im_product" onchange="loadImages()">
+          <option value="">— ürün seçin —</option>
+          ${products.map(p=>`<option value="${p.id}">#${p.id} · ${esc(p.name)}</option>`).join("")}
+        </select>
+      </label>
+      <label class="f"><span>Dosya (birden fazla seçilebilir · jpg/png/webp · en fazla 5 MB)</span>
+        <input id="im_file" type="file" accept="image/jpeg,image/png,image/webp" multiple></label>
+      <label class="f" style="flex-direction:row;align-items:center;gap:8px">
+        <input id="im_primary" type="checkbox"><span>İlk yüklenen görsel birincil olsun</span></label>
+      <button class="btn" onclick="uploadImages()">Yükle</button>
+      <p class="muted" id="im_status"></p>
+    </div>
+    <div class="panel" style="max-width:760px"><h3>Mevcut görseller</h3>
+      <div id="im_list"><p class="muted">Ürün seçin.</p></div></div>`;
+}
+
+async function loadImages(){
+  const id=parseInt(document.getElementById("im_product").value)||0;
+  const box=document.getElementById("im_list");
+  if(!id){box.innerHTML='<p class="muted">Ürün seçin.</p>';return;}
+  try{
+    const imgs=unwrap(await api.productImage.byProduct(id))||[];
+    if(!imgs.length){box.innerHTML='<p class="muted">Bu ürünün görseli yok.</p>';return;}
+    box.innerHTML=`<div style="display:flex;flex-wrap:wrap;gap:12px">
+      ${imgs.map(i=>`<div style="width:150px">
+        <img src="${esc(imgUrl(i.image_url))}" alt="" style="width:150px;height:150px;object-fit:cover;border-radius:8px;background:#222">
+        <div class="muted" style="font-size:12px;margin-top:4px">
+          #${i.id} ${i.is_primary?'<span class="ok">· birincil</span>':""}</div>
+        <div class=row-actions style="margin-top:4px">
+          ${i.is_primary?"":`<button class="btn ghost sm" onclick="makePrimary(${i.id})">Birincil yap</button>`}
+          <button class="btn danger sm" onclick="delImage(${i.id})">Sil</button></div>
+      </div>`).join("")}</div>`;
+  }catch(e){box.innerHTML='<p class="muted">Görseller okunamadı: '+esc(e.message||"hata")+'</p>';}
+}
+
+async function uploadImages(){
+  const id=parseInt(document.getElementById("im_product").value)||0;
+  if(!id)return toast("Ürün seçin",true);
+  const input=document.getElementById("im_file");
+  const files=Array.from(input.files||[]);
+  if(!files.length)return toast("Dosya seçin",true);
+  const wantPrimary=document.getElementById("im_primary").checked;
+  const status=document.getElementById("im_status");
+  let ok=0,fail=0;
+  // SIRAYLA yükle: paralel gönderim "birincil" yarışına girer (her istek diğerlerinin
+  // birincilini sıfırlayabilir) ve hata mesajı hangi dosyaya ait belirsizleşir.
+  for(let k=0;k<files.length;k++){
+    status.textContent=`Yükleniyor ${k+1}/${files.length}: ${files[k].name}`;
+    try{
+      await api.productImage.upload(id,files[k],wantPrimary&&k===0);
+      ok++;
+    }catch(e){
+      fail++;
+      toast(files[k].name+": "+(e.message||"yüklenemedi"),true);
+    }
+  }
+  status.textContent=`Bitti — ${ok} başarılı, ${fail} başarısız.`;
+  input.value="";
+  await loadImages();
+}
+
+async function makePrimary(imageId){
+  try{await api.productImage.setPrimary(imageId);toast("Birincil güncellendi");await loadImages();}
+  catch(e){toast(e.message,true);}
+}
+async function delImage(imageId){
+  if(!confirm("Görsel silinsin mi?"))return;
+  try{await api.productImage.remove(imageId);toast("Silindi");await loadImages();}
+  catch(e){toast(e.message,true);}
+}
 
 // ── Başlangıç: token varsa doğrudan panele ──
 if(api.isLoggedIn()) showApp();
