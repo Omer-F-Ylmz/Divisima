@@ -99,6 +99,17 @@ Dizgede `Database=` **bulunmalidir**: `InvoiceCancellationTests` degiskeni ham k
   cagiranin elindeki izlenen varlikta ESKI degerde kalir; o varlik uzerinden yapilan
   tam-varlik `UpdateAsync` (tum kolonlari yazar) atomik guncellemeyi SESSIZCE geri alir.
   Bellekteki deger de esitlenmelidir.
+- **Autofac modulundeki servisler `services.AddScoped` ile EZILEMEZ.**
+  `AutofacServiceProviderFactory` once `Populate(services)` yapar, `AutofacBusinessModule`
+  SONRA kaydeder ve Autofac'te son kayit kazanir. Testte bir modul servisini degistirmek
+  icin host builder'a MODULDEN SONRA calisacak bir `ConfigureContainer<ContainerBuilder>`
+  eklenir - `WebApplicationFactory.CreateHost(IHostBuilder)` override edilerek.
+  **`ConfigureTestContainer` minimal hosting'de ATESLENMIYOR** (olculdu: sarmalayici
+  yerine gercek uygulama cozuldu). `IIyzicoClient` istisna: o `Program.cs`'te
+  ServiceCollection'a kayitli, orayi `AddScoped` ile ezmek calisir.
+- **Test siniflarindaki STATIK hata-enjeksiyon bayraklari test sinirini asar.**
+  `InitializeAsync`'te sifirlanmazsa bir testin enjeksiyonu sonrakileri sessizce bozar
+  (bir kez yasandi: sadakat bayragi acik kaldi, 8-paralel pini "0 kazanim" ile kirildi).
 
 ## 6. Assert kalitesi
 
@@ -130,12 +141,13 @@ Bu bolum, yeni bir oturumun tek basina devam edebilmesi icin yazildi.
 
 ## DURUM
 
-- **Sprint 5 push `383f4f2` — HER IKI WORKFLOW TAMAMEN YESIL** (run 32376145363 CI +
-  32376145406 Security; adim bazinda dogrulandi). `SQL gerektiren testler` SUCCESS,
-  `Testler + coverage` SUCCESS, `Coverage raporunu yukle` SUCCESS,
-  codeql/dependency-scan/secret-scan/format-check SUCCESS, `TESHIS` skipped, annotation BOS.
-- **Sprint 6 (para duzeltmeleri) TAMAMLANDI ve push edildi** — asagidaki bolume bak.
-- **Yerel (Sprint 6 sonrasi): 137/137 `Category=Sql`, 258/258 tam suit** (Testcontainers'li
+- **Sprint 6 push `de59f7d` — HER IKI WORKFLOW TAMAMEN YESIL** (run 32380571595 CI +
+  32380571560 Security; adim bazinda dogrulandi). `SQL gerektiren testler` SUCCESS,
+  `Testler + coverage` SUCCESS (Testcontainers'li `OrderEndpointTests` DAHIL),
+  `Coverage raporunu yukle` SUCCESS, codeql/dependency-scan/secret-scan/format-check
+  SUCCESS, `TESHIS` skipped, annotation BOS. (Sprint 5 `383f4f2` de tamamen yesildi.)
+- **Sprint 7 (callback kapanisi) TAMAMLANDI ve push edildi** — asagidaki bolume bak.
+- **Yerel (Sprint 7 sonrasi): 141/141 `Category=Sql`, 262/262 tam suit** (Testcontainers'li
   `OrderEndpointTests` HARIC - yerelde Docker kapali, CI'da yesil kosuyor).
 
 ## SPRINT 5 - KAPANDI (run yesil)
@@ -206,9 +218,69 @@ Yeni:
 - `KumulatifSayac_CagiranSiparisiGuncellese_de_KAYBOLMAZ` (RefundMoneyTests)
 - `BASARISIZ_ODEMEDE_FATURA_URETILIYOR_PINLENIR` (SUPHELI pini - duzeltilmedi)
 
+## SPRINT 7 - CALLBACK KAPANISI (TAMAMLANDI)
+
+Sprint 6'nin iki SUPHELI maddesi kapatildi. Iki kalem, kapsam buyutulmedi.
+
+### (a) Basarisiz odemede fatura
+
+`ApplyConfirmedSideEffectsAsync` dogrulama BASARISINDAN SONRAYA (commit'in ardina) tasindi;
+basarisiz/fraud dali, siparis `Cancelled` olarak kalici olduktan sonra
+`ApplyCancelledSideEffectsAsync` cagiriyor. Iptal edilen siparise artik fatura kesilmiyor;
+baska bir onay yolundan (COD/havale/magaza kredisi) kesilmis bir fatura varsa iptal ediliyor.
+
+### (b) Gercek transaction - B-MINIMAL (kullanici karari)
+
+Tasarim raporu once verildi, onay sonrasi uygulandi. Iki bolge ayrildi:
+
+- **A bolgesi** (odeme guncelleme, siparis onayi, stok onayi/serbest birakma, kupon kaydi,
+  zaman cizelgesi, cuzdan iadesi + defter kaydi) -> `IUnitOfWork.ExecuteInTransactionAsync`
+  ile TEK gercek transaction. **Atomik durum gecisi de ICINDE**: kazanma artik KOSULLU,
+  commit'te kesinlesiyor. A bolgesi patlarsa rollback gecisi de geri alir, odeme `Pending`'e
+  doner, yeniden giris TEMIZ olur.
+- **B bolgesi** (fatura, sadakat, referans, kupon sayaci) commit sonrasi kaldi ama artik
+  SESSIZ degil: her adim `YanEtkiUygulaAsync` ile ayri sarilir, patlayan adim ADIYLA
+  loglanir VE siparis zaman cizelgesine "UYARI: '<adim>' adimi basarisiz" notu dusulur
+  (OrderManager'daki "KRITIK: para iadesi BASARISIZ" kalibiyla ayni).
+
+**Manuel `BeginTransaction` DEGIL `ExecuteInTransactionAsync` secildi**: `Program.cs`'te
+`EnableRetryOnFailure` yorumda duruyor ve gerekcesi "transaction kullanan manager'lar
+`ExecuteInTransactionAsync`'e tasinmali - manuel `BeginTransaction` retry stratejisi
+tarafindan REDDEDILIR"; `IyzicoPayment` o listedeydi. Engel kaldirildi.
+**Bayragi ACMA karari AYRI ve alinmadi** (defterde - asagi). Iyzico retrieve cagrisi
+transaction lambda'sinin DISINDA (her retry saglayiciya yeni sorgu gondermesin).
+
+### PINLER
+
+Kirilan (bilincli, ayni commit'te yenisi geldi):
+- `BASARISIZ_ODEMEDE_FATURA_URETILIYOR_PINLENIR`
+
+Yeni:
+- `FraudReddi_FaturaBIRAKMAZ_VeCiroyaGIRMEZ` - siparis Cancelled + fatura yok ya da
+  Cancelled + gercek `IDashboardService.GetSummary()` ile `total_revenue=0`, `total_orders=1`
+- `BasariliOdeme_FaturaKesilir_Sent_VeCiroyaGirer` - regresyon (vakum kirici)
+- `ABolgesiOrtasinda_HATA_TAMAMEN_GeriAlinir_YenidenGiris_TEMIZ` - A bolgesinin SON adiminda
+  hata; odeme `Pending`'e doner, stok/rezervasyon/zaman cizelgesi bozulmaz, sonra yeniden
+  giris temiz tamamlanir (retrieve=2, sadakat TAM 1)
+- `BBolgesi_HATASI_OdemeSUCCESS_KALIR_Hata_GORUNUR_ABolgesi_BOZULMAZ` - sadakat adimi
+  patlar; odeme Success kalir, fatura yine kesilir, zaman cizelgesinde adim ADIYLA gorunur
+- `BasarisizDal_CuzdanIadesi_VeDefterKaydi_ATOMIK_AyrismaOLMAZ` - defter kaydi patlarsa
+  bakiye de artmaz; calisan defterle ayni akis gercekten iade yazar
+
+(iii) maddesi icin AYRI pin yazilmadi: `AyniSiparise_SekizParalelCallback_TEK_ISLENIR_SADAKAT_TEK_SATIR`
+zaten tam bunu olcuyor ve transaction'li halde de yesil - kopyasi gurultu olurdu.
+
+### DIS KONTROLU
+
+4 assert ters cevrildi -> 3 AYRI test isimli kirmizi verdi (dorduncu flip ayni testte
+oldugu icin ilk flip'ten sonra rapor edilmedi - once o kirilir). 5. kontrol (uretim
+mutasyonu) `ExecuteInTransactionAsync` -> transaction'siz kosucu ile yapildi ve **S7 oncesi
+zarari birebir yeniden uretti**: odeme `Success` kaldi (kalici kismi durum) ve cuzdan
+bakiyesi **100.00** artip defterde iz kalmadi (ayrisma). Hepsi geri alindi.
+
 ## SIRA
 
-1. **Sprint 6 run raporu** (push edildi, rapor bekleniyor)
+1. **Sprint 7 run raporu** (push edildi, rapor bekleniyor)
 2. **E4a** - stok-adjust + gorsel-yukleme admin ekranlari (LAUNCH ON KOSULU:
    ucler var, arayuz yok; operator bunlari panelden yapamiyor)
 3. **E1** auth + katalog -> **E2** sepet+checkout+odeme -> **E3** hesap+siparis takibi
@@ -235,26 +307,33 @@ Yeni:
   (hicbir csproj'de referans yok).
 - **Auth modeli**: mevcut hibrit korunuyor (access localStorage + refresh httpOnly
   cookie + kosullu CSRF). Backend ile uyumlu oldugu dogrulandi.
+- **`EnableRetryOnFailure`: S7'de ACILMADI.** S7 engeli kaldirdi (IyzicoPayment artik
+  `ExecuteInTransactionAsync` kullaniyor) ama bayragi acmak AYRI bir karar ve alinmadi.
+  Acmadan once `Program.cs` yorumundaki DIGER manager'lar (OrderManager, GiftCard,
+  Loyalty, Referral, Return, StoreCredit) da tasinmali - aksi halde onlarin manuel
+  `BeginTransaction` cagrilari retry stratejisi tarafindan REDDEDILIR.
+- **SPRINT 8 DEFTERE** (simdi is yok, E fazi sonunda karar): `PaymentConfirmed` outbox'a
+  tasima (altyapi hazir: `outbox_messages` + `OutboxService` + `OutboxProcessor` atomik
+  claim/reclaim + `Cron.Minutely`) **+ kupon `used_count` idempotency** (on kosul).
+  Kazanci: B bolgesi hatasi sessiz kalmak yerine yeniden denenir; maliyeti eventual
+  tutarlilik (~1 dk) ve at-least-once idempotentlik zorunlulugu.
 
 ## SUPHELI DAVRANISLAR - KARAR BEKLEYENLER
 
-Sprint 5'in iki maddesi (kilit/sadakat ciftlenmesi + kumulatif iade siniri)
-**Sprint 6'da KAPANDI**. Acik kalan / yeni bulunanlar:
+Sprint 5'in iki maddesi (kilit/sadakat ciftlenmesi + kumulatif iade siniri) **S6'da**,
+Sprint 6'nin iki maddesi (basarisiz odemede fatura + transaction'siz callback) **S7'de**
+KAPANDI. Acik kalan / yeni bulunanlar:
 
-1. **Basarisiz odemede FATURA uretiliyor ve iptal edilmiyor.** (S6'da olculdu, pinlendi)
-   `IyzicoPaymentManager.HandleCallback` icinde `ApplyConfirmedSideEffectsAsync`,
-   odeme sonucu DOGRULANMADAN ONCE cagriliyor (satir ~184). Fraud reddi / tutar
-   uyusmazliginda siparis `Cancelled` oluyor ama fatura kesilmis ve `Sent` (saglayiciya
-   gonderildi) durumunda kaliyor; basarisiz dal `ApplyCancelledSideEffectsAsync`
-   CAGIRMIYOR. Yani iptal edilen siparis muhasebe ciro raporunda kaliyor.
-   Pin: `BASARISIZ_ODEMEDE_FATURA_URETILIYOR_PINLENIR`.
-2. **Callback kritik bolumu TRANSACTION'SIZ calisiyor.** (S6'da fark edildi, dokunulmadi)
-   Ayni yerde `BeginTransactionAsync()` hemen ardindan `CommitAsync()` geliyor
-   (satir ~177-178) - BOS bir transaction acilip kapaniyor. Sonraki tum yazmalar
-   (odeme guncelleme, siparis onayi, kupon kullanimi, cuzdan iadesi) ambient
-   transaction OLMADAN, her DAL cagrisinda ayri SaveChanges ile kaliciliyor; alt
-   taraftaki `CommitAsync()` ve `catch` icindeki `RollbackAsync()` **no-op**.
-   Yani yarida kalan bir callback kismi durum birakabilir. Duzeltme karari kullanicinin.
+1. **Kupon `used_count` artisi IDEMPOTENT DEGIL.** (S7 tasarim calismasinda olculdu)
+   `IncrementCouponUsageWithRetry` duz bir sayac artisidir. Bugun zararsiz cunku
+   callback tam bir kez calisiyor; ama B bolgesi at-least-once bir mekanizmaya
+   (outbox) tasinirsa sayac FAZLA sayar. Sprint 8'in on kosulu - defterde.
+   Cozum adaylari: `coupon_usages` satirlarindan turetmek ya da `(coupon_id, order_id)`
+   unique indeks + artisi insert basarisina baglamak.
+2. **`InvoiceManager.GenerateForOrder` siparis DURUMUNU kontrol etmiyor.** (S7'de
+   okundu, dokunulmadi) Var olan herhangi bir siparis id'si icin fatura kesiyor;
+   tek koruma cagiranin dogru yerden cagirmasi. S7'de cagri onay dalina tasindigi
+   icin bugun sorun yok, ama uc kendi basina korumasiz. Duzeltme karari kullanicinin.
 
 ## SUREC (degismez)
 

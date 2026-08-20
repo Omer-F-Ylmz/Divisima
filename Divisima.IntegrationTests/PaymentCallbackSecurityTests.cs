@@ -1,10 +1,18 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using Autofac;
 using Divisima.Bussiness.Abstract;
+using Divisima.Bussiness.Concrete;
+using Divisima.DataAccess.Abstract;
+using Divisima.DataAccess.Concrete.EntityFramework;
+using Microsoft.Extensions.Hosting;
+using Divisima.Core.DataAccess;
 using Divisima.Core.Integrations.Iyzico;
 using Divisima.Core.Utilities.Enums;
+using Divisima.Core.Utilities.Results;
 using Divisima.DataAccess.Concrete.Context;
+using Divisima.Entity.Dtos.Dashboard;
 using Divisima.Entity.Dtos.Order;
 using Divisima.Entity.Dtos.Payment;
 using Divisima.Entity.Entities;
@@ -108,10 +116,28 @@ namespace Divisima.IntegrationTests
                     var d = services.SingleOrDefault(x => x.ServiceType == typeof(DbContextOptions<DivisimaDbContext>));
                     if (d != null) services.Remove(d);
                     services.AddDbContext<DivisimaDbContext>(o => o.UseSqlServer(ConnStr));
-                    // Autofac modulu IIyzicoClient'i kaydediyor; son kayit kazanir.
+                    // IIyzicoClient Program.cs'te ServiceCollection'a kaydediliyor; buradaki kayit
+                    // daha SONRA geldigi icin kazanir.
                     services.AddScoped<IIyzicoClient>(sp =>
                         new ControllableIyzicoClient(sp.GetRequiredService<IConfiguration>()));
                 });
+            }
+
+            // AUTOFAC KATMANI (S7): asagidaki servisler AutofacBusinessModule'de kayitli.
+            // ServiceCollection'a yazmak onlari EZMEZ - AutofacServiceProviderFactory once
+            // Populate(services) yapiyor, modul kayitlari SONRA geliyor ve Autofac'te son kayit
+            // kazaniyor. ConfigureTestContainer ise minimal hosting'de ATESLENMIYOR (olculdu:
+            // sarmalayici yerine gercek uygulama cozuluyordu). Bu yuzden host builder'a MODULDEN
+            // SONRA calisacak ek bir ConfigureContainer geri cagrisi ekliyoruz.
+            protected override IHost CreateHost(IHostBuilder builder)
+            {
+                builder.ConfigureContainer<ContainerBuilder>(cb =>
+                {
+                    cb.RegisterType<KontrolluStatusHistory>().As<IOrderStatusHistoryService>().InstancePerLifetimeScope();
+                    cb.RegisterType<KontrolluLoyalty>().As<ILoyaltyService>().InstancePerLifetimeScope();
+                    cb.RegisterType<KontrolluCreditTxDal>().As<IStoreCreditTransactionDal>().InstancePerLifetimeScope();
+                });
+                return base.CreateHost(builder);
             }
         }
 
@@ -128,6 +154,12 @@ namespace Divisima.IntegrationTests
             ControllableIyzicoClient.RefundCallCount = 0;
             ControllableIyzicoClient.RefundedTotal = 0m;
             ControllableIyzicoClient.RefundedTotalBasarili = 0m;
+            // S7 HATA ENJEKSIYON BAYRAKLARI - statik olduklari icin test sinirini asarlar.
+            // Sifirlanmazsa bir testin enjeksiyonu SONRAKI testleri sessizce bozar (bir kez yasandi:
+            // sadakat bayragi acik kaldi ve 8-paralel pini "0 kazanim" ile kirildi).
+            KontrolluStatusHistory.RecordPatlasin = false;
+            KontrolluLoyalty.EarnPatlasin = false;
+            KontrolluCreditTxDal.AddPatlasin = false;
             try
             {
                 await using (var pre = NewContext())
@@ -736,14 +768,14 @@ namespace Divisima.IntegrationTests
                 .Should().Be(order.total_price, "kumulatif sayac tam olarak siparis tutarinda durmali");
         }
 
-        // ── SUPHELI DAVRANIS PINI (S6'DA DUZELTILMEDI - RAPOR EDILDI) ────────────────────
-        // ApplyConfirmedSideEffectsAsync, odeme sonucu DOGRULANMADAN ONCE cagriliyor
-        // (IyzicoPaymentManager satir ~184). Fraud reddi / tutar uyusmazligi ile siparis
-        // Cancelled olsa bile FATURA uretiliyor ve saglayiciya "Sent" olarak isaretleniyor;
-        // basarisiz dal ApplyCancelledSideEffectsAsync CAGIRMIYOR - fatura acikta kaliyor.
-        // Kapsam disi (uretim davranisi degistirilmedi); mevcut davranis pinlenir.
+        // ── SPRINT 7: BASARISIZ ODEMEDE FATURA ───────────────────────────────────────────
+        // ONCEKI PIN (S6): "BASARISIZ_ODEMEDE_FATURA_URETILIYOR_PINLENIR" - fraud reddi ile
+        // IPTAL edilen siparise de fatura kesiliyor ve saglayiciya Sent olarak gidiyordu.
+        // Sebep: ApplyConfirmedSideEffectsAsync dogrulamadan ONCE cagriliyordu ve basarisiz dal
+        // iptal yan etkilerini hic tetiklemiyordu. S7'de cagri ONAY dalina tasindi, basarisiz dal
+        // ApplyCancelledSideEffectsAsync cagiriyor. O pin BILINCLI kirildi; sozlesme burada.
         [Fact]
-        public async Task BASARISIZ_ODEMEDE_FATURA_URETILIYOR_PINLENIR()
+        public async Task FraudReddi_FaturaBIRAKMAZ_VeCiroyaGIRMEZ()
         {
             if (Skipped()) return;
             var (orderId, token, amount) = await NewPendingPaymentAsync();
@@ -756,15 +788,59 @@ namespace Divisima.IntegrationTests
             var r = await CallbackAsync(token, Sign(token));
             r.code.Should().Be(HttpStatusCode.BadRequest, "fraud reddi 400 donmeli");
 
-            await using var ctx = NewContext();
-            (await ctx.Set<Order>().AsNoTracking().SingleAsync(o => o.id == orderId)).status
-                .Should().Be((byte)OrderStatusEnum.Cancelled, "fraud reddedilen siparis iptal edilmeli");
+            await using (var ctx = NewContext())
+            {
+                (await ctx.Set<Order>().AsNoTracking().SingleAsync(o => o.id == orderId)).status
+                    .Should().Be((byte)OrderStatusEnum.Cancelled, "fraud reddedilen siparis iptal edilmeli");
 
-            var fatura = await ctx.Set<Invoice>().AsNoTracking().SingleOrDefaultAsync(i => i.order_id == orderId);
-            fatura.Should().NotBeNull(
-                "MEVCUT DAVRANIS: iptal edilen siparise fatura URETILIYOR (dogrulamadan once cagriliyor)");
-            fatura!.status.Should().Be((byte)InvoiceStatusEnum.Sent,
-                "MEVCUT DAVRANIS: fatura ayrica saglayiciya gonderilmis isaretleniyor ve iptal EDILMIYOR");
+                // ASIL SOZLESME: ya hic fatura yok, ya da varsa IPTAL edilmis. "Sent" KALMAZ.
+                var fatura = await ctx.Set<Invoice>().AsNoTracking()
+                    .SingleOrDefaultAsync(i => i.order_id == orderId);
+                if (fatura != null)
+                    fatura.status.Should().Be((byte)InvoiceStatusEnum.Cancelled,
+                        "fatura uretildiyse IPTAL edilmis olmali - saglayicida gecerli fatura KALMAZ");
+                else
+                    fatura.Should().BeNull("iptal edilen siparise fatura hic kesilmemeli");
+            }
+
+            // CIFT-ANLAM KIRICI: fatura tarafi temiz diye ciro tarafi da temiz demek degildir.
+            // Gercek rapor servisi surulur - iptal edilen siparis ciroya GIRMEMELI.
+            var ozet = await WithScopeAsync(sp => sp.GetRequiredService<IDashboardService>().GetSummary());
+            var dto = (ozet.Item2 as SuccessDataResult<DashboardSummaryDto>)!.Data;
+            dto.total_revenue.Should().Be(0m, "iptal edilen siparis ciroya girmemeli");
+            dto.total_orders.Should().Be(1, "siparis kaydi duruyor (silinmedi) - ciroya sayilmiyor sadece");
+        }
+
+        // REGRESYON: duzeltme faturayi OLDURMEDI - basarili odemede fatura AYNEN kesiliyor.
+        // (Vakum kirici: yukaridaki test tek basina "fatura hic kesilmiyor" ile de yesil kalirdi.)
+        [Fact]
+        public async Task BasariliOdeme_FaturaKesilir_Sent_VeCiroyaGirer()
+        {
+            if (Skipped()) return;
+            var (orderId, token, amount) = await NewPendingPaymentAsync();
+            ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
+            {
+                Success = true, PaymentId = "PAY-FATURA-OK", PaidPrice = amount,
+                Currency = "TRY", FraudStatus = "1", Installment = 1
+            };
+
+            (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue("odeme basarili olmali");
+
+            decimal siparisTutari;
+            await using (var ctx = NewContext())
+            {
+                var siparis = await ctx.Set<Order>().AsNoTracking().SingleAsync(o => o.id == orderId);
+                siparis.status.Should().Be((byte)OrderStatusEnum.Confirmed);
+                siparisTutari = siparis.total_price;
+
+                var fatura = await ctx.Set<Invoice>().AsNoTracking().SingleAsync(i => i.order_id == orderId);
+                fatura.status.Should().Be((byte)InvoiceStatusEnum.Sent,
+                    "onaylanan siparisin faturasi kesilip saglayiciya gonderilmeli");
+            }
+
+            var ozet = await WithScopeAsync(sp => sp.GetRequiredService<IDashboardService>().GetSummary());
+            var dto = (ozet.Item2 as SuccessDataResult<DashboardSummaryDto>)!.Data;
+            dto.total_revenue.Should().Be(siparisTutari, "onaylanan siparis ciroya girmeli");
         }
 
         // Para birimi uyusmazligi da ayni dala duser (cift-anlam kirici: "her sey fraud degil").
@@ -784,5 +860,269 @@ namespace Divisima.IntegrationTests
             r.code.Should().Be(HttpStatusCode.BadRequest, "TRY siparise USD odeme kabul edilmemeli");
             (await ReadOrderAsync(orderId)).status.Should().Be((byte)OrderStatusEnum.Cancelled);
         }
+
+        // ══ SPRINT 7 HATA ENJEKSIYON SARMALAYICILARI ════════════════════════════════════
+        // Hepsi GERCEK uygulamadan TUREVdir: bayrak kapaliyken davranis birebir uretim davranisi.
+        // Arayuzu yeniden bildirmek (": Gercek, IArayuz") C#'ta arayuz eslemesini yeniden
+        // hesaplatir; boylece "new" ile golgelenen uye arayuz uzerinden de cagrilir.
+
+        private sealed class KontrolluStatusHistory : OrderStatusHistoryManager, IOrderStatusHistoryService
+        {
+            public KontrolluStatusHistory(IOrderStatusHistoryDal historyDal, IOrderDal orderDal)
+                : base(historyDal, orderDal) { }
+
+            public static bool RecordPatlasin;
+
+            public new async Task RecordAsync(int orderId, byte status, string note)
+            {
+                if (RecordPatlasin)
+                    throw new InvalidOperationException("TEST: A bolgesinin son adiminda hata");
+                await base.RecordAsync(orderId, status, note);
+            }
+        }
+
+        private sealed class KontrolluLoyalty : LoyaltyManager, ILoyaltyService
+        {
+            public KontrolluLoyalty(ICustomerDal customerDal, IOrderDal orderDal, ILoyaltyTransactionDal txDal,
+                IStoreCreditTransactionDal creditTxDal, IUnitOfWork unitOfWork)
+                : base(customerDal, orderDal, txDal, creditTxDal, unitOfWork) { }
+
+            public static bool EarnPatlasin;
+
+            public new async Task<(HttpStatusCode, Divisima.Core.Utilities.Results.Result)> EarnFromOrder(
+                int customerId, decimal orderTotal, int orderId)
+            {
+                if (EarnPatlasin)
+                    throw new InvalidOperationException("TEST: commit sonrasi sadakat adimi patladi");
+                return await base.EarnFromOrder(customerId, orderTotal, orderId);
+            }
+        }
+
+        private sealed class KontrolluCreditTxDal : EfStoreCreditTransactionDal, IStoreCreditTransactionDal
+        {
+            public KontrolluCreditTxDal(DivisimaDbContext context) : base(context) { }
+
+            public static bool AddPatlasin;
+
+            public new async Task AddAsync(StoreCreditTransaction entity)
+            {
+                if (AddPatlasin)
+                    throw new InvalidOperationException("TEST: cuzdan defter kaydi patladi");
+                await base.AddAsync(entity);
+            }
+        }
+
+        private static async Task<decimal> ReadStoreCreditAsync(int customerId)
+        {
+            await using var ctx = NewContext();
+            return (await ctx.Set<Customer>().AsNoTracking().SingleAsync(c => c.id == customerId)).store_credit;
+        }
+
+        // Magaza kredisi OLAN musteriyle siparis: kredinin tamami checkout'ta kullanilir, kalan
+        // tutar online tahsil edilir. Basarisiz dalin cuzdan iadesi yolunu surmek icin gerekli.
+        private async Task<(int orderId, string token, decimal amount, int customerId)>
+            NewPendingPaymentWithCreditAsync(int qty, int stock, decimal storeCredit)
+        {
+            var (customerId, productId) = await SeedAsync(stock);
+            await using (var ctx = NewContext())
+            {
+                var c = await ctx.Set<Customer>().SingleAsync(x => x.id == customerId);
+                c.store_credit = storeCredit;
+                await ctx.SaveChangesAsync();
+            }
+
+            var place = await WithScopeAsync(sp => sp.GetRequiredService<IOrderService>().PlaceOrder(
+                new OrderCreateRequestDto
+                {
+                    customer_id = customerId, coupon_code = "", use_store_credit = storeCredit,
+                    payment_method = 0,
+                    items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = qty } }
+                }));
+            place.Item2.Success.Should().BeTrue($"siparis olusmali: {place.Item2.Message}");
+
+            int orderId;
+            await using (var ctx = NewContext())
+            {
+                var o = await ctx.Set<Order>().AsNoTracking().SingleAsync(x => x.customer_id == customerId);
+                orderId = o.id;
+                o.store_credit_used.Should().Be(storeCredit, "kredi sipariste kullanilmis olmali");
+            }
+
+            var init = await WithScopeAsync(sp => sp.GetRequiredService<IPaymentService>()
+                .Initialize(new PaymentInitRequestDto { order_id = orderId }, customerId));
+            init.Item2.Success.Should().BeTrue($"odeme baslatilmali: {init.Item2.Message}");
+
+            await using (var ctx2 = NewContext())
+            {
+                var pay = await ctx2.Set<Payment>().AsNoTracking().SingleAsync(p => p.order_id == orderId);
+                return (orderId, pay.token!, pay.amount, customerId);
+            }
+        }
+
+        // ══ SPRINT 7 - GERCEK TRANSACTION PINLERI ═══════════════════════════════════════
+        // A bolgesi (odeme guncelleme, siparis onayi, stok, kupon kaydi, zaman cizelgesi) artik
+        // IUnitOfWork.ExecuteInTransactionAsync ile TEK transaction'da; atomik durum gecisi de
+        // ICINDE. B bolgesi (fatura/puan/referans/kupon sayaci) commit sonrasi ve best-effort ama
+        // artik SESSIZ degil. Asagidaki dort pin bu sozlesmeyi surer.
+        //
+        // HATA ENJEKSIYONU: gercek uygulamalardan TUREYEN sarmalayicilar Autofac'e sonradan
+        // kaydedilir (son kayit kazanir). Sinifin geri kalani GERCEK kodu kosturur - "her sey
+        // sahte" olan bir kurulumda bu testler hicbir sey olcmezdi.
+
+        // (i) A BOLGESININ ORTASINDA hata -> her sey geri alinir, yeniden giris temiz.
+        // Enjeksiyon noktasi bilerek A bolgesinin SON adimi (zaman cizelgesi): oncesindeki tum
+        // yazmalar (odeme Success, siparis Confirmed, stok dususu) ZATEN yapilmis olur, dolayisiyla
+        // rollback'in hepsini geri almasi gerekir. Onceki halde (bos transaction) hicbiri geri
+        // alinmazdi - odeme Success kalir, guard yeniden girisi engellerdi: KALICI KISMI DURUM.
+        [Fact]
+        public async Task ABolgesiOrtasinda_HATA_TAMAMEN_GeriAlinir_YenidenGiris_TEMIZ()
+        {
+            if (Skipped()) return;
+            var (orderId, token, amount) = await NewPendingPaymentAsync(qty: 2, stock: 10);
+            var productId = await ReadOrderItemProductIdAsync(orderId);
+            var (fizikselOnce, rezerveOnce) = await ReadStockAsync(productId);
+            rezerveOnce.Should().Be(2, "siparis rezervasyonu kurulmus olmali (pozitif baslangic kosulu)");
+
+            ControllableIyzicoClient.RetrieveCallCount = 0;
+            ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
+            {
+                Success = true, PaymentId = "PAY-TX-1", PaidPrice = amount,
+                Currency = "TRY", FraudStatus = "1", Installment = 1
+            };
+
+            KontrolluStatusHistory.RecordPatlasin = true;
+            var hata = await CallbackAsync(token, Sign(token));
+            hata.code.Should().Be(HttpStatusCode.InternalServerError, "A bolgesi hatasi 500 donmeli");
+
+            // ROLLBACK: durum gecisi DAHIL hicbir A satiri kalmamali.
+            (await ReadPaymentAsync(orderId)).payment_status.Should().Be((byte)PaymentStatusEnum.Pending,
+                "atomik durum gecisi transaction ICINDE - rollback onu da geri almali");
+            (await ReadOrderAsync(orderId)).status.Should().Be((byte)OrderStatusEnum.Pending,
+                "siparis onayi geri alinmali");
+            var (fizikselOrta, rezerveOrta) = await ReadStockAsync(productId);
+            fizikselOrta.Should().Be(fizikselOnce, "stok dususu geri alinmali");
+            rezerveOrta.Should().Be(rezerveOnce, "rezervasyon Confirmed'e gecmemeli - Active kalmali");
+            await using (var ctx = NewContext())
+                (await ctx.Set<OrderStatusHistory>().CountAsync(h => h.order_id == orderId
+                        && h.status == (byte)OrderStatusEnum.Confirmed))
+                    .Should().Be(0, "zaman cizelgesine onay satiri yazilmamali");
+            // NOT: bu sipariste kupon YOK (NewPendingPaymentAsync coupon_code=""), bu yuzden
+            // CouponUsage sayisi burada bir sey OLCMEZ - vakum assert yazilmadi. Kupon yolunun
+            // transaction icinde oldugu kod okunarak degil, kupon senaryosu ayri surulerek
+            // dogrulanmali (kapsam disi - bkz. rapor).
+
+            // YENIDEN GIRIS TEMIZ: ayni token, calisan bagimlilikla tekrar gelirse is TAMAMLANIR.
+            // (Vakum kirici: yukaridaki "hicbir sey olmadi" iddialari, akis tamamen bozuk olsa da
+            //  yesil kalirdi. Burasi akisin GERCEKTEN calistigini kanitliyor.)
+            KontrolluStatusHistory.RecordPatlasin = false;
+            var ikinci = await CallbackAsync(token, Sign(token));
+            ikinci.result.Success.Should().BeTrue($"yeniden giris basarili olmali: {ikinci.result.Message}");
+
+            (await ReadPaymentAsync(orderId)).payment_status.Should().Be((byte)PaymentStatusEnum.Success);
+            (await ReadOrderAsync(orderId)).status.Should().Be((byte)OrderStatusEnum.Confirmed);
+            var (fizikselSon, rezerveSon) = await ReadStockAsync(productId);
+            fizikselSon.Should().Be(fizikselOnce - 2, "stok TAM BIR kez dusmeli");
+            rezerveSon.Should().Be(0, "rezervasyon onaylanmali");
+            await using (var ctx = NewContext())
+            {
+                (await ctx.Set<LoyaltyTransaction>().CountAsync(t => t.order_id == orderId
+                        && t.type == (byte)LedgerEntryTypeEnum.Earn))
+                    .Should().Be(1, "basarisiz ilk deneme sadakat kazanimini ciftlememeli");
+                (await ctx.Set<OrderStatusHistory>().CountAsync(h => h.order_id == orderId
+                        && h.status == (byte)OrderStatusEnum.Confirmed))
+                    .Should().Be(1, "onay satiri TAM BIR kez yazilmali");
+            }
+            ControllableIyzicoClient.RetrieveCallCount.Should().Be(2,
+                "iki ayri deneme yapildi - ilki rollback'le bittigi icin ikincisi guard'a TAKILMAMALI");
+        }
+
+        // (ii) B BOLGESI hatasi -> odeme SUCCESS kalir (para gercekten alindi), hata GORUNUR olur,
+        // A bolgesi bozulmaz. Enjeksiyon: sadakat puani (bugun ciplak "catch { }" ile dusuyordu).
+        [Fact]
+        public async Task BBolgesi_HATASI_OdemeSUCCESS_KALIR_Hata_GORUNUR_ABolgesi_BOZULMAZ()
+        {
+            if (Skipped()) return;
+            var (orderId, token, amount) = await NewPendingPaymentAsync(qty: 2, stock: 10);
+            var productId = await ReadOrderItemProductIdAsync(orderId);
+            var (fizikselOnce, _) = await ReadStockAsync(productId);
+
+            ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
+            {
+                Success = true, PaymentId = "PAY-TX-2", PaidPrice = amount,
+                Currency = "TRY", FraudStatus = "1", Installment = 1
+            };
+
+            KontrolluLoyalty.EarnPatlasin = true;
+            var r = await CallbackAsync(token, Sign(token));
+            r.result.Success.Should().BeTrue("commit sonrasi yan etki hatasi odemeyi BOZMAZ - para alindi");
+
+            // A bolgesi bozulmadi.
+            (await ReadPaymentAsync(orderId)).payment_status.Should().Be((byte)PaymentStatusEnum.Success);
+            (await ReadOrderAsync(orderId)).status.Should().Be((byte)OrderStatusEnum.Confirmed);
+            (await ReadStockAsync(productId)).physical.Should().Be(fizikselOnce - 2, "stok dususu kalici");
+
+            await using var ctx = NewContext();
+            // Patlayan adim GERCEKTEN uygulanmadi (vakum kirici - flag isliyor mu?).
+            (await ctx.Set<LoyaltyTransaction>().CountAsync(t => t.order_id == orderId))
+                .Should().Be(0, "patlayan adim uygulanmamali");
+            // Diger B adimlari etkilenmedi - bir adimin hatasi zinciri KESMEZ.
+            (await ctx.Set<Invoice>().CountAsync(i => i.order_id == orderId))
+                .Should().Be(1, "fatura adimi patlayan adimdan BAGIMSIZ calismali");
+
+            // ASIL SINAV: hata GORUNUR. Hangi adimin patladigi zaman cizelgesinde ayirt edilebilir.
+            var notlar = await ctx.Set<OrderStatusHistory>().AsNoTracking()
+                .Where(h => h.order_id == orderId).Select(h => h.note).ToListAsync();
+            notlar.Should().Contain(n => n != null && n.Contains("sadakat puani"),
+                $"patlayan adim ADIYLA kaydedilmeli - sessiz dusmemeli. Notlar: {string.Join(" | ", notlar)}");
+        }
+
+        // (iv) BASARISIZ dalda cuzdan iadesi + defter kaydi ATOMIK.
+        // Onceden ambient transaction YOKTU: bakiye artisi (ExecuteUpdate) ve defter kaydi (insert)
+        // ayri ayri kaliciliyordu - arada bir hata "bakiye artti ama defterde iz yok" AYRISMASI
+        // birakirdi. Simdi ikisi de ayni transaction'da.
+        [Fact]
+        public async Task BasarisizDal_CuzdanIadesi_VeDefterKaydi_ATOMIK_AyrismaOLMAZ()
+        {
+            if (Skipped()) return;
+            const decimal kredi = 100m;
+            var (orderId, token, amount, customerId) =
+                await NewPendingPaymentWithCreditAsync(qty: 2, stock: 10, storeCredit: kredi);
+
+            var bakiyeOnce = await ReadStoreCreditAsync(customerId);
+            bakiyeOnce.Should().Be(0m, "kredinin tamami sipariste kullanilmis olmali (pozitif baslangic)");
+
+            ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
+            {
+                Success = true, PaymentId = "PAY-TX-3", PaidPrice = amount,
+                Currency = "TRY", FraudStatus = "0", Installment = 1   // fraud RED -> basarisiz dal
+            };
+
+            // 1) Defter kaydi PATLIYOR -> bakiye artisi da geri alinmali.
+            KontrolluCreditTxDal.AddPatlasin = true;
+            var hata = await CallbackAsync(token, Sign(token));
+            hata.code.Should().Be(HttpStatusCode.InternalServerError);
+
+            (await ReadStoreCreditAsync(customerId)).Should().Be(bakiyeOnce,
+                "defter kaydi yazilamadiysa BAKIYE de artmamali - ayrisma OLMAZ");
+            await using (var ctx = NewContext())
+                (await ctx.Set<StoreCreditTransaction>().CountAsync(t => t.order_id == orderId
+                        && t.type == (byte)LedgerEntryTypeEnum.Earn))
+                    .Should().Be(0, "IADE defter kaydi yok (siparis anindaki HARCAMA satiri ayri - onu saymiyoruz)");
+            (await ReadPaymentAsync(orderId)).payment_status.Should().Be((byte)PaymentStatusEnum.Pending,
+                "rollback durum gecisini de geri almali");
+
+            // 2) VAKUM KIRICI: calisan defterle ayni akis GERCEKTEN iade yaziyor.
+            KontrolluCreditTxDal.AddPatlasin = false;
+            var ikinci = await CallbackAsync(token, Sign(token));
+            ikinci.code.Should().Be(HttpStatusCode.BadRequest, "fraud reddi 400 donmeli");
+
+            (await ReadStoreCreditAsync(customerId)).Should().Be(bakiyeOnce + kredi,
+                "iptal edilen siparisin cuzdan payi iade edilmeli");
+            await using (var ctx = NewContext())
+                (await ctx.Set<StoreCreditTransaction>().CountAsync(t => t.order_id == orderId
+                        && t.type == (byte)LedgerEntryTypeEnum.Earn))
+                    .Should().Be(1, "IADE defter kaydi TAM BIR kez - bakiye ile defter mutabik");
+        }
+
     }
 }

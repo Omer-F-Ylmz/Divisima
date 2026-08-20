@@ -10,6 +10,7 @@ using Divisima.Core.Utilities.Results;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Payment;
 using Divisima.Entity.Entities;
+using Microsoft.Extensions.Logging;
 
 namespace Divisima.Bussiness.Concrete
 {
@@ -35,6 +36,8 @@ namespace Divisima.Bussiness.Concrete
         private readonly IStoreCreditTransactionDal _creditTxDal;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IOrderConfirmationService _orderConfirmation;
+        // Commit sonrasi yan etkiler artik SESSIZ dusmuyor - patlayan adim adiyla loglanir (S7).
+        private readonly ILogger<IyzicoPaymentManager> _logger;
 
         public IyzicoPaymentManager(IPaymentDal paymentDal, IOrderDal orderDal,
             IIyzicoClient iyzico, IStockService stockService, ICustomerDal customerDal,
@@ -43,8 +46,9 @@ namespace Divisima.Bussiness.Concrete
 IOrderStatusHistoryService statusHistory,
 ILoyaltyService loyaltyService,
 IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitOfWork unitOfWork,
-            IOrderConfirmationService orderConfirmation)
+            IOrderConfirmationService orderConfirmation, ILogger<IyzicoPaymentManager> logger)
         {
+            _logger = logger;
             _paymentDal = paymentDal;
             _orderDal = orderDal;
             _iyzico = iyzico;
@@ -183,151 +187,209 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
                 return (HttpStatusCode.NotFound, new ErrorResult(Messages.PaymentNotFound));
             if (payment.payment_status != (byte)PaymentStatusEnum.Pending)
                 return (HttpStatusCode.OK, new SuccessResult(Messages.PaymentAlreadyProcessed));
-
-            // Açıklayıcı yorum: 4) GERÇEK SONUCU IYZICO'DAN ÇEK - callback gövdesine ASLA güvenme
+            // Açıklayıcı yorum: 4) GERÇEK SONUCU IYZICO'DAN ÇEK - callback gövdesine ASLA güvenme.
+            // TRANSACTION SINIRI DISINDA (S7): asagidaki A bolgesi retry-guvenli bir transaction
+            // icinde kosar; gecici bir DB kopmasinda tekrarlanabilir. Bu dis cagri ORAYA GIRMEZ -
+            // aksi halde her retry saglayiciya yeni bir sorgu gonderirdi.
             var result = await _iyzico.RetrievePaymentResultAsync(dto.token);
 
-            await _unitOfWork.BeginTransactionAsync();
-            await _unitOfWork.CommitAsync();
+            // Açıklayıcı yorum: 5) TUTAR DOĞRULAMA - ödenen tutar sipariş tutarını KARŞILAMALI (manipülasyon/eksik-ödeme engeli).
+            //    KRİTİK: TAKSİTLİ ödemede Iyzico komisyonu ekler -> PaidPrice = amountDue + komisyon > payment.amount olur.
+            //    Eskiden "== payment.amount" (tam eşleşme) idi -> GEÇERLİ taksit ödemeleri REDDEDİLİYORDU (installment_fee kodu ölüydü).
+            //    Güvenlik: eksik ödeme (PaidPrice < amountDue) hâlâ reddedilir; fazlası yalnız MAKUL taksit komisyonu kadar (üst sınır=2x).
+            //    PaidPrice güvenilir Iyzico callback'inden (HMAC doğrulanmış) gelir; fazla ödemenin saldırgan faydası yok.
+            bool amountMatches = result.PaidPrice >= payment.amount && result.PaidPrice <= payment.amount * 2m;
+            bool fraudOk = result.FraudStatus == "1";
+            // Açıklayıcı yorum: PARA BİRİMİ KONTROLÜ - sipariş para birimi ile ödeme eşleşmeli (TRY siparişe USD engeli)
+            bool currencyOk = string.Equals(result.Currency, order.currency ?? "TRY", StringComparison.OrdinalIgnoreCase);
+            bool odemeGecerli = result.Success && amountMatches && fraudOk && currencyOk;
 
-            // Açıklayıcı yorum: Post-commit - FATURA vb. onay yan etkileri (MERKEZİ tanım).
-            // Dört onay yolu (COD, tam mağaza kredisi, havale onayı, bu online callback) aynı çağrıyı
-            // kullanır; kural tek yerde durduğu için yeni bir onay yolu eklendiğinde atlanmaz.
-            // Kendi içinde try/catch + log var: hata ödemeyi bozmaz ama SESSİZ de kalmaz.
-            await _orderConfirmation.ApplyConfirmedSideEffectsAsync(order.id);
-
-            // Açıklayıcı yorum: Post-commit yan etki - sadakat puanı (kendi transaction'ını açar, bu yüzden commit SONRASI;
+            // ══ A BOLGESI - GERCEK TRANSACTION (S7) ═════════════════════════════════════════
+            // ONCEDEN burada BeginTransactionAsync() hemen ardindan CommitAsync() geliyordu: BOS bir
+            // transaction acilip kapaniyor, sonraki TUM yazmalar ambient transaction OLMADAN her DAL
+            // cagrisinda ayri SaveChanges ile kaliciliyor, alttaki CommitAsync() ve catch icindeki
+            // RollbackAsync() no-op oluyordu. Yani yarida kalan bir callback KISMI DURUM birakiyordu
+            // (or. cuzdana kredi yazilip defter kaydi yazilamadan cokme -> bakiye ile defter ayrisir).
+            //
+            // ExecuteInTransactionAsync SECILDI, manuel BeginTransaction DEGIL: Program.cs'te
+            // EnableRetryOnFailure yorumda duruyor ve gerekcesi "transaction kullanan manager'lar
+            // ExecuteInTransactionAsync'e tasinmali - manuel BeginTransaction retry stratejisi
+            // tarafindan REDDEDILIR" diyor; IyzicoPayment o listedeydi. Bu tasima engeli kaldirir.
+            // (Bayragi ACMA karari ayri - bu sprint kapsaminda degil.)
+            //
+            // ATOMIK DURUM GECISI transaction'a DAHIL: gecis artik KOSULLU bir kazanmadir. A bolgesi
+            // patlarsa rollback gecisi de geri alir, odeme Pending'e doner ve yeniden giris TEMIZ olur.
+            // Eszamanlilik ayrica saglamlasir: ikinci callback'in UPDATE'i satir kilidinde bloke olur,
+            // yani tekillik artik yalniz uygulama kilidine bagli degil.
+            bool kazandi;
             try
             {
-                // Açıklayıcı yorum: 4) TUTAR DOĞRULAMA - ödenen tutar sipariş tutarını KARŞILAMALI (manipülasyon/eksik-ödeme engeli).
-                //    KRİTİK: TAKSİTLİ ödemede Iyzico komisyonu ekler -> PaidPrice = amountDue + komisyon > payment.amount olur.
-                //    Eskiden "== payment.amount" (tam eşleşme) idi -> GEÇERLİ taksit ödemeleri REDDEDİLİYORDU (installment_fee kodu ölüydü).
-                //    Güvenlik: eksik ödeme (PaidPrice < amountDue) hâlâ reddedilir; fazlası yalnız MAKUL taksit komisyonu kadar (üst sınır=2x).
-                //    PaidPrice güvenilir Iyzico callback'inden (HMAC doğrulanmış) gelir; fazla ödemenin saldırgan faydası yok.
-                bool amountMatches = result.PaidPrice >= payment.amount && result.PaidPrice <= payment.amount * 2m;
-                bool fraudOk = result.FraudStatus == "1";
-                // Açıklayıcı yorum: PARA BİRİMİ KONTROLÜ - sipariş para birimi ile ödeme eşleşmeli (TRY siparişe USD engeli)
-                bool currencyOk = string.Equals(result.Currency, order.currency ?? "TRY", StringComparison.OrdinalIgnoreCase);
-                if (result.Success && amountMatches && fraudOk && currencyOk)
+                kazandi = await _unitOfWork.ExecuteInTransactionAsync(async () =>
                 {
-                    // ATOMIK DURUM GECISI (S6) - TEK KAZANAN. Pending->Success gecisini veritabani
-                    // yapar (WHERE payment_status=Pending). Kilit tek sunucuda serilestiriyor, ama
-                    // kilit dagitik ortamda suresi dolabilir / Redis kopabilir; para etkisi olan yan
-                    // etkilerin (sadakat puani, kupon sayaci, referans odulu) tek kez uygulanmasi
-                    // KILIDE DEGIL bu gecise baglidir. 0 donen cagri hicbir yan etki uygulamaz.
-                    var kazanan = await _paymentDal.TryTransitionStatusAsync(payment.id,
-                        (byte)PaymentStatusEnum.Pending, (byte)PaymentStatusEnum.Success);
-                    if (kazanan == 0)
-                        return (HttpStatusCode.OK, new SuccessResult(Messages.PaymentAlreadyProcessed));
+                    var gecis = await _paymentDal.TryTransitionStatusAsync(payment.id,
+                        (byte)PaymentStatusEnum.Pending,
+                        odemeGecerli ? (byte)PaymentStatusEnum.Success : (byte)PaymentStatusEnum.Failed);
+                    if (gecis == 0)
+                        return false;   // baska bir cagri kazandi - hicbir yan etki uygulanmaz
 
-                    payment.payment_status = (byte)PaymentStatusEnum.Success;
-                    payment.paid_price = result.PaidPrice;
-                    // Aciklayici yorum: TAKSIT - secilen taksit + komisyon. Komisyon = PaidPrice - amountDue (karta cekilen tutar).
-                    // ONCEDEN taban order.total_price idi -> store_credit kullanildiginda (amountDue < total) komisyon YANLIS/0 cikiyordu.
-                    payment.installment_count = (byte)result.Installment;
-                    payment.installment_fee = result.PaidPrice > payment.amount ? result.PaidPrice - payment.amount : 0m;
-                    order.installment_count = (byte)result.Installment;
-                    payment.currency = result.Currency;
-                    payment.fraud_status = result.FraudStatus;
-                    payment.transaction_id = result.PaymentId;
-                    payment.paid_at = DateTime.Now;
-                    await _paymentDal.UpdateAsync(payment);
-
-                    order.status = (byte)OrderStatusEnum.Confirmed;
-                    // Açıklayıcı yorum: Ödeme başarılı - rezervasyonu gerçek stok düşümüne çevir
-                    await _stockService.ConfirmReservation(order.id);
-                    order.is_online_payment_done = true;
-                    order.payment_id = result.PaymentId;
-                    await _orderDal.UpdateAsync(order);
-
-                    // Açıklayıcı yorum: Kupon kullanımını KAYDET - ödeme başarılı olduğunda (kupon gerçekten tüketildi).
-                    // used_count artırılır (limit denetimi anlamlı olur) + CouponUsage kaydı (kim/hangi sipariş).
-                    if (!string.IsNullOrWhiteSpace(order.coupon_code))
+                    if (odemeGecerli)
                     {
-                        var coupon = await _couponDal.GetByCodeAsync(order.coupon_code);
-                        if (coupon != null)
+                        payment.payment_status = (byte)PaymentStatusEnum.Success;
+                        payment.paid_price = result.PaidPrice;
+                        // Aciklayici yorum: TAKSIT - secilen taksit + komisyon. Komisyon = PaidPrice - amountDue (karta cekilen tutar).
+                        // ONCEDEN taban order.total_price idi -> store_credit kullanildiginda (amountDue < total) komisyon YANLIS/0 cikiyordu.
+                        payment.installment_count = (byte)result.Installment;
+                        payment.installment_fee = result.PaidPrice > payment.amount ? result.PaidPrice - payment.amount : 0m;
+                        order.installment_count = (byte)result.Installment;
+                        payment.currency = result.Currency;
+                        payment.fraud_status = result.FraudStatus;
+                        payment.transaction_id = result.PaymentId;
+                        payment.paid_at = DateTime.Now;
+                        await _paymentDal.UpdateAsync(payment);
+
+                        order.status = (byte)OrderStatusEnum.Confirmed;
+                        // Açıklayıcı yorum: Ödeme başarılı - rezervasyonu gerçek stok düşümüne çevir
+                        await _stockService.ConfirmReservation(order.id);
+                        order.is_online_payment_done = true;
+                        order.payment_id = result.PaymentId;
+                        await _orderDal.UpdateAsync(order);
+
+                        // Açıklayıcı yorum: Kupon kullanımını KAYDET - ödeme başarılı olduğunda (kupon gerçekten tüketildi).
+                        // used_count artırılır (limit denetimi anlamlı olur) + CouponUsage kaydı (kim/hangi sipariş).
+                        if (!string.IsNullOrWhiteSpace(order.coupon_code))
                         {
-                            // Açıklayıcı yorum: CouponUsage kaydı transaction içinde (insert - çakışma yok, denetim izi).
-                            // used_count artışı post-commit retry ile yapılır (ödemeyi concurrency çakışması bozmasın).
-                            await _couponUsageDal.AddAsync(new CouponUsage
+                            var coupon = await _couponDal.GetByCodeAsync(order.coupon_code);
+                            if (coupon != null)
                             {
-                                coupon_id = coupon.id,
-                                customer_id = order.customer_id,
-                                order_id = order.id,
-                                discount_applied = order.discount_amount,
-                                created_at = DateTime.Now
+                                // Açıklayıcı yorum: CouponUsage kaydı transaction içinde (insert - çakışma yok, denetim izi).
+                                // used_count artışı post-commit retry ile yapılır (ödemeyi concurrency çakışması bozmasın).
+                                await _couponUsageDal.AddAsync(new CouponUsage
+                                {
+                                    coupon_id = coupon.id,
+                                    customer_id = order.customer_id,
+                                    order_id = order.id,
+                                    discount_applied = order.discount_amount,
+                                    created_at = DateTime.Now
+                                });
+                            }
+                        }
+
+                        // Açıklayıcı yorum: Zaman çizelgesine "Onaylandı" kaydı (ödeme başarılı - transaction içinde)
+                        await _statusHistory.RecordAsync(order.id, (byte)OrderStatusEnum.Confirmed, "Ödeme onaylandı");
+                    }
+                    else
+                    {
+                        // Açıklayıcı yorum: Başarısız/tutar uyuşmuyor/fraud - sipariş iptal + stok iade
+                        payment.payment_status = (byte)PaymentStatusEnum.Failed;
+                        payment.paid_price = result.PaidPrice;
+                        payment.fraud_status = result.FraudStatus;
+                        await _paymentDal.UpdateAsync(payment);
+
+                        order.status = (byte)OrderStatusEnum.Cancelled;
+                        await _orderDal.UpdateAsync(order);
+
+                        // Açıklayıcı yorum: Ödeme başarısız - stok DÜŞMEDİĞİ için (rezerve edilmişti) rezervasyonu
+                        // serbest bırak - fiziksel stok hiç azalmamıştı (stok artırma değil, rezerve iadesi).
+                        await _stockService.ReleaseReservation(order.id);
+
+                        // CÜZDAN İADESİ - siparişte kullanılan mağaza kredisi geri verilir (sipariş iptal edildi).
+                        // Bakiye artisi ile defter kaydi ARTIK GERCEKTEN atomik (S7): oncesinde ambient
+                        // transaction olmadigi icin ikisi ayri ayri kaliciliyordu - arada bir cokme
+                        // "bakiye artti ama defterde iz yok" ayrismasi birakirdi.
+                        if (order.store_credit_used > 0)
+                        {
+                            await _customerDal.IncrementStoreCreditAsync(order.customer_id, order.store_credit_used);
+                            await _creditTxDal.AddAsync(new StoreCreditTransaction
+                            {
+                                customer_id = order.customer_id, amount = order.store_credit_used,
+                                type = (byte)LedgerEntryTypeEnum.Earn, reason = "Ödeme başarısız - kredi iadesi",
+                                order_id = order.id, created_at = DateTime.Now
                             });
                         }
                     }
-
-                    // Açıklayıcı yorum: Zaman çizelgesine "Onaylandı" kaydı (ödeme başarılı - transaction içinde)
-                    await _statusHistory.RecordAsync(order.id, (byte)OrderStatusEnum.Confirmed, "Ödeme onaylandı");
-
-                    await _unitOfWork.CommitAsync();
-
-                    // Açıklayıcı yorum: Post-commit yan etki - sadakat puanı (kendi transaction'ını açar, bu yüzden commit SONRASI;
-                    // hata olsa da ödeme başarısını bozmaz - puan ikincil, sonradan mutabakat edilebilir).
-                    try { await _loyaltyService.EarnFromOrder(order.customer_id, order.total_price, order.id); } catch { }
-
-                    // Açıklayıcı yorum: Post-commit - referans ödülü (davet edilen müşterinin ilk siparişinde iki tarafa kredi)
-                    try { await _referralService.RewardOnFirstOrder(order.customer_id, order.id); } catch { }
-
-                    // Açıklayıcı yorum: Post-commit - kupon used_count artışı optimistic-concurrency retry ile
-                    // (row_version çakışması olursa yeniden yükle+dene; ödeme akışını etkilemez, lost-update önlenir).
-                    if (!string.IsNullOrWhiteSpace(order.coupon_code))
-                        await IncrementCouponUsageWithRetry(order.coupon_code);
-
-                    return (HttpStatusCode.OK, new SuccessResult(Messages.PaymentSuccess));
-                }
-                else
-                {
-                    // ATOMIK DURUM GECISI (S6) - basarisiz dalda da TEK KAZANAN. Aksi halde eszamanli
-                    // callback'ler iptal yan etkilerini (rezervasyon serbest, cuzdan iadesi) tekrar
-                    // tekrar uygulardi: cuzdan iadesi sogurulmayan bir yan etkidir, ikinci calisma
-                    // musteriye ikinci kez kredi yazardi.
-                    var kaybeden = await _paymentDal.TryTransitionStatusAsync(payment.id,
-                        (byte)PaymentStatusEnum.Pending, (byte)PaymentStatusEnum.Failed);
-                    if (kaybeden == 0)
-                        return (HttpStatusCode.OK, new SuccessResult(Messages.PaymentAlreadyProcessed));
-
-                    // Açıklayıcı yorum: Başarısız/tutar uyuşmuyor/fraud - sipariş iptal + stok iade
-                    payment.payment_status = (byte)PaymentStatusEnum.Failed;
-                    payment.paid_price = result.PaidPrice;
-                    payment.fraud_status = result.FraudStatus;
-                    await _paymentDal.UpdateAsync(payment);
-
-                    order.status = (byte)OrderStatusEnum.Cancelled;
-                    await _orderDal.UpdateAsync(order);
-
-                    // Açıklayıcı yorum: Ödeme başarısız - stok DÜŞMEDİĞİ için (rezerve edilmişti) rezervasyonu
-                    // serbest bırak - fiziksel stok hiç azalmamıştı (stok artırma değil, rezerve iadesi).
-                    await _stockService.ReleaseReservation(order.id);
-
-                    // Açıklayıcı yorum: CÜZDAN İADESİ - siparişte kullanılan mağaza kredisi geri verilir (sipariş iptal edildi).
-                    // ATOMIK increment + ledger kaydı (bakiye ile hareket mutabakatı korunur).
-                    if (order.store_credit_used > 0)
-                    {
-                        await _customerDal.IncrementStoreCreditAsync(order.customer_id, order.store_credit_used);
-                        await _creditTxDal.AddAsync(new StoreCreditTransaction
-                        {
-                            customer_id = order.customer_id, amount = order.store_credit_used,
-                            type = (byte)LedgerEntryTypeEnum.Earn, reason = "Ödeme başarısız - kredi iadesi",
-                            order_id = order.id, created_at = DateTime.Now
-                        });
-                    }
-
-                    await _unitOfWork.CommitAsync();
-                    var msg = !amountMatches ? Messages.PaymentAmountMismatch
-                            : !currencyOk ? Messages.PaymentCurrencyMismatch
-                            : !fraudOk ? Messages.PaymentFraudReject
-                            : Messages.PaymentFailed;
-                    return (HttpStatusCode.BadRequest, new ErrorResult(msg));
-                }
+                    return true;
+                });
             }
             catch (Exception)
             {
-                await _unitOfWork.RollbackAsync();
+                // Transaction KENDI icinde rollback etti (ExecuteInTransactionAsync catch -> Rollback -> throw).
+                // Durum gecisi de geri alindi: odeme Pending kaldi, tekrar denenebilir.
                 return (HttpStatusCode.InternalServerError, new ErrorResult(Messages.PaymentProcessingError));
+            }
+
+            if (!kazandi)
+                return (HttpStatusCode.OK, new SuccessResult(Messages.PaymentAlreadyProcessed));
+
+            // ══ B BOLGESI - COMMIT SONRASI YAN ETKILER ══════════════════════════════════════
+            // Bunlar transaction'a ALINAMAZ: fatura dis saglayiciya HTTP yapar, loyalty/referral
+            // kendi transaction'larini acar. Bu yuzden commit SONRASI ve "best-effort" kalirlar -
+            // ama artik SESSIZ degiller: her adim ayri ayri sarilir, patlayan adim ADIYLA loglanir
+            // ve siparis zaman cizelgesine operatorun gorecegi bir not dusulur. Onceden bunlar
+            // ciplak "catch { }" idi: puan/referans/kupon sayaci sessizce dusuyordu.
+            if (odemeGecerli)
+            {
+                // FATURA - ODEME DOGRULANDIKTAN SONRA (S7). Onceden dogrulamadan ONCE cagriliyordu:
+                // fraud reddi ile IPTAL edilen siparise de fatura kesiliyor ve saglayiciya "Sent"
+                // olarak gidiyordu. Artik yalniz ONAYLANMIS siparise kesilir. Dort onay yolu (COD,
+                // tam magaza kredisi, havale onayi, bu online callback) ayni cagriyi kullanir.
+                await YanEtkiUygulaAsync(order.id, "fatura",
+                    () => _orderConfirmation.ApplyConfirmedSideEffectsAsync(order.id));
+
+                // Sadakat puani (kendi transaction'ini acar - bu yuzden commit SONRASI).
+                await YanEtkiUygulaAsync(order.id, "sadakat puani",
+                    () => _loyaltyService.EarnFromOrder(order.customer_id, order.total_price, order.id));
+
+                // Referans odulu (davet edilen musterinin ilk siparisinde iki tarafa kredi).
+                await YanEtkiUygulaAsync(order.id, "referans odulu",
+                    () => _referralService.RewardOnFirstOrder(order.customer_id, order.id));
+
+                // Kupon used_count artisi optimistic-concurrency retry ile.
+                if (!string.IsNullOrWhiteSpace(order.coupon_code))
+                    await YanEtkiUygulaAsync(order.id, "kupon sayaci",
+                        () => IncrementCouponUsageWithRetry(order.coupon_code));
+
+                return (HttpStatusCode.OK, new SuccessResult(Messages.PaymentSuccess));
+            }
+
+            // IPTAL YAN ETKILERI - siparis Cancelled olarak KALICI olduktan SONRA.
+            // Bu dalda artik fatura KESILMIYOR (onay dalina tasindi), ama cagri yine de yapilir:
+            // baska bir onay yolundan (COD/havale/magaza kredisi) fatura kesilmis bir siparis bu
+            // callback ile iptal olabilir - o fatura acikta KALMAMALI. CancelForOrder idempotent.
+            await YanEtkiUygulaAsync(order.id, "fatura iptali",
+                () => _orderConfirmation.ApplyCancelledSideEffectsAsync(order.id));
+
+            var msg = !amountMatches ? Messages.PaymentAmountMismatch
+                    : !currencyOk ? Messages.PaymentCurrencyMismatch
+                    : !fraudOk ? Messages.PaymentFraudReject
+                    : Messages.PaymentFailed;
+            return (HttpStatusCode.BadRequest, new ErrorResult(msg));
+        }
+
+        // COMMIT SONRASI YAN ETKI SARMALAYICI (S7).
+        // Sozlesme: bu adimlar odemeyi BOZMAZ (para gercekten alindi, geri alinmaz) ama SESSIZ de
+        // kalmaz. Patlayan adim adiyla loglanir VE siparis zaman cizelgesine not dusulur - operator
+        // hangi yan etkinin eksik kaldigini panelde gorebilsin (OrderManager'daki "KRITIK: para
+        // iadesi BASARISIZ" notuyla ayni kalip). Not yazmanin kendisi de patlarsa log tek kanal kalir.
+        private async Task YanEtkiUygulaAsync(int orderId, string adim, Func<Task> islem)
+        {
+            try
+            {
+                await islem();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Odeme sonrasi yan etki BASARISIZ. adim={Adim} orderId={OrderId}", adim, orderId);
+                try
+                {
+                    await _statusHistory.RecordAsync(orderId, (byte)OrderStatusEnum.Confirmed,
+                        $"UYARI: '{adim}' adimi basarisiz - manuel kontrol gerekli");
+                }
+                catch (Exception izEx)
+                {
+                    _logger.LogError(izEx,
+                        "Yan etki hatasi zaman cizelgesine yazilamadi. adim={Adim} orderId={OrderId}", adim, orderId);
+                }
             }
         }
         // Açıklayıcı yorum: Kupon used_count'u optimistic concurrency ile güvenli artır.
