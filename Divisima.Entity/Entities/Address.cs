@@ -9,7 +9,7 @@ namespace Divisima.Entity.Entities
         public int customer_id { get; set; }
         public string title { get; set; }          // "Ev", "İş"
         public string full_name { get; set; }
-        public string phone { get; set; }
+        public string? phone { get; set; }   // KVKK silmede NULL yazilir (anonimlestirme)
         public string city { get; set; }
         public string district { get; set; }
         public string full_address { get; set; }

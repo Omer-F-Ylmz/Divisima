@@ -14,11 +14,6 @@ namespace Divisima.Bussiness.Concrete
     // Açıklayıcı yorum: Hesap yönetimi iş kuralları. Profil/şifre/tercih/silme.
     public class AccountManager : IAccountService
     {
-        // Aciklayici yorum: Anonimlestirmede NOT NULL kolonlara yazilan yer tutucu (telefon).
-        // Kisisel veri degil; "bu alan silindi" anlamina gelir. Mevcut anonimlestirme
-        // uslubuyla ayni (full_address = "-", title = "-").
-        internal const string AnonymizedPlaceholder = "-";
-
         private readonly ICustomerDal _customerDal;
         private readonly IUserSessionDal _userSessionDal;
         private readonly IAddressDal _addressDal;
@@ -117,7 +112,7 @@ namespace Divisima.Bussiness.Concrete
             // Buraya null yazmak SqlException uretiyordu -> silme ucu HER cagrida 500 donuyor ve
             // KVKK silme hakki uctan uca calismiyordu. Anonim yer tutucu yaziliyor; ayni kalip
             // asagidaki adres kaskadinda da gecerli (addresses.phone da NOT NULL).
-            c.phone = AnonymizedPlaceholder;
+            c.phone = null;
             c.address = null;
             c.city = null;
             c.birthdate = null;
@@ -141,7 +136,7 @@ namespace Divisima.Bussiness.Concrete
             foreach (var a in addresses)
             {
                 a.full_name = "Silinmiş";
-                a.phone = AnonymizedPlaceholder;   // addresses.phone da NOT NULL - null yazilamaz
+                a.phone = null;
                 a.full_address = "-";
                 a.title = "-";
                 a.is_active = false;

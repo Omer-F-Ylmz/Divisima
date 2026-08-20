@@ -600,7 +600,7 @@ namespace Divisima.IntegrationTests
             c.email.Should().NotBe(A.Email.ToLowerInvariant(), "e-posta anonimlestirilmeli");
             c.email.Should().StartWith("deleted_", "anonimlestirme kalibi korunmali");
             c.name.Should().NotBe("Test Musteri", "ad anonimlestirilmeli");
-            c.phone.Should().NotBe("5550000000", "telefon anonimlestirilmeli");
+            c.phone.Should().BeNull("telefon NULL yazilmali (Sprint 4: kolon nullable yapildi)");
             c.password_hash.Should().BeEmpty("parola ozeti temizlenmeli");
 
             // H27 ADRES KASKADI: adres defteri de PII tasir - anonimlesmis ve pasiflesmis olmali.
@@ -608,7 +608,7 @@ namespace Divisima.IntegrationTests
                 .Where(a => a.customer_id == A.CustomerId).ToListAsync();
             addresses.Should().NotBeEmpty("kaskadin uzerinde calistigi adres bulunmali");
             addresses.Should().OnlyContain(a => !a.is_active, "adresler pasiflesmeli");
-            addresses.Should().NotContain(a => a.phone == "5551112233", "adres telefonu anonimlestirilmeli");
+            addresses.Should().OnlyContain(a => a.phone == null, "adres telefonlari NULL olmali");
             addresses.Should().NotContain(a => a.full_address == "Silme testi adresi", "adres metni temizlenmeli");
 
             // Oturumlar dusmus olmali.

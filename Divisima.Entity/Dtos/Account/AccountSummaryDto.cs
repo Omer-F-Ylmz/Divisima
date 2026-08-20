@@ -7,7 +7,7 @@ namespace Divisima.Entity.Dtos.Account
         public int id { get; set; }
         public string name { get; set; }
         public string email { get; set; }
-        public string phone { get; set; }
+        public string? phone { get; set; }   // anonimlestirilmis musteride NULL olabilir
         public DateTime? birthdate { get; set; }
         public bool email_verified { get; set; }
         public bool two_factor_enabled { get; set; }

@@ -24,20 +24,25 @@ namespace Divisima.Bussiness.Concrete
                 System.Globalization.CultureInfo.InvariantCulture, out var r) && r >= 0m && r < 1m ? r : 0.20m;
 
         private readonly IInvoiceDal _invoiceDal;
+        private readonly IInvoiceItemDal _invoiceItemDal;
         private readonly IOrderDal _orderDal;
         private readonly IOrderItemDal _orderItemDal;
         private readonly IProductDal _productDal;
+        private readonly ICategoryDal _categoryDal;
         private readonly IEInvoiceProvider _eInvoiceProvider;
         private readonly IConfiguration _config;
 
         public InvoiceManager(IInvoiceDal invoiceDal, IOrderDal orderDal, IOrderItemDal orderItemDal,
-            IProductDal productDal, IEInvoiceProvider eInvoiceProvider, IConfiguration config)
+            IProductDal productDal, IEInvoiceProvider eInvoiceProvider, IConfiguration config,
+            IInvoiceItemDal invoiceItemDal, ICategoryDal categoryDal)
         {
             _config = config;
             _invoiceDal = invoiceDal;
+            _invoiceItemDal = invoiceItemDal;
             _orderDal = orderDal;
             _orderItemDal = orderItemDal;
             _productDal = productDal;
+            _categoryDal = categoryDal;
             _eInvoiceProvider = eInvoiceProvider;
         }
 
@@ -52,12 +57,84 @@ namespace Divisima.Bussiness.Concrete
             if (existing != null)
                 return (HttpStatusCode.OK, new SuccessResult(Messages.InvoiceAlreadyExists));
 
-            // Açıklayıcı yorum: KDV ayrıştırma (total KDV dahil) -> subtotal = total / 1.20, tax = total - subtotal
             var total = order.total_price;
-            var subtotal = MoneyHelper.Round(total / (1 + TaxRate));
-            var taxAmount = total - subtotal;
-
             var invoiceNumber = $"DIV-{DateTime.Now:yyyy}-{order.id:D6}";
+
+            // KALEM BAZLI KDV.
+            // Onceden KDV BASLIK duzeyinde tek oranla ayristiriliyordu (subtotal = total / 1.20).
+            // Karisik sepette (giyim %10 + aksesuar %20) bu matematiksel olarak YANLIS bir
+            // beyandi. Artik her kalem KENDI efektif orani ile hesaplanir:
+            //     efektif oran = Product.vat_rate ?? Category.vat_rate ?? EInvoice:KdvRate
+            // ve bu oran faturaya KOPYALANIR (snapshot) - kategori orani sonradan degisse bile
+            // kesilmis fatura DEGISMEZ.
+            var items = await _orderItemDal.GetListAsync(i => i.order_id == order.id);
+            var productIds = items.Select(i => i.product_id).Distinct().ToList();
+            var products = (await _productDal.GetListAsync(p => productIds.Contains(p.id)))
+                .ToDictionary(p => p.id, p => p);
+            var categoryIds = products.Values.Select(p => p.category_id).Distinct().ToList();
+            var categoryRates = (await _categoryDal.GetListAsync(c => categoryIds.Contains(c.id)))
+                .ToDictionary(c => c.id, c => c.vat_rate);
+
+            // Kalem brut tutarlari siparis indirimiyle ORANTILI dusulur - aksi halde kalemler
+            // toplami order.total_price'i asardi (ReturnManager'daki refund_amount ile ayni kural).
+            decimal indirimOrani = order.subtotal > 0m
+                ? (order.subtotal - order.discount_amount) / order.subtotal
+                : 1m;
+
+            var invoiceItems = new List<InvoiceItem>();
+            var lines = new List<EInvoiceLine>();
+            decimal toplananBrut = 0m;
+
+            for (int i = 0; i < items.Count; i++)
+            {
+                var item = items[i];
+                products.TryGetValue(item.product_id, out var product);
+                var productName = product?.name ?? "Ürün";
+
+                decimal? categoryRate = null;
+                if (product != null) categoryRates.TryGetValue(product.category_id, out categoryRate);
+                var effectiveRate = product?.vat_rate ?? categoryRate ?? TaxRate;
+
+                var brut = MoneyHelper.Round(item.unit_price * item.quantity * indirimOrani);
+
+                // KURUS KACAGI ENGELI: yuvarlama artiklari SON kaleme yazilir; boylece
+                // kalem toplamlari order.total_price'a BIREBIR esitlenir.
+                if (i == items.Count - 1) brut = total - toplananBrut;
+                toplananBrut += brut;
+
+                var lineSubtotal = MoneyHelper.Round(brut / (1 + effectiveRate));
+                var vatAmount = brut - lineSubtotal;
+
+                invoiceItems.Add(new InvoiceItem
+                {
+                    product_id = item.product_id,
+                    product_name = productName,
+                    quantity = item.quantity,
+                    unit_price = item.unit_price,
+                    line_subtotal = lineSubtotal,
+                    vat_rate = effectiveRate,
+                    vat_amount = vatAmount,
+                    line_total = brut,
+                    created_at = DateTime.Now
+                });
+
+                lines.Add(new EInvoiceLine
+                {
+                    ProductName = productName,
+                    Quantity = item.quantity,
+                    UnitPrice = item.unit_price,
+                    LineTotal = brut,
+                    VatRate = effectiveRate,
+                    VatAmount = vatAmount
+                });
+            }
+
+            var subtotal = invoiceItems.Sum(x => x.line_subtotal);
+            var taxAmount = invoiceItems.Sum(x => x.vat_amount);
+
+            // Baslik tax_rate'in ANLAMI DEGISTI: artik kalemlerin AGIRLIKLI ORTALAMASI.
+            // Tek oranli sepette eski davranisla ayni degeri verir (regresyon uyumu).
+            var weightedRate = subtotal > 0m ? MoneyHelper.RoundRate(taxAmount / subtotal) : TaxRate;
 
             var invoice = new Invoice
             {
@@ -66,29 +143,18 @@ namespace Divisima.Bussiness.Concrete
                 invoice_number = invoiceNumber,
                 invoice_type = (byte)InvoiceTypeEnum.Individual,
                 subtotal = subtotal,
-                tax_rate = TaxRate,
+                tax_rate = weightedRate,
                 tax_amount = taxAmount,
-                total = total,
+                total = subtotal + taxAmount,   // = kalem toplamlari (kurus kacagi yok)
                 status = (byte)InvoiceStatusEnum.Draft,
                 created_at = DateTime.Now
             };
             await _invoiceDal.AddAsync(invoice);
 
-            // Açıklayıcı yorum: e-Fatura sağlayıcıya ilet (kapalıysa taslak referans döner)
-            var items = await _orderItemDal.GetListAsync(i => i.order_id == order.id);
-            // N+1 duzeltmesi: tum urun adlarini tek sorguda
-            var invIds = items.Select(i => i.product_id).Distinct().ToList();
-            var invProducts = (await _productDal.GetListAsync(p => invIds.Contains(p.id))).ToDictionary(p => p.id, p => p.name);
-            var lines = new List<EInvoiceLine>();
-            foreach (var item in items)
+            foreach (var ii in invoiceItems)
             {
-                lines.Add(new EInvoiceLine
-                {
-                    ProductName = invProducts.TryGetValue(item.product_id, out var pn) ? pn : "Ürün",
-                    Quantity = item.quantity,
-                    UnitPrice = item.unit_price,
-                    LineTotal = item.unit_price * item.quantity
-                });
+                ii.invoice_id = invoice.id;
+                await _invoiceItemDal.AddAsync(ii);
             }
 
             var result = await _eInvoiceProvider.SendInvoiceAsync(new EInvoiceRequest

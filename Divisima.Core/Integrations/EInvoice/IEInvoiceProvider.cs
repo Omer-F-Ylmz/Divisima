@@ -34,6 +34,12 @@ namespace Divisima.Core.Integrations.EInvoice
         public int Quantity { get; set; }
         public decimal UnitPrice { get; set; }
         public decimal LineTotal { get; set; }
+
+        // KALEM BAZLI KDV: bu iki alan YOKTU. Sağlayıcıya yalnız satır tutarı gidiyordu ve
+        // KDV başlıktan tek oranla hesaplanıyordu - karışık sepette (giyim %10 + aksesuar %20)
+        // beyan YANLIŞ oluyordu. Oran fatura anındaki değerle dondurulur (bkz. InvoiceItem).
+        public decimal VatRate { get; set; }     // 0.10 = %10
+        public decimal VatAmount { get; set; }   // kalem KDV tutarı
     }
 
     public class EInvoiceResult

@@ -15,10 +15,12 @@ namespace Divisima.API.Controllers
     public class SellerAuthController : ControllerBase
     {
         private readonly ISellerAuthService _sellerAuth;
+        private readonly IConfiguration _config;
 
-        public SellerAuthController(ISellerAuthService sellerAuth)
+        public SellerAuthController(ISellerAuthService sellerAuth, IConfiguration config)
         {
             _sellerAuth = sellerAuth;
+            _config = config;
         }
 
         // Açıklayıcı yorum: Satıcı başvurusu (kayıt sonrası Pending - admin onayı bekler).
@@ -28,6 +30,15 @@ namespace Divisima.API.Controllers
         [ProducesResponseType(typeof(ErrorResult), (int)HttpStatusCode.BadRequest)]
         public async Task<IActionResult> Register([FromBody] SellerRegisterRequestDto dto)
         {
+            // KAPALI KAPI: satici basvurusu VARSAYILAN OLARAK KAPALI (Seller:RegistrationEnabled).
+            // Bu uc [AllowAnonymous] - yani internetten HERKES satici hesabi acabiliyordu. Launch tek
+            // saticiyla yapilacagi icin acik durmasinin bir faydasi yok, saldiri yuzeyi var.
+            // Marketplace acildiginda bayrak true yapilir; kod yolu aynen korunuyor.
+            var registrationEnabled = bool.TryParse(_config["Seller:RegistrationEnabled"], out var enabled) && enabled;
+            if (!registrationEnabled)
+                return StatusCode((int)HttpStatusCode.Forbidden,
+                    new ErrorResult("Satıcı başvuruları şu anda kapalı."));
+
             var result = await _sellerAuth.Register(dto);
             return StatusCode((int)result.Item1, result.Item2);
         }

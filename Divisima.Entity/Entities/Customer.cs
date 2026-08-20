@@ -10,7 +10,7 @@ namespace Divisima.Entity.Entities
         public string name { get; set; }
         public string email { get; set; }
         public byte user_type { get; set; } = 2;   // Admin (1) / Customer (2) - varsayilan Customer
-        public string phone { get; set; }
+        public string? phone { get; set; }   // KVKK silmede NULL yazilir (anonimlestirme)
         public string? address { get; set; }
         public string? city { get; set; }
         public CustomerGenderEnum? gender { get; set; }

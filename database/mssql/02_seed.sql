@@ -9,10 +9,13 @@ GO
 
 -- === Kategoriler ===
 SET IDENTITY_INSERT categories ON;
-INSERT INTO categories (id, name, slug, display_order, is_active, created_at) VALUES
-  (1, N'Kadin Giyim', N'kadin-giyim', 1, 1, SYSUTCDATETIME()),
-  (2, N'Elbise',      N'elbise',      2, 1, SYSUTCDATETIME()),
-  (3, N'Dis Giyim',   N'dis-giyim',   3, 1, SYSUTCDATETIME());
+-- vat_rate: kalem bazli KDV. Uc kategori de GIYIM -> 0.1000 (%10). ACIKCA yazilir;
+-- NULL birakilirsa efektif oran EInvoice:KdvRate'e (%20) duser ve giyim fazla KDV ile faturalanir.
+-- Aksesuar kategorisi eklenirse 0.2000 ile olusturulmalidir.
+INSERT INTO categories (id, name, slug, display_order, vat_rate, is_active, created_at) VALUES
+  (1, N'Kadin Giyim', N'kadin-giyim', 1, 0.1000, 1, SYSUTCDATETIME()),
+  (2, N'Elbise',      N'elbise',      2, 0.1000, 1, SYSUTCDATETIME()),
+  (3, N'Dis Giyim',   N'dis-giyim',   3, 0.1000, 1, SYSUTCDATETIME());
 SET IDENTITY_INSERT categories OFF;
 GO
 

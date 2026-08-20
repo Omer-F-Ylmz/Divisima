@@ -169,6 +169,7 @@ namespace Divisima.Bussiness.DependencyResolvers.Autofac
             // ── Fatura ──
             builder.RegisterType<InvoiceManager>().As<IInvoiceService>().InstancePerLifetimeScope();
             builder.RegisterType<EfInvoiceDal>().As<IInvoiceDal>().InstancePerLifetimeScope();
+            builder.RegisterType<EfInvoiceItemDal>().As<IInvoiceItemDal>().InstancePerLifetimeScope();
 
             // ── İade/değişim ──
             builder.RegisterType<ReturnManager>().As<IReturnService>().InstancePerLifetimeScope();

@@ -18,5 +18,11 @@ namespace Divisima.Core.Utilities.Pricing
         // Açıklayıcı yorum: Yüzde indirim hesabı (yuvarlanmış)
         public static decimal Percentage(decimal baseAmount, decimal percent) =>
             Round(baseAmount * percent / 100m);
+
+        // Açıklayıcı yorum: VERGİ ORANI yuvarlama - 4 hane (kolon tipi decimal(5,4)).
+        // Para değil oran olduğu için ayrı: 2 haneye yuvarlamak %10 ile %20'nin ağırlıklı
+        // ortalamasını (ör. 0.1467) bozardı.
+        public static decimal RoundRate(decimal rate) =>
+            Math.Round(rate, 4, MidpointRounding.AwayFromZero);
     }
 }

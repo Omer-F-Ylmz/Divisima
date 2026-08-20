@@ -20,6 +20,9 @@ namespace Divisima.Entity.Entities
         public string? variant_group_id { get; set; } // aynı ürünün renk varyantlarını bağlar (aynı grup = varyant)
         public string? image_url { get; set; } // ürün görseli (URL veya data-uri) - frontend grid/detay
         public byte product_type { get; set; } // Giysi (0), Aksesuar (1) - beden stok mantığı buna göre
+        // KDV oranı OVERRIDE'ı (0.20 = %20). NULL = kategorinin oranı kullanılır.
+        // Efektif oran zinciri: Product.vat_rate ?? Category.vat_rate ?? EInvoice:KdvRate (0.20).
+        public decimal? vat_rate { get; set; }
         public decimal average_rating { get; set; } = 0m;  // onayli yorumlarin ortalamasi (frontend yildiz)
         public int review_count { get; set; } = 0;         // onayli yorum sayisi
         public int? seller_id { get; set; } // hangi satıcıya ait (null = platform/admin ürünü). Marketplace izolasyonu.

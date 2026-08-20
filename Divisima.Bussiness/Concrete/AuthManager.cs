@@ -394,7 +394,7 @@ namespace Divisima.Bussiness.Concrete
             customer.email = $"deleted-{Guid.NewGuid():N}@anonymized.local";
             // NOT NULL TUZAGI (AccountManager.DeleteAccount ile ayni): customers.phone NOT NULL.
             // null yazmak silme ucunu 500 ile dusuruyordu. Anonim yer tutucu yazilir.
-            customer.phone = AccountManager.AnonymizedPlaceholder;
+            customer.phone = null;
             customer.address = null;
             customer.city = null;
             customer.birthdate = null;

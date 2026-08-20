@@ -75,7 +75,8 @@ namespace Divisima.IntegrationTests
             var config = new ConfigurationBuilder().AddInMemoryCollection().Build();
             return new InvoiceManager(
                 new EfInvoiceDal(ctx), new EfOrderDal(ctx), new EfOrderItemDal(ctx),
-                new EfProductDal(ctx), provider ?? new FakeEInvoiceProvider(), config);
+                new EfProductDal(ctx), provider ?? new FakeEInvoiceProvider(), config,
+                new EfInvoiceItemDal(ctx), new EfCategoryDal(ctx));
         }
 
         public async Task InitializeAsync()

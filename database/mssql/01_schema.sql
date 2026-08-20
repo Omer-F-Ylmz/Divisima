@@ -1,4 +1,4 @@
--- Divisima e-ticaret veritabani (MSSQL) - 43 tablo
+-- Divisima e-ticaret veritabani (MSSQL) - 44 tablo
 -- Entity siniflarindan otomatik uretildi. Kolon adlari entity ile birebir (snake_case).
 
 -- CREATE DATABASE Divisima;
@@ -11,7 +11,7 @@ CREATE TABLE addresses (
     customer_id INT NOT NULL,
     title NVARCHAR(256) NOT NULL,
     full_name NVARCHAR(256) NOT NULL,
-    phone NVARCHAR(256) NOT NULL,
+    phone NVARCHAR(256) NULL,   -- KVKK anonimlestirmesinde NULL yazilir
     city NVARCHAR(256) NOT NULL,
     district NVARCHAR(256) NOT NULL,
     full_address NVARCHAR(256) NOT NULL,
@@ -57,6 +57,7 @@ CREATE TABLE categories (
     name NVARCHAR(256) NOT NULL,
     slug NVARCHAR(256) NOT NULL,
     display_order INT NOT NULL,
+    vat_rate DECIMAL(5,4) NULL,   -- kalem bazli KDV (NULL = EInvoice:KdvRate varsayilanina duser)
     is_active BIT NOT NULL,
     created_at DATETIME2 NOT NULL,
     updated_at DATETIME2 NULL
@@ -139,7 +140,7 @@ CREATE TABLE customers (
     name NVARCHAR(256) NOT NULL,
     email NVARCHAR(256) NOT NULL,
     user_type TINYINT NOT NULL DEFAULT 2,
-    phone NVARCHAR(256) NOT NULL,
+    phone NVARCHAR(256) NULL,   -- KVKK anonimlestirmesinde NULL yazilir
     address NVARCHAR(256) NULL,
     city NVARCHAR(256) NULL,
     gender NVARCHAR(256) NULL,
@@ -203,7 +204,7 @@ CREATE TABLE invoices (
     tax_number NVARCHAR(256) NULL,
     company_name NVARCHAR(256) NULL,
     subtotal DECIMAL(18,2) NOT NULL,
-    tax_rate DECIMAL(18,2) NOT NULL,
+    tax_rate DECIMAL(5,4) NOT NULL,   -- kalemlerin AGIRLIKLI ORTALAMASI (18,2 olsaydi 0.1467 -> 0.15 yuvarlanirdi)
     tax_amount DECIMAL(18,2) NOT NULL,
     total DECIMAL(18,2) NOT NULL,
     status TINYINT NOT NULL,
@@ -211,6 +212,24 @@ CREATE TABLE invoices (
     pdf_url NVARCHAR(MAX) NULL,
     created_at DATETIME2 NOT NULL
 );
+
+-- Fatura kalemleri: KALEM BAZLI KDV. Oran fatura kesildigi anda DONDURULUR (snapshot) -
+-- kategori/urun orani sonradan degisse bile kesilmis fatura degismez.
+-- invoices.tax_rate artik kalemlerin AGIRLIKLI ORTALAMASIDIR.
+CREATE TABLE invoice_items (
+    id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    invoice_id INT NOT NULL,
+    product_id INT NOT NULL,
+    product_name NVARCHAR(200) NULL,
+    quantity INT NOT NULL,
+    unit_price DECIMAL(18,2) NOT NULL,
+    line_subtotal DECIMAL(18,2) NOT NULL,
+    vat_rate DECIMAL(5,4) NOT NULL,
+    vat_amount DECIMAL(18,2) NOT NULL,
+    line_total DECIMAL(18,2) NOT NULL,
+    created_at DATETIME2 NOT NULL
+);
+CREATE INDEX IX_invoice_items_invoice_id ON invoice_items (invoice_id);
 
 CREATE TABLE loyalty_transactions (
     id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
@@ -347,6 +366,7 @@ CREATE TABLE products (
     variant_group_id NVARCHAR(256) NULL,
     image_url NVARCHAR(MAX) NULL,
     product_type TINYINT NOT NULL,
+    vat_rate DECIMAL(5,4) NULL,   -- kategori oranini EZEN urun bazli KDV (NULL = kategoriden alinir)
     average_rating DECIMAL(18,2) NOT NULL DEFAULT 0,
     review_count INT NOT NULL DEFAULT 0,
     is_active BIT NOT NULL,

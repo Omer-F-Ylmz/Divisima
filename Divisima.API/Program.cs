@@ -52,7 +52,10 @@ var builder = WebApplication.CreateBuilder(args);
     // Açıklayıcı yorum: Prod'da placeholder secret tespit et (yanlışlıkla gerçek secret'sız deploy önleme)
     if (!builder.Environment.IsDevelopment())
     {
-        var placeholders = new[] { "CHANGE_ME", "placeholder", "your-", "xxxxx", "TODO" };
+        // "CHANGE_IN_PRODUCTION" SONRADAN EKLENDI: database/advanced_simulation.py bu dizgeyi
+        // reddettigini DOGRULUYORDU ama C# listesinde YOKTU - simulasyon, kodda olmayan bir kurali
+        // test ediyordu (sahte guvence). Simulasyonu zayiflatmak yerine kod guclendirildi.
+        var placeholders = new[] { "CHANGE_ME", "CHANGE_IN_PRODUCTION", "placeholder", "your-", "xxxxx", "TODO" };
         if (placeholders.Any(p => (jwtKey ?? "").Contains(p, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("FATAL: Config - TokenOptions:SecurityKey placeholder değeri içeriyor (prod'da gerçek secret gerekli).");
 

@@ -45,6 +45,7 @@ namespace Divisima.DataAccess.Concrete.Context
         public DbSet<SecurityEvent> SecurityEvents { get; set; }
         public DbSet<ReturnRequest> ReturnRequests { get; set; }
         public DbSet<Invoice> Invoices { get; set; }
+        public DbSet<InvoiceItem> InvoiceItems { get; set; }
         public DbSet<CustomerDevice> CustomerDevices { get; set; }
         public DbSet<Shipment> Shipments { get; set; }
         public DbSet<StockReservation> StockReservations { get; set; }
@@ -95,6 +96,7 @@ namespace Divisima.DataAccess.Concrete.Context
                 b.HasIndex(p => p.variant_group_id);
                 b.Property(p => p.image_url).HasColumnName("image_url").HasMaxLength(1000);
                 b.Property(p => p.product_type).HasColumnName("product_type");
+                b.Property(p => p.vat_rate).HasColumnName("vat_rate").HasColumnType("decimal(5,4)");
                 b.Property(p => p.is_active).HasColumnName("is_active").HasDefaultValue(true);
                 b.Property(p => p.created_at).HasColumnName("created_at");
                 b.Property(p => p.updated_at).HasColumnName("updated_at");
@@ -141,6 +143,7 @@ namespace Divisima.DataAccess.Concrete.Context
                 b.Property(c => c.name).HasColumnName("name").IsRequired().HasMaxLength(100);
                 b.Property(c => c.slug).HasColumnName("slug").IsRequired().HasMaxLength(100);
                 b.Property(c => c.display_order).HasColumnName("display_order");
+                b.Property(c => c.vat_rate).HasColumnName("vat_rate").HasColumnType("decimal(5,4)");
                 b.Property(c => c.is_active).HasColumnName("is_active").HasDefaultValue(true);
                 b.Property(c => c.created_at).HasColumnName("created_at");
                 b.Property(c => c.updated_at).HasColumnName("updated_at");
@@ -668,6 +671,25 @@ namespace Divisima.DataAccess.Concrete.Context
             });
 
             // Açıklayıcı yorum: Invoice tablosu (fatura)
+            // Açıklayıcı yorum: FATURA KALEMLERİ - kalem bazlı KDV. Oran fatura anında DONDURULUR.
+            modelBuilder.Entity<InvoiceItem>(b =>
+            {
+                b.ToTable("invoice_items");
+                b.HasKey(i => i.id);
+                b.Property(i => i.invoice_id).HasColumnName("invoice_id");
+                b.Property(i => i.product_id).HasColumnName("product_id");
+                b.Property(i => i.product_name).HasColumnName("product_name").HasMaxLength(200);
+                b.Property(i => i.quantity).HasColumnName("quantity");
+                b.Property(i => i.unit_price).HasColumnName("unit_price").HasColumnType("decimal(18,2)");
+                b.Property(i => i.line_subtotal).HasColumnName("line_subtotal").HasColumnType("decimal(18,2)");
+                b.Property(i => i.vat_rate).HasColumnName("vat_rate").HasColumnType("decimal(5,4)");
+                b.Property(i => i.vat_amount).HasColumnName("vat_amount").HasColumnType("decimal(18,2)");
+                b.Property(i => i.line_total).HasColumnName("line_total").HasColumnType("decimal(18,2)");
+                b.Property(i => i.created_at).HasColumnName("created_at");
+                // Fatura kalemleri her zaman fatura uzerinden okunur.
+                b.HasIndex(i => i.invoice_id);
+            });
+
             modelBuilder.Entity<Invoice>(b =>
             {
                 b.ToTable("invoices");
