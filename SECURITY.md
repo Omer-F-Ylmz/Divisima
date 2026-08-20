@@ -107,3 +107,41 @@ TokenBlacklist → Authorization → Controllers
 - **serilog-siem.md:** güvenlik olayları → Elasticsearch/Seq + alerting kuralları.
 - **deployment-checklist.md:** production öncesi feature flag + secret + yetki kontrol listesi.
 - **Dockerfile:** non-root kullanıcı, minimal image, secret gömülmez, healthcheck.
+
+## 11. Kabul Edilen Riskler
+
+Bu bölüm, bilerek kapatılmayan güvenlik bulgularını, gerekçesini ve yeniden
+değerlendirme tetikleyicisini kayda geçirir. Tarihsiz veya gerekçesiz kabul yoktur.
+
+### AutoMapper — CVE-2026-32933 / GHSA-rvv3-g6hj-g44x (High, CVSS 7.5)
+**Karar tarihi:** 20 Ağustos 2026 · **Durum:** kabul edilen risk · **Sürüm:** AutoMapper 12.0.1
+
+**Zafiyet:** Derin iç içe nesne graflarında kontrolsüz özyineleme. Kendine referans veren
+(~25.000+ seviye) bir nesne grafiği `StackOverflowException` üretir; .NET'te bu istisna
+yakalanamadığı için tek bir istek değil **tüm süreç** ölür (DoS).
+
+**Neden maruz DEĞİLİZ (kanıtlar):**
+1. **`ProjectTo` kullanılmıyor** — tüm çözümde sıfır eşleşme.
+2. **İstemci girdisinden entity'ye eşleme yalnız 7 noktada** (Address, Category, Collection,
+   Coupon ×2, Product ×2) ve bu isteklerin DTO'ları **düz**: en derini
+   `ProductAddRequestDto.stocks : List<ProductStockDto>`, `ProductStockDto` ise yalnız
+   `string` + `int` içerir. İstemci girdisinden ulaşılabilen azami graf derinliği **2**.
+   Hiçbir istek DTO'sunda kendine referans veya döngü yok - tip grafiği sonlu ve döngüsüz.
+3. **JSON bağlama derinlik sınırı**: özel `MaxDepth` ayarı yok, yani System.Text.Json
+   varsayılanı (64) geçerli. 25.000 seviyelik bir gövde AutoMapper'a ULAŞMADAN,
+   deserialization aşamasında reddedilir.
+
+**Neden yükseltmiyoruz:** Yamalı sürümler 15.1.1 ve 16.1.1'dir. AutoMapper 15'ten itibaren
+lisans **RPL-1.5** (güçlü copyleft - onunla derlenen yazılımın kaynağını yayımlamayı
+zorunlu kılar) **veya** Lucky Penny Software ticari lisansıdır. 12/13/14 sürümleri MIT'tir
+ama **üçü de aynı advisory kapsamındadır** (ölçüldü: 13.0.1 ve 14.0.0 build'de aynı NU1903
+uyarısını veriyor). Yani "MIT kalarak yamalı sürüme geçmek" mümkün değil.
+
+**Yeniden değerlendirme tetikleyicileri (herhangi biri):**
+- MIT (veya uyumlu izinli) lisanslı yamalı bir AutoMapper sürümü yayımlanırsa,
+- Ticari lisans satın alınmasına karar verilirse,
+- Eşleme yüzeyimiz değişirse: `ProjectTo` eklenirse, ya da bir istek DTO'suna kendine
+  referans veren / döngü kurabilen bir alan eklenirse (bu belge o anda güncellenmelidir).
+
+**Telafi edici kontroller:** `dependency-scan` kapısındaki istisna advisory-id bazlıdır
+(`GHSA-rvv3-g6hj-g44x`) - başka bir zafiyet çıkarsa kapı yine kırar.
