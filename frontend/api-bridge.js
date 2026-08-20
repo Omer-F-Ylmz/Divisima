@@ -40,6 +40,14 @@
   }
   function unwrap(r) { return (r && r.data !== undefined) ? r.data : r; }
 
+  // HTML kaçışı. index.html kendi esc()'sini tanımlıyor; yüklenme sırası değişirse diye
+  // burada da bir tane var - sunucudan gelen metin innerHTML'e kaçışsız GİRMEZ.
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
   // Zarf toleransı: /product/filter "items/total_count" (küçük harf) döner,
   // /search/products ise PagedResult<T> -> camelCase "items/totalCount". İkisi de kabul.
   function pageItems(res) {
@@ -449,40 +457,504 @@
   }
   window.divisimaShowVerify = showVerifyPrompt;
 
-  // ── Kupon (E2 kapsamı - dokunulmadı) ───────────────────────────────────────
+
+  // ══ E2 - SEPET + CHECKOUT + ODEME ══════════════════════════════════════════
+  //
+  // Sepet: storefront'un yerel `cart` Map'i EKRAN icin kaynak olmaya devam ediyor
+  // (rozet, mini adim, oneriler hepsi ona bagli); her mutasyon API'ye AYNALANIYOR.
+  // Boylece sozlesme degismeden sunucu sepeti gercek kalir.
+  //
+  // Checkout: index.html'in checkout ekrani MOCK'tur - yerel adres listesi (ADDR),
+  // yerel kart formu (CARDS) ve yerel kupon tablosu (COUPONS) kullanir. KART BILGISI
+  // BIZE HIC GELMEMELI (Iyzico Checkout Form alir), bu yuzden o ekran gercek bir panelle
+  // DEGISTIRILIYOR: adresler API'den, kupon API'den, magaza kredisi API'den.
+
+  var checkoutState = { addresses: [], addrId: null, coupon: null, useCredit: 0, credit: 0, method: "card" };
+
+  function money(n) {
+    try { return Number(n || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " TL"; }
+    catch (e) { return (Number(n || 0)).toFixed(2) + " TL"; }
+  }
+
+  // Sepetteki kalemleri API siparis kalemi bicimine cevir.
+  function cartItemsPayload() {
+    var out = [];
+    if (!window.cart || !window.cart.forEach) return out;
+    window.cart.forEach(function (it) {
+      var q = Math.floor(it.qty); if (!isFinite(q) || q < 1) q = 1;
+      out.push({ product_id: it.id, size: it.size || "", quantity: q });
+    });
+    return out;
+  }
+
+  function cartSubtotal() {
+    var s = 0;
+    if (!window.cart || !window.cart.forEach) return 0;
+    window.cart.forEach(function (it) {
+      var p = window.byId(it.id); if (!p) return;
+      var q = Math.floor(it.qty); if (!isFinite(q) || q < 1) q = 1;
+      s += (Number(p.price) || 0) * q;
+    });
+    return s;
+  }
+
+  // ── Sepet aynalama ─────────────────────────────────────────────────────────
+  // API cagrisi UI'yi BLOKLAMAZ: sepet yerelde aninda guncellenir, sunucu arkadan
+  // yakalar. Hata olursa kullaniciya bildirilir ama sepet geri alinmaz (yeniden
+  // deneme checkout'ta zaten sunucuya tam liste gonderilerek yapiliyor).
+  // Aynalama hatasi SESSIZ KALMAZ: yerel sepet dolu gorunurken sunucu sepeti bos kalirsa
+  // musteri bunu ancak checkout'ta anlar. Ornek (olculdu): bedeni secilmemis bir giyim
+  // kalemi sunucuda "stok yetersiz" ile reddediliyor - beden satiri "" ile eslesmiyor.
+  var lastMirrorWarn = 0;
+  function mirror(promise, adim) {
+    return promise.catch(function (e) {
+      console.warn("Divisima: sepet aynalama basarisiz (" + adim + ")", e && e.message);
+      var now = Date.now();
+      if (now - lastMirrorWarn > 4000) {   // ust uste toast yagmuru olmasin
+        lastMirrorWarn = now;
+        notify("Sepet sunucuya yazılamadı: " + (e && e.message ? e.message : "bilinmeyen hata"));
+      }
+    });
+  }
+
+  function wireCart() {
+    // addToCart(id, size, qty, color) - storefront yerel Map'e yaziyor; sonrasinda aynala.
+    if (typeof window.addToCart === "function" && !window.addToCart.__divisimaWrapped) {
+      var origAdd = window.addToCart;
+      window.addToCart = function (id, size, qty, color) {
+        origAdd.apply(window, arguments);
+        if (!api.isLoggedIn()) return;   // anonim sepet yerel kalir (uc Customer ister)
+        // Yerel Map'teki GUNCEL adet gonderilir: uc UPSERT (SET) semantigi kullaniyor,
+        // artirma degil. Yerelde 2'ye ciktiysa sunucuya da 2 yazilmali.
+        var key = null, entry = null;
+        window.cart.forEach(function (v, k) { if (v.id === id && (v.size || "") === (size || "")) { key = k; entry = v; } });
+        var q = entry ? Math.floor(entry.qty) : (qty || 1);
+        mirror(api.cart.setQuantity(id, size || "", q), "ekle");
+      };
+      window.addToCart.__divisimaWrapped = true;
+    }
+
+    // Adet/silme storefront icinde dogrudan cart.set/delete ile yapiliyor ve tek ortak
+    // fonksiyon yok. renderCart her degisiklikten sonra cagrildigi icin ORAYA baglanip
+    // sunucu sepetini yerel sepete esitliyoruz (tam senkron - kaymayi imkansiz kilar).
+    if (typeof window.renderCart === "function" && !window.renderCart.__divisimaWrapped) {
+      var origRender = window.renderCart;
+      var syncTimer = null;
+      window.renderCart = function () {
+        origRender.apply(window, arguments);
+        if (!api.isLoggedIn()) return;
+        clearTimeout(syncTimer);
+        syncTimer = setTimeout(syncCartToServer, 250);   // hizli tiklamalarda tek istek
+      };
+      window.renderCart.__divisimaWrapped = true;
+    }
+  }
+
+  // Sunucu sepetini yerel sepete esitle: yereldeki her kalem SET edilir, sunucuda olup
+  // yerelde olmayan kalem SILINIR. (Sepet kucuk oldugu icin tam esitleme guvenli ve basit.)
+  var syncing = false;
+  async function syncCartToServer() {
+    if (syncing || !api.isLoggedIn()) return;
+    syncing = true;
+    try {
+      var local = cartItemsPayload();
+      var localKey = {};
+      local.forEach(function (it) { localKey[it.product_id + "|" + it.size] = it; });
+
+      var server = [];
+      try { server = (unwrap(await api.cart.get()) || {}).items || unwrap(await api.cart.get()) || []; }
+      catch (e) { server = []; }
+      if (!Array.isArray(server)) server = [];
+
+      for (var i = 0; i < local.length; i++) {
+        await mirror(api.cart.setQuantity(local[i].product_id, local[i].size, local[i].quantity), "esitle");
+      }
+      for (var j = 0; j < server.length; j++) {
+        var s = server[j];
+        var k = s.product_id + "|" + (s.size || "");
+        if (!localKey[k]) await mirror(api.cart.remove(s.product_id, s.size || ""), "sil");
+      }
+    } finally { syncing = false; }
+  }
+  window.divisimaSyncCart = syncCartToServer;
+
+  // ── Checkout paneli (MOCK ekranin yerine) ──────────────────────────────────
+  async function renderRealCheckout() {
+    var view = document.getElementById("checkoutView");
+    if (!view) return;
+
+    if (!api.isLoggedIn()) {
+      view.innerHTML = '<div class="wrap" style="padding:40px 0"><h2>Ödeme</h2>' +
+        '<p class="muted" style="margin:10px 0 16px">Siparişi tamamlamak için giriş yapmalısın.</p>' +
+        '<a class="btn" href="#/giris">Giriş yap</a></div>';
+      return;
+    }
+    if (!window.cart || window.cart.size === 0) {
+      view.innerHTML = '<div class="wrap" style="padding:40px 0"><h2>Ödeme</h2>' +
+        '<p class="muted" style="margin:10px 0 16px">Sepetin boş.</p>' +
+        '<a class="btn" href="#/kategori/tumu">Alışverişe başla</a></div>';
+      return;
+    }
+
+    view.innerHTML = '<div class="wrap" style="padding:28px 0"><p class="muted">Ödeme hazırlanıyor…</p></div>';
+
+    // Adresler + magaza kredisi paralel
+    var addrs = [], credit = 0;
+    try { addrs = unwrap(await api.address.list()) || []; } catch (e) { addrs = []; }
+    try { credit = Number((unwrap(await api._get("/api/Account/summary")) || {}).store_credit) || 0; } catch (e) { credit = 0; }
+    checkoutState.addresses = addrs;
+    checkoutState.credit = credit;
+    if (!checkoutState.addrId) {
+      var def = addrs.filter(function (a) { return a.is_default; })[0] || addrs[0];
+      checkoutState.addrId = def ? def.id : null;
+    }
+    drawCheckout();
+  }
+
+  function drawCheckout() {
+    var view = document.getElementById("checkoutView");
+    if (!view) return;
+    var sub = cartSubtotal();
+    var disc = checkoutState.coupon ? Number(checkoutState.coupon.discount_amount) || 0 : 0;
+    var freeShip = !!(checkoutState.coupon && checkoutState.coupon.free_shipping);
+    // Kargo kurali backend ile AYNI: >= 2000 bedava, degilse 49.90 (OrderManager sabitleri).
+    // Kesin tutar siparis yanitindan gelir; burada gosterilen TAHMINDIR.
+    var ship = (freeShip || sub >= 2000) ? 0 : 49.9;
+    var credUse = Math.min(checkoutState.useCredit, checkoutState.credit, Math.max(0, sub - disc + ship));
+    var total = Math.max(0, sub - disc + ship - credUse);
+
+    var items = [];
+    window.cart.forEach(function (it) {
+      var p = window.byId(it.id); if (!p) return;
+      var q = Math.floor(it.qty) || 1;
+      items.push('<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px">' +
+        '<span>' + esc(p.name) + (it.size ? " · " + esc(String(it.size)) : "") + " × " + q + "</span>" +
+        "<span>" + money((Number(p.price) || 0) * q) + "</span></div>");
+    });
+
+    var addrOpts = checkoutState.addresses.map(function (a) {
+      return '<option value="' + a.id + '"' + (a.id === checkoutState.addrId ? " selected" : "") + ">" +
+        esc(a.title || a.full_name || ("Adres #" + a.id)) + " · " + esc(a.city || "") + "</option>";
+    }).join("");
+
+    view.innerHTML =
+      '<div class="wrap" style="padding:28px 0;max-width:720px">' +
+      "<h2>Ödeme</h2>" +
+
+      '<div class="panel" style="margin-top:16px"><h3>Teslimat adresi</h3>' +
+      (checkoutState.addresses.length
+        ? '<select id="coAddr" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px">' + addrOpts + "</select>"
+        : '<p class="muted" style="font-size:13px">Kayıtlı adresin yok, aşağıdan ekle.</p>') +
+      '<button class="btn ghost sm" id="coNewAddr" style="margin-top:10px">+ Yeni adres</button>' +
+      '<div id="coAddrForm" style="display:none;margin-top:12px"></div>' +
+      "</div>" +
+
+      '<div class="panel"><h3>Sipariş özeti</h3>' + items.join("") +
+      '<div style="border-top:1px solid #e8e4de;margin-top:10px;padding-top:10px;font-size:13px">' +
+      '<div style="display:flex;justify-content:space-between"><span>Ara toplam</span><span>' + money(sub) + "</span></div>" +
+      (disc > 0 ? '<div style="display:flex;justify-content:space-between;color:#0f6e56"><span>Kupon indirimi</span><span>-' + money(disc) + "</span></div>" : "") +
+      '<div style="display:flex;justify-content:space-between"><span>Kargo' + (ship === 0 ? " (ücretsiz)" : "") + "</span><span>" + money(ship) + "</span></div>" +
+      (credUse > 0 ? '<div style="display:flex;justify-content:space-between;color:#0f6e56"><span>Mağaza kredisi</span><span>-' + money(credUse) + "</span></div>" : "") +
+      '<div style="display:flex;justify-content:space-between;font-weight:600;font-size:15px;margin-top:8px"><span>Toplam</span><span id="coTotal">' + money(total) + "</span></div>" +
+      "</div></div>" +
+
+      '<div class="panel"><h3>Kupon</h3>' +
+      '<div style="display:flex;gap:8px"><input id="coCoupon" placeholder="Kupon kodu" style="flex:1;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px" value="' +
+      (checkoutState.coupon ? esc(checkoutState.coupon.code) : "") + '">' +
+      '<button class="btn ghost" id="coCouponGo">Uygula</button></div>' +
+      '<div id="coCouponMsg" style="font-size:12px;margin-top:6px"></div></div>' +
+
+      (checkoutState.credit > 0
+        ? '<div class="panel"><h3>Mağaza kredisi</h3>' +
+          '<p class="muted" style="font-size:13px">Bakiyen: ' + money(checkoutState.credit) + "</p>" +
+          '<label style="display:flex;align-items:center;gap:8px;margin-top:8px">' +
+          '<input type="checkbox" id="coUseCredit"' + (checkoutState.useCredit > 0 ? " checked" : "") + "> Bakiyeyi kullan</label></div>"
+        : "") +
+
+      '<div class="panel"><h3>Ödeme yöntemi</h3>' +
+      '<label style="display:flex;align-items:center;gap:8px"><input type="radio" name="coPay" value="card"' +
+      (checkoutState.method === "card" ? " checked" : "") + "> Kredi/banka kartı (güvenli ödeme sayfası)</label>" +
+      '<label style="display:flex;align-items:center;gap:8px;margin-top:6px"><input type="radio" name="coPay" value="cod"' +
+      (checkoutState.method === "cod" ? " checked" : "") + "> Kapıda ödeme</label>" +
+      '<p class="muted" style="font-size:12px;margin-top:8px">Kart bilgilerin bize hiç gelmez; ödeme sağlayıcının kendi sayfasında alınır.</p>' +
+      "</div>" +
+
+      '<button class="btn" id="coSubmit" style="width:100%;padding:13px">Siparişi tamamla</button>' +
+      '<div id="coErr" style="color:#a32d2d;font-size:13px;margin-top:10px"></div>' +
+      '<div id="coPayHost" style="margin-top:16px"></div>' +
+      "</div>";
+
+    var sel = document.getElementById("coAddr");
+    if (sel) sel.onchange = function () { checkoutState.addrId = parseInt(sel.value) || null; };
+    document.getElementById("coNewAddr").onclick = toggleAddrForm;
+    document.getElementById("coCouponGo").onclick = applyCouponReal;
+    var cc = document.getElementById("coUseCredit");
+    if (cc) cc.onchange = function () { checkoutState.useCredit = cc.checked ? checkoutState.credit : 0; drawCheckout(); };
+    Array.prototype.forEach.call(document.getElementsByName("coPay"), function (r) {
+      r.onchange = function () { checkoutState.method = r.value; };
+    });
+    document.getElementById("coSubmit").onclick = submitOrder;
+  }
+
+  function toggleAddrForm() {
+    var box = document.getElementById("coAddrForm");
+    if (!box) return;
+    if (box.style.display !== "none") { box.style.display = "none"; return; }
+    box.style.display = "";
+    box.innerHTML =
+      '<input id="adTitle" placeholder="Adres başlığı (Ev/İş)" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
+      '<input id="adName" placeholder="Ad Soyad" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
+      '<input id="adPhone" placeholder="Telefon" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
+      '<input id="adCity" placeholder="İl" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
+      '<input id="adDistrict" placeholder="İlçe" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
+      '<textarea id="adFull" rows="2" placeholder="Açık adres" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px"></textarea>' +
+      '<button class="btn sm" id="adSave">Adresi kaydet</button>' +
+      '<div id="adErr" style="color:#a32d2d;font-size:12px;margin-top:6px"></div>';
+    document.getElementById("adSave").onclick = async function () {
+      var err = document.getElementById("adErr"); err.textContent = "";
+      try {
+        await api.address.upsert({
+          customer_id: 1,   // sunucu token'dan ezer; validator > 0 istiyor olabilir
+          title: (document.getElementById("adTitle").value || "").trim(),
+          full_name: (document.getElementById("adName").value || "").trim(),
+          phone: (document.getElementById("adPhone").value || "").trim(),
+          city: (document.getElementById("adCity").value || "").trim(),
+          district: (document.getElementById("adDistrict").value || "").trim(),
+          full_address: (document.getElementById("adFull").value || "").trim(),
+          zip_code: "",
+          is_default: checkoutState.addresses.length === 0
+        });
+        checkoutState.addrId = null;
+        await renderRealCheckout();
+      } catch (e) { err.textContent = e.message || "Adres kaydedilemedi"; }
+    };
+  }
+
+  async function applyCouponReal() {
+    var msg = document.getElementById("coCouponMsg");
+    var code = (document.getElementById("coCoupon").value || "").trim();
+    msg.textContent = ""; msg.style.color = "#a32d2d";
+    if (!code) { checkoutState.coupon = null; drawCheckout(); return; }
+    try {
+      var d = unwrap(await api.coupons.validate(code, cartSubtotal()));
+      checkoutState.coupon = d ? Object.assign({ code: code }, d) : null;
+      drawCheckout();
+      var m2 = document.getElementById("coCouponMsg");
+      if (m2) { m2.style.color = "#0f6e56"; m2.textContent = "Kupon uygulandı."; }
+    } catch (e) {
+      checkoutState.coupon = null;
+      drawCheckout();
+      var m3 = document.getElementById("coCouponMsg");
+      if (m3) { m3.style.color = "#a32d2d"; m3.textContent = e.message || "Kupon geçersiz"; }
+    }
+  }
+
+  async function submitOrder() {
+    var err = document.getElementById("coErr");
+    var btn = document.getElementById("coSubmit");
+    err.textContent = "";
+    var items = cartItemsPayload();
+    if (!items.length) { err.textContent = "Sepet boş."; return; }
+    if (!checkoutState.addrId && checkoutState.addresses.length) { err.textContent = "Adres seç."; return; }
+
+    // BEDENSIZ GIYIM KALEMI: sunucu stok satirini beden ile bulur, "" hicbir satirla
+    // eslesmez ve siparis "stok yetersiz" ile duser. Kullaniciyi checkout'un ortasinda
+    // anlamsiz bir hataya birakmak yerine burada ADIYLA soyluyoruz.
+    var bedensiz = items.filter(function (it) {
+      return !it.size && typeof window.isClothing === "function" && window.isClothing(it.product_id);
+    });
+    if (bedensiz.length) {
+      var adlar = bedensiz.map(function (it) {
+        var p = window.byId(it.product_id); return p ? p.name : ("#" + it.product_id);
+      }).join(", ");
+      err.textContent = "Beden seçilmemiş ürün var: " + adlar + ". Sepetten beden seçip tekrar dene.";
+      return;
+    }
+
+    btn.disabled = true; btn.textContent = "Gönderiliyor…";
+    try {
+      // Sunucu sepetini de esitle (siparis kalemleri govdeden gidiyor ama sepet tutarli kalsin)
+      await syncCartToServer();
+
+      var order = unwrap(await api.orders.place({
+        customer_id: 1,                       // sunucu token'dan EZER; validator > 0 istiyor
+        request_id: (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
+        address_id: checkoutState.addrId || null,
+        coupon_code: checkoutState.coupon ? checkoutState.coupon.code : "",   // non-nullable
+        use_store_credit: checkoutState.useCredit > 0 ? checkoutState.credit : 0,
+        payment_method: checkoutState.method === "cod" ? 1 : 0,
+        items: items
+      }));
+
+      var orderId = (order && order.id) ? order.id : order;   // uc siparis id'sini dogrudan donuyor
+      try { sessionStorage.setItem("divisima_last_order", String(orderId)); } catch (e) {}
+
+      if (checkoutState.method === "cod") {
+        // Kapida odeme: odeme baslatilmaz, siparis dogrudan olusur.
+        if (window.cart) window.cart.clear();
+        try { await api.cart.clear(); } catch (e) {}
+        location.hash = "#/odeme/sonuc?order=" + orderId + "&status=cod";
+        return;
+      }
+
+      var pay = unwrap(await api.payment.initialize(orderId));
+      if (!pay || !pay.checkout_form_content) throw new Error("Ödeme formu alınamadı.");
+      embedCheckoutForm(pay.checkout_form_content);
+    } catch (e) {
+      err.textContent = e.message || "Sipariş oluşturulamadı";
+    } finally {
+      btn.disabled = false; btn.textContent = "Siparişi tamamla";
+    }
+  }
+
+  // Iyzico Checkout Form HTML'i <script> icerir. innerHTML ile eklenen script
+  // TARAYICI TARAFINDAN CALISTIRILMAZ (HTML5 kurali) - dugumler yeniden olusturulmali.
+  function embedCheckoutForm(html) {
+    var host = document.getElementById("coPayHost");
+    if (!host) return;
+    host.innerHTML = "";
+    var holder = document.createElement("div");
+    holder.id = "iyzipay-checkout-form";
+    holder.className = "responsive";
+    host.appendChild(holder);
+
+    var tmp = document.createElement("div");
+    tmp.innerHTML = html;
+    Array.prototype.forEach.call(tmp.childNodes, function (node) {
+      if (node.tagName === "SCRIPT") {
+        var s = document.createElement("script");
+        if (node.src) s.src = node.src; else s.text = node.textContent;
+        document.body.appendChild(s);
+      } else {
+        host.appendChild(node.cloneNode(true));
+      }
+    });
+    host.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  window.divisimaEmbedCheckoutForm = embedCheckoutForm;
+
+  // ── Odeme sonuc sayfasi (#/odeme/sonuc?order=..&status=..) ─────────────────
+  async function renderPaymentResult(params) {
+    var view = document.getElementById("checkoutView");
+    if (!view) return;
+    var orderId = parseInt(params.order) || 0;
+    var status = params.status || "";
+    var ok = status === "success" || status === "cod";
+
+    view.innerHTML = '<div class="wrap" style="padding:40px 0;max-width:640px"><p class="muted">Yükleniyor…</p></div>';
+
+    var order = null;
+    if (orderId) { try { order = unwrap(await api.orders.get(orderId)); } catch (e) { order = null; } }
+
+    var baslik = status === "cod" ? "Siparişin alındı" : (ok ? "Ödemen alındı" : "Ödeme tamamlanamadı");
+    var alt = status === "cod"
+      ? "Kapıda ödeme ile siparişin oluşturuldu."
+      : (ok ? "Siparişin onaylandı ve hazırlanmaya başlıyor." : "Tutar tahsil edilmedi. Kartında bir kesinti olduysa iade edilir.");
+
+    var ozet = "";
+    if (order) {
+      // ALAN ADLARI (olculdu): siparis detayi "total" ve "order_status" (METIN, "Confirmed")
+      // doner - "total_price"/"status" DEGIL. Yanlis alan okununca ekranda "0,00 TL" ve
+      // "undefined" cikiyordu. Yine de her iki bicim de kabul ediliyor.
+      var toplam = (order.total !== undefined) ? order.total : order.total_price;
+      var durum = (order.order_status !== undefined && order.order_status !== null)
+        ? order.order_status : orderStatusLabel(order.status);
+      var kalemler = (order.items || []).map(function (it) {
+        return '<div style="display:flex;justify-content:space-between;font-size:13px;padding:3px 0;color:#6b6b6b">' +
+          "<span>" + esc(it.product_name || ("#" + it.product_id)) +
+          (it.size ? " · " + esc(String(it.size)) : "") + " × " + (it.quantity || 1) + "</span>" +
+          "<span>" + money(it.line_total) + "</span></div>";
+      }).join("");
+
+      ozet = '<div class="panel" style="text-align:left"><h3>Sipariş özeti</h3>' +
+        '<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0"><span>Sipariş no</span><span>' +
+        esc(String(order.order_number || order.id || orderId)) + "</span></div>" +
+        kalemler +
+        '<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0"><span>Kargo</span><span>' +
+        money(order.shipping_cost) + "</span></div>" +
+        '<div style="display:flex;justify-content:space-between;font-size:14px;font-weight:600;padding:6px 0;border-top:1px solid #e8e4de;margin-top:6px"><span>Toplam</span><span>' +
+        money(toplam) + "</span></div>" +
+        '<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0"><span>Durum</span><span>' +
+        esc(String(durum)) + "</span></div></div>";
+    } else if (orderId) {
+      ozet = '<p class="muted" style="font-size:13px">Sipariş #' + orderId + " detayına şu an ulaşılamadı.</p>";
+    }
+
+    view.innerHTML =
+      '<div class="wrap" style="padding:40px 0;max-width:640px;text-align:center">' +
+      '<div style="font-size:44px;margin-bottom:8px">' + (ok ? "✓" : "✕") + "</div>" +
+      "<h2>" + baslik + "</h2>" +
+      '<p class="muted" style="margin:8px 0 18px">' + alt + "</p>" +
+      ozet +
+      '<div style="display:flex;gap:10px;justify-content:center;margin-top:18px">' +
+      '<a class="btn" href="#/hesabim/siparislerim">Siparişlerime git</a>' +
+      (ok ? '<a class="btn ghost" href="#/kategori/tumu">Alışverişe devam</a>'
+          : '<a class="btn ghost" href="#/odeme">Tekrar dene</a>') +
+      "</div></div>";
+
+    if (ok && window.cart && window.cart.size) {
+      window.cart.clear();
+      try { if (typeof window.renderCart === "function") window.renderCart(); } catch (e) {}
+    }
+  }
+
+  function orderStatusLabel(s) {
+    var m = { 0: "Beklemede", 1: "Onaylandı", 2: "Hazırlanıyor", 3: "Kargoda", 4: "Teslim edildi", 5: "İptal" };
+    return m[s] !== undefined ? m[s] : String(s);
+  }
+
+  // Yonlendirici: #/odeme -> gercek checkout, #/odeme/sonuc -> sonuc sayfasi.
+  function wireCheckoutRouting() {
+    function handle() {
+      var raw = location.hash.replace(/^#\/?/, "");
+      var qi = raw.indexOf("?");
+      var path = qi >= 0 ? raw.slice(0, qi) : raw;
+      var query = qi >= 0 ? raw.slice(qi + 1) : "";
+      var seg = path.split("/");
+      if (seg[0] !== "odeme") return;
+      var params = {};
+      query.split("&").forEach(function (kv) {
+        if (!kv) return;
+        var i = kv.indexOf("=");
+        params[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1));
+      });
+      if (typeof window.setView === "function") window.setView("checkout");
+      if (seg[1] === "sonuc") renderPaymentResult(params);
+      else renderRealCheckout();
+    }
+    // ROUTER'I SARMALA: yalniz hashchange dinlemek YETMIYOR. index.html'in router'i
+    // "#/odeme" gorunce showCheckout() -> renderCheckout() ile MOCK ekrani ciziyor ve
+    // sayfa yeniden yuklendiginde (odeme callback'i 302 ile geri donduğunde) bizim
+    // ciziminizin USTUNE yaziyordu (olculdu: sonuc sayfasi yerine checkout goruldu).
+    // Router'in ardindan calisarak son sozu biz soyluyoruz.
+    if (typeof window.router === "function" && !window.router.__divisimaWrapped) {
+      var origRouter = window.router;
+      window.router = function () {
+        origRouter.apply(window, arguments);
+        handle();
+      };
+      window.router.__divisimaWrapped = true;
+    }
+    window.addEventListener("hashchange", function () { setTimeout(handle, 0); });
+    setTimeout(handle, 0);   // ilk yuklemede zaten #/odeme'deysek
+  }
+  // ── Kupon (gerçek API) ─────────────────────────────────────────────────────
   function wireCoupon() {
     window.divisimaValidateCoupon = async function (code, subtotal) {
-      try { return unwrap(await api._post("/api/coupon/validate", { code: code, cart_total: subtotal })); }
+      try { return unwrap(await api.coupons.validate(code, subtotal)); }
       catch (e) { return null; }
     };
   }
 
-  // ── Checkout (E2 kapsamı - dokunulmadı) ────────────────────────────────────
+  // ── Eski koprü checkout'u KALDIRILDI (E2) ──────────────────────────────────
+  // Onceki divisimaCheckout uc alanı YANLIS gonderiyordu: "payment_type" (dogru ad
+  // payment_method), coupon_code null (non-nullable -> 400), customer_id yok
+  // (validator > 0 istiyor) ve items HIC gonderilmiyordu. Yani hicbir zaman calisan
+  // bir siparis yolu degildi. Yerine gercek checkout paneli geldi (submitOrder).
+  // Disari acilan tek yuzey, elle surus/teshis icin:
   function wireCheckout() {
-    window.divisimaCheckout = async function (opts) {
-      opts = opts || {};
-      try {
-        if (window.cart && window.cart.values) {
-          for (var entry of window.cart.values()) {
-            await api.cart.add(entry.id, entry.size || "", entry.qty);
-          }
-        }
-      } catch (e) { console.warn("Sepet senkronu kısmi", e); }
-
-      var order = await api.orders.place({
-        address_id: opts.addressId || null,
-        coupon_code: opts.couponCode || null,
-        payment_type: opts.paymentType != null ? opts.paymentType : 0,
-        request_id: (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now())
-      });
-      var orderData = unwrap(order);
-      var pay = await api.payment.initialize(orderData.id);
-      return { order: orderData, payment: unwrap(pay) };
-    };
-
-    window.divisimaCheckoutSafe = async function (opts) {
-      try { notify("Sipariş oluşturuluyor…"); return await window.divisimaCheckout(opts); }
-      catch (e) { notify(e.message || "Sipariş oluşturulamadı, tekrar deneyin."); throw e; }
+    window.divisimaCheckout = function () {
+      return Promise.reject(new Error("Kaldirildi - #/odeme panelini kullan (submitOrder)."));
     };
   }
 
@@ -493,6 +965,8 @@
     wireCheckout();
     wireSearch();
     wireProductDetail();
+    wireCart();               // E2: sepet mutasyonlarini sunucuya aynala
+    wireCheckoutRouting();    // E2: #/odeme ve #/odeme/sonuc
     // Kategoriler ÖNCE: ürün kategorisi category_id üzerinden çözülüyor (liste yolu
     // category_name döndürmüyor), yükleme sırası ters olursa tüm ürünler "tumu" olur.
     await loadCategories();

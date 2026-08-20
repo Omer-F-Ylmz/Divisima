@@ -7,6 +7,7 @@ using Divisima.Entity.Dtos.Payment;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Configuration;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace Divisima.API.Controllers
@@ -18,7 +19,12 @@ namespace Divisima.API.Controllers
     public class PaymentController : ControllerBase
     {
         private readonly IPaymentService _paymentService;
-        public PaymentController(IPaymentService paymentService) { _paymentService = paymentService; }
+        private readonly IConfiguration _config;
+        public PaymentController(IPaymentService paymentService, IConfiguration config)
+        {
+            _paymentService = paymentService;
+            _config = config;
+        }
 
         // Açıklayıcı yorum: JWT'deki gerçek kullanıcı id (sahiplik kontrolü buradan gelir, client'tan değil)
         private int CurrentCustomerId =>
@@ -36,13 +42,36 @@ namespace Divisima.API.Controllers
         }
 
         // Açıklayıcı yorum: 3DS callback - Iyzico POST eder (anonim ama imza doğrulanır)
+        //
+        // E2 - TARAYICI YONLENDIRMESI: bu ucu Iyzico KULLANICININ TARAYICISI uzerinden POST eder.
+        // Onceden ham JSON donuyordu; musteri odeme sonunda beyaz bir sayfada {"success":true}
+        // gorup akistan dusuyordu. Artik storefront'un sonuc sayfasina 302 ile donuyor.
+        //
+        // SINIRLAR (bilincli):
+        //  - HandleCallback'e DOKUNULMADI: imza + sunucu-sunucu retrieve + atomik gecis + yan
+        //    etkiler aynen calisiyor. Yalniz bu action'in YANIT BICIMI degisti.
+        //  - Webhook (bant-disi, sunucu-sunucu) JSON donmeye DEVAM EDIYOR - onu bir tarayici
+        //    okumuyor, yonlendirme oraya zarar verirdi.
+        //  - Storefront:BaseUrl tanimsizsa ESKI davranis (JSON) korunur; boylece yapilandirma
+        //    eksik bir ortamda callback sessizce bozulmaz.
         [HttpPost("callback")]
         [AllowAnonymous]
-        [SwaggerOperation(Summary = "Ödeme callback", Description = "Iyzico callback. İmza + sunucu-sunucu doğrulama ile işlenir.")]
+        [SwaggerOperation(Summary = "Ödeme callback", Description = "Iyzico callback. İmza + sunucu-sunucu doğrulama ile işlenir; tarayıcı storefront sonuç sayfasına yönlendirilir.")]
         public async Task<IActionResult> Callback([FromForm] PaymentCallbackRequestDto dto)
         {
+            // Siparis id'si islemden ONCE cozulur: basarisiz dalda da sonuc sayfasi siparisi
+            // gosterebilsin. Salt-okur cagri, HandleCallback'i etkilemez.
+            var orderId = await _paymentService.GetOrderIdByTokenAsync(dto.token);
+
             var r = await _paymentService.HandleCallback(dto);
-            return StatusCode((int)r.Item1, r.Item2);
+
+            var storefront = (_config["Storefront:BaseUrl"] ?? "").TrimEnd('/');
+            if (string.IsNullOrWhiteSpace(storefront))
+                return StatusCode((int)r.Item1, r.Item2);   // yapilandirma yok - eski davranis
+
+            var status = r.Item1 == HttpStatusCode.OK ? "success" : "failed";
+            var url = $"{storefront}/index.html#/odeme/sonuc?order={orderId}&status={status}";
+            return Redirect(url);
         }
 
         // Açıklayıcı yorum: Webhook - Iyzico'nun bant-dışı bildirimi (callback kaybolursa yedek teyit).

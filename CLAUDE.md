@@ -120,6 +120,17 @@ Dizgede `Database=` **bulunmalidir**: `InvoiceCancellationTests` degiskeni ham k
 - **Dis kontrolu:** yeni testlerin gercekten olctugu, assert tersine cevrilip **isimli
   kirmizi** gozlenerek kanitlanir; sonra geri alinir ve kanit raporda belirtilir.
 
+## 6b. Rapor bicimi (KALICI)
+
+Her rapor, mesajin SONUNDA ayrica **TEK PARCA DUZ METIN** olarak **TEK kod blogu**
+icinde tekrarlanir. Gerekce: raporlar kopyalanip baska yere yapistiriliyor ve zengin
+bicim (tablo/kalin/baglanti) kopyada bos dusuyor.
+
+- Tablolar duz satira cevrilir (`Alan: deger` ya da `A | B | C` duz metin).
+- Kalin/italik/markdown baglanti isaretleri kullanilmaz; dosya yolu duz yazilir.
+- Blok TEK parcadir - ikiye bolunmez, araya aciklama girmez.
+- Zengin bicimli anlatim yukarida kalir; kod blogu onun duz metin karsiligidir.
+
 ## 7. CI kurallari
 
 - **CI script'leri YAML'dan cikarilip calistirilarak dogrulanir.** Varsayimla "calisir"
@@ -148,8 +159,9 @@ Bu bolum, yeni bir oturumun tek basina devam edebilmesi icin yazildi.
   SUCCESS, `TESHIS` skipped, annotation BOS. (Sprint 5 `383f4f2` de tamamen yesildi.)
 - **Sprint 7 push `4ee6318` — HER IKI WORKFLOW TAMAMEN YESIL** (run 32386448987 CI + 32386447800 Security).
 - **E4a push `fb2b046` — HER IKI WORKFLOW TAMAMEN YESIL** (run 32392181855 CI + 32392181886 Security).
-- **E1 (storefront auth + katalog) TAMAMLANDI ve push edildi** — asagidaki bolume bak.
-- **Yerel (E1 sonrasi): 150/150 `Category=Sql`, 271/271 tam suit** (Testcontainers'li
+- **E1 push `748c592` — HER IKI WORKFLOW TAMAMEN YESIL** (run 32395415468 CI + 32395415528 Security).
+- **E2 (sepet + checkout + odeme) TAMAMLANDI ve push edildi** — asagidaki bolume bak.
+- **Yerel (E2 sonrasi): 154/154 `Category=Sql`, 275/275 tam suit** (Testcontainers'li
   `OrderEndpointTests` HARIC - yerelde Docker kapali, CI'da yesil kosuyor).
 
 ## SPRINT 5 - KAPANDI (run yesil)
@@ -394,13 +406,87 @@ cagri yapildi: sessiz yenileme + tekrar -> BASARILI. Katalog: 2 gercek urun, dog
 indirim rozeti, `_ss {M:20,L:4}`, stok 24; bos kategori sayfasi ve bos/hata katalog durumlari
 cokmeden cizildi; arama "E4a" -> 1 sonuc.
 
+## E2 - SEPET + CHECKOUT + ODEME (TAMAMLANDI)
+
+### ONAYLI TEK BACKEND ISTISNASI: callback 302
+
+`PaymentController.Callback` artik `Storefront:BaseUrl` + `#/odeme/sonuc?order=..&status=..`
+adresine **302** doner. Sinirlar bilincli:
+- `HandleCallback` DEGISMEDI (imza + S2S retrieve + atomik gecis + yan etkiler aynen).
+  Yalniz bu action'in YANIT BICIMI degisti.
+- **Webhook JSON donmeye DEVAM EDIYOR** - onu tarayici okumuyor.
+- `Storefront:BaseUrl` bossa ESKI davranis (JSON) korunur - yapilandirmasi eksik bir
+  ortamda callback sessizce bozulmaz.
+- Siparis id'si icin `IPaymentService.GetOrderIdByTokenAsync` **eklendi** (salt-okur,
+  ayri metot). Mevcut imzalara dokunulmadi.
+
+Yapilandirma: `Storefront:BaseUrl` (prod `https://divisima.com`, dev `http://localhost:5173`)
+ve dev'de `Storage:PublicBaseUrl = http://localhost:5000` (gorsellerin storefront'ta 404
+olmamasi icin - example.json'a gerekcesiyle yazildi).
+
+### ISTEMCI SOZLESME DUZELTMELERI (olculdu)
+
+- `cart.remove` GOVDE gonderiyordu; uc `Remove(int productId, string size)` ile **sorgu
+  dizesi** bagliyor -> parametreler hic baglanmiyordu.
+- `cart.add` UPSERT'tir ve adeti **SET** eder (artirmaz) - "adet guncelle" de bu ucu kullanir.
+- Eski `divisimaCheckout` calisir bir yol DEGILDI: `payment_type` (dogru ad `payment_method`),
+  `coupon_code: null` (non-nullable -> 400), `customer_id` yok (validator > 0), `items` HIC
+  gonderilmiyordu. Kaldirildi, yerine gercek checkout paneli geldi.
+- Siparis detayi `total` + `order_status` (METIN) doner - `total_price`/`status` DEGIL;
+  yanlis alan okununca sonuc sayfasi "0,00 TL / undefined" gosteriyordu.
+
+### SEPET
+
+Yerel `cart` Map ekran icin kaynak olmaya devam ediyor; her mutasyon sunucuya aynalaniyor
+(`addToCart` sarmalandi, `renderCart` sonrasi 250 ms'lik tam esitleme). Aynalama hatasi
+SESSIZ DEGIL - toast ile bildiriliyor (bedensiz giyim kalemi sunucuda reddediliyor;
+checkout da bunu ADIYLA soyleyip erken duruyor).
+
+### CHECKOUT PANELI (mock ekranin yerine)
+
+index.html'in checkout'u MOCK'tu: yerel adres listesi, **yerel kart formu**, yerel kupon
+tablosu. Kart bilgisi bize HIC gelmemeli, bu yuzden o ekran gercek panelle degistirildi:
+adresler API'den (sec + olustur), kupon API'den, magaza kredisi `/api/Account/summary`'den,
+kargo kurali backend ile ayni (>= 2000 bedava, degilse 49.90) ve TAHMIN oldugu yaziyor.
+Kart / kapida odeme secimi UI'da.
+
+### PINLER (PaymentCallbackRedirectTests - 4 test)
+
+- `BasariliCallback_302_ile_SonucSayfasina_Yonlendirir` (order + status=success + odeme
+  gercekten islenmis)
+- `BasarisizCallback_302_status_failed_Doner` (cift-anlam kirici; odeme Pending KALIR)
+- `StorefrontAyariYOKSA_EskiDavranis_JSON_Doner`
+- `Webhook_JSON_Donmeye_DEVAM_EDER_Yonlendirilmez`
+
+**Kirilan eski pin YOK**: HTTP duzeyinde callback pini hic yoktu; mevcut callback pinleri
+(`PaymentCallbackSecurityTests`) servisi DOGRUDAN cagiriyor, o yuzden etkilenmediler.
+
+### DIS KONTROLU
+
+4 assert ters -> 4 AYRI isimli kirmizi. 5. kontrol: `Callback`'ten yonlendirme kaldirildi ->
+iki 302 pini kirildi ve **E2 oncesi zarar birebir uretildi** (tarayici ham JSON'da: basarida
+200, basarisizlikta 400). Digerleri (JSON dallari) dogru sekilde yesil kaldi.
+
+### ELLE DOGRULAMA (tarayici, uctan uca)
+
+Giris -> sepete ekle (yerel + sunucu `2:2`) -> adet 1'e dusur (`2:1`) -> sil (bos) ->
+`#/odeme` paneli (adres olustur, ozet 999,80 + 49,90 = 1.049,70) -> kart ile siparis (#10)
+-> Iyzico form gomuldu (mock modda icerik yorum satiri) -> callback POST -> **302** ->
+sonuc sayfasi: siparis no, kalemler, toplam 1.049,70, durum Confirmed, sepet temizlendi.
+Basarisiz yol: bozuk imza -> 302 `status=failed` -> "Odeme tamamlanamadi", durum **Pending**,
+**sepet KORUNDU**, "Tekrar dene". Kapida odeme: siparis #12 dogrudan Confirmed.
+Kupon: `%10` kuponu ekran tahmininde 499,81 gosterdi; sunucunun hesapladigi toplam da
+**499,81** - istemci tahmini sunucuyla birebir ortusuyor. Uc siparis de `/api/order/my-orders`
+listesinde gorunuyor.
+
+Not: ilk kupon denemem `discount_value` alan adiyla olusturuldugu icin indirim 0 cikti;
+dogru alan `value`. Backend dogruydu, test verisi yanlisti.
+
 ## SIRA
 
-1. **E1 run raporu** (push edildi, rapor bekleniyor)
-2. **E2** sepet+checkout+odeme -> **E3** hesap+siparis takibi
-   - E2'nin iki somut isi: `checkout_form_content` gomme + `#/odeme/sonuc` donus sayfasi
-     (callback bugun ham JSON donuyor)
-   - E3: CMS sanitizasyonu IKI katman (yazma `InputSanitizer` + okuma DOMPurify)
+1. **E2 run raporu** (push edildi, rapor bekleniyor)
+2. **E3** hesap + siparis takibi
+   - CMS sanitizasyonu IKI katman (yazma `InputSanitizer` + okuma DOMPurify)
 3. **Sema kapanis dalgasi** - kalan tek aday: **gift-card expiry**
    (`refunded_amount` Sprint 6'da kapandi; seller migration DEGIL - `sellers` ve
    `seller_id` zaten `InitialCreate`'te)
@@ -426,11 +512,29 @@ cokmeden cizildi; arama "E4a" -> 1 sonuc.
   Acmadan once `Program.cs` yorumundaki DIGER manager'lar (OrderManager, GiftCard,
   Loyalty, Referral, Return, StoreCredit) da tasinmali - aksi halde onlarin manuel
   `BeginTransaction` cagrilari retry stratejisi tarafindan REDDEDILIR.
-- **SPRINT 8 DEFTERE** (simdi is yok, E fazi sonunda karar): `PaymentConfirmed` outbox'a
-  tasima (altyapi hazir: `outbox_messages` + `OutboxService` + `OutboxProcessor` atomik
-  claim/reclaim + `Cron.Minutely`) **+ kupon `used_count` idempotency** (on kosul).
-  Kazanci: B bolgesi hatasi sessiz kalmak yerine yeniden denenir; maliyeti eventual
-  tutarlilik (~1 dk) ve at-least-once idempotentlik zorunlulugu.
+- **SPRINT 8 = E FAZI SONRASI LAUNCH-ONCESI ZORUNLU DALGA (ALTI KALEM).**
+  Simdi is yok; E fazi bitince kosulur. Sira onceligi (6) guvenlik oldugu icin ustte.
+
+  1. **Kupon `used_count` idempotency** (outbox'in on kosulu). `IncrementCouponUsageWithRetry`
+     duz sayac artisi; at-least-once bir mekanizmada FAZLA sayar. Cozum adaylari:
+     `coupon_usages` satirlarindan turetmek ya da `(coupon_id, order_id)` unique indeks +
+     artisi insert basarisina baglamak.
+  2. **`InvoiceManager.GenerateForOrder` siparis DURUMU guard'i** - Cancelled/Pending
+     siparise fatura kesilmez + pinler.
+  3. **`PaymentConfirmed` outbox'a tasima** (altyapi hazir: `outbox_messages` +
+     `OutboxService` + `OutboxProcessor` atomik claim/reclaim + `Cron.Minutely`).
+     Kazanci: B bolgesi hatasi sessiz kalmak yerine yeniden denenir; maliyeti eventual
+     tutarlilik (~1 dk) ve at-least-once idempotentlik zorunlulugu. **Outbox karari o gun.**
+  4. **`LocalImageStorage`: CWD yerine `WebRootPath`.** Pin: yazma ile statik servis FARKLI
+     calisma dizininde bile ortusur (test host'undaki `UseContentRoot` hizalamasina gerek
+     kalmadan yesil).
+  5. **Storefront `filter` yolu `category_name` + `total_stock` + `sizes` DOLDURUR**
+     (DTO zenginlestirme). Duzeltme sonrasi istemcideki 6-esmanli detay telafisi
+     (`api-bridge.js enrichAll`) KALDIRILIR ve pinler guncellenir.
+  6. **ONCELIKLI (GUVENLIK): refresh token gercekten httpOnly cookie'ye tasinir.**
+     `SetRefreshTokenCookie` GERCEKTEN kullanilir - login/refresh cookie YAZAR, refresh ucu
+     cookie'den OKUR, logout siler; istemci uyarlanir; CSRF double-submit devreye girer.
+     Eski govde-tabanli sozlesme pinleri BILINCLI kirilir, yenileri ayni commit'te gelir.
 
 ## SUPHELI DAVRANISLAR - KARAR BEKLEYENLER
 

@@ -41,6 +41,7 @@
       this.wishlist = this._buildWishlist();
       this.orders = this._buildOrders();
       this.payment = this._buildPayment();
+      this.coupons = this._buildCoupons();
       this.returns = this._buildReturns();
       this.invoices = this._buildInvoices();
       this.shipment = this._buildShipment();
@@ -302,8 +303,15 @@
       const api = this;
       return {
         get() { return api._get("/api/cart"); },
+        // DIKKAT: add UPSERT'tir ve adeti ARTIRMAZ, SET eder (CartManager: existing.quantity = dto.quantity).
+        // "Adet guncelle" icin de bu cagrilir; yeni MUTLAK adet gonderilir.
         add(productId, size, quantity) { return api._post("/api/cart/add", { product_id: productId, size, quantity }); },
-        remove(productId, size) { return api._del("/api/cart/remove", { product_id: productId, size }); },
+        setQuantity(productId, size, quantity) { return api._post("/api/cart/add", { product_id: productId, size, quantity }); },
+        // Uc [HttpDelete("remove")] Remove(int productId, string size) - govde DEGIL SORGU DIZESI bagliyor.
+        // Onceden govde gonderiliyordu; parametreler hic baglanmiyor, silme yanlis satiri hedefliyordu.
+        remove(productId, size) {
+          return api._del("/api/cart/remove" + api._qs({ productId: productId, size: size }));
+        },
         clear() { return api._del("/api/cart/clear"); },
       };
     }
@@ -321,7 +329,12 @@
       return {
         // Açıklama: Sipariş durum zaman çizelgesi (takip)
         timeline(orderId) { return api._get("/api/order/timeline/" + orderId); },
-        place(payload) { return api._post("/api/order/place", payload); },  // {address_id, coupon_code, payment_type, request_id}
+        // OrderCreateRequestDto: {customer_id, request_id, address_id, coupon_code, use_store_credit,
+        // payment_method (0=Online, 1=Kapida), items:[{product_id,size,quantity}]}
+        // TUZAKLAR (olculdu): customer_id > 0 ZORUNLU - FluentValidation controller token'dan
+        // degeri set etmeden ONCE kosuyor (token yine de ezer, govdedeki deger yok sayilir);
+        // coupon_code non-nullable oldugu icin "" gonderilmeli. Alan adi payment_METHOD.
+        place(payload) { return api._post("/api/order/place", payload); },
         get(id) { return api._get("/api/order/get/" + id); },
         my() { return api._get("/api/order/my-orders"); },
       };
@@ -330,8 +343,23 @@
       const api = this;
       return {
         // Açıklama: Ödeme başlat -> Iyzico Checkout Form içeriği döner (iframe/HTML gömülür)
+        // Yanit: {conversation_id, checkout_form_content}. checkout_form_content Iyzico'nun
+        // <script> iceren HTML parcasidir; DOM'a innerHTML ile konulursa script CALISMAZ -
+        // script dugumleri yeniden olusturulmalidir (bkz. api-bridge.js embedCheckoutForm).
         initialize(orderId) { return api._post("/api/payment/initialize", { order_id: orderId }); },
-        // callback/webhook backend-Iyzico arası; frontend genelde çağırmaz
+        // callback/webhook backend-Iyzico arası; frontend genelde çağırmaz.
+        // Callback ARTIK 302 ile storefront'un #/odeme/sonuc sayfasina donuyor (E2).
+      };
+    }
+
+    // ─────────────────────── Kupon (storefront) ───────────────────────
+    _buildCoupons() {
+      const api = this;
+      return {
+        // customer_id sunucuda token'dan set edilir; govdede gondermek gereksiz.
+        validate(code, cartTotal) {
+          return api._post("/api/coupon/validate", { code: code, cart_total: cartTotal });
+        },
       };
     }
     _buildReturns() {

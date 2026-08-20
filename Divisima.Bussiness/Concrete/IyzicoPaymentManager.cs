@@ -138,6 +138,15 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
             }, Messages.PaymentInitiated));
         }
 
+        // E2: callback yonlendirmesi icin token -> siparis id. SALT OKUR, hicbir durum degistirmez.
+        // Bulunamazsa 0 doner (cagiran yonlendirmeyi siparissiz yapar).
+        public async Task<int> GetOrderIdByTokenAsync(string token)
+        {
+            if (string.IsNullOrWhiteSpace(token)) return 0;
+            var payment = (await _paymentDal.GetListNoTrackingAsync(p => p.token == token)).FirstOrDefault();
+            return payment?.order_id ?? 0;
+        }
+
         public async Task<(HttpStatusCode, Result)> HandleCallback(PaymentCallbackRequestDto dto)
         {
             // Açıklayıcı yorum: 1) İMZA DOĞRULA - sahte callback'i en baştan ele
