@@ -47,19 +47,35 @@ namespace Divisima.IntegrationTests
 
         private DivisimaDbContext NewContext() => new DivisimaDbContext(Options);
 
-        // e-Fatura sağlayıcısı CancelForOrder'da HİÇ kullanılmaz; ctor'u doyurmak için sessiz sahte.
-        private sealed class NoopEInvoiceProvider : IEInvoiceProvider
+        // e-Fatura sağlayıcısı sahtesi. ARTIK CancelForOrder'da KULLANILIYOR: sağlayıcıya
+        // gönderilmiş (provider_invoice_id dolu) bir fatura iptal edilirken önce burası çağrılır.
+        // CancelSucceeds ile iki yol da pinlenebilir: sağlayıcı kabul ederse yerel iptal yazılır,
+        // reddederse fatura Cancelled İŞARETLENMEZ.
+        private sealed class FakeEInvoiceProvider : IEInvoiceProvider
         {
+            public bool CancelSucceeds { get; init; } = true;
+            public int CancelCallCount { get; private set; }
+            public string? LastCancelledProviderId { get; private set; }
+
             public Task<EInvoiceResult> SendInvoiceAsync(EInvoiceRequest request) =>
                 Task.FromResult(new EInvoiceResult { Success = false, ErrorMessage = "test" });
+
+            public Task<EInvoiceResult> CancelInvoiceAsync(string providerInvoiceId, string reason)
+            {
+                CancelCallCount++;
+                LastCancelledProviderId = providerInvoiceId;
+                return Task.FromResult(CancelSucceeds
+                    ? new EInvoiceResult { Success = true, ProviderInvoiceId = providerInvoiceId }
+                    : new EInvoiceResult { Success = false, ErrorMessage = "saglayici iptali reddetti (test)" });
+            }
         }
 
-        private InvoiceManager NewManager(DivisimaDbContext ctx)
+        private InvoiceManager NewManager(DivisimaDbContext ctx, FakeEInvoiceProvider? provider = null)
         {
             var config = new ConfigurationBuilder().AddInMemoryCollection().Build();
             return new InvoiceManager(
                 new EfInvoiceDal(ctx), new EfOrderDal(ctx), new EfOrderItemDal(ctx),
-                new EfProductDal(ctx), new NoopEInvoiceProvider(), config);
+                new EfProductDal(ctx), provider ?? new FakeEInvoiceProvider(), config);
         }
 
         public async Task InitializeAsync()
@@ -101,7 +117,7 @@ namespace Divisima.IntegrationTests
         private bool Skipped() => !_sqlAvailable;
 
         // Sipariş + faturayı kur; faturanın başlangıç durumu parametrik.
-        private async Task<(int orderId, int invoiceId)> SeedAsync(byte orderStatus, byte? invoiceStatus)
+        private async Task<(int orderId, int invoiceId)> SeedAsync(byte orderStatus, byte? invoiceStatus, string? providerInvoiceId = null)
         {
             await using var ctx = NewContext();
             // orders -> customers FK'si var: önce müşteri lazım.
@@ -144,6 +160,7 @@ namespace Divisima.IntegrationTests
                     tax_rate = 0.20m,
                     tax_amount = 20m,
                     total = 120m,
+                    provider_invoice_id = providerInvoiceId,   // dolu ise: fatura GERCEKTEN saglayiciya gitmis
                     status = invoiceStatus.Value,
                     created_at = DateTime.Now
                 };
@@ -239,6 +256,77 @@ namespace Divisima.IntegrationTests
 
             code.Should().Be(HttpStatusCode.NotFound);
             result.Success.Should().BeFalse();
+        }
+
+        // SPRINT 3 - SAGLAYICI IPTALI.
+        // Fatura GERCEKTEN gonderilmisse (provider_invoice_id dolu) yerel iptalden ONCE
+        // saglayici cagrilir. Oncesinde bu cagri HIC yoktu: siparis iptal ediliyor, fatura
+        // yerelde Cancelled oluyor, GIB tarafinda GECERLI kaliyordu.
+        [Fact]
+        public async Task CancelForOrder_GonderilmisFatura_SaglayiciIptaliCAGRILIR_YerelDeIptalOlur()
+        {
+            if (Skipped()) return;
+            const string providerId = "GIB-REF-12345";
+            var (orderId, invoiceId) = await SeedAsync(
+                (byte)OrderStatusEnum.Cancelled, (byte)InvoiceStatusEnum.Sent, providerId);
+
+            var provider = new FakeEInvoiceProvider { CancelSucceeds = true };
+            await using (var ctx = NewContext())
+            {
+                var (code, result) = await NewManager(ctx, provider).CancelForOrder(orderId);
+                code.Should().Be(HttpStatusCode.OK, $"saglayici kabul etti: {result.Message}");
+                result.Success.Should().BeTrue();
+            }
+
+            provider.CancelCallCount.Should().Be(1, "saglayici iptali TAM BIR kez cagrilmali");
+            provider.LastCancelledProviderId.Should().Be(providerId, "saglayiciya dogru referans gonderilmeli");
+            (await ReadInvoiceStatusAsync(invoiceId)).Should().Be((byte)InvoiceStatusEnum.Cancelled,
+                "saglayici kabul edince yerel iptal de yazilmali");
+        }
+
+        // SAGLAYICI REDDEDERSE fatura Cancelled ISARETLENMEZ. Aksi halde magazanin kaydinda
+        // "iptal", vergi idaresinde GECERLI fatura kalir ve bu uyumsuzluk sessizce buyur.
+        [Fact]
+        public async Task CancelForOrder_SaglayiciREDDEDERSE_Fatura_CancelledISARETLENMEZ()
+        {
+            if (Skipped()) return;
+            var (orderId, invoiceId) = await SeedAsync(
+                (byte)OrderStatusEnum.Cancelled, (byte)InvoiceStatusEnum.Sent, "GIB-REF-99999");
+
+            var provider = new FakeEInvoiceProvider { CancelSucceeds = false };
+            await using (var ctx = NewContext())
+            {
+                var (code, result) = await NewManager(ctx, provider).CancelForOrder(orderId);
+                code.Should().Be(HttpStatusCode.BadGateway, "saglayici reddi yukari bildirilmeli");
+                result.Success.Should().BeFalse();
+                result.Message.Should().Contain("iptal edilemedi", "hata mesaji sebebi soylemeli");
+            }
+
+            provider.CancelCallCount.Should().Be(1);
+            (await ReadInvoiceStatusAsync(invoiceId)).Should().Be((byte)InvoiceStatusEnum.Sent,
+                "saglayici reddedince fatura durumu DEGISMEMELI - yarim iptal olmaz");
+        }
+
+        // CIFT-ANLAM KIRICI: saglayiciya HIC gitmemis fatura (provider_invoice_id bos) icin
+        // saglayici cagrilmaz ve yerel iptal dogrudan yazilir. Yani ustteki iki test
+        // "her fatura icin saglayici cagriliyor" yanilgisini disarida birakir.
+        [Fact]
+        public async Task CancelForOrder_GonderilmemisFatura_SaglayiciCAGRILMAZ_YerelIptalYazilir()
+        {
+            if (Skipped()) return;
+            var (orderId, invoiceId) = await SeedAsync(
+                (byte)OrderStatusEnum.Cancelled, (byte)InvoiceStatusEnum.Draft, providerInvoiceId: null);
+
+            var provider = new FakeEInvoiceProvider { CancelSucceeds = false };   // cagrilirsa test kirmizi olur
+            await using (var ctx = NewContext())
+            {
+                var (code, result) = await NewManager(ctx, provider).CancelForOrder(orderId);
+                code.Should().Be(HttpStatusCode.OK, $"gonderilmemis fatura icin iptal dogrudan yazilmali: {result.Message}");
+                result.Success.Should().BeTrue();
+            }
+
+            provider.CancelCallCount.Should().Be(0, "saglayiciya hic gitmemis fatura icin iptal cagrisi YAPILMAMALI");
+            (await ReadInvoiceStatusAsync(invoiceId)).Should().Be((byte)InvoiceStatusEnum.Cancelled);
         }
     }
 }

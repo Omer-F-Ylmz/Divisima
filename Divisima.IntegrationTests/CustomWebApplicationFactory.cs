@@ -19,6 +19,18 @@ namespace Divisima.IntegrationTests
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
+                TestHostConfig.Apply(builder);
+            // AUTH RATE LIMIT - test host'unda yukseltilir.
+            // Sebep: bu siniftaki eszamanlilik testi KASITLI olarak 8 AYRI musteri yaratiyor
+            // (gercek oversell senaryosu farkli alicilarin yarismasidir). TestAuthHelper musteri
+            // basina 3 auth istegi atiyor; test sunucusunda RemoteIpAddress null oldugu icin
+            // hepsi AYNI partition'a duser ve uretim limiti (10/dk) test KURULUMUNU cokertirdi -
+            // nitekim cokertti: OrderEndpointTests dort run boyunca "HTTP 429 TooManyRequests"
+            // ile kirmiziydi ve sebep genisletilmis annotation deseni sayesinde gorulebildi.
+            // Limitin KENDISI AuthRateLimitPinTests'te URETIM VARSAYILANIYLA pinli kalir;
+            // burada yukseltmek o sozlesmeyi zayiflatmaz, yalnizca bu sinifi limitten ayirir.
+            builder.UseSetting("RateLimit:AuthPermitLimit", "1000");
+
             builder.ConfigureServices(services =>
             {
                 // Açıklayıcı yorum: Gerçek DbContext'i test container'ının connection string'iyle değiştir

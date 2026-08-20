@@ -214,6 +214,9 @@ namespace Divisima.Core.Utilities.Constants
         // ── Fatura iptali (sipariş iptal edilince) ──
         public static string InvoiceCancelled = "Fatura iptal edildi.";
         public static string InvoiceAlreadyCancelled = "Fatura zaten iptal edilmiş.";
+        // e-Fatura sağlayıcısı iptali reddetti -> fatura YEREL olarak da iptal işaretlenmez
+        // (kayıtta iptal / GİB'de geçerli uyumsuzluğu oluşmasın).
+        public static string InvoiceProviderCancelFailed = "Fatura e-Fatura sağlayıcısında iptal edilemedi; işlem geri alındı.";
         public static string InvoiceCancelNotNeeded = "İptal edilecek fatura bulunmuyor.";
         public static string InvoiceCancelOrderNotCancelled = "Sipariş iptal edilmediği için fatura iptal edilemez.";
 

@@ -40,6 +40,7 @@ namespace Divisima.IntegrationTests
         {
             protected override void ConfigureWebHost(IWebHostBuilder builder)
             {
+                TestHostConfig.Apply(builder);
                 builder.ConfigureServices(services =>
                 {
                     var d = services.SingleOrDefault(x => x.ServiceType == typeof(DbContextOptions<DivisimaDbContext>));

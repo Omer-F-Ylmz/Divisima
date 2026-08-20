@@ -58,6 +58,10 @@ namespace Divisima.Bussiness.DependencyResolvers.Autofac
             builder.RegisterType<OrderStatusHistoryManager>().As<IOrderStatusHistoryService>().InstancePerLifetimeScope();
             builder.RegisterType<EfOrderStatusHistoryDal>().As<IOrderStatusHistoryDal>().InstancePerLifetimeScope();
             // Açıklayıcı yorum: Terk edilmiş sepet hatırlatması (yeni DAL yok - mevcut Cart/CartItem/Customer DAL)
+            // İYS/ETK kapısı - pazarlama iletilerinin TEK karar noktası (terk-sepet, doğum günü,
+            // win-back, yorum daveti, fiyat düşüşü). İşlemsel mailler bu kapıdan geçmez.
+            builder.RegisterType<MarketingGate>().As<IMarketingGate>().InstancePerLifetimeScope();
+
             builder.RegisterType<AbandonedCartManager>().As<IAbandonedCartService>().InstancePerLifetimeScope();
             // Açıklayıcı yorum: Son görüntülenen ürünler
             builder.RegisterType<RecentlyViewedManager>().As<IRecentlyViewedService>().InstancePerLifetimeScope();

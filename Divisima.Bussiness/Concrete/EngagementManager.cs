@@ -23,16 +23,22 @@ namespace Divisima.Bussiness.Concrete
         private const int WinBackCooldownDays = 30;    // 30 günde bir win-back (spam önleme)
         private const int ReviewInviteDaysAfterDelivery = 7; // teslimden 7 gün sonra
 
-        public EngagementManager(ICustomerDal customerDal, IOrderDal orderDal, IMailService mailService, IOutboxService outboxService)
+        private readonly IMarketingGate _marketingGate;
+
+        public EngagementManager(ICustomerDal customerDal, IOrderDal orderDal, IMailService mailService, IOutboxService outboxService,
+            IMarketingGate marketingGate)
         {
             _customerDal = customerDal;
             _orderDal = orderDal;
             _mailService = mailService;
             _outboxService = outboxService;
+            _marketingGate = marketingGate;
         }
 
         public async Task<int> SendBirthdayOffers()
         {
+            // IYS KAPISI: bu bir TICARI ELEKTRONIK ILETIDIR - bayrak kapaliysa hic taranmaz.
+            if (!_marketingGate.Enabled) return 0;
             var today = DateTime.Now;
             // Açıklayıcı yorum: Bugün doğum günü olan, bildirim izinli, bu yıl teklif almamış aktif müşteriler
             var customers = await _customerDal.GetListAsync(c => c.is_active && c.notify_email && c.birthdate.HasValue);
@@ -44,6 +50,8 @@ namespace Divisima.Bussiness.Concrete
                 bool isBirthday = b.Day == today.Day && b.Month == today.Month;
                 bool alreadySentThisYear = c.birthday_offer_sent_year.HasValue && c.birthday_offer_sent_year.Value.Year == today.Year;
                 if (!isBirthday || alreadySentThisYear) continue;
+                // IYS: en guncel pazarlama rizasi + tercih (bayrak zaten metot basinda kontrol edildi).
+                if (!await _marketingGate.CanSendToCustomerAsync(c.id)) continue;
 
                 try
                 {
@@ -69,6 +77,8 @@ namespace Divisima.Bussiness.Concrete
 
         public async Task<int> SendWinBackCampaigns()
         {
+            // IYS KAPISI: bu bir TICARI ELEKTRONIK ILETIDIR - bayrak kapaliysa hic taranmaz.
+            if (!_marketingGate.Enabled) return 0;
             var now = DateTime.Now;
             var cutoff = now.AddDays(-WinBackDaysThreshold);
             var customers = await _customerDal.GetListAsync(c => c.is_active && c.notify_email);
@@ -80,6 +90,9 @@ namespace Divisima.Bussiness.Concrete
                     .OrderByDescending(o => o.created_at).FirstOrDefault();
                 if (lastOrder == null) continue; // hiç sipariş vermemiş (bu win-back değil, onboarding)
                 if (lastOrder.created_at > cutoff) continue; // yakın zamanda sipariş vermiş
+
+                // IYS: en guncel pazarlama rizasi + tercih (bayrak zaten metot basinda kontrol edildi).
+                if (!await _marketingGate.CanSendToCustomerAsync(c.id)) continue;
 
                 // Açıklayıcı yorum: Cooldown - son win-back'ten bu yana yeterli süre geçmiş mi
                 if (c.last_winback_sent_at.HasValue && c.last_winback_sent_at.Value > now.AddDays(-WinBackCooldownDays)) continue;
@@ -108,6 +121,8 @@ namespace Divisima.Bussiness.Concrete
 
         public async Task<int> SendReviewInvites()
         {
+            // IYS KAPISI: bu bir TICARI ELEKTRONIK ILETIDIR - bayrak kapaliysa hic taranmaz.
+            if (!_marketingGate.Enabled) return 0;
             var now = DateTime.Now;
             var target = now.AddDays(-ReviewInviteDaysAfterDelivery);
             // Açıklayıcı yorum: Teslim edilmiş, davet gönderilmemiş, teslim tarihi ~N gün önce olan siparişler
@@ -124,7 +139,10 @@ namespace Divisima.Bussiness.Concrete
                 if (deliveredAt > target) continue; // daha N gün olmamış
 
                 var customer = await _customerDal.GetAsync(c => c.id == o.customer_id && c.is_active);
-                if (customer == null || !customer.notify_email)
+                // IYS: notify_email tercihine EK OLARAK en guncel pazarlama rizasi da sorulur.
+                // Yorum daveti ticari elektronik iletidir - siparise bagli olmasi onu islemsel yapmaz.
+                if (customer == null || !customer.notify_email
+                    || !await _marketingGate.CanSendToCustomerAsync(customer.id))
                 {
                     // Açıklayıcı yorum: İzin yoksa yine damgala (tekrar taranmasın)
                     o.review_invite_sent_at = now;

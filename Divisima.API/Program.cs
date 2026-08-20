@@ -70,6 +70,13 @@ var builder = WebApplication.CreateBuilder(args);
         catch (FormatException) { throw new InvalidOperationException("FATAL: Config - Encryption:Key geçerli base64 değil."); }
         if (encKeyBytes.Length != 32)
             throw new InvalidOperationException($"FATAL: Config - Encryption:Key AES-256 için TAM 32 bayt olmalı (bulunan: {encKeyBytes.Length}).");
+
+        // Açıklayıcı yorum: MAIL SUNUCUSU - prod'da ZORUNLU.
+        // SmtpMailService, Host boşsa gönderim yapmaz ve yalnız uyarı loglar (Development kolaylığı).
+        // Prod'da bu sessiz davranış e-posta doğrulama, parola sıfırlama ve sipariş bildirimlerinin
+        // HİÇ gitmemesi demektir - üstelik her çağıran başarı görür. Açılışta engellenir.
+        if (string.IsNullOrWhiteSpace(cfg["MailSettings:Host"]))
+            throw new InvalidOperationException("FATAL: Config - MailSettings:Host tanımlı değil (prod'da e-posta gönderimi zorunlu; Host boşsa hiçbir mail gitmez).");
     }
 }
 
@@ -240,15 +247,25 @@ builder.Services.AddRateLimiter(options =>
     // DEPLOY NOTU: bölümleme RemoteIpAddress'e dayanır. Ters proxy/LB arkasında
     // ForwardedHeaders:KnownProxies DOLDURULMAZSA tüm istekler LB'nin IP'sinde toplanır ve bu
     // düzeltme kâğıt üstünde kalır - iki ayar birlikte anlamlıdır.
+    // Açıklayıcı yorum: Limitler YAPILANDIRILABİLİR (varsayılan bugünkü değerler). İki gerekçe:
+    //  1) Prod'da eşiği değiştirmek için yeniden derleme gerekmesin (CGNAT arkasındaki müşteriler,
+    //     kampanya günleri gibi durumlarda ayarlanabilmeli).
+    //  2) Entegrasyon testleri gerçek istemci kimliği üretemiyor (test sunucusunda RemoteIpAddress
+    //     null); onlarca müşteri yaratan bir test tek partition'da limite takılıyordu. Test host'u
+    //     bu anahtarı yükselterek limiti devre dışı bırakabiliyor - üretim varsayılanı değişmiyor
+    //     ve limitin KENDİSİ AuthRateLimitPinTests'te varsayılan değerle pinli kalıyor.
+    var authPermitLimit = int.TryParse(builder.Configuration["RateLimit:AuthPermitLimit"], out var apl) && apl > 0 ? apl : 10;
+    var paymentPermitLimit = int.TryParse(builder.Configuration["RateLimit:PaymentPermitLimit"], out var ppl) && ppl > 0 ? ppl : 10;
+
     options.AddPolicy("auth", context => RateLimitPartition.GetFixedWindowLimiter(
         partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         // Bölümlenince 5/dk gereksiz dar kalıyordu (aynı evden/ofisten giren birkaç kullanıcı
         // birbirini kilitliyordu). İstemci başına 10/dk hem kaba kuvvete kapalı hem yaşanabilir.
-        factory: _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1) }));
+        factory: _ => new FixedWindowRateLimiterOptions { PermitLimit = authPermitLimit, Window = TimeSpan.FromMinutes(1) }));
 
     options.AddPolicy("payment", context => RateLimitPartition.GetFixedWindowLimiter(
         partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-        factory: _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1) }));
+        factory: _ => new FixedWindowRateLimiterOptions { PermitLimit = paymentPermitLimit, Window = TimeSpan.FromMinutes(1) }));
 });
 
 // B12: API versiyonlama

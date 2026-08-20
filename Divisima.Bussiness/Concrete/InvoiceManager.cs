@@ -137,6 +137,20 @@ namespace Divisima.Bussiness.Concrete
             if (invoice.status == (byte)InvoiceStatusEnum.Cancelled)
                 return (HttpStatusCode.OK, new SuccessResult(Messages.InvoiceAlreadyCancelled));
 
+            // SAGLAYICI IPTALI - yerel iptalden ONCE.
+            // Fatura GERCEKTEN gonderilmisse (provider_invoice_id dolu) once GIB tarafinda iptal
+            // edilmeli. Saglayici basarisiz donerse fatura Cancelled ISARETLENMEZ: aksi halde
+            // magazanin kaydinda "iptal", vergi idaresinde GECERLI fatura kalir ve bu uyumsuzluk
+            // sessizce buyur. Cagiran hatayi gorur ve yeniden deneyebilir (metot idempotent).
+            if (!string.IsNullOrWhiteSpace(invoice.provider_invoice_id))
+            {
+                var cancelResult = await _eInvoiceProvider.CancelInvoiceAsync(
+                    invoice.provider_invoice_id, "Siparis iptal edildi");
+                if (!cancelResult.Success)
+                    return (HttpStatusCode.BadGateway,
+                        new ErrorResult(Messages.InvoiceProviderCancelFailed + " " + (cancelResult.ErrorMessage ?? "")));
+            }
+
             // DİKKAT: Invoice entity'sinde updated_at/cancelled_at kolonu YOK -> yalnız status güncellenir
             // (olmayan alana atama CS1061 ile build'i patlatırdı).
             invoice.status = (byte)InvoiceStatusEnum.Cancelled;

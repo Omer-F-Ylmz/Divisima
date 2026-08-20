@@ -63,5 +63,54 @@ namespace Divisima.Core.Integrations.EInvoice
                 return new EInvoiceResult { Success = false, ErrorMessage = ex.Message };
             }
         }
+
+        // Açıklayıcı yorum: e-Fatura iptali. SendInvoiceAsync ile AYNI H53 deseni izlenir -
+        // "yalan söyleyen stub" üretilmez.
+        public async Task<EInvoiceResult> CancelInvoiceAsync(string providerInvoiceId, string reason)
+        {
+            // e-Fatura kapalıysa (dev): gönderim de yapılmamıştı, iptal edilecek bir şey yok.
+            if (!Enabled)
+                return new EInvoiceResult { Success = true, ProviderInvoiceId = providerInvoiceId };
+
+            if (string.IsNullOrWhiteSpace(providerInvoiceId))
+            {
+                // Sağlayıcıya hiç gitmemiş bir fatura - iptal edilecek bir dış kayıt yok.
+                // Bu bir HATA değil; çağıran zaten yerel iptali yapacak.
+                return new EInvoiceResult { Success = true };
+            }
+
+            var apiUrl = _config["EInvoice:ApiUrl"];
+            if (string.IsNullOrWhiteSpace(apiUrl))
+            {
+                _logger.LogError("e-Fatura ETKIN ama entegrasyon YAPILANDIRILMAMIS (EInvoice:ApiUrl bos). " +
+                                 "Fatura {Id} GIB tarafinda IPTAL EDILMEDI.", providerInvoiceId);
+                return new EInvoiceResult
+                {
+                    Success = false,
+                    ErrorMessage = "e-Fatura entegrasyonu yapılandırılmamış (EInvoice:ApiUrl). İptal gönderilmedi."
+                };
+            }
+
+            try
+            {
+                // Açıklayıcı yorum: Gerçek entegratör iptal çağrısı buraya (Foriba/Logo/Uyumsoft REST).
+                // ÖNEMLİ: gerçek çağrı eklenene kadar burası da BAŞARISIZ döner - sahte başarı ÜRETİLMEZ.
+                // Sahte başarı, GİB'de geçerli duran faturayı yerelde "iptal" göstermek demekti.
+                var client = _httpClientFactory.CreateClient("einvoice");
+                // var res = await client.PostAsJsonAsync(apiUrl + "/cancel", new { providerInvoiceId, reason });
+                await Task.CompletedTask;
+                _logger.LogError("e-Fatura IPTAL kodu HENUZ YAZILMADI: {Id} - iptal gonderilmedi.", providerInvoiceId);
+                return new EInvoiceResult
+                {
+                    Success = false,
+                    ErrorMessage = "e-Fatura iptal entegrasyonu henüz uygulanmadı; iptal gönderilmedi."
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "e-Fatura iptal edilemedi: {Id}", providerInvoiceId);
+                return new EInvoiceResult { Success = false, ErrorMessage = ex.Message };
+            }
+        }
     }
 }

@@ -5,6 +5,13 @@ namespace Divisima.Core.Integrations.EInvoice
     public interface IEInvoiceProvider
     {
         Task<EInvoiceResult> SendInvoiceAsync(EInvoiceRequest request);
+
+        // Açıklayıcı yorum: e-Fatura İPTALİ. Bu metot YOKTU: sipariş iptal edilince fatura yalnız
+        // YEREL olarak Cancelled işaretleniyor, GİB tarafına hiçbir bildirim gitmiyordu. Sonuç:
+        // mağazanın kayıtlarında iptal, vergi idaresinde GEÇERLİ fatura - sessiz uyumsuzluk.
+        // providerInvoiceId, gönderim sırasında sağlayıcının döndürdüğü referanstır; yalnız
+        // GERÇEKTEN gönderilmiş faturalar iptal edilebilir.
+        Task<EInvoiceResult> CancelInvoiceAsync(string providerInvoiceId, string reason);
     }
 
     // Açıklayıcı yorum: e-Fatura gönderim isteği (sağlayıcıdan bağımsız model)

@@ -18,11 +18,15 @@ namespace Divisima.Bussiness.Concrete
         private readonly IProductDal _productDal;
         private readonly IMailService _mailService;
 
-        public PriceDropManager(IPriceDropSubscriptionDal subDal, IProductDal productDal, IMailService mailService)
+        private readonly IMarketingGate _marketingGate;
+
+        public PriceDropManager(IPriceDropSubscriptionDal subDal, IProductDal productDal, IMailService mailService,
+            IMarketingGate marketingGate)
         {
             _subDal = subDal;
             _productDal = productDal;
             _mailService = mailService;
+            _marketingGate = marketingGate;
         }
 
         public async Task<(HttpStatusCode, Result)> Subscribe(PriceDropSubscribeDto dto)
@@ -61,6 +65,10 @@ namespace Divisima.Bussiness.Concrete
 
             foreach (var sub in pending)
             {
+                // İYS: fiyat düşüşü bildirimi ticari elektronik iletidir. Claim'den ÖNCE sorulur -
+                // izin yoksa kayıt "bildirildi" damgalanmasın, kişi izin verirse ileride gidebilsin.
+                if (!await _marketingGate.CanSendToEmailAsync(sub.email)) continue;
+
                 // CONCURRENCY FIX (H42): ATOMİK claim ÖNCE - eşzamanlı iki fiyat-güncelleme aynı aboneye ÇİFT mail atmasın.
                 if (!await _subDal.TryClaimForNotificationAsync(sub.id))
                     continue; // başka bir çağrı zaten aldı + gönderdi

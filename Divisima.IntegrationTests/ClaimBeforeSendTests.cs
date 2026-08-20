@@ -39,6 +39,7 @@ namespace Divisima.IntegrationTests
         {
             protected override void ConfigureWebHost(IWebHostBuilder builder)
             {
+                TestHostConfig.Apply(builder);
                 builder.ConfigureServices(services =>
                 {
                     var d = services.SingleOrDefault(x => x.ServiceType == typeof(DbContextOptions<DivisimaDbContext>));
@@ -161,6 +162,45 @@ namespace Divisima.IntegrationTests
             await using (var ctx = NewContext())
             {
                 (await ctx.Set<StockNotificationRequest>().AsNoTracking().SingleAsync(x => x.id == requestId))
+                    .is_notified.Should().BeTrue("kayit bildirildi olarak isaretlenmeli");
+            }
+        }
+
+        // D5b - FIYAT DUSUSU ABONELIGI: stok bildirimiyle AYNI claim deseni. Ayni abonelige
+        // eszamanli iki fiyat guncellemesi gelirse yalniz biri mail hakkini almali.
+        [Fact]
+        public async Task FiyatDususu_SekizParalelCagri_AyniAboneligi_TAM_BIR_KEZ_Sahiplenir()
+        {
+            if (Skipped()) return;
+            const int workers = 8;
+
+            int subId;
+            await using (var ctx = NewContext())
+            {
+                var sub = new PriceDropSubscription
+                {
+                    product_id = 7,
+                    email = $"fiyat-{Guid.NewGuid():N}@divisima.test",
+                    subscribed_price = 250m,
+                    is_notified = false,
+                    created_at = DateTime.Now
+                };
+                ctx.Set<PriceDropSubscription>().Add(sub);
+                await ctx.SaveChangesAsync();
+                subId = sub.id;
+            }
+
+            var claims = await Task.WhenAll(Enumerable.Range(0, workers).Select(_ =>
+                WithScopeAsync(sp => sp.GetRequiredService<IPriceDropSubscriptionDal>()
+                    .TryClaimForNotificationAsync(subId))));
+
+            claims.Count(c => c).Should().Be(1,
+                $"ayni aboneye YALNIZ bir mail hakki verilmeli. Sonuclar: {string.Join(",", claims)}");
+            claims.Count(c => !c).Should().Be(workers - 1, "digerleri sahiplenemeden donmeli");
+
+            await using (var ctx = NewContext())
+            {
+                (await ctx.Set<PriceDropSubscription>().AsNoTracking().SingleAsync(x => x.id == subId))
                     .is_notified.Should().BeTrue("kayit bildirildi olarak isaretlenmeli");
             }
         }
