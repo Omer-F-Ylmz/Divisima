@@ -39,7 +39,7 @@ namespace Divisima.Bussiness.Concrete
                 // dto.id'ye BAŞKASININ adres id'sini vererek o adresi ezebilir veya (mapper customer_id'yi map ederse) KENDİNE
                 // geçirebilirdi. Delete'te sahiplik kontrolü vardı ama Upsert'in UPDATE yolunda YOKTU (controller yorumu aksini iddia ediyordu).
                 if (addr.customer_id != dto.customer_id)
-                    return (HttpStatusCode.Forbidden, new ErrorResult(Messages.AccessDenied));
+                    return (HttpStatusCode.NotFound, new ErrorResult(Messages.AddressNotFound));   // TEK SOZLESME: sahiplik ihlali de "bulunamadi"
                 _mapper.Map(dto, addr);
                 addr.updated_at = DateTime.Now;
                 await _addressDal.UpdateAsync(addr);
@@ -63,7 +63,7 @@ namespace Divisima.Bussiness.Concrete
             if (addr == null) return (HttpStatusCode.NotFound, new ErrorResult(Messages.AddressNotFound));
             // Açıklayıcı yorum: Sahiplik doğrulaması - müşteri yalnızca kendi adresini silebilir (IDOR engeli)
             if (addr.customer_id != customerId)
-                return (HttpStatusCode.Forbidden, new ErrorResult(Messages.AccessDenied));
+                return (HttpStatusCode.NotFound, new ErrorResult(Messages.AddressNotFound));   // TEK SOZLESME: sahiplik ihlali de "bulunamadi"
             addr.is_active = false;   // soft delete
             await _addressDal.UpdateAsync(addr);
 

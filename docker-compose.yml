@@ -45,7 +45,16 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__DivisimaDb: "Server=sqlserver;Database=Divisima;User Id=sa;Password=${DB_PASSWORD:-Your_strong_Pass123};TrustServerCertificate=True"
       Redis__Enabled: "true"
-      Redis__Configuration: "redis:6379"
+      # DUZELTME: anahtar adi "Redis__Configuration" idi; Program.cs ise Redis:Connection okuyor.
+      # Uyusmadigi icin Enabled=true olmasina ragmen baglanti dizgesi varsayilan localhost:6379'a
+      # dusuyordu - yani api konteynerinin KENDI ici - ve ConnectionMultiplexer.Connect acilista
+      # patliyordu. Konteyner hic ayaga kalkmiyordu.
+      Redis__Connection: "redis:6379"
+      # DUZELTME: bu degisken YOKTU. appsettings.json'daki TokenOptions:SecurityKey degeri
+      # "CHANGE_ME" (9 bayt) ve Program.cs'in fail-fast blogu >= 32 bayt sarti KOSULSUZ - yani
+      # Development'ta bile. Sonuc: "docker compose up" acilista InvalidOperationException ile
+      # duser du. Asagidaki deger YALNIZ yerel gelistirme icindir, gercek secret DEGILDIR.
+      TokenOptions__SecurityKey: "divisima-local-compose-key-do-not-use-in-production"
     ports:
       - "5000:5000"
 

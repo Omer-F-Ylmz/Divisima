@@ -34,7 +34,11 @@ namespace Divisima.Bussiness.Concrete
             var size = filter.page_size is < 1 or > 100 ? 20 : filter.page_size;
             var search = (filter.search ?? "").Trim().ToLower();
 
-            var all = await _customerDal.GetListAsync(c =>
+            // GUVENLIK SINIRI: IgnoreQueryFilters YALNIZ bu admin listelemesinde. Global is_active
+            // filtresi yuzunden "is_active = false" filtresi HER ZAMAN bos liste donuyordu - admin
+            // askiya aldigi musterileri hic goremiyordu (dolayisiyla geri de acamiyordu).
+            // NoTracking'dir; yalniz okuma/projeksiyon icin kullanilir.
+            var all = await _customerDal.GetListIgnoringFiltersAsync(c =>
                 (filter.is_active == null || c.is_active == filter.is_active.Value) &&
                 (search == "" || c.name.ToLower().Contains(search) || c.email.ToLower().Contains(search)));
 
@@ -63,7 +67,12 @@ namespace Divisima.Bussiness.Concrete
 
         public async Task<(HttpStatusCode, Result)> SetActive(AdminCustomerStatusDto dto)
         {
-            var customer = await _customerDal.GetAsync(c => c.id == dto.customer_id);
+            // GUVENLIK SINIRI: IgnoreQueryFilters YALNIZ bu admin yolunda. Customer uzerinde global
+            // is_active sorgu filtresi var; normal GetAsync PASIF musteriyi BULAMIYOR. Sonuc:
+            // askiya alinan musteri bir daha ACILAMIYORDU - SetActive(is_active: true) her zaman
+            // 404 CustomerNotFound donuyordu, yani ban tek yonluydu.
+            // Musteri-yuzeyli hicbir sorgu bu metodu kullanmaz; filtre oralarda aynen gecerlidir.
+            var customer = await _customerDal.GetIgnoringFiltersAsync(c => c.id == dto.customer_id);
             if (customer == null)
                 return (HttpStatusCode.NotFound, new ErrorResult(Messages.CustomerNotFound));
 

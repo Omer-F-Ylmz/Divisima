@@ -13,6 +13,18 @@ namespace Divisima.DataAccess.Concrete.EntityFramework
         {
         }
 
+        // Aciklayici yorum: ATOMIK rezervasyon (CAS) - musait miktar yetiyorsa reserved artar, yetmiyorsa
+        // hicbir satir etkilenmez. WHERE kosulu ve UPDATE ayni ifadede oldugu icin "kontrol et sonra yaz"
+        // araligi YOKTUR; iki eszamanli cagri asla birbirinin uzerine yazamaz ve overselling olusmaz.
+        public async Task<int> TryReserveAsync(int productId, string size, int quantity)
+        {
+            return await Context.Set<ProductStock>()
+                .Where(s => s.product_id == productId && s.size == size && s.is_active
+                            && s.stock_quantity - s.reserved_quantity >= quantity)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(s => s.reserved_quantity, s => s.reserved_quantity + quantity));
+        }
+
         // Aciklayici yorum: ATOMIK onay - stock_quantity ve reserved_quantity tek UPDATE'te (row_version cakismasi olmaz).
         // reserved 0 altina inmez (CASE). ReserveStock retry'i ile ayni satirda guvenle calisir.
         public async Task<int> ConfirmStockAsync(int productId, string size, int quantity)

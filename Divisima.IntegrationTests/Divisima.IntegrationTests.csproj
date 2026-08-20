@@ -12,6 +12,13 @@
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.0" />
     <PackageReference Include="Testcontainers.MsSql" Version="3.10.0" />
     <PackageReference Include="FluentAssertions" Version="6.12.0" />
+    <!-- CI'daki "collect:XPlat Code Coverage" secenegi bu toplayiciya ihtiyac duyar. Referans YOKTU:
+         coverage adimi sessizce hicbir dosya uretmiyor, artifact yukleme adimi da her run'da
+         "No files were found with the provided path: ./coverage" uyarisi veriyordu. -->
+    <PackageReference Include="coverlet.collector" Version="6.0.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Divisima.API\Divisima.API.csproj" />

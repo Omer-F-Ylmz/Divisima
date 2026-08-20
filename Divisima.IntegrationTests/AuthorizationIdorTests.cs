@@ -228,7 +228,7 @@ namespace Divisima.IntegrationTests
             }
 
             var theirs = await B.Client.PostAsync($"/api/Order/{orderId}/cancel-item/{itemId}", null);
-            theirs.StatusCode.Should().Be(HttpStatusCode.Forbidden, "yabanci siparisin kalemi iptal edilemez");
+            theirs.StatusCode.Should().Be(HttpStatusCode.NotFound, "TEK SOZLESME: sahiplik ihlali de 404 - varlik sizdirilmaz");
             (await theirs.Content.ReadAsStringAsync()).Should().NotContain(A.Email);
 
             // ISLEM GERCEKTEN OLMADI.
@@ -271,7 +271,7 @@ namespace Divisima.IntegrationTests
             (await mine.Content.ReadAsStringAsync()).Should().Contain(invoiceNumber);
 
             var theirs = await B.Client.GetAsync($"/api/Invoice/order/{orderId}");
-            theirs.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+            theirs.StatusCode.Should().Be(HttpStatusCode.NotFound, "TEK SOZLESME: sahiplik ihlali de 404 - fatura varligi sizdirilmaz");
 
             var body = await theirs.Content.ReadAsStringAsync();
             body.Should().NotContain(invoiceNumber, "fatura numarasi SIZMAMALI");
@@ -298,7 +298,7 @@ namespace Divisima.IntegrationTests
                     .SingleAsync(a => a.customer_id == A.CustomerId)).id;
 
             var theirs = await B.Client.DeleteAsync($"/api/Address/delete/{addressId}");
-            theirs.StatusCode.Should().Be(HttpStatusCode.Forbidden, "yabanci adres silinemez");
+            theirs.StatusCode.Should().Be(HttpStatusCode.NotFound, "TEK SOZLESME: sahiplik ihlali de 404");
 
             await using (var ctx = NewContext())
             {
@@ -359,6 +359,78 @@ namespace Divisima.IntegrationTests
                 (await ctx.Set<WishlistItem>().CountAsync(w => w.customer_id == B.CustomerId))
                     .Should().Be(0, "B nin favorisinde hic satir olusmamali");
             }
+        }
+
+        // SPRINT 2 - TEK SOZLESME TARAMASI.
+        // Oncesinde sahiplik ihlali uclara gore FARKLI cevap veriyordu: siparis/timeline 404
+        // (varligi gizler) ama kalem-iptal / fatura / adres 403 (varligi DOGRULAR). Siparis
+        // ucundaki gizleme bu yuzden deliniyordu: id tarayan biri /api/Invoice/order/{id} 403 mu
+        // 404 mu donduguna bakarak hangi siparis id'lerinin GERCEK oldugunu ogrenebiliyordu.
+        // Artik bes ucun hepsi ayni kodu doner ve govdede sahibe ait hicbir veri bulunmaz.
+        [Fact]
+        public async Task Idor_BesUcunHEPSI_AYNI_KODU_Doner_VeGovdeSizdirmaz()
+        {
+            if (Skipped()) return;
+            var (orderId, itemId, _) = await PlaceOrderForAAsync();
+            var orderNumber = await ReadOrderNumberAsync(orderId);
+
+            // Kalem iptali yalniz Confirmed/Preparing'de acik - sahiplik kontrolu bundan ONCE
+            // calisiyor ama testin "sebep sahiplik" oldugunu netlestirmesi icin durumu ayarla.
+            await using (var ctx = NewContext())
+            {
+                var o = await ctx.Set<Order>().SingleAsync(x => x.id == orderId);
+                o.status = (byte)OrderStatusEnum.Confirmed;
+                await ctx.SaveChangesAsync();
+            }
+
+            string invoiceNumber;
+            await using (var ctx = NewContext())
+                invoiceNumber = (await ctx.Set<Invoice>().AsNoTracking()
+                    .SingleAsync(i => i.order_id == orderId)).invoice_number;
+
+            var upsert = await A.Client.PostAsJsonAsync("/api/Address/upsert", new AddressRequestDto
+            {
+                customer_id = A.CustomerId, title = "Ev", full_name = "A Musteri", phone = "5551112233",
+                city = "Istanbul", district = "Kadikoy", full_address = "Sozlesme testi adresi", is_default = true
+            });
+            upsert.IsSuccessStatusCode.Should().BeTrue("adres eklenebilmeli");
+            int addressId;
+            await using (var ctx = NewContext())
+                addressId = (await ctx.Set<Address>().AsNoTracking().SingleAsync(a => a.customer_id == A.CustomerId)).id;
+
+            var denemeler = new (string ad, Func<Task<HttpResponseMessage>> cagri)[]
+            {
+                ("siparis detayi",  () => B.Client.GetAsync($"/api/Order/get/{orderId}")),
+                ("siparis timeline",() => B.Client.GetAsync($"/api/Order/timeline/{orderId}")),
+                ("kalem iptali",    () => B.Client.PostAsync($"/api/Order/{orderId}/cancel-item/{itemId}", null)),
+                ("fatura",          () => B.Client.GetAsync($"/api/Invoice/order/{orderId}")),
+                ("adres silme",     () => B.Client.DeleteAsync($"/api/Address/delete/{addressId}")),
+            };
+
+            foreach (var (ad, cagri) in denemeler)
+            {
+                var resp = await cagri();
+                resp.StatusCode.Should().Be(HttpStatusCode.NotFound, $"{ad}: tek sozlesme 404 olmali");
+
+                var body = await resp.Content.ReadAsStringAsync();
+                body.Should().NotContain(A.Email, $"{ad}: govdede sahibin e-postasi SIZMAMALI");
+                body.Should().NotContain(orderNumber, $"{ad}: govdede siparis numarasi SIZMAMALI");
+                body.Should().NotContain(invoiceNumber, $"{ad}: govdede fatura numarasi SIZMAMALI");
+                body.Should().NotContain("Sozlesme testi adresi", $"{ad}: govdede adres metni SIZMAMALI");
+            }
+
+            // ISLEM GERCEKTEN OLMADI: hicbir deneme A'nin verisini degistirmemis.
+            await using (var son = NewContext())
+            {
+                (await son.Set<OrderItem>().AsNoTracking().SingleAsync(i => i.id == itemId))
+                    .is_cancelled.Should().BeFalse("kalem iptal edilmemis olmali");
+                (await son.Set<Address>().AsNoTracking().SingleAsync(a => a.id == addressId))
+                    .is_active.Should().BeTrue("adres silinmemis olmali");
+            }
+
+            // VAKUM KIRICI: ayni uclar SAHIBI icin calisiyor - yani 404'un sebebi "uc bozuk" degil.
+            (await A.Client.GetAsync($"/api/Order/get/{orderId}")).StatusCode.Should().Be(HttpStatusCode.OK);
+            (await A.Client.GetAsync($"/api/Invoice/order/{orderId}")).StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
         // =====================================================================

@@ -3,6 +3,8 @@ using Divisima.Bussiness.Abstract;
 using Divisima.DataAccess.Concrete.Context;
 using Divisima.Entity.Dtos.Admin;
 using Divisima.Entity.Entities;
+using Divisima.Core.Utilities.Dtos;
+using Divisima.Core.Utilities.Results;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -180,6 +182,100 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             (await ctx.Set<WishlistItem>().CountAsync(w => w.customer_id == A.CustomerId))
                 .Should().Be(1, "aktif hesabin yazmasi gercekten islenmis olmali");
+        }
+
+        // SPRINT 2 - REAKTIVASYON.
+        // ONCEKI HATA: SetActive musteriyi normal GetAsync ile ariyordu; Customer uzerinde global
+        // is_active filtresi oldugu icin PASIF musteri bulunamiyor ve SetActive(true) her zaman
+        // 404 donuyordu - yani askiya alma TEK YONLUYDU, banlanan hesap bir daha acilamiyordu.
+        // Simdi admin yolu IgnoreQueryFilters kullaniyor. Ayrica her SetActive cagrisinda hesap
+        // durumu cache anahtari dusuruldugu icin ayni access token ANINDA yeniden gecerli olur.
+        [Fact]
+        public async Task Reaktivasyon_AYNI_TOKENI_ANINDA_Yeniden_Kabul_Eder()
+        {
+            if (Skipped()) return;
+
+            // POZITIF OLAY: baslangicta calisiyor.
+            (await A.Client.GetAsync("/api/Account/summary")).StatusCode.Should().Be(HttpStatusCode.OK);
+
+            var suspend = await WithScopeAsync(sp => sp.GetRequiredService<IAdminCustomerService>()
+                .SetActive(new AdminCustomerStatusDto { customer_id = A.CustomerId, is_active = false }));
+            suspend.Item2.Success.Should().BeTrue($"askiya alma basarili olmali: {suspend.Item2.Message}");
+            (await A.Client.GetAsync("/api/Account/summary")).StatusCode
+                .Should().Be(HttpStatusCode.Unauthorized, "askiya alinca token reddedilmeli");
+
+            // ASIL SINAV: pasif musteri GERI ACILABILIYOR mu (eskiden 404 donuyordu).
+            var reactivate = await WithScopeAsync(sp => sp.GetRequiredService<IAdminCustomerService>()
+                .SetActive(new AdminCustomerStatusDto { customer_id = A.CustomerId, is_active = true }));
+            reactivate.Item2.Success.Should().BeTrue(
+                $"pasif musteri GERI ACILABILMELI - eskiden CustomerNotFound donuyordu: {reactivate.Item2.Message}");
+
+            await using (var ctx = NewContext())
+                (await ctx.Set<Customer>().AsNoTracking().SingleAsync(c => c.id == A.CustomerId))
+                    .is_active.Should().BeTrue("musteri veritabaninda yeniden aktif olmali");
+
+            // AYNI access token, TTL beklemeden yeniden gecerli (cache invalidate kaniti).
+            (await A.Client.GetAsync("/api/Account/summary")).StatusCode
+                .Should().Be(HttpStatusCode.OK, "reaktivasyon sonrasi AYNI token ANINDA kabul edilmeli");
+
+            // Musteri normal akista: yazma da calisiyor.
+            var urun = await NewProductAsync();
+            (await A.Client.PostAsync($"/api/Wishlist/toggle?productId={urun}", null))
+                .IsSuccessStatusCode.Should().BeTrue("reaktive musteri yazma yapabilmeli");
+            await using (var ctx = NewContext())
+                (await ctx.Set<WishlistItem>().CountAsync(w => w.customer_id == A.CustomerId))
+                    .Should().Be(1, "yazma gercekten islenmis olmali");
+        }
+
+        // ONCEKI HATA: ListCustomers de normal GetListAsync kullaniyordu; global filtre yuzunden
+        // "is_active = false" filtresi HER ZAMAN bos liste donuyordu - admin askiya aldigi
+        // musterileri hic goremiyordu. VAKUM KIRICI: bir pasif + bir aktif musteri tohumlanir ve
+        // iki filtrenin sayilari AYRI AYRI dogrulanir (tek filtre bakilsa "hepsini donduruyor" da
+        // yesil kalirdi).
+        [Fact]
+        public async Task AdminListesi_PasifFiltresi_PasifMusteriyi_Donduruyor()
+        {
+            if (Skipped()) return;
+
+            var pasifEmail = $"pasif-{Guid.NewGuid():N}@divisima.test";
+            var aktifEmail = $"aktif-{Guid.NewGuid():N}@divisima.test";
+            await using (var ctx = NewContext())
+            {
+                ctx.Set<Customer>().Add(new Customer
+                {
+                    name = "Pasif Musteri", email = pasifEmail, phone = "5550000001",
+                    password_hash = new byte[] { 1 }, password_salt = new byte[] { 2 },
+                    is_active = false, email_verified = true, created_at = DateTime.Now
+                });
+                ctx.Set<Customer>().Add(new Customer
+                {
+                    name = "Aktif Musteri", email = aktifEmail, phone = "5550000002",
+                    password_hash = new byte[] { 1 }, password_salt = new byte[] { 2 },
+                    is_active = true, email_verified = true, created_at = DateTime.Now
+                });
+                await ctx.SaveChangesAsync();
+            }
+
+            // Govdeyi metin olarak degil TIPLI okuyoruz: Result'i JSON'a cevirmek Data alanini
+            // dusuruyor (bildirilen tip Result, calisma zamani SuccessDataResult<...>).
+            static async Task<List<string>> EpostalariGetirAsync(
+                Func<Func<IServiceProvider, Task<(HttpStatusCode, Result)>>, Task<(HttpStatusCode, Result)>> scope,
+                bool aktifMi)
+            {
+                var r = await scope(sp => sp.GetRequiredService<IAdminCustomerService>()
+                    .ListCustomers(new AdminCustomerFilterDto { is_active = aktifMi, page = 1, page_size = 100 }));
+                r.Item2.Success.Should().BeTrue($"listeleme basarili olmali: {r.Item2.Message}");
+                var data = r.Item2.Should().BeOfType<SuccessDataResult<PagedResult<AdminCustomerListDto>>>().Subject.Data;
+                return data.Items.Select(i => i.email).ToList();
+            }
+
+            var pasifler = await EpostalariGetirAsync(f => WithScopeAsync(f), aktifMi: false);
+            pasifler.Should().Contain(pasifEmail, "pasif filtresi pasif musteriyi DONDURMELI");
+            pasifler.Should().NotContain(aktifEmail, "pasif filtresi aktif musteriyi dondurMEMELI");
+
+            var aktifler = await EpostalariGetirAsync(f => WithScopeAsync(f), aktifMi: true);
+            aktifler.Should().Contain(aktifEmail, "aktif filtresi aktif musteriyi dondurmeli");
+            aktifler.Should().NotContain(pasifEmail, "aktif filtresi pasif musteriyi dondurMEMELI");
         }
 
         // Middleware yalniz kimlikli MUSTERI isteklerinde devreye girer: anonim uclar ve

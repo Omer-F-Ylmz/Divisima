@@ -438,7 +438,7 @@ namespace Divisima.Bussiness.Concrete
             if (order == null)
                 return (HttpStatusCode.NotFound, new ErrorResult(Messages.OrderNotFound));
             if (order.customer_id != customerId)
-                return (HttpStatusCode.Forbidden, new ErrorResult(Messages.OrderAccessDenied));
+                return (HttpStatusCode.NotFound, new ErrorResult(Messages.OrderNotFound));   // TEK SOZLESME: sahiplik ihlali de "bulunamadi" (varlik sizdirilmaz)
 
             var items = await _orderItemDal.GetListAsync(i => i.order_id == order.id && !i.is_cancelled);
             var productIds = items.Select(i => i.product_id).Distinct().ToList();
@@ -722,7 +722,7 @@ Tarih: {order.created_at:dd.MM.yyyy}</p>
 
             // Açıklayıcı yorum: IDOR koruması - sipariş bu müşteriye mi ait
             if (order.customer_id != customerId)
-                return (HttpStatusCode.Forbidden, new ErrorResult(Messages.OrderAccessDenied));
+                return (HttpStatusCode.NotFound, new ErrorResult(Messages.OrderNotFound));   // TEK SOZLESME: sahiplik ihlali de "bulunamadi" (varlik sizdirilmaz)
 
             // Açıklayıcı yorum: Sadece ödenmiş ve henüz kargolanmamış siparişlerde kısmi iptal
             if (order.status != (byte)OrderStatusEnum.Confirmed && order.status != (byte)OrderStatusEnum.Preparing)
@@ -856,7 +856,7 @@ Tarih: {order.created_at:dd.MM.yyyy}</p>
             var order = await _orderDal.GetAsync(o => o.id == orderId);
             if (order == null) return (HttpStatusCode.NotFound, new ErrorResult(Messages.OrderNotFound));
             if (order.customer_id != customerId)
-                return (HttpStatusCode.Forbidden, new ErrorResult(Messages.OrderAccessDenied));
+                return (HttpStatusCode.NotFound, new ErrorResult(Messages.OrderNotFound));   // TEK SOZLESME: sahiplik ihlali de "bulunamadi" (varlik sizdirilmaz)
 
             var (earliest, latest) = DeliveryEstimator.Estimate(order.created_at);
             var dto = new Divisima.Entity.Dtos.Order.EstimatedDeliveryDto

@@ -126,5 +126,79 @@ namespace Divisima.IntegrationTests
                 foreach (var m in managers) await m.ctx.DisposeAsync();
             }
         }
+
+        // SPRINT 2 - ATOMIK REZERVASYON (CAS) PINI.
+        // ESKI DESEN: oku -> bellekte artir -> row_version ile yaz -> DbUpdateConcurrencyException
+        // -> 3 kez dene -> pes et ve 409 don. Bol stok VARKEN bile eszamanli cagrilarin cogu
+        // "Stok guncelleme cakismasi" aliyordu; musteri bunu "stok yok" diye okur.
+        // YENI DESEN: tek atomik UPDATE (WHERE available >= qty). Cekisme satir kilidiyle cozulur,
+        // concurrency istisnasi URETILMEZ - dolayisiyla stok yeterliyken KAYBEDEN CAGRI OLMAZ.
+        [Fact]
+        public async Task ReserveStock_BolStokla_SekizParalelIstek_HEPSI_Basarili_SIFIR_Cakisma()
+        {
+            if (Skipped()) return;
+            const int stock = 500;
+            const int each = 1;
+            const int callers = 8;
+
+            var pid = await NewProductWithStockAsync(stock);
+            var managers = Enumerable.Range(0, callers).Select(_ => NewManager()).ToList();
+            try
+            {
+                var results = await Task.WhenAll(managers.Select((m, i) =>
+                    m.mgr.ReserveStock(pid, "M", each, orderId: 7300 + i)));
+
+                var basarili = results.Count(r => r.Item2.Success);
+                var cakisma = results.Count(r => r.Item1 == System.Net.HttpStatusCode.Conflict);
+
+                basarili.Should().Be(callers,
+                    $"stok bol - sekiz cagrinin HEPSI rezerve edebilmeli. Kodlar: {string.Join(",", results.Select(r => (int)r.Item1))}");
+                cakisma.Should().Be(0, "atomik CAS ile concurrency cakismasi (409) HIC olusmamali");
+
+                var after = await ReadStockAsync(pid);
+                after.reserved.Should().Be(callers * each, "rezerve sayaci basarili istek sayisiyla birebir");
+                after.physical.Should().Be(stock, "rezervasyon fiziksel stogu degistirmez");
+            }
+            finally
+            {
+                foreach (var m in managers) await m.ctx.DisposeAsync();
+            }
+        }
+
+        // Stok TAM N iken: N cagri gecer, kalanlar "yetersiz stok" (400) alir - 409 DEGIL.
+        // Ayrim onemli: 400 dogru ve anlasilir bir cevap ("stok kalmadi"), 409 ise altyapi
+        // cakismasini musteriye stok sorunu gibi gosteren yanlis sinyaldi.
+        [Fact]
+        public async Task ReserveStock_TamNStok_TamN_Basarili_Kalanlar400_YetersizStok()
+        {
+            if (Skipped()) return;
+            const int stock = 5;
+            const int each = 1;
+            const int callers = 8;
+
+            var pid = await NewProductWithStockAsync(stock);
+            var managers = Enumerable.Range(0, callers).Select(_ => NewManager()).ToList();
+            try
+            {
+                var results = await Task.WhenAll(managers.Select((m, i) =>
+                    m.mgr.ReserveStock(pid, "M", each, orderId: 7400 + i)));
+
+                var kodlar = string.Join(",", results.Select(r => (int)r.Item1));
+                results.Count(r => r.Item2.Success).Should().Be(stock,
+                    $"tam stok kadar cagri gecmeli. Kodlar: {kodlar}");
+                results.Count(r => r.Item1 == System.Net.HttpStatusCode.BadRequest).Should().Be(callers - stock,
+                    $"kalan cagrilar YETERSIZ STOK (400) almali. Kodlar: {kodlar}");
+                results.Count(r => r.Item1 == System.Net.HttpStatusCode.Conflict).Should().Be(0,
+                    $"hicbir cagri cakisma (409) ALMAMALI. Kodlar: {kodlar}");
+
+                var after = await ReadStockAsync(pid);
+                after.reserved.Should().Be(stock, "rezerve tam stoka esitlenmeli");
+                after.available.Should().Be(0, "musait sifira inmeli - overselling yok");
+            }
+            finally
+            {
+                foreach (var m in managers) await m.ctx.DisposeAsync();
+            }
+        }
     }
 }

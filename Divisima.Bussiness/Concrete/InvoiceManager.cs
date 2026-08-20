@@ -158,7 +158,7 @@ namespace Divisima.Bussiness.Concrete
                 return (HttpStatusCode.NotFound, new ErrorResult(Messages.InvoiceNotFound));
             // Açıklayıcı yorum: SAHİPLİK - yalnız kendi faturası (IDOR engeli)
             if (invoice.customer_id != customerId)
-                return (HttpStatusCode.Forbidden, new ErrorResult(Messages.InvoiceNotYours));
+                return (HttpStatusCode.NotFound, new ErrorResult(Messages.InvoiceNotFound));   // TEK SOZLESME: sahiplik ihlali de "bulunamadi"
             return (HttpStatusCode.OK, new SuccessDataResult<InvoiceResponseDto>(Map(invoice)));
         }
 

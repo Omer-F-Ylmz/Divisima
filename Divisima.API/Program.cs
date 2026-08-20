@@ -55,6 +55,21 @@ var builder = WebApplication.CreateBuilder(args);
         var placeholders = new[] { "CHANGE_ME", "placeholder", "your-", "xxxxx", "TODO" };
         if (placeholders.Any(p => (jwtKey ?? "").Contains(p, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("FATAL: Config - TokenOptions:SecurityKey placeholder değeri içeriyor (prod'da gerçek secret gerekli).");
+
+        // Açıklayıcı yorum: ALAN ŞİFRELEME ANAHTARI - prod'da ZORUNLU.
+        // AesEncryptionProvider anahtar boşsa SESSİZCE sabit bir metinden (SHA256("DIVISIMA_DEV_
+        // ENCRYPTION_KEY")) anahtar türetiyor. Bu dev kolaylığı; prod'da çalışırsa tüm alan
+        // şifrelemesi HERKESİN BİLEBİLECEĞİ bir anahtarla yapılır ve hiçbir uyarı çıkmaz.
+        // Depodaki appsettings.json'da değer boş olduğu için bu sessiz düşüş gerçek bir risk.
+        // Development'ta fallback korunur - yalnız prod'da açılış engellenir.
+        var encKey = cfg["Encryption:Key"];
+        if (string.IsNullOrWhiteSpace(encKey))
+            throw new InvalidOperationException("FATAL: Config - Encryption:Key tanımlı değil (prod'da AES-256 anahtarı zorunlu; üret: openssl rand -base64 32).");
+        byte[] encKeyBytes;
+        try { encKeyBytes = Convert.FromBase64String(encKey); }
+        catch (FormatException) { throw new InvalidOperationException("FATAL: Config - Encryption:Key geçerli base64 değil."); }
+        if (encKeyBytes.Length != 32)
+            throw new InvalidOperationException($"FATAL: Config - Encryption:Key AES-256 için TAM 32 bayt olmalı (bulunan: {encKeyBytes.Length}).");
     }
 }
 
@@ -212,11 +227,28 @@ builder.Services.AddRateLimiter(options =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             factory: _ => new FixedWindowRateLimiterOptions { PermitLimit = 100, Window = TimeSpan.FromMinutes(1) }));
-    options.AddFixedWindowLimiter("auth", opt => { opt.PermitLimit = 5; opt.Window = TimeSpan.FromMinutes(1); });
     // GÜVENLİK/DOĞRULUK: "payment" policy'si EKSİKTİ -> PaymentController [EnableRateLimiting("payment")]
     // tanımsız policy'ye referans veriyordu; .NET 8 yerleşik limiter bunu runtime'da InvalidOperationException
     // ile reddeder (ödeme endpoint'i 500). Redis middleware'indeki "payment" scope (10/dk) ile tutarlı tanımlandı.
-    options.AddFixedWindowLimiter("payment", opt => { opt.PermitLimit = 10; opt.Window = TimeSpan.FromMinutes(1); });
+    //
+    // PARTITION DÜZELTMESİ: bu iki policy önce AddFixedWindowLimiter ile tanımlıydı; o aşırı yükleme
+    // TEK bir limiter örneği üretir, yani kova TÜM kullanıcılar arasında paylaşılırdı. Sonuç: site
+    // genelinde dakikada 5 register/login isteği - tek bir kullanıcı herkesin girişini kilitleyebilirdi
+    // (testle doğrulandı: 6. istek 429, üstelik farklı uçtan). GlobalLimiter zaten IP'ye bölünmüştü,
+    // bu ikisi bölünmemişti. Artık AddPolicy + RateLimitPartition ile istemci başına ayrı kova var.
+    //
+    // DEPLOY NOTU: bölümleme RemoteIpAddress'e dayanır. Ters proxy/LB arkasında
+    // ForwardedHeaders:KnownProxies DOLDURULMAZSA tüm istekler LB'nin IP'sinde toplanır ve bu
+    // düzeltme kâğıt üstünde kalır - iki ayar birlikte anlamlıdır.
+    options.AddPolicy("auth", context => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        // Bölümlenince 5/dk gereksiz dar kalıyordu (aynı evden/ofisten giren birkaç kullanıcı
+        // birbirini kilitliyordu). İstemci başına 10/dk hem kaba kuvvete kapalı hem yaşanabilir.
+        factory: _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1) }));
+
+    options.AddPolicy("payment", context => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        factory: _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1) }));
 });
 
 // B12: API versiyonlama

@@ -278,7 +278,11 @@ jobs:
           # okunamiyor - kimlik dogrulamasi istiyor). Bu yuzden kirmizinin sebebi buraya da basilir.
           # DIKKAT - annotation'lar PUBLIC: YALNIZ Failed/assert satirlari basilir; cikti kuyrugu
           # ve ortam bilgisi Summary'de kalir, buraya SIZDIRILMAZ.
+          # DESEN GENISLETILDI (ci.yml ile ayni): istisna tipi ve IC istisna satirlari da dusuyor,
+          # yigin izi disarida, bire bir tekrarlar awk ile eleniyor. Gerekce icin ci.yml'daki
+          # ayrintili yoruma bakin.
           if [ -f "$F" ]; then
-            grep -aE "^[[:space:]]*(Failed|X) |^[[:space:]]*(Expected|Actual) " "$F" | head -10 \
+            grep -aE "^[[:space:]]*(Failed|X) |^[[:space:]]*(Expected|Actual) |^[[:space:]]*(-+ )?[A-Za-z][A-Za-z0-9_.]*Exception[ :(]" "$F" \
+              | awk '!seen[$0]++' | head -20 \
               | while IFS= read -r line; do echo "::error::${line}"; done
           fi

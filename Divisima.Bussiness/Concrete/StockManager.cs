@@ -127,30 +127,28 @@ namespace Divisima.Bussiness.Concrete
         public async Task<(HttpStatusCode, Result)> ReserveStock(int productId, string size, int quantity, int orderId)
         {
             size = (size ?? string.Empty).Trim();   // H48: beden normalizasyonu (bosluk kaynakli hayalet stok engeli)
-            const int maxRetry = 3;
-            for (int attempt = 0; attempt < maxRetry; attempt++)
+
+            // ESKI DESEN (kaldirildi): oku -> bellekte artir -> row_version ile yaz -> catch -> 3 kez dene.
+            // Ayni urun+bedene eszamanli siparislerde denemeler tukeniyordu ve 8 siparisin 7'si
+            // 500 adet stok VARKEN "Stok guncelleme cakismasi" (409) aliyordu. Musteri bunu
+            // "stok yok" diye okur - olcum D2 dalgasindaydi.
+            //
+            // YENI DESEN: tek atomik CAS. Kosul ve yazma ayni SQL UPDATE'inde oldugu icin
+            // kontrol-yazma araligi yok, concurrency EXCEPTION uretilmez, cekisme satir
+            // kilidiyle cozulur. Retry / 409 yolu tamamen ortadan kalkti.
+
+            // Varlik kontrolu ayri ve TAKIPSIZ: "beden yok" (404) ile "musait degil" (400) ayrimi
+            // korunsun. Takipsiz olmasi sart - CAS sonrasi bellekteki nesne bayat kalirdi ve ayni
+            // DbContext'te sonraki bir SaveChanges'i haksiz yere concurrency hatasina dusururdu.
+            if (!await _productStockDal.AnyAsync(s => s.product_id == productId && s.size == size && s.is_active))
+                return (HttpStatusCode.NotFound, new ErrorResult(Messages.StockNotFound));
+
+            var reserved = await _productStockDal.TryReserveAsync(productId, size, quantity);
+            if (reserved == 0)
+                return (HttpStatusCode.BadRequest, new ErrorResult(Messages.StockInsufficient));
+
+            try
             {
-                var stock = await _productStockDal.GetAsync(s => s.product_id == productId && s.size == size && s.is_active);
-                if (stock == null)
-                    return (HttpStatusCode.NotFound, new ErrorResult(Messages.StockNotFound));
-
-                // Açıklayıcı yorum: Müsait = fiziksel - rezerve; yetmezse overselling engeli
-                if ((stock.stock_quantity - stock.reserved_quantity) < quantity)
-                    return (HttpStatusCode.BadRequest, new ErrorResult(Messages.StockInsufficient));
-
-                stock.reserved_quantity += quantity;
-                stock.updated_at = DateTime.Now;
-                try
-                {
-                    await _productStockDal.UpdateAsync(stock);
-                }
-                catch (DbUpdateConcurrencyException)
-                {
-                    if (attempt == maxRetry - 1)
-                        return (HttpStatusCode.Conflict, new ErrorResult(Messages.StockConcurrencyConflict));
-                    continue;
-                }
-
                 // Açıklayıcı yorum: Rezervasyon kaydı (süre dolunca job serbest bırakır)
                 await _stockReservationDal.AddAsync(new StockReservation
                 {
@@ -162,9 +160,20 @@ namespace Divisima.Bussiness.Concrete
                     expires_at = DateTime.Now.AddMinutes(ReservationMinutes),
                     created_at = DateTime.Now
                 });
-                return (HttpStatusCode.OK, new SuccessResult(Messages.StockReserved));
             }
-            return (HttpStatusCode.Conflict, new ErrorResult(Messages.StockConcurrencyConflict));
+            catch
+            {
+                // TELAFI: sayac arttiktan sonra rezervasyon satiri yazilamazsa sayac SIZAR
+                // (stok kimseye ait olmadan bloke kalir). Tek cagiran (OrderManager.PlaceOrder)
+                // bu cagriyi zaten bir transaction icinde yapiyor ve rollback ikisini birden geri
+                // alir; buradaki telafi transaction'siz bir cagiran icin savunmadir.
+                // NOT: burada YENI transaction ACILMAZ - ayni DbContext'te zaten acik bir
+                // transaction varken BeginTransaction istisna firlatir ve siparis akisini kirardi.
+                await _productStockDal.ReleaseReservedAsync(productId, size, quantity);
+                throw;
+            }
+
+            return (HttpStatusCode.OK, new SuccessResult(Messages.StockReserved));
         }
 
         // Açıklayıcı yorum: ONAYLA - ödeme başarılı; rezervasyonu gerçek stok düşümüne çevir (fiziksel -= , rezerve -=).

@@ -11,23 +11,27 @@ using Xunit;
 
 namespace Divisima.IntegrationTests
 {
-    // D5-9 - AUTH RATE LIMIT: TEK KOVA (PARTITIONSIZ) - AMPIRIK PIN
+    // AUTH RATE LIMIT SOZLESMESI
     //
-    // Program.cs:216
-    //     options.AddFixedWindowLimiter("auth", opt => { opt.PermitLimit = 5; opt.Window = 1 dk; });
-    // Global limiter PartitionedRateLimiter.Create ile IP ye gore bolunmus; "auth" policy si ise
-    // BOLUNMEMIS - AddFixedWindowLimiter tek bir limiter ornegi uretir. AuthController sinif
-    // duzeyinde [EnableRateLimiting("auth")] tasiyor, yani register/login/verify-email AYNI
-    // kovadan yer.
+    // GECMIS: "auth" policy si AddFixedWindowLimiter ile tanimliydi; o asiri yukleme TEK bir
+    // limiter ornegi uretir, yani kova TUM kullanicilar arasinda paylasilirdi. Site genelinde
+    // dakikada 5 register/login demekti - tek bir istemci herkesin girisini kilitleyebilirdi.
+    // Bu sinif once o davranisi ampirik olarak pinledi (6. istek 429).
     //
-    // BU SINIFA AYRI HOST: alti istek kovayi tamamen bitiriyor. Diger test siniflari kendi
+    // SIMDI: AddPolicy + RateLimitPartition(RemoteIpAddress) ile istemci basina ayri kova ve
+    // limit 10/dk (bolunmus haliyle 5 gereksiz dardi). Bu test artik su ikisini olcer:
+    //   1) AYNI istemci icin limit 10, on birinci istek 429,
+    //   2) kova ENDPOINT basina DEGIL - login sayaci tukenince register de 429 aliyor
+    //      (policy AuthController un tamamina sinif duzeyinde uygulanmis).
+    //
+    // KAPSAM SINIRI (bilincli): test sunucusunda RemoteIpAddress null oldugu icin tum istekler
+    // ayni ("unknown") partition'a duser. Dolayisiyla bu test "farkli istemciler AYRI kovadan
+    // yer" iddiasini KANITLAMAZ - onu ancak gercek ag katmani gosterebilir. Burada olculen sey
+    // limitin degeri ve endpoint'ler arasi paylasim.
+    //
+    // BU SINIFA AYRI HOST: on bir istek kovayi bitiriyor. Diger test siniflari kendi
     // WebApplicationFactory ornekleriyle kostugu icin onlarin TestAuthHelper login leri
     // etkilenmez (D4 teki iki-host deseninin ayni gerekcesi).
-    //
-    // KISIT: test sunucusunda RemoteIpAddress null; X-Forwarded-For de guvenilmeyen kaynaktan
-    // geldigi icin yok sayilir. Bu yuzden "FARKLI istemci kimligi ayni kovadan yer" iddiasi
-    // dogrudan gosterilemedi. Gosterilen sey: kova ENDPOINT ler arasinda paylasiliyor
-    // (login de register de ayni sayaci tuketiyor) ve limit 5 te doluyor.
     [Trait("Category", "Sql")]
     public class AuthRateLimitPinTests : IAsyncLifetime
     {
@@ -95,15 +99,15 @@ namespace Divisima.IntegrationTests
         private bool Skipped() => !_sqlAvailable;
 
         [Fact]
-        public async Task AuthPolicy_BesIstekten_SonrakiIstek_429_AlirVeKovaEndpointlerArasiPaylasilir()
+        public async Task AuthPolicy_IstemciBasina_OnIstekten_Sonra_429_VeKovaEndpointlerArasiPaylasilir()
         {
             if (Skipped()) return;
             var client = _factory!.CreateClient();
 
-            // Ilk BES istek: kimlik bilgileri kasten yanlis - amac dogrulama degil, sayaci tuketmek.
+            // Ilk ON istek: kimlik bilgileri kasten yanlis - amac dogrulama degil, sayaci tuketmek.
             // Bunlarin 429 ALMAMASI gerekir (uygulamaya ulasip is mantigindan cevap almalilar).
             var kodlar = new List<int>();
-            for (int i = 0; i < 5; i++)
+            for (int i = 0; i < 10; i++)
             {
                 var resp = await client.PostAsJsonAsync("/api/auth/login",
                     new { email = $"yok-{Guid.NewGuid():N}@divisima.test", password = "YanlisParola123" });
@@ -111,13 +115,13 @@ namespace Divisima.IntegrationTests
             }
 
             kodlar.Should().NotContain((int)HttpStatusCode.TooManyRequests,
-                $"ilk bes istek limite takilmamali. Kodlar: {string.Join(",", kodlar)}");
+                $"ilk on istek limite takilmamali. Kodlar: {string.Join(",", kodlar)}");
 
-            // ALTINCI istek AYNI uctan -> kova bitti.
-            var altinci = await client.PostAsJsonAsync("/api/auth/login",
+            // ON BIRINCI istek AYNI uctan -> bu istemcinin kovasi bitti.
+            var onBirinci = await client.PostAsJsonAsync("/api/auth/login",
                 new { email = $"yok-{Guid.NewGuid():N}@divisima.test", password = "YanlisParola123" });
-            ((int)altinci.StatusCode).Should().Be(429,
-                "PermitLimit=5 - altinci istek reddedilmeli");
+            ((int)onBirinci.StatusCode).Should().Be(429,
+                "PermitLimit=10 - on birinci istek reddedilmeli");
 
             // FARKLI bir auth ucu da AYNI kovadan yiyor: policy endpoint basina degil,
             // AuthController un tamami icin tek sayac tutuyor.

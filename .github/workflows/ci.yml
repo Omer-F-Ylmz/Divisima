@@ -156,10 +156,21 @@ jobs:
 
           # ANNOTATION KANALI: annotation'lar check-runs API'sinden ANONIM okunabilir (Summary
           # okunamiyor - kimlik dogrulamasi istiyor). Bu yuzden kirmizinin sebebi buraya da basilir.
-          # DIKKAT - annotation'lar PUBLIC: YALNIZ Failed/assert satirlari basilir; cikti kuyrugu
+          # DIKKAT - annotation'lar PUBLIC: yalnizca TEST SONUCU satirlari basilir; cikti kuyrugu
           # ve ortam bilgisi Summary'de kalir, buraya SIZDIRILMAZ.
+          #
+          # DESEN GENISLETILDI: onceki hali yalniz "Failed" ve "Expected/Actual" satirlarini
+          # aliyordu. Hata bir ASSERTION degil ISTISNA oldugunda hicbir sebep satiri dusmuyordu -
+          # OrderEndpointTests uc run boyunca "Failed <isim>" disinda tek kelime uretmedi.
+          # Artik istisna tipi satirlari da yakalaniyor:
+          #   "   System.InvalidOperationException : ..."      (dis istisna)
+          #   "---- Microsoft.Data.SqlClient.SqlException : ..." (IC istisna - asil sebep)
+          # Yigin izi satirlari ("   at Namespace.Method(...)") KASITLI olarak disarida:
+          # bunlar sebep degil gurultu. awk ile bire bir tekrar eden satirlar elenir (uygulamanin
+          # kendi Serilog cikti satirlari ayni istisnayi defalarca yazabiliyor).
           if [ -f "$F" ]; then
-            grep -aE "^[[:space:]]*(Failed|X) |^[[:space:]]*(Expected|Actual) " "$F" | head -10 \
+            grep -aE "^[[:space:]]*(Failed|X) |^[[:space:]]*(Expected|Actual) |^[[:space:]]*(-+ )?[A-Za-z][A-Za-z0-9_.]*Exception[ :(]" "$F" \
+              | awk '!seen[$0]++' | head -20 \
               | while IFS= read -r line; do echo "::error::${line}"; done
           fi
 

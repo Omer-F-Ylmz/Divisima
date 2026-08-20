@@ -6,6 +6,7 @@ using Divisima.DataAccess.Concrete.Context;
 using Divisima.DataAccess.Concrete.EntityFramework;
 using Divisima.Entity.Entities;
 using FluentAssertions;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Xunit;
@@ -27,9 +28,17 @@ namespace Divisima.IntegrationTests
         //  - VERİLMEMİŞSE (yerel): LocalDB denenir; yoksa testler atlanır (Windows dışı geliştirici makinesi).
         private static readonly string? ExplicitConn = Environment.GetEnvironmentVariable("DIVISIMA_TEST_SQL");
 
-        private static readonly string ConnStr = string.IsNullOrWhiteSpace(ExplicitConn)
-            ? @"Server=(localdb)\MSSQLLocalDB;Database=DivisimaInvoiceCancelTest;Trusted_Connection=True;TrustServerCertificate=True;"
-            : ExplicitConn;
+        // Veritabani adini SINIF kendisi belirler (diger tum SQL sinifiyla ayni desen).
+        // ONCEDEN: ExplicitConn ham kullaniliyordu; dizgede "Database=" yoksa EnsureDeleted
+        // "The database name could not be determined" ile duserdi. Yani sinif, CI'daki dizgenin
+        // SEKLINE bagliydi. InitialCatalog burada set edilince bagimlilik ortadan kalkar.
+        private const string DbName = "DivisimaInvoiceCancelTest";
+
+        private static readonly string ConnStr =
+            new SqlConnectionStringBuilder(string.IsNullOrWhiteSpace(ExplicitConn)
+                    ? @"Server=(localdb)\MSSQLLocalDB;Trusted_Connection=True;TrustServerCertificate=True;"
+                    : ExplicitConn)
+            { InitialCatalog = DbName }.ConnectionString;
 
         private bool _sqlAvailable;
 

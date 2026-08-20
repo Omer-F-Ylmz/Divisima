@@ -19,11 +19,10 @@ namespace Divisima.API.Controllers
         protected int CurrentSellerId =>
             int.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : 0;
 
-        // Açıklayıcı yorum: İstenen kaynak sahibi ile oturum kullanıcısı aynı mı? Değilse 403 (IDOR engeli).
-        protected IActionResult EnsureOwner(int resourceOwnerId, out bool ok)
-        {
-            ok = resourceOwnerId == CurrentCustomerId && CurrentCustomerId > 0;
-            return ok ? null : StatusCode(403, new { Success = false, Message = "Bu kaynağa erişim yetkiniz yok." });
-        }
+        // NOT: Burada bir EnsureOwner yardımcısı vardı ve HİÇBİR yerden çağrılmıyordu (grep: sıfır
+        // kullanım). Üstelik 403 döndürüyordu; sahiplik ihlalinde artık tek sözleşme 404 (varlık
+        // sızdırılmaz). Ölü ve sözleşmeye aykırı bir yardımcıyı bırakmak, bir gün "hazır var" diye
+        // kullanılıp tutarsızlığı geri getirmek demekti - kaldırıldı. Sahiplik kontrolleri iş
+        // katmanında (manager'larda) yapılır; kaynak zaten orada okunuyor, kontrol de orada olmalı.
     }
 }
