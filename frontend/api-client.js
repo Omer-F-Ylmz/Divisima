@@ -3,7 +3,12 @@
  * ---------------------------------------
  * Çerçeveden bağımsız (vanilla JS). Tüm backend uçlarını sarar.
  * Özellikler: JWT saklama, 401'de otomatik token yenileme, CSRF (double-submit),
- *             httpOnly refresh cookie (credentials: include), tutarlı hata yönetimi.
+ *             tutarlı hata yönetimi.
+ *
+ * NOT (E1): refresh token bugün httpOnly cookie ile TAŞINMIYOR. Backend onu login
+ * yanıtının gövdesinde döndürüyor ve /api/auth/refresh'te gövdede bekliyor
+ * (SetRefreshTokenCookie yardımcısı tanımlı ama hiç çağrılmıyor - ölçüldü).
+ * İstemci bu yüzden refresh token'ı da saklıyor; güvenlik notu setRefreshToken'da.
  *
  * Kullanım:
  *   const api = new DivisimaAPI("https://api.divisima.com");
@@ -18,11 +23,13 @@
       // Açıklama: Sondaki / temizlenir
       this.baseUrl = (baseUrl || "").replace(/\/+$/, "");
       this._accessToken = null;
-      this._refreshing = null; // eşzamanlı 401'lerde tek yenileme
+      this._refreshToken = null;
+      this._refreshing = null; // eszamanli 401lerde tek yenileme
 
-      // Açıklama: Erişim token'ı sekmeler arası paylaşılsın diye localStorage (refresh token httpOnly cookie'de, JS görmez)
+      // Açıklama: Token'lar sekmeler arası paylaşılsın diye localStorage (bkz. yukarıdaki NOT)
       try {
         this._accessToken = localStorage.getItem("divisima_access_token");
+        this._refreshToken = localStorage.getItem("divisima_refresh_token");
       } catch (_) {}
 
       // Alt modüller
@@ -58,6 +65,35 @@
       } catch (_) {}
     }
     getAccessToken() { return this._accessToken; }
+
+    // REFRESH TOKEN SAKLAMA (E1). Backend bugün refresh token'ı GÖVDEDE dönüyor ve gövdede
+    // geri bekliyor (SetRefreshTokenCookie tanımlı ama çağrılmıyor - ölçüldü). Bu yüzden
+    // istemcinin saklaması ZORUNLU; aksi halde otomatik yenileme hiç çalışamaz.
+    // GÜVENLİK NOTU: JS'in erişebildiği bir yerde durması httpOnly cookie'den ZAYIFTIR
+    // (XSS'te çalınabilir). Doğru çözüm backend'in cookie yazması + cookie'den okumasıdır;
+    // bu bir BACKEND değişikliğidir ve E1 kapsamı dışıdır (raporda ŞÜPHELİ olarak duruyor).
+    setRefreshToken(token) {
+      this._refreshToken = token;
+      try {
+        if (token) localStorage.setItem("divisima_refresh_token", token);
+        else localStorage.removeItem("divisima_refresh_token");
+      } catch (_) {}
+    }
+    getRefreshToken() {
+      if (this._refreshToken) return this._refreshToken;
+      try { this._refreshToken = localStorage.getItem("divisima_refresh_token"); } catch (_) {}
+      return this._refreshToken;
+    }
+
+    // Göreli medya URL'ini API tabanına çöz. Backend Storage:PublicBaseUrl bosken
+    // "/uploads/products/x.png" gibi GÖRELİ URL döndürüyor; storefront ayrı origin'de
+    // çalıştığında bu kendi origin'ine çözülür ve 404 verir (E4a'da ölçüldü).
+    resolveUrl(u) {
+      u = String(u || "");
+      if (!u) return "";
+      if (/^(https?:)?\/\//i.test(u) || /^data:/i.test(u)) return u;
+      return this.baseUrl.replace(/\/+$/, "") + (u.startsWith("/") ? u : "/" + u);
+    }
     isLoggedIn() { return !!this._accessToken; }
 
     // Açıklama: CSRF token'ı çerezden okur (backend antiforgery double-submit kullanır)
@@ -121,20 +157,37 @@
       return data;
     }
 
-    // Açıklama: Eşzamanlı 401'lerde tek bir yenileme çalışır (diğerleri onu bekler)
+    // Açıklama: Eşzamanlı 401'lerde tek bir yenileme çalışır (diğerleri onu bekler).
+    //
+    // SÖZLEŞME (E1'de ÖLÇÜLDÜ - koda bakılarak doğrulandı, varsayım değil):
+    // POST /api/auth/refresh, RefreshTokenRequestDto'yu [FromBody] alıyor ve AuthManager
+    // yalnız dto.refresh_token'ı okuyor - hiçbir yerde cookie okunmuyor. Ayrıca
+    // SetRefreshTokenCookie yardımcısı TANIMLI ama HİÇ ÇAĞRILMIYOR, yani login httpOnly
+    // cookie YAZMIYOR; refresh token login yanıtının GÖVDESİNDE geliyor.
+    // Bu yüzden istemci token'ı saklayıp gövdede geri gönderiyor. Gövdesiz POST atmak
+    // 415 Unsupported Media Type veriyordu (ölçüldü) - yenileme hiç çalışmıyordu.
     async _tryRefresh() {
       if (this._refreshing) return this._refreshing;
       this._refreshing = (async () => {
         try {
+          const refreshToken = this.getRefreshToken();
+          if (!refreshToken) { this.setAccessToken(null); return false; }
           const res = await fetch(this.baseUrl + "/api/auth/refresh", {
             method: "POST",
-            headers: { "Accept": "application/json" },
-            credentials: "include", // refresh token httpOnly cookie'den gider
+            headers: { "Accept": "application/json", "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ refresh_token: refreshToken }),
           });
-          if (!res.ok) { this.setAccessToken(null); return false; }
+          if (!res.ok) { this.setAccessToken(null); this.setRefreshToken(null); return false; }
           const data = await res.json();
-          const token = data && (data.data ? data.data.access_token : data.access_token);
-          if (token) { this.setAccessToken(token); return true; }
+          const payload = (data && data.data) ? data.data : data;
+          const token = payload && (payload.token || payload.access_token);
+          if (token) {
+            this.setAccessToken(token);
+            // Rotasyon: uç yeni bir refresh token döndürüyorsa eskisi geçersizleşti, yenisini sakla.
+            if (payload.refresh_token) this.setRefreshToken(payload.refresh_token);
+            return true;
+          }
           return false;
         } catch (_) {
           this.setAccessToken(null);
@@ -167,16 +220,23 @@
       const api = this;
       return {
         async register(payload) { return api._post("/api/auth/register", payload); },
-        // Açıklama: Login başarılıysa access token'ı sakla (refresh httpOnly cookie'de)
+        // Açıklama: Login yanıtı CustomerLoginResponseDto -> alan adı "token" (access_token DEĞİL)
+        // ve "refresh_token". Önceki kod data.data.access_token okuyordu; alan yok, undefined
+        // dönüyor, token HİÇ SAKLANMIYORDU: login 200 dönmesine rağmen sonraki her çağrı 401
+        // alıyordu (ölçüldü - panele girilemiyordu). access_token okuması ileri uyumluluk için
+        // yedek olarak bırakıldı.
         async login(email, password) {
           const data = await api._post("/api/auth/login", { email, password });
-          const token = data && (data.data ? data.data.access_token : data.access_token);
+          const payload = (data && data.data) ? data.data : data;
+          const token = payload && (payload.token || payload.access_token);
           if (token) api.setAccessToken(token);
+          if (payload && payload.refresh_token) api.setRefreshToken(payload.refresh_token);
           return data;
         },
         async refresh() { return api._tryRefresh(); },
         async logout() {
-          try { await api._post("/api/auth/logout", {}); } finally { api.setAccessToken(null); }
+          try { await api._post("/api/auth/logout", {}); }
+          finally { api.setAccessToken(null); api.setRefreshToken(null); }
         },
         async verifyEmail(token) { return api._get("/api/auth/verify-email" + api._qs({ token })); },
         async resendVerification(email) { return api._post("/api/auth/resend-verification", { email }); },
@@ -191,9 +251,14 @@
     _buildProducts() {
       const api = this;
       return {
+        // DİKKAT: getlist ADMIN yetkisi ister ([RequireUserType(Admin)]). Storefront bunu
+        // ÇAĞIRAMAZ - anonim ziyaretçi 403 alır. Katalog için filter() kullanılır.
         list() { return api._get("/api/product/getlist"); },
         get(id) { return api._get("/api/product/get/" + id); },
-        filter(payload) { return api._post("/api/product/filter", payload); }, // {categoryId,minPrice,maxPrice,size,sort,page,pageSize}
+        // Anonim katalog yolu. Alan adları ProductFilterRequestDto ile birebir:
+        // {category_id, sub_category_id, sizes[], colors[], min_price, max_price,
+        //  on_sale, in_stock, sort: "price-asc|price-desc|new|old", page, size}
+        filter(payload) { return api._post("/api/product/filter", payload || { page: 1, size: 24 }); },
         // Açıklama: Öneriler - ürün detay/sepet sayfasında kişiselleştirme
         frequentlyBought(productId, limit) { return api._get("/api/recommendation/frequently-bought/" + productId + api._qs({ limit })); },
         similar(productId, limit) { return api._get("/api/recommendation/similar/" + productId + api._qs({ limit })); },
@@ -215,7 +280,14 @@
     }
     _buildSearch() {
       const api = this;
-      return { products(q) { return api._get("/api/search/products" + api._qs({ q })); } };
+      // Uç [FromQuery] ProductSearchRequestDto bağlıyor: alan adı "query" (q DEĞİL).
+      // Önceden "q" gönderiliyordu; parametre HİÇ bağlanmıyor, arama metni yok sayılıp
+      // filtresiz sonuç dönüyordu (ölçüldü).
+      return {
+        products(q, opts) {
+          return api._get("/api/search/products" + api._qs(Object.assign({ query: q }, opts || {})));
+        },
+      };
     }
     _buildContent() {
       const api = this;

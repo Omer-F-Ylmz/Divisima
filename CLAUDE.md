@@ -147,8 +147,9 @@ Bu bolum, yeni bir oturumun tek basina devam edebilmesi icin yazildi.
   `Coverage raporunu yukle` SUCCESS, codeql/dependency-scan/secret-scan/format-check
   SUCCESS, `TESHIS` skipped, annotation BOS. (Sprint 5 `383f4f2` de tamamen yesildi.)
 - **Sprint 7 push `4ee6318` — HER IKI WORKFLOW TAMAMEN YESIL** (run 32386448987 CI + 32386447800 Security).
-- **E4a (admin ekran bosluklari) TAMAMLANDI ve push edildi** — asagidaki bolume bak.
-- **Yerel (E4a sonrasi): 146/146 `Category=Sql`, 267/267 tam suit** (Testcontainers'li
+- **E4a push `fb2b046` — HER IKI WORKFLOW TAMAMEN YESIL** (run 32392181855 CI + 32392181886 Security).
+- **E1 (storefront auth + katalog) TAMAMLANDI ve push edildi** — asagidaki bolume bak.
+- **Yerel (E1 sonrasi): 150/150 `Category=Sql`, 271/271 tam suit** (Testcontainers'li
   `OrderEndpointTests` HARIC - yerelde Docker kapali, CI'da yesil kosuyor).
 
 ## SPRINT 5 - KAPANDI (run yesil)
@@ -329,10 +330,74 @@ admin uclarindan -> musteri siparisi ile GERCEK rezervasyon -> `GET /api/Stock/{
 yukleme -> statik servis + `nosniff`. Ardindan panel `http://localhost:5173`'te (CORS
 `AllowedOrigins` listesinde) surulup STOK ve GORSEL ekranlari elle kullanildi.
 
+## E1 - STOREFRONT AUTH + KATALOG (TAMAMLANDI)
+
+Frontend + config disina CIKILMADI. Backend gerektiren her bulgu SUPHELI'ye yazildi.
+
+### OLCULEN BES SOZLESME HATASI (hepsi istemci tarafinda kapatildi)
+
+| # | Bulgu | Kanit |
+|---|---|---|
+| 1 | `auth.login` `data.data.access_token` okuyordu; API `data.token` donuyor | Token HIC saklanmiyor, login 200 ama her cagri 401 (E4a'da panele girilemiyordu) |
+| 2 | `_tryRefresh` GOVDESIZ POST atiyordu | Uc `[FromBody] RefreshTokenRequestDto` bekliyor -> **415** |
+| 3 | Katalog `GET /api/product/getlist` cagiriyordu | O uc `[RequireUserType(Admin)]`; anonim **401** -> kopru her seferinde sessizce MOCK'a dusuyordu |
+| 4 | Arama `q` gonderiyordu | Uc `[FromQuery] ProductSearchRequestDto` -> alan adi `query`; `q` HIC baglanmiyor, arama filtresiz |
+| 5 | Gorsel URL'leri goreli | Storefront ayri origin'de -> kendi origin'ine cozulup 404 (`api.resolveUrl` ile duzeltildi) |
+
+### REFRESH TOKEN GERCEGI (devir notu duzeltildi)
+
+Onceki devirde "refresh httpOnly cookie" yazilmisti. **Yanlis:** `SetRefreshTokenCookie`
+yardimcisi TANIMLI ama HIC CAGRILMIYOR; login refresh token'i GOVDEDE donuyor, `/api/auth/refresh`
+de GOVDEDE bekliyor, `AuthManager.RefreshToken` hicbir yerde cookie okumuyor. `Logout` ise
+hic yazilmayan cookie'yi okuyor. Bugun calisan sozlesme: **govde**. Istemci buna uyduruldu;
+guvenlik notu `setRefreshToken` uzerinde ve SUPHELI'de.
+
+### MOCK YOLLARI KAPANDI
+
+- Katalog `POST /api/product/filter` (anonim) ile geliyor; `sort`/`sizes`/`colors` HER ZAMAN
+  gonderiliyor (non-nullable -> eksikse 400 "The sort field is required").
+- API 0 urun donerse **mock'a DUSULMEZ**: "Katalog su an bos" durumu cizilir.
+- API hata verirse "Urunlere ulasilamadi + Tekrar dene" cizilir.
+- Kayit/giris/cikis index.html'in sahte `login(name)` yolundan alinip gercek uclara baglandi.
+
+### LISTE YOLU BOSLUGU ICIN ISTEMCI TELAFISI
+
+`filter` yolu `category_name` / `total_stock` / `sizes` DOLDURMUYOR (ProductProfile ucunu de
+Ignore ediyor; admin `GetList` sizes'i sonradan dolduruyor, storefront yolu doldurmuyor).
+Ham veriyle vitrin bastan sona "Tukendi" gorunuyordu. Telafi:
+- kategori: `category_id` + `/api/category/getlist` (tam cozum, ayrica `T["cat_<slug>"]`
+  ceviri tablosuna eklenerek "cat_e4a-kategori" ham anahtar basimi da duzeltildi)
+- stok/beden: her urun icin detay ucu (`enrichAll`, 6 esmanli, sayfa boyutu 24)
+- **`p._ss` tuzagi**: storefront beden-stok'u `_ss`'te ONBELLEKLIYOR ve ilk cizim stok=0 iken
+  yapildigi icin "tum bedenler 0" olarak DONUYORDU; gercek harita `_ss`'e yaziliyor.
+
+### PINLER (StorefrontCatalogContractTests - 4 test)
+
+- `AnonimKatalog_FilterACIK_GetListADMIN_ISTER`
+- `Filter_Sort_Sizes_Colors_ZORUNLU_PINLENIR`
+- `Filter_ListeYolu_CategoryName_TotalStock_Sizes_DOLDURMUYOR_PINLENIR` (SUPHELI pini)
+- `Arama_QueryParametresi_Filtreler_q_Parametresi_FILTRELEMEZ`
+
+### DIS KONTROLU
+
+4 assert ters -> 4 AYRI isimli kirmizi. 5. kontrol istemci mutasyonuyla: login okumasi eski
+haline (`access_token`) cevrildi -> access token saklanmadi (yenileme telafi etti); yenileme
+yolu da kapatilinca korumali cagri **401** dondu - E4a'da olculen belirti birebir.
+
+### ELLE DOGRULAMA (tarayici)
+
+Storefront `http://localhost:5173`'te (CORS `AllowedOrigins`'te), API `:5000`. Kayit ->
+**warn logunda TOKEN YOK** (yalniz alici+konu; token DB'den alindi - devir notundaki
+"warn-dali logundan token" varsayimi YANLIS) -> arayuzdeki dogrulama kutusundan verify ->
+giris (access+refresh saklandi, `#/hesabim` yonlendirmesi) -> access token BOZULUP korumali
+cagri yapildi: sessiz yenileme + tekrar -> BASARILI. Katalog: 2 gercek urun, dogru fiyat,
+indirim rozeti, `_ss {M:20,L:4}`, stok 24; bos kategori sayfasi ve bos/hata katalog durumlari
+cokmeden cizildi; arama "E4a" -> 1 sonuc.
+
 ## SIRA
 
-1. **E4a run raporu** (push edildi, rapor bekleniyor)
-2. **E1** auth + katalog -> **E2** sepet+checkout+odeme -> **E3** hesap+siparis takibi
+1. **E1 run raporu** (push edildi, rapor bekleniyor)
+2. **E2** sepet+checkout+odeme -> **E3** hesap+siparis takibi
    - E2'nin iki somut isi: `checkout_form_content` gomme + `#/odeme/sonuc` donus sayfasi
      (callback bugun ham JSON donuyor)
    - E3: CMS sanitizasyonu IKI katman (yazma `InputSanitizer` + okuma DOMPurify)
@@ -393,16 +458,23 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    birebir gozlendi (dosya test bin'ine yazildi, 404 alindi) ve test host'unda
    `UseContentRoot(CWD)` ile hizalandi. Uretim duzeltmesi `WebRootPath` kullanmak olurdu -
    YAPILMADI, karar kullanicinin.
-4. **`Divisima.API/wwwroot/` `.gitignore`'da DEGIL.** Yuklenen urun gorselleri calisma
-   agacinda takipsiz dosya olarak birikiyor; dikkatsiz bir `git add -A` musteri
-   gorsellerini depoya sokabilir. E4a elle dogrulamasinda uretilen 3 dosya elle silindi.
-   Aday satir: `Divisima.API/wwwroot/uploads/`.
-5. **`api-client.js` login/refresh sozlesmesi API ile UYUSMUYOR.** (E4a elle
-   dogrulamasinda olculdu) API `data.token` donuyor, istemci `data.data.access_token`
-   okuyor ([api-client.js:173](frontend/api-client.js:173) ve `:136`) -> token hic
-   saklanmiyor, panele girilemiyor (login 200, sonraki her cagri 401). Ayrica
-   `_tryRefresh` govdesiz POST atiyor ve uc **415** donuyor. E1'in birinci isi budur;
-   E4a kapsaminda DUZELTILMEDI.
+4. **Storefront liste yolu `category_name` / `total_stock` / `sizes` DOLDURMUYOR.**
+   (E1'de olculdu, pinlendi) `ProductProfile` ucunu de `Ignore` ediyor; admin `GetList`
+   `sizes`'i sonradan dolduruyor ama `GetListSearchAndFilterWithPaging` (yorumunda
+   "storefront" yazan yol) hicbirini doldurmuyor. Ham veriyle vitrindeki HER urun
+   "kategorisiz + 0 stok + bedensiz" -> bastan sona "Tukendi" gorunur. E1 istemci
+   tarafinda telafi etti (kategori: `category_id`+kategori listesi; stok/beden: urun
+   basina detay cagrisi, sayfa boyutu 24). Kalici duzeltme backend'de: liste yolu da
+   admin `GetList` gibi doldurmali. Pin: `Filter_ListeYolu_..._DOLDURMUYOR_PINLENIR`.
+5. **Refresh token httpOnly cookie ile TASINMIYOR (devir notu YANLISTI).**
+   (E1'de olculdu) `AuthController.SetRefreshTokenCookie` TANIMLI ama HIC CAGRILMIYOR;
+   login refresh token'i GOVDEDE donuyor, `/api/auth/refresh` `[FromBody]` bekliyor,
+   `AuthManager.RefreshToken` hicbir yerde cookie okumuyor. `Logout` ise hic yazilmayan
+   cookie'yi okuyor (`Request.Cookies["refresh_token"]` -> null). Yani "access localStorage
+   + refresh httpOnly cookie" modeli YARIM: yazma yolu olu. E1 istemciyi bugun CALISAN
+   sozlesmeye (govde) uydurdu; refresh token JS'in erisebildigi yerde duruyor ve bu
+   httpOnly'den ZAYIF. Duzeltme BACKEND isi (cookie yaz + cookie'den oku + logout'u
+   duzelt), karar kullanicinin.
 
 ## SUREC (degismez)
 
