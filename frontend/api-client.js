@@ -5,10 +5,12 @@
  * Özellikler: JWT saklama, 401'de otomatik token yenileme, CSRF (double-submit),
  *             tutarlı hata yönetimi.
  *
- * NOT (E1): refresh token bugün httpOnly cookie ile TAŞINMIYOR. Backend onu login
- * yanıtının gövdesinde döndürüyor ve /api/auth/refresh'te gövdede bekliyor
- * (SetRefreshTokenCookie yardımcısı tanımlı ama hiç çağrılmıyor - ölçüldü).
- * İstemci bu yüzden refresh token'ı da saklıyor; güvenlik notu setRefreshToken'da.
+ * NOT (SPRINT 8 MADDE 6): refresh token ARTIK httpOnly cookie ile taşınıyor. Backend onu
+ * login/refresh/2FA yanıtında cookie'ye yazıp GÖVDEDEN SİLİYOR; /api/auth/refresh gövde
+ * almıyor, cookie'den okuyor. İstemci refresh token'ı ne görüyor ne saklıyor.
+ * (E1'de ölçülen eski durum: SetRefreshTokenCookie tanımlı ama hiç çağrılmıyordu, token
+ * gövdede dönüyordu ve localStorage'da duruyordu - XSS'te çalınabilirdi.)
+ * CSRF: double-submit; "csrf_token" cookie'si okunup "X-CSRF-Token" başlığıyla geri gönderilir.
  *
  * Kullanım:
  *   const api = new DivisimaAPI("https://api.divisima.com");
@@ -26,10 +28,13 @@
       this._refreshToken = null;
       this._refreshing = null; // eszamanli 401lerde tek yenileme
 
-      // Açıklama: Token'lar sekmeler arası paylaşılsın diye localStorage (bkz. yukarıdaki NOT)
+      // Açıklama: Access token sekmeler arası paylaşılsın diye localStorage.
+      // SPRINT 8 MADDE 6: refresh token ARTIK OKUNMUYOR - httpOnly cookie'de duruyor.
+      // Eski sürümden kalan kalıntı burada, ilk kurulumda TEMİZLENİYOR; aksi halde kullanıcının
+      // localStorage'ında hâlâ geçerli bir refresh token kalır ve XSS yüzeyi kapanmamış olur.
       try {
         this._accessToken = localStorage.getItem("divisima_access_token");
-        this._refreshToken = localStorage.getItem("divisima_refresh_token");
+        localStorage.removeItem("divisima_refresh_token");
       } catch (_) {}
 
       // Alt modüller
@@ -69,24 +74,19 @@
     }
     getAccessToken() { return this._accessToken; }
 
-    // REFRESH TOKEN SAKLAMA (E1). Backend bugün refresh token'ı GÖVDEDE dönüyor ve gövdede
-    // geri bekliyor (SetRefreshTokenCookie tanımlı ama çağrılmıyor - ölçüldü). Bu yüzden
-    // istemcinin saklaması ZORUNLU; aksi halde otomatik yenileme hiç çalışamaz.
-    // GÜVENLİK NOTU: JS'in erişebildiği bir yerde durması httpOnly cookie'den ZAYIFTIR
-    // (XSS'te çalınabilir). Doğru çözüm backend'in cookie yazması + cookie'den okumasıdır;
-    // bu bir BACKEND değişikliğidir ve E1 kapsamı dışıdır (raporda ŞÜPHELİ olarak duruyor).
-    setRefreshToken(token) {
-      this._refreshToken = token;
-      try {
-        if (token) localStorage.setItem("divisima_refresh_token", token);
-        else localStorage.removeItem("divisima_refresh_token");
-      } catch (_) {}
+    // REFRESH TOKEN ARTIK ISTEMCIDE SAKLANMIYOR (SPRINT 8 MADDE 6).
+    // Backend refresh token'i httpOnly cookie'ye yaziyor ve YANIT GOVDESINDEN siliyor; JS onu
+    // ne gorebiliyor ne saklayabiliyor - XSS'te calinamaz. E1'de zorunlu olan localStorage
+    // saklamasi bu yuzden KALKTI.
+    //
+    // Metot KALDIRILMADI, cunku eski surumlerden gelen kullanicilarin localStorage'inda hala
+    // bir token duruyor olabilir; cagrildiginda o kalintiyi TEMIZLIYOR. Boylece yeni surume
+    // gecen kullanicida eski token JS'in erisebildigi yerde UNUTULMUYOR.
+    setRefreshToken(_token) {
+      this._refreshToken = null;
+      try { localStorage.removeItem("divisima_refresh_token"); } catch (_) {}
     }
-    getRefreshToken() {
-      if (this._refreshToken) return this._refreshToken;
-      try { this._refreshToken = localStorage.getItem("divisima_refresh_token"); } catch (_) {}
-      return this._refreshToken;
-    }
+    getRefreshToken() { return null; }
 
     // Göreli medya URL'ini API tabanına çöz. Backend Storage:PublicBaseUrl bosken
     // "/uploads/products/x.png" gibi GÖRELİ URL döndürüyor; storefront ayrı origin'de
@@ -100,8 +100,15 @@
     isLoggedIn() { return !!this._accessToken; }
 
     // Açıklama: CSRF token'ı çerezden okur (backend antiforgery double-submit kullanır)
+    // CSRF ADLARI (SPRINT 8 MADDE 6'da OLCULDU ve DUZELTILDI):
+    // Istemci "XSRF-TOKEN" cookie'sini okuyup "X-XSRF-TOKEN" basligi gonderiyordu; backend'deki
+    // AntiforgeryMiddleware ise "csrf_token" cookie'sini ve "X-CSRF-Token" basligini okuyor.
+    // UC YONLU AD UYUSMAZLIGI - iki taraf da kendi adiyla calisiyordu, hicbir zaman eslesmedi.
+    // Bugune kadar gorunmemesinin sebebi middleware'in HIC calismamasiydi: yalniz refresh_token
+    // cookie'si VARSA devreye giriyor, o cookie de hic yazilmiyordu. Cookie yazilmaya baslayinca
+    // bu uyusmazlik /api/auth/refresh'i 403'e cevirirdi. Adlar backend'inkine hizalandi.
     _getCsrfToken() {
-      const m = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
+      const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
       return m ? decodeURIComponent(m[1]) : null;
     }
 
@@ -118,7 +125,7 @@
       // Açıklama: Durum değiştiren isteklerde CSRF başlığı
       if (["POST", "PUT", "DELETE", "PATCH"].includes(method)) {
         const csrf = this._getCsrfToken();
-        if (csrf) headers["X-XSRF-TOKEN"] = csrf;
+        if (csrf) headers["X-CSRF-Token"] = csrf;
       }
 
       const fetchOpts = {
@@ -162,24 +169,24 @@
 
     // Açıklama: Eşzamanlı 401'lerde tek bir yenileme çalışır (diğerleri onu bekler).
     //
-    // SÖZLEŞME (E1'de ÖLÇÜLDÜ - koda bakılarak doğrulandı, varsayım değil):
-    // POST /api/auth/refresh, RefreshTokenRequestDto'yu [FromBody] alıyor ve AuthManager
-    // yalnız dto.refresh_token'ı okuyor - hiçbir yerde cookie okunmuyor. Ayrıca
-    // SetRefreshTokenCookie yardımcısı TANIMLI ama HİÇ ÇAĞRILMIYOR, yani login httpOnly
-    // cookie YAZMIYOR; refresh token login yanıtının GÖVDESİNDE geliyor.
-    // Bu yüzden istemci token'ı saklayıp gövdede geri gönderiyor. Gövdesiz POST atmak
-    // 415 Unsupported Media Type veriyordu (ölçüldü) - yenileme hiç çalışmıyordu.
+    // SÖZLEŞME (SPRINT 8 MADDE 6 ile DEĞİŞTİ):
+    // POST /api/auth/refresh artık GÖVDE ALMIYOR - token httpOnly "refresh_token" cookie'sinden
+    // okunuyor. Bu yüzden istek gövdesiz gidiyor ve "credentials: include" ZORUNLU (cookie
+    // olmadan uç 401 döner). Ayrıca istek Bearer TAŞIMADIĞI ve cookie TAŞIDIĞI için
+    // AntiforgeryMiddleware devreye girer: "X-CSRF-Token" başlığı "csrf_token" cookie'siyle
+    // eşleşmezse 403 gelir. Başlık bu yüzden burada AÇIKÇA ekleniyor - ortak _request yolundan
+    // geçmediğimiz için otomatik eklenmiyor.
     async _tryRefresh() {
       if (this._refreshing) return this._refreshing;
       this._refreshing = (async () => {
         try {
-          const refreshToken = this.getRefreshToken();
-          if (!refreshToken) { this.setAccessToken(null); return false; }
+          const headers = { "Accept": "application/json" };
+          const csrf = this._getCsrfToken();
+          if (csrf) headers["X-CSRF-Token"] = csrf;
           const res = await fetch(this.baseUrl + "/api/auth/refresh", {
             method: "POST",
-            headers: { "Accept": "application/json", "Content-Type": "application/json" },
+            headers,
             credentials: "include",
-            body: JSON.stringify({ refresh_token: refreshToken }),
           });
           if (!res.ok) { this.setAccessToken(null); this.setRefreshToken(null); return false; }
           const data = await res.json();
@@ -187,8 +194,8 @@
           const token = payload && (payload.token || payload.access_token);
           if (token) {
             this.setAccessToken(token);
-            // Rotasyon: uç yeni bir refresh token döndürüyorsa eskisi geçersizleşti, yenisini sakla.
-            if (payload.refresh_token) this.setRefreshToken(payload.refresh_token);
+            // Rotasyon artik SUNUCU tarafinda: yeni refresh token cookie'ye yaziliyor,
+            // govdede gelmiyor. Istemcinin saklayacagi bir sey YOK.
             return true;
           }
           return false;
@@ -233,7 +240,10 @@
           const payload = (data && data.data) ? data.data : data;
           const token = payload && (payload.token || payload.access_token);
           if (token) api.setAccessToken(token);
-          if (payload && payload.refresh_token) api.setRefreshToken(payload.refresh_token);
+          // SPRINT 8 MADDE 6: refresh token artik GOVDEDE GELMIYOR (sunucu httpOnly cookie'ye
+          // yazip alani govdeden siliyor). setRefreshToken cagrisi kalintiyi temizlemek icin
+          // duruyor - eski surumden gelen kullanicinin localStorage'inda unutulmasin.
+          api.setRefreshToken(null);
           return data;
         },
         async refresh() { return api._tryRefresh(); },
@@ -417,6 +427,10 @@
       return {
         // Açıklama: Stoksuz ürün+beden için "gelince haber ver" aboneliği
         subscribe(productId, size, email) { return api._post("/api/stocknotification/subscribe", { product_id: productId, size: size, email: email }); },
+        // SPRINT 8 MADDE 10: abonelik yonetimi. Onceden backend'de YALNIZ subscribe vardi -
+        // kullanici kurdugu bildirimi ne gorebiliyor ne kapatabiliyordu.
+        mine() { return api._get("/api/stocknotification/my"); },
+        remove(id) { return api._del("/api/stocknotification/" + id); },
       };
     }
 
@@ -428,6 +442,9 @@
       const api = this;
       return {
         subscribe(productId, email) { return api._post("/api/price-drop/subscribe", { product_id: productId, email: email }); },
+        // SPRINT 8 MADDE 10 (stok bildirimiyle ayni gerekce).
+        mine() { return api._get("/api/price-drop/my"); },
+        remove(id) { return api._del("/api/price-drop/" + id); },
       };
     }
 

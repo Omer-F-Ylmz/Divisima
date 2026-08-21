@@ -326,31 +326,44 @@ namespace Divisima.IntegrationTests
                 .status.Should().Be((byte)OrderStatusEnum.Confirmed);
         }
 
-        // ── 6) E2b: CF GEVSEMESI WEBHOOK'A SIZMAZ ──────────────────────────────────────
+        // ── 6) WEBHOOK YONLENDIRILMEZ (JSON DONER) ─────────────────────────────────────
         //
-        // Tarayici yolundaki olcum (imza yok) sunucu-sunucu yolu BAGLAMAZ. Webhook'ta imza
-        // AYNEN ZORUNLU: HandleCallback'in imzaZorunlu varsayilani TRUE ve Webhook action'i
-        // bunu ACIKCA true veriyor. Ayni govde (yalniz token) iki uca gonderilir; callback
-        // KABUL eder, webhook REDDEDER - cift-anlam kirici: 400 gercekten imzadan geliyor,
-        // cunku ayni govde diger ucta calisiyor.
+        // E2'nin sinirini pinler: 302 yalniz TARAYICI yolu icin: webhook'u bir tarayici
+        // okumuyor, oraya yonlendirme zarar verirdi.
+        //
+        // ══ BILINCLI KIRILAN PIN - KAYIT (SPRINT 8 MADDE 9) ════════════════════════════
+        // Bu testin adi eskiden Webhook_ImzaSIZ_REDDEDILIR_CF_Gevsemesi_SIZMAZ idi ve
+        // "imzasiz webhook 400 alir" iddiasini sabitliyordu. O iddia E2b'de DOGRU bir sey
+        // soyluyordu (tarayici yolundaki gevseme sunucu-sunucu yola sizmasin) ama dayandigi
+        // VARSAYIM - "webhook'ta imza GELIR" - 22 Agustos 2026'da GERCEK Iyzico bildirimiyle
+        // CURUTULDU: govdede "signature" alani yok, baslikta X-Iyz-Signature VAR ama BOS.
+        // Yani pin, gercek bildirimi reddeden bir davranisi savunur hale gelmisti (canli
+        // zarar: siparis #33 - para alindi, siparis Pending kaldi).
+        // Imza asserti KALDIRILDI; yerine WebhookContractTests geldi ve gevsemenin SINIRINI
+        // pinliyor (imza GELIRSE hala dogrulanir). Bu testte YALNIZ E2'nin kendi iddiasi
+        // (yonlendirme YOK) kaldi - kapsam daraldi, adi bunu soyluyor.
         [Fact]
-        public async Task Webhook_ImzaSIZ_REDDEDILIR_CF_Gevsemesi_SIZMAZ()
+        public async Task Webhook_YONLENDIRILMEZ_JSON_Doner()
         {
             if (Skipped()) return;
             var (orderId, token) = await NewPendingPaymentAsync(_factory!);
 
             var resp = await NoRedirect(_factory!).PostAsJsonAsync("/api/payment/webhook",
-                new { token = token });   // signature YOK
+                new { token = token });   // signature YOK - gercek bildirimin bicimi
 
-            resp.StatusCode.Should().Be(HttpStatusCode.BadRequest, "webhook imzasiz kabul ETMEZ");
             resp.StatusCode.Should().NotBe(HttpStatusCode.Found, "webhook YONLENDIRILMEZ");
+            resp.Headers.Location.Should().BeNull("webhook yanitinda Location basligi olmamali");
+            resp.Content.Headers.ContentType!.MediaType.Should().Be("application/json",
+                "bant-disi bildirim JSON doner - tarayici bicimine cevrilmez");
 
+            // VAKUM KIRICI: "yonlendirme yok" iddiasi, uc hic calismasa da yesil kalirdi.
+            // Imzasiz gercek bildirim retrieve otoritesiyle GERCEKTEN islenmis olmali.
             await using var ctx = NewContext();
             (await ctx.Set<Payment>().AsNoTracking().SingleAsync(p => p.order_id == orderId))
-                .payment_status.Should().Be((byte)PaymentStatusEnum.Pending,
-                    "reddedilen webhook odemeyi ISLEMEMELI - 400 kozmetik degil");
+                .payment_status.Should().Be((byte)PaymentStatusEnum.Success,
+                    "imzasiz gercek bildirim retrieve otoritesiyle islenir (Sprint 8 madde 9)");
             (await ctx.Set<Order>().AsNoTracking().SingleAsync(o => o.id == orderId))
-                .status.Should().Be((byte)OrderStatusEnum.Pending);
+                .status.Should().Be((byte)OrderStatusEnum.Confirmed);
         }
     }
 }

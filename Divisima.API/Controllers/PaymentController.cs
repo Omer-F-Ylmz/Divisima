@@ -1,5 +1,6 @@
 using System.Net;
 using System.Security.Claims;
+using Asp.Versioning;
 using Divisima.Bussiness.Abstract;
 using Divisima.Core.Security.Authorization;
 using Divisima.Core.Utilities.Enums;
@@ -80,15 +81,74 @@ namespace Divisima.API.Controllers
 
         // Açıklayıcı yorum: Webhook - Iyzico'nun bant-dışı bildirimi (callback kaybolursa yedek teyit).
         // Aynı güvenli HandleCallback mantığını kullanır; idempotent olduğundan çift işlem güvenli.
+        //
+        // ══ SPRINT 8 MADDE 9 - GERCEK BILDIRIMLE OLCULDU (22 Agustos 2026) ══════════════════
+        //
+        // Public tunel uzerinden GERCEK Iyzico bildirimi yakalandi (User-Agent Apache-HttpClient,
+        // sunucu-sunucu). IKI BAGIMSIZ engel olculdu; ikisi de burada kapatildi. Canli kanit:
+        // siparis #33 - para Iyzico'da SUCCESS (iyziPaymentId 37415135), bizde Pending. Yani
+        // "callback kayboldu" senaryosunda TEK kurtarma yolu CALISMIYORDU.
+        //
+        // (1) VERSIYONLAMA. Iyzico her bildirimde "X-Api-Version: V1" yolluyor. Program.cs'teki
+        //     HeaderApiVersionReader("X-Api-Version") bu degeri ayristiramiyor ve istek
+        //     CONTROLLER'A HIC ULASMADAN bos govdeli 400 ile reddediliyordu (log:
+        //     "Request contained the API version 'V1', which is not valid").
+        //     DIKKAT - 400'U COZEN SEY ASAGIDAKI [ApiVersionNeutral] DEGILDIR. Uc kez olculdu:
+        //     attribute action duzeyinde de controller duzeyinde de 400'u ENGELLEMIYOR, boru
+        //     hattinin basina konan bir middleware de gec kaliyor (yonlendirme, dolayisiyla
+        //     ApiVersionMatcherPolicy, kullanici middleware'lerinden ONCE kosuyor).
+        //     Cozum OKUYUCU duzeyinde: Divisima.API.Versioning.WebhookExemptHeaderApiVersionReader
+        //     yalniz BU YOLDA "X-Api-Version" basligini yok sayar (gerekce + elenen alternatifler
+        //     o dosyanin basinda). Attribute NIYETI ifade ettigi icin BIRAKILDI - webhook'u bir
+        //     ucuncu taraf cagirir, bizim surum sozlesmemize tabi degildir - ama tek basina
+        //     yeterli DEGIL; okuyucu muafiyeti silinirse burasi kurtarmaz.
+        //     Kapsamin DAR kaldigi pinli: AYNI baslikla baska bir uc HALA 400 verir.
+        //
+        // (2) IMZA. Gercek bildirimde imza HIC YOK: govdede "signature" alani yok, baslikta
+        //     "X-Iyz-Signature" VAR ama DEGERI BOS (olculdu 22 Agu). Bu action imzayi kosulsuz
+        //     zorunlu tuttugu icin (imzaZorunlu: true) her GERCEK bildirim 400 yiyordu.
+        //     OTORITE ARTIK RETRIEVE: (i) token opak, yalniz bize+Iyzico'ya ait, (ii) sonuc
+        //     sunucu-sunucu RetrievePaymentResultAsync ile Iyzico'dan cekilir, (iii) token 30 dk
+        //     zaman asimina tabi, (iv) tutar/para birimi/fraud dogrulanir, (v) yalniz Pending
+        //     odeme islenir. E2b'de CF callback icin ONAYLANAN modelin AYNISI; sebep de ayni -
+        //     saglayici imza gondermiyor.
+        //     GEVSEME "imzayi yok say" DEGIL, "imza YOKSA retrieve otoritesiyle isle": imza
+        //     gelirse (govdede ya da baslikta) AYNEN dogrulanir ve tutmazsa istek reddedilir.
+        //     Panelde bir webhook imza anahtari bulunursa baslik dogrulamasi ZATEN ACIK olur.
+        //
+        // (3) BEDEL VE SINIRI. Her istek potansiyel olarak bir sunucu-sunucu retrieve demek -
+        //     Iyzico'ya dogru bir amplifikasyon kanali. OLCULDU ki bu kanal ZATEN dar:
+        //     HandleCallback retrieve'e gelmeden once token'i BIZIM tablomuzda ariyor; bizim
+        //     olmayan bir token 404 ile duser ve DISARI HIC CIKILMAZ. Retrieve'e ancak (a) bizim
+        //     urettigimiz, (b) hala Pending, (c) 30 dk'dan yeni bir token ulasir.
+        //     Yine de sayisal bir tavan gerekiyordu: [EnableRateLimiting("payment")] eklendi.
+        //     Bu YENI bir sayi DEGIL - Redis yolu (RedisRateLimitMiddleware) bu ucu path
+        //     eslesmesiyle (/payment/) ZATEN 10/dk'ya baglıyordu; yerlesik limiter yolunda ise
+        //     webhook yalniz GlobalLimiter'in 100/dk'sindaydi. Iki yolun ayni davranmasi
+        //     Program.cs'teki policy tanimin ACIK NIYETI ("Redis middleware'indeki payment
+        //     scope (10/dk) ile tutarli"); buradaki ayrisma o niyetin bosluguydu.
         [HttpPost("webhook")]
         [AllowAnonymous]
-        [SwaggerOperation(Summary = "Ödeme webhook", Description = "Iyzico bant-dışı bildirim (yedek teyit). İmza doğrulanır, idempotent.")]
+        [ApiVersionNeutral]
+        [EnableRateLimiting("payment")]
+        [SwaggerOperation(Summary = "Ödeme webhook", Description = "Iyzico bant-dışı bildirim (yedek teyit). İmza gelirse doğrulanır; otorite sunucu-sunucu sorgudur. İdempotent.")]
         public async Task<IActionResult> Webhook([FromBody] PaymentCallbackRequestDto dto)
         {
-            // E2b: WEBHOOK yolu - imza AYNEN ZORUNLU. Bant-disi bildirim sunucu-sunucu gelir ve
-            // tarayici tarafindaki olcum (imza yok) BURAYI BAGLAMAZ. Acikca yaziliyor ki gelecekte
-            // varsayilana bakip yorum yapilmasin.
-            var r = await _paymentService.HandleCallback(dto, imzaZorunlu: true);
+            // Imza govdede YOKSA baslikta aranir. Baslik adi OLCULDU: "X-Iyz-Signature".
+            //
+            // BILEREK YAPILMADI: dokumanlarda gecen "X-IYZ-SIGNATURE-V3" basligi bu dogrulayiciya
+            // BAGLANMADI. Bizim VerifyCallbackSignature'imiz HMAC-SHA256(secretKey, token)
+            // hesaplar; V3 imzasi FARKLI bir govde uzerinden uretilir. Olculmemis bir esleme
+            // yazmak, o baslik dolmaya basladigi gun HER GERCEK bildirimi reddederdi - bugun
+            // duzelttigimiz kesintinin BIREBIR aynisi. Format olculunce buraya eklenir.
+            if (string.IsNullOrWhiteSpace(dto.signature))
+            {
+                var basliktakiImza = Request.Headers["X-Iyz-Signature"].ToString();
+                if (!string.IsNullOrWhiteSpace(basliktakiImza))
+                    dto.signature = basliktakiImza.Trim();
+            }
+
+            var r = await _paymentService.HandleCallback(dto, imzaZorunlu: false);
             return StatusCode((int)r.Item1, r.Item2);
         }
     }

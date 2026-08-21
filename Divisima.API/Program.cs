@@ -38,6 +38,32 @@ using Polly;
 using Polly.Extensions.Http;
 using Serilog;
 
+// SPRINT 8 MADDE 13 - KULTUR PINLEME (TEK NOKTA).
+//
+// OLCULEN SORUN: uygulama hicbir yerde kultur pinlemiyordu; para ve tarih bicimlendirmesi
+// KOSTUGU KABININ yereline gore degisiyordu. E3 run'inda bu CANLI ORTAMDA gorundu: GitHub
+// kosucusu (Linux, LANG=C.UTF-8) invariant kulturde kostugu icin fatura govdesindeki tutar
+// "1,049.70" olarak basildi ve tr bicimini bekleyen bir test kirildi.
+//   OLCUM: tr-TR -> "549,90" / "1.049,70"   |   Invariant -> "549.90" / "1,049.70"
+// URETIMDEKI ANLAMI: LANG verilmemis bir Linux dagitiminda Turk musteriye kesilen faturada
+// tutar NOKTA ayracli yazilir. Bu bir gorunum meselesi degil - fatura mali bir beyandir.
+//
+// NEDEN "DefaultThreadCurrentCulture", "RequestLocalization" DEGIL (olculerek secildi):
+//   * Magaza TEK PAZARLI (TR / TRY). Bicimlendirmenin istemcinin "Accept-Language" basligina
+//     gore degismesi ISTENMEZ - Ingilizce tarayicidan siparis veren musteriye NOKTA ayracli
+//     bir Turk faturasi cikardi.
+//   * RequestLocalization yalnizca ISTEK hattini etkiler. Fatura, fiyat-dususu e-postasi ve
+//     outbox islemleri ARKA PLAN islerinde (Hangfire) da uretiliyor; orada middleware yok ve
+//     kultur yine kabin yereline duserdi. Tek nokta pinleme her ikisini de kapsar.
+//
+// ETKILENEN YUZEY (tarandi): OrderManager (fatura HTML'i - 11 tutar + 1 tarih),
+// PriceDropManager (fiyat dususu e-postasi - 2 tutar). Iyzico entegrasyonu ZATEN acikca
+// InvariantCulture kullaniyor (IyzicoClient), yani bu pinleme saglayiciya giden tutarlari
+// ETKILEMEZ. "{Guid:N}" kullanimlari sayi bicimi DEGIL Guid bicimidir - ilgisiz.
+var trCulture = new System.Globalization.CultureInfo("tr-TR");
+System.Globalization.CultureInfo.DefaultThreadCurrentCulture = trCulture;
+System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = trCulture;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Açıklayıcı yorum: Config fail-fast - kritik ayar eksik/zayıfsa uygulama BAŞLAMASIN (ilk istekte patlamak yerine).
@@ -80,6 +106,24 @@ var builder = WebApplication.CreateBuilder(args);
         // HİÇ gitmemesi demektir - üstelik her çağıran başarı görür. Açılışta engellenir.
         if (string.IsNullOrWhiteSpace(cfg["MailSettings:Host"]))
             throw new InvalidOperationException("FATAL: Config - MailSettings:Host tanımlı değil (prod'da e-posta gönderimi zorunlu; Host boşsa hiçbir mail gitmez).");
+
+        // SPRINT 8 MADDE 7 - ODEME CALLBACK ADRESI: prod'da ZORUNLU. (E2b'de OLCULDU)
+        // IyzicoPaymentManager.Initialize, DTO'daki callback_url BOS geldiginde bu config
+        // degerini kullanir; storefront o alani GONDERMIYOR. Deger bos kalirsa gercek Iyzico
+        // BOS callbackUrl'i kabul etmiyor ve HER kart odemesi init'te 400 ile duser - musteri
+        // yalnizca "Odeme baslatilamadi." goruru. E2b'de bu belirti birebir olculdu. Ilk odeme
+        // denemesinde patlamak yerine ACILISTA durulur.
+        var iyzicoCallback = cfg["Iyzico:CallbackUrl"];
+        if (string.IsNullOrWhiteSpace(iyzicoCallback))
+            throw new InvalidOperationException(
+                "FATAL: Config - Iyzico:CallbackUrl tanımlı değil (prod'da zorunlu; boşsa her kart ödemesi init'te 400 ile düşer). " +
+                "SENKRON UYARISI: bu adresin origin'i, storefront CSP'sindeki form-action listesiyle AYNI olmalıdır - " +
+                "aksi halde Iyzico'nun sonuç POST'u tarayıcı tarafından engellenir, callback hiç ateşlenmez ve " +
+                "'para çekildi ama sipariş Pending' durumu oluşur (E2b'de yaşandı).");
+        // Adres MUTLAK ve HTTPS olmali: Iyzico goreli adrese POST edemez, duz HTTP'yi de kabul etmez.
+        if (!Uri.TryCreate(iyzicoCallback, UriKind.Absolute, out var cbUri) || cbUri.Scheme != Uri.UriSchemeHttps)
+            throw new InvalidOperationException(
+                $"FATAL: Config - Iyzico:CallbackUrl mutlak bir HTTPS adresi olmalı (bulunan: '{iyzicoCallback}').");
     }
 }
 
@@ -278,9 +322,14 @@ builder.Services.AddApiVersioning(o =>
     o.AssumeDefaultVersionWhenUnspecified = true;
     o.ReportApiVersions = true;
     // Açıklayıcı yorum: B4 - Versiyon URL segmenti + header + query'den okunabilir (istemci esnekliği; v2'de controller [ApiVersion] ile ayrılır)
+    //
+    // SPRINT 8 MADDE 9: baslik okuyucusu WebhookExemptHeaderApiVersionReader ile sarmalandi -
+    // yalniz /api/payment/webhook yolunda "X-Api-Version" YOK SAYILIR. Gerekce, olcumler ve
+    // denenip ELENEN alternatifler (action/controller [ApiVersionNeutral], middleware) o
+    // sinifin basindaki blokta; burada tekrarlanmiyor ki iki yer ayrisamasin.
     o.ApiVersionReader = Asp.Versioning.ApiVersionReader.Combine(
         new Asp.Versioning.UrlSegmentApiVersionReader(),
-        new Asp.Versioning.HeaderApiVersionReader("X-Api-Version"),
+        new Divisima.API.Versioning.WebhookExemptHeaderApiVersionReader(),
         new Asp.Versioning.QueryStringApiVersionReader("api-version"));
 }).AddApiExplorer(o => { o.GroupNameFormat = "'v'VVV"; o.SubstituteApiVersionInUrl = true; });
 
