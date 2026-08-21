@@ -818,7 +818,7 @@ eski onbellegi temizlemek icin).
   Acmadan once `Program.cs` yorumundaki DIGER manager'lar (OrderManager, GiftCard,
   Loyalty, Referral, Return, StoreCredit) da tasinmali - aksi halde onlarin manuel
   `BeginTransaction` cagrilari retry stratejisi tarafindan REDDEDILIR.
-- **SPRINT 8 = E FAZI SONRASI LAUNCH-ONCESI ZORUNLU DALGA (DOKUZ KALEM).**
+- **SPRINT 8 = E FAZI SONRASI LAUNCH-ONCESI ZORUNLU DALGA (ON IKI KALEM).**
   Simdi is yok; E fazi bitince kosulur. Sira onceligi (6) guvenlik oldugu icin ustte.
 
   1. **Kupon `used_count` idempotency** (outbox'in on kosulu). `IncrementCouponUsageWithRetry`
@@ -886,6 +886,17 @@ eski onbellegi temizlemek icin).
      Depo taramasi (E3, referans): `SuccessDataResult<string>` **4 cagri** -
      `OrderManager.cs`, `ReferralManager.cs` (ikisi de duzeltildi),
      `GiftCardManager.cs:43`, `ProductImageManager.cs:83` (iki argumanli, ETKILENMEZ).
+  12. **OLU PAYLASIM BAGLANTILARI: router'a `#/urun/<id>` rotasi.** (E3'te olculdu,
+     kullanici karariyla LAUNCH ONCESINE alindi - "paylasilan linklerin 404'u launch'a
+     tasinmaz") `index.html:2154` `shareUrl(id)` -> `#/urun/<id>` uretiyor ve urun
+     kartindaki WhatsApp / Facebook / X / Pinterest / "baglantiyi kopyala" secenekleri bu
+     adresi paylasiyor; ama urun detayi bir ROTA DEGIL, `openDetail(id)` ile acilan bir
+     MODAL ve router `#/urun` yolunu TANIMIYOR. Olculdu: `location.hash = "#/urun/1"` ->
+     sayfa basligi **"Sayfa Bulunamadi · Divisima"**. Kapsam: router'a `#/urun/:id` yolu
+     eklenir ve **katalog yuklendikten SONRA** `openDetail(id)` cagrilir (E3'te olculen
+     katalog yarisi burada da gecerli - erken cagri MOCK urunu acardi), ardindan ELLE
+     DOGRULAMA: paylasilan bir baglantiyi temiz sekmede acmak dogru urunu acmali.
+     Bkz. SUPHELI #10.
 
 ## SUPHELI DAVRANISLAR - KARAR BEKLEYENLER
 
