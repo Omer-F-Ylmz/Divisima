@@ -341,6 +341,10 @@ CREATE TABLE payments (
     currency NVARCHAR(256) NULL,
     fraud_status NVARCHAR(256) NULL,
     transaction_id NVARCHAR(256) NULL,
+    -- E2b: IADE bu kimligi ister (paymentId DEGIL). Olculdu: ayni odemede paymentId=37399936
+    -- iken itemTransaction paymentTransactionId=39316344; yanlisiyla cagrilinca Iyzico
+    -- "Bu isyerine ait odeme kirilim kaydi bulunamadi" ile reddediyor.
+    item_transaction_id NVARCHAR(120) NULL,
     conversation_id NVARCHAR(256) NULL,
     token NVARCHAR(MAX) NULL,
     paid_at DATETIME2 NULL,

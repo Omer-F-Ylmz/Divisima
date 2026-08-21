@@ -34,6 +34,13 @@ namespace Divisima.IntegrationTests
     // token zaman asimi -> dagitik kilit -> kilit sonrasi TEKRAR okuma -> sunucu-sunucu sonuc
     // sorgusu -> tutar/para birimi/fraud dogrulamasi. Halkalarin her biri ayri ayri surulur.
     //
+    // E2b HARSAT GUNCELLEMESI: RetrieveOverride ile kurulan sahte sonuclar artik
+    // ItemTransactionId de tasiyor. Gerekce: gercek Iyzico'da basarili bir odemenin HER ZAMAN
+    // bir odeme KIRILIMI (itemTransaction) vardir ve IADE o kimlikle yapilir (paymentId ile
+    // DEGIL - E2b'de olculdu). Sahte sonuc bu alani bos birakirsa iade "kimlik yok" dalinda
+    // duser ve pin, olcmek istedigi seyi (tutar/clamp) hic olcemez. ASSERT'LER DEGISMEDI -
+    // yalniz sahte saglayici gercek sozlesmeye uyduruldu.
+    //
     // MOCK MODU: Iyzico:UseRealSdk=false. Imza dogrulamasi GERCEK algoritma ile calisir
     // (HMAC-SHA256(secretKey, token), timing-safe) - bu yuzden mock'la olcmek anlamli.
     // Sonuc sorgusunu kontrol edebilmek icin IIyzicoClient SARMALANIR: imza ve init GERCEK
@@ -73,6 +80,9 @@ namespace Divisima.IntegrationTests
             public static Func<string, decimal, IyzicoRefundResult>? RefundOverride { get; set; }
             public static int RefundCallCount { get; set; }
             public static decimal RefundedTotal { get; set; }
+            // E2b: saglayiciya GONDERILEN kimlik. Iade paymentId ile DEGIL, odeme kiriliminin
+            // (itemTransaction) kimligiyle yapilmali - hangisinin gittigi ancak boyle olculur.
+            public static string? LastRefundTransactionId { get; set; }
 
             public Task<IyzicoCheckoutInitResult> InitializeCheckoutFormAsync(IyzicoCheckoutInitRequest request)
                 => _real.InitializeCheckoutFormAsync(request);
@@ -95,6 +105,7 @@ namespace Divisima.IntegrationTests
             public Task<IyzicoRefundResult> RefundAsync(string paymentTransactionId, decimal amount)
             {
                 RefundCallCount++;
+                LastRefundTransactionId = paymentTransactionId;
                 RefundedTotal += amount;
                 var sonuc = RefundOverride != null
                     ? RefundOverride(paymentTransactionId, amount)
@@ -154,6 +165,7 @@ namespace Divisima.IntegrationTests
             ControllableIyzicoClient.RefundCallCount = 0;
             ControllableIyzicoClient.RefundedTotal = 0m;
             ControllableIyzicoClient.RefundedTotalBasarili = 0m;
+            ControllableIyzicoClient.LastRefundTransactionId = null;
             // S7 HATA ENJEKSIYON BAYRAKLARI - statik olduklari icin test sinirini asarlar.
             // Sifirlanmazsa bir testin enjeksiyonu SONRAKI testleri sessizce bozar (bir kez yasandi:
             // sadakat bayragi acik kaldi ve 8-paralel pini "0 kazanim" ile kirildi).
@@ -312,8 +324,14 @@ namespace Divisima.IntegrationTests
         }
 
         // Bos imza da reddedilmeli (cift-anlam kirici: yalniz "yanlis imza" degil, imzasizlik da).
+        //
+        // E2b - KAPSAM DARALDI, AD DEGISTI: CallbackAsync servisi DOGRUDAN cagiriyor ve
+        // HandleCallback'in imzaZorunlu varsayilani TRUE. Yani bu pin artik KATI yolu
+        // (webhook) olcuyor. Tarayici CF callback yolunda imza ZORUNLU DEGIL - Iyzico orada
+        // "signature" alanini HIC gondermiyor (E2b'de olculdu); o yolun pinleri
+        // PaymentCallbackRedirectTests icinde, HTTP duzeyinde.
         [Fact]
-        public async Task ImzaYOKSA_Reddedilir()
+        public async Task ImzaYOKSA_Reddedilir_KATI_YOL_WEBHOOK()
         {
             if (Skipped()) return;
             var (orderId, token, _) = await NewPendingPaymentAsync();
@@ -399,7 +417,7 @@ namespace Divisima.IntegrationTests
             ControllableIyzicoClient.RetrieveCallCount = 0;
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-RACE", PaidPrice = amount,
+                Success = true, PaymentId = "PAY-RACE", ItemTransactionId = "ITX-RACE", ItemTransactionCount = 1, PaidPrice = amount,
                 Currency = "TRY", FraudStatus = "1", Installment = 1
             };
 
@@ -478,7 +496,7 @@ namespace Divisima.IntegrationTests
             ControllableIyzicoClient.RetrieveCallCount = 0;
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-SIRA", PaidPrice = amount,
+                Success = true, PaymentId = "PAY-SIRA", ItemTransactionId = "ITX-SIRA", ItemTransactionCount = 1, PaidPrice = amount,
                 Currency = "TRY", FraudStatus = "1", Installment = 1
             };
 
@@ -510,7 +528,7 @@ namespace Divisima.IntegrationTests
 
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-EKSIK", PaidPrice = amount - 1m,   // 1 TL eksik
+                Success = true, PaymentId = "PAY-EKSIK", ItemTransactionId = "ITX-EKSIK", ItemTransactionCount = 1, PaidPrice = amount - 1m,   // 1 TL eksik
                 Currency = "TRY", FraudStatus = "1", Installment = 1
             };
 
@@ -534,7 +552,7 @@ namespace Divisima.IntegrationTests
             var komisyonlu = amount * 1.1m;   // %10 taksit komisyonu - 2x ust sinirinin altinda
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-TAKSIT", PaidPrice = komisyonlu,
+                Success = true, PaymentId = "PAY-TAKSIT", ItemTransactionId = "ITX-TAKSIT", ItemTransactionCount = 1, PaidPrice = komisyonlu,
                 Currency = "TRY", FraudStatus = "1", Installment = 3
             };
 
@@ -558,7 +576,7 @@ namespace Divisima.IntegrationTests
 
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-FRAUD", PaidPrice = amount,
+                Success = true, PaymentId = "PAY-FRAUD", ItemTransactionId = "ITX-FRAUD", ItemTransactionCount = 1, PaidPrice = amount,
                 Currency = "TRY", FraudStatus = "-1", Installment = 1   // fraud RED
             };
 
@@ -585,7 +603,7 @@ namespace Divisima.IntegrationTests
 
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-IADE-1", PaidPrice = amount,
+                Success = true, PaymentId = "PAY-IADE-1", ItemTransactionId = "ITX-IADE-1", ItemTransactionCount = 1, PaidPrice = amount,
                 Currency = "TRY", FraudStatus = "1", Installment = 1
             };
             (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue("odeme basarili olmali");
@@ -593,6 +611,7 @@ namespace Divisima.IntegrationTests
             ControllableIyzicoClient.RefundCallCount = 0;
             ControllableIyzicoClient.RefundedTotal = 0m;
             ControllableIyzicoClient.RefundedTotalBasarili = 0m;
+            ControllableIyzicoClient.LastRefundTransactionId = null;
 
             var order = await ReadOrderAsync(orderId);
             var iade = await WithScopeAsync(sp => sp.GetRequiredService<IRefundService>()
@@ -618,7 +637,7 @@ namespace Divisima.IntegrationTests
 
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-IADE-2", PaidPrice = amount,
+                Success = true, PaymentId = "PAY-IADE-2", ItemTransactionId = "ITX-IADE-2", ItemTransactionCount = 1, PaidPrice = amount,
                 Currency = "TRY", FraudStatus = "1", Installment = 1
             };
             (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue();
@@ -627,6 +646,7 @@ namespace Divisima.IntegrationTests
             ControllableIyzicoClient.RefundCallCount = 0;
             ControllableIyzicoClient.RefundedTotal = 0m;
             ControllableIyzicoClient.RefundedTotalBasarili = 0m;
+            ControllableIyzicoClient.LastRefundTransactionId = null;
 
             // POZITIF OLAY: ilk (asiri) cagri TEK cagri kirpmasiyla tam tutara iniyor ve GERCEKTEN oduyor.
             var asiri = await WithScopeAsync(sp => sp.GetRequiredService<IRefundService>()
@@ -662,7 +682,7 @@ namespace Divisima.IntegrationTests
             var (orderId, token, amount) = await NewPendingPaymentAsync(qty: 2, stock: 10);
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-IADE-3", PaidPrice = amount,
+                Success = true, PaymentId = "PAY-IADE-3", ItemTransactionId = "ITX-IADE-3", ItemTransactionCount = 1, PaidPrice = amount,
                 Currency = "TRY", FraudStatus = "1", Installment = 1
             };
             (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue();
@@ -671,6 +691,7 @@ namespace Divisima.IntegrationTests
             ControllableIyzicoClient.RefundCallCount = 0;
             ControllableIyzicoClient.RefundedTotal = 0m;
             ControllableIyzicoClient.RefundedTotalBasarili = 0m;
+            ControllableIyzicoClient.LastRefundTransactionId = null;
 
             var ucte = decimal.Round(order.total_price / 3m, 2);
             var birinci = await WithScopeAsync(sp => sp.GetRequiredService<IRefundService>()
@@ -703,7 +724,7 @@ namespace Divisima.IntegrationTests
             var (orderId, token, amount) = await NewPendingPaymentAsync(qty: 2, stock: 10);
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-IADE-4", PaidPrice = amount,
+                Success = true, PaymentId = "PAY-IADE-4", ItemTransactionId = "ITX-IADE-4", ItemTransactionCount = 1, PaidPrice = amount,
                 Currency = "TRY", FraudStatus = "1", Installment = 1
             };
             (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue();
@@ -712,6 +733,7 @@ namespace Divisima.IntegrationTests
             ControllableIyzicoClient.RefundCallCount = 0;
             ControllableIyzicoClient.RefundedTotal = 0m;
             ControllableIyzicoClient.RefundedTotalBasarili = 0m;
+            ControllableIyzicoClient.LastRefundTransactionId = null;
 
             // 1) Saglayici REDDEDIYOR -> iade basarisiz, sayac ARTMAMALI.
             ControllableIyzicoClient.RefundOverride = (_, __) => new IyzicoRefundResult { Success = false };
@@ -745,7 +767,7 @@ namespace Divisima.IntegrationTests
             var (orderId, token, amount) = await NewPendingPaymentAsync(qty: 2, stock: 10);
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-IADE-5", PaidPrice = amount,
+                Success = true, PaymentId = "PAY-IADE-5", ItemTransactionId = "ITX-IADE-5", ItemTransactionCount = 1, PaidPrice = amount,
                 Currency = "TRY", FraudStatus = "1", Installment = 1
             };
             (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue();
@@ -754,6 +776,7 @@ namespace Divisima.IntegrationTests
             ControllableIyzicoClient.RefundCallCount = 0;
             ControllableIyzicoClient.RefundedTotal = 0m;
             ControllableIyzicoClient.RefundedTotalBasarili = 0m;
+            ControllableIyzicoClient.LastRefundTransactionId = null;
 
             var sonuclar = await Task.WhenAll(Enumerable.Range(0, 2).Select(_ =>
                 WithScopeAsync(sp => sp.GetRequiredService<IRefundService>()
@@ -781,7 +804,7 @@ namespace Divisima.IntegrationTests
             var (orderId, token, amount) = await NewPendingPaymentAsync();
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-FRAUD-FATURA", PaidPrice = amount,
+                Success = true, PaymentId = "PAY-FRAUD-FATURA", ItemTransactionId = "ITX-FRAUD-FATURA", ItemTransactionCount = 1, PaidPrice = amount,
                 Currency = "TRY", FraudStatus = "0", Installment = 1
             };
 
@@ -820,7 +843,7 @@ namespace Divisima.IntegrationTests
             var (orderId, token, amount) = await NewPendingPaymentAsync();
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-FATURA-OK", PaidPrice = amount,
+                Success = true, PaymentId = "PAY-FATURA-OK", ItemTransactionId = "ITX-FATURA-OK", ItemTransactionCount = 1, PaidPrice = amount,
                 Currency = "TRY", FraudStatus = "1", Installment = 1
             };
 
@@ -852,7 +875,7 @@ namespace Divisima.IntegrationTests
 
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-USD", PaidPrice = amount,
+                Success = true, PaymentId = "PAY-USD", ItemTransactionId = "ITX-USD", ItemTransactionCount = 1, PaidPrice = amount,
                 Currency = "USD", FraudStatus = "1", Installment = 1
             };
 
@@ -986,7 +1009,7 @@ namespace Divisima.IntegrationTests
             ControllableIyzicoClient.RetrieveCallCount = 0;
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-TX-1", PaidPrice = amount,
+                Success = true, PaymentId = "PAY-TX-1", ItemTransactionId = "ITX-TX-1", ItemTransactionCount = 1, PaidPrice = amount,
                 Currency = "TRY", FraudStatus = "1", Installment = 1
             };
 
@@ -1048,7 +1071,7 @@ namespace Divisima.IntegrationTests
 
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-TX-2", PaidPrice = amount,
+                Success = true, PaymentId = "PAY-TX-2", ItemTransactionId = "ITX-TX-2", ItemTransactionCount = 1, PaidPrice = amount,
                 Currency = "TRY", FraudStatus = "1", Installment = 1
             };
 
@@ -1093,7 +1116,7 @@ namespace Divisima.IntegrationTests
 
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-TX-3", PaidPrice = amount,
+                Success = true, PaymentId = "PAY-TX-3", ItemTransactionId = "ITX-TX-3", ItemTransactionCount = 1, PaidPrice = amount,
                 Currency = "TRY", FraudStatus = "0", Installment = 1   // fraud RED -> basarisiz dal
             };
 
@@ -1124,5 +1147,49 @@ namespace Divisima.IntegrationTests
                     .Should().Be(1, "IADE defter kaydi TAM BIR kez - bakiye ile defter mutabik");
         }
 
+
+        // ── E2b) IADE KIMLIGI: paymentId DEGIL, ODEME KIRILIMI (itemTransaction) ────────
+        //
+        // OLCUM (gercek Iyzico sandbox): ayni odemede paymentId=37399936 iken
+        // itemTransaction paymentTransactionId=39316344 - IKI AYRI KIMLIK. Eskiden refund'a
+        // payments.transaction_id (paymentId) gonderiliyordu ve Iyzico
+        // "Bu isyerine ait odeme kirilim kaydi bulunamadi" ile REDDEDIYORDU: yani URETIMDE
+        // HICBIR KART IADESI CALISMIYORDU. Mock her kimlige Success donduru icin hicbir test
+        // bunu goremiyordu (mock da E2b'de sertlestirildi).
+        //
+        // Bu pin saglayiciya GERCEKTEN GIDEN kimligi olcer. Vakum kirici: iki alan da DOLU ve
+        // BIRBIRINDEN FARKLI, yani assert "yanlislikla" gecemez.
+        [Fact]
+        public async Task Iade_ODEME_KIRILIMI_Kimligiyle_Gonderilir_PaymentId_ILE_DEGIL()
+        {
+            if (Skipped()) return;
+            var (orderId, token, amount) = await NewPendingPaymentAsync(qty: 2, stock: 10);
+
+            ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
+            {
+                Success = true, PaymentId = "PAY-KIMLIK", ItemTransactionId = "ITX-KIMLIK",
+                ItemTransactionCount = 1, PaidPrice = amount, Currency = "TRY",
+                FraudStatus = "1", Installment = 1
+            };
+            (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue("odeme basarili olmali");
+
+            // Callback iki kimligi de sakladi mi?
+            var odeme = await ReadPaymentAsync(orderId);
+            odeme.transaction_id.Should().Be("PAY-KIMLIK");
+            odeme.item_transaction_id.Should().Be("ITX-KIMLIK");
+            odeme.item_transaction_id.Should().NotBe(odeme.transaction_id,
+                "iki kimlik FARKLI olmali - aksi halde bu pin hicbir sey ayirt etmez");
+
+            ControllableIyzicoClient.LastRefundTransactionId = null;
+            var order = await ReadOrderAsync(orderId);
+            var iade = await WithScopeAsync(sp => sp.GetRequiredService<IRefundService>()
+                .RefundToSourceAsync(order, 100m, "kimlik testi"));
+
+            iade.Success.Should().BeTrue($"iade basarili olmali: kimlik dogru gonderilmeli");
+            ControllableIyzicoClient.LastRefundTransactionId.Should().Be("ITX-KIMLIK",
+                "IADE ODEME KIRILIMI kimligiyle yapilmali");
+            ControllableIyzicoClient.LastRefundTransactionId.Should().NotBe("PAY-KIMLIK",
+                "paymentId gonderilirse gercek Iyzico 'odeme kirilim kaydi bulunamadi' der");
+        }
     }
 }

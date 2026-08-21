@@ -271,5 +271,66 @@ namespace Divisima.IntegrationTests
             (await ctx.Set<Payment>().AsNoTracking().SingleAsync(p => p.order_id == orderId))
                 .payment_status.Should().Be((byte)PaymentStatusEnum.Success);
         }
+
+        // ── 5) E2b: GERCEK IYZICO BICIMI - CF callback YALNIZ "token" gonderir ──────────
+        //
+        // OLCUM (tahmin degil): sandbox turunda tarayici Network > callback > Payload >
+        // Form Data icinde TEK alan vardi: "token". "signature" alani YOKTU. Eski kod imzayi
+        // kosulsuz zorunlu tuttugu icin GERCEK Iyzico ile her gecerli odeme reddediliyordu -
+        // callback 4 ms'de 400 donuyor, retrieve HIC calismiyor, odeme Pending kaliyor, para
+        // Iyzico'da kalmis oluyordu. Bu pin o bicimi BIREBIR uretir: govdede sadece token.
+        //
+        // Otorite imza degil: sunucu-sunucu retrieve + token zaman asimi + tutar/fraud +
+        // "yalniz Pending islenebilir". Bu yuzden asagida 302'nin KOZMETIK OLMADIGI da
+        // dogrulanir - odeme gercekten Success, siparis gercekten Confirmed.
+        [Fact]
+        public async Task CFCallback_YALNIZ_TOKEN_ile_ISLENIR_GercekIyzicoBicimi()
+        {
+            if (Skipped()) return;
+            var (orderId, token) = await NewPendingPaymentAsync(_factory!);
+
+            // signature ALANI HIC YOK - Form(token, imza) degil, tek alanli govde.
+            var govde = new FormUrlEncodedContent(new Dictionary<string, string> { ["token"] = token });
+            var resp = await NoRedirect(_factory!).PostAsync("/api/payment/callback", govde);
+
+            resp.StatusCode.Should().Be(HttpStatusCode.Found);
+            var loc = resp.Headers.Location!.ToString();
+            loc.Should().Contain("status=success", "imzasiz CF callback GECERLIDIR - Iyzico imza gondermiyor");
+            loc.Should().Contain("order=" + orderId);
+
+            // VAKUM KIRICI: 302 kozmetik degil, is gercekten yapildi.
+            await using var ctx = NewContext();
+            (await ctx.Set<Payment>().AsNoTracking().SingleAsync(p => p.order_id == orderId))
+                .payment_status.Should().Be((byte)PaymentStatusEnum.Success);
+            (await ctx.Set<Order>().AsNoTracking().SingleAsync(o => o.id == orderId))
+                .status.Should().Be((byte)OrderStatusEnum.Confirmed);
+        }
+
+        // ── 6) E2b: CF GEVSEMESI WEBHOOK'A SIZMAZ ──────────────────────────────────────
+        //
+        // Tarayici yolundaki olcum (imza yok) sunucu-sunucu yolu BAGLAMAZ. Webhook'ta imza
+        // AYNEN ZORUNLU: HandleCallback'in imzaZorunlu varsayilani TRUE ve Webhook action'i
+        // bunu ACIKCA true veriyor. Ayni govde (yalniz token) iki uca gonderilir; callback
+        // KABUL eder, webhook REDDEDER - cift-anlam kirici: 400 gercekten imzadan geliyor,
+        // cunku ayni govde diger ucta calisiyor.
+        [Fact]
+        public async Task Webhook_ImzaSIZ_REDDEDILIR_CF_Gevsemesi_SIZMAZ()
+        {
+            if (Skipped()) return;
+            var (orderId, token) = await NewPendingPaymentAsync(_factory!);
+
+            var resp = await NoRedirect(_factory!).PostAsJsonAsync("/api/payment/webhook",
+                new { token = token });   // signature YOK
+
+            resp.StatusCode.Should().Be(HttpStatusCode.BadRequest, "webhook imzasiz kabul ETMEZ");
+            resp.StatusCode.Should().NotBe(HttpStatusCode.Found, "webhook YONLENDIRILMEZ");
+
+            await using var ctx = NewContext();
+            (await ctx.Set<Payment>().AsNoTracking().SingleAsync(p => p.order_id == orderId))
+                .payment_status.Should().Be((byte)PaymentStatusEnum.Pending,
+                    "reddedilen webhook odemeyi ISLEMEMELI - 400 kozmetik degil");
+            (await ctx.Set<Order>().AsNoTracking().SingleAsync(o => o.id == orderId))
+                .status.Should().Be((byte)OrderStatusEnum.Pending);
+        }
     }
 }

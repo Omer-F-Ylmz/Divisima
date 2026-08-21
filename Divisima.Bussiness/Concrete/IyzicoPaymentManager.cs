@@ -10,6 +10,7 @@ using Divisima.Core.Utilities.Results;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Payment;
 using Divisima.Entity.Entities;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Divisima.Bussiness.Concrete
@@ -36,6 +37,8 @@ namespace Divisima.Bussiness.Concrete
         private readonly IStoreCreditTransactionDal _creditTxDal;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IOrderConfirmationService _orderConfirmation;
+        // Aciklayici yorum: Iyzico:CallbackUrl - DTO callback_url BOS geldiginde kullanilan OPERATOR girdisi (E2b).
+        private readonly IConfiguration _config;
         // Commit sonrasi yan etkiler artik SESSIZ dusmuyor - patlayan adim adiyla loglanir (S7).
         private readonly ILogger<IyzicoPaymentManager> _logger;
 
@@ -46,7 +49,7 @@ namespace Divisima.Bussiness.Concrete
 IOrderStatusHistoryService statusHistory,
 ILoyaltyService loyaltyService,
 IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitOfWork unitOfWork,
-            IOrderConfirmationService orderConfirmation, ILogger<IyzicoPaymentManager> logger)
+            IOrderConfirmationService orderConfirmation, IConfiguration config, ILogger<IyzicoPaymentManager> logger)
         {
             _logger = logger;
             _paymentDal = paymentDal;
@@ -64,6 +67,7 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
             _creditTxDal = creditTxDal;
             _unitOfWork = unitOfWork;
             _orderConfirmation = orderConfirmation;
+            _config = config;
         }
 
         public async Task<(HttpStatusCode, Result)> Initialize(PaymentInitRequestDto dto, int authenticatedCustomerId)
@@ -104,6 +108,17 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
             if (!string.IsNullOrWhiteSpace(dto.callback_url) && !UrlValidator.IsSafePublicHttpsUrl(dto.callback_url))
                 return (HttpStatusCode.BadRequest, new ErrorDataResult<PaymentInitResponseDto>(Messages.PaymentInvalidCallbackUrl));
 
+            // Aciklayici yorum: CALLBACK ADRESI COZUMU (E2b).
+            // DTO DOLUYSA mevcut davranis AYNEN surer - yukaridaki SSRF guard onu zaten dogruladi.
+            // DTO BOS ise operator girdisi olan Iyzico:CallbackUrl kullanilir. Gerekce: storefront bu adresi
+            // BILMEZ ve bilmemeli, gercek Iyzico ise BOS callbackUrl kabul etmez (form baslatilamaz).
+            // Config degeri DTO guardina TABI DEGIL: kullanici girdisi degil OPERATOR girdisidir. Dev ortaminda
+            // http://localhost:5000/... olabilir; guard yalniz public HTTPS kabul ettigi icin ayni deger DTO
+            // uzerinden GECEMEZDI. Ayar yoksa bos kalir - yani E2b oncesi davranis birebir korunur.
+            var callbackUrl = !string.IsNullOrWhiteSpace(dto.callback_url)
+                ? dto.callback_url
+                : (_config["Iyzico:CallbackUrl"] ?? "");
+
             var customer = await _customerDal.GetAsync(c => c.id == order.customer_id);
             var conversationId = Guid.NewGuid().ToString("N");
 
@@ -112,7 +127,7 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
             {
                 ConversationId = conversationId,
                 Price = amountDue,   // KALAN tutar (cuzdan dususu sonrasi)
-                CallbackUrl = dto.callback_url ?? "",
+                CallbackUrl = callbackUrl,
                 CustomerId = order.customer_id,
                 BuyerName = customer?.name ?? "Musteri",
                 BuyerEmail = customer?.email ?? ""
@@ -147,11 +162,28 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
             return payment?.order_id ?? 0;
         }
 
-        public async Task<(HttpStatusCode, Result)> HandleCallback(PaymentCallbackRequestDto dto)
+        public async Task<(HttpStatusCode, Result)> HandleCallback(PaymentCallbackRequestDto dto, bool imzaZorunlu = true)
         {
-            // Açıklayıcı yorum: 1) İMZA DOĞRULA - sahte callback'i en baştan ele
-            if (!_iyzico.VerifyCallbackSignature(dto.token, dto.signature))
-                return (HttpStatusCode.BadRequest, new ErrorResult(Messages.PaymentSignatureInvalid));
+            // 1) IMZA (E2b - OLCULEREK DEGISTI)
+            // Iyzico CF callback POST edilen govdesinde YALNIZ "token" gonderiyor. Olculdu:
+            // tarayici Network > callback > Payload > Form Data icinde TEK alan var, "signature"
+            // alani YOK. Eski kod imzayi kosulsuz zorunlu tutuyordu, dolayisiyla GERCEK Iyzico ile
+            // her gecerli odemenin callback'i "gecersiz imza" ile reddediliyordu (olculdu: callback
+            // 4 ms'de 400 donuyor - retrieve HIC calismiyor; odeme satiri Pending, para Iyzico'da).
+            //
+            // Bu yolda OTORITE imza DEGIL: (i) token opak ve yalniz bize+Iyzico'ya ait,
+            // (ii) sonuc SUNUCU-SUNUCU RetrievePaymentResultAsync ile Iyzico'dan cekiliyor,
+            // (iii) token 30 dk zaman asimina tabi, (iv) tutar/para birimi/fraud dogrulaniyor,
+            // (v) yalniz Pending odeme islenebiliyor. Sahte bir callback bunlarin hicbirini
+            // atlayamaz - retrieve odenmemis bir token icin basari DONMEZ.
+            //
+            // GEVSEME SINIRLI: imza GELDIYSE yine dogrulanir (asagidaki kosul), ve webhook yolu
+            // imzaZorunlu=true ile cagrildigi icin oradaki zorunluluk AYNEN durur.
+            if (imzaZorunlu || !string.IsNullOrWhiteSpace(dto.signature))
+            {
+                if (!_iyzico.VerifyCallbackSignature(dto.token, dto.signature))
+                    return (HttpStatusCode.BadRequest, new ErrorResult(Messages.PaymentSignatureInvalid));
+            }
 
             // NoTracking (S6): bu ilk okuma yalniz GUARD icin. Tracked okunursa DbContext bu satiri
             // izlemeye alir ve kilit sonrasindaki TAZE okuma identity resolution ile ayni bayat
@@ -253,6 +285,8 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
                         payment.currency = result.Currency;
                         payment.fraud_status = result.FraudStatus;
                         payment.transaction_id = result.PaymentId;
+                        // E2b: IADE bu kimlikle yapilir (paymentId ile DEGIL) - olculdu.
+                        payment.item_transaction_id = result.ItemTransactionId;
                         payment.paid_at = DateTime.Now;
                         await _paymentDal.UpdateAsync(payment);
 

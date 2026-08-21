@@ -63,7 +63,11 @@ namespace Divisima.API.Controllers
             // gosterebilsin. Salt-okur cagri, HandleCallback'i etkilemez.
             var orderId = await _paymentService.GetOrderIdByTokenAsync(dto.token);
 
-            var r = await _paymentService.HandleCallback(dto);
+            // E2b: TARAYICI yolu. Iyzico CF callback POST-unda YALNIZ "token" gonderiyor - imza
+            // alani HIC yok (olculdu: Network > callback > Payload > Form Data). Bu yuzden burada
+            // imza ZORUNLU DEGIL; otorite sunucu-sunucu retrieve + token zaman asimi + tutar/fraud
+            // kontrolleridir. Imza yine de gelirse HandleCallback onu DOGRULAR.
+            var r = await _paymentService.HandleCallback(dto, imzaZorunlu: false);
 
             var storefront = (_config["Storefront:BaseUrl"] ?? "").TrimEnd('/');
             if (string.IsNullOrWhiteSpace(storefront))
@@ -81,7 +85,10 @@ namespace Divisima.API.Controllers
         [SwaggerOperation(Summary = "Ödeme webhook", Description = "Iyzico bant-dışı bildirim (yedek teyit). İmza doğrulanır, idempotent.")]
         public async Task<IActionResult> Webhook([FromBody] PaymentCallbackRequestDto dto)
         {
-            var r = await _paymentService.HandleCallback(dto);
+            // E2b: WEBHOOK yolu - imza AYNEN ZORUNLU. Bant-disi bildirim sunucu-sunucu gelir ve
+            // tarayici tarafindaki olcum (imza yok) BURAYI BAGLAMAZ. Acikca yaziliyor ki gelecekte
+            // varsayilana bakip yorum yapilmasin.
+            var r = await _paymentService.HandleCallback(dto, imzaZorunlu: true);
             return StatusCode((int)r.Item1, r.Item2);
         }
     }

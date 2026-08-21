@@ -515,6 +515,8 @@ namespace Divisima.DataAccess.Concrete.Context
                 b.Property(p => p.currency).HasColumnName("currency").HasMaxLength(10);
                 b.Property(p => p.fraud_status).HasColumnName("fraud_status").HasMaxLength(10);
                 b.Property(p => p.transaction_id).HasColumnName("transaction_id").HasMaxLength(120);
+                // E2b: IADE bu kimligi ister (paymentId DEGIL) - olculdu, bkz. Payment.item_transaction_id.
+                b.Property(p => p.item_transaction_id).HasColumnName("item_transaction_id").HasMaxLength(120);
                 b.Property(p => p.conversation_id).HasColumnName("conversation_id").HasMaxLength(120);
                 b.Property(p => p.token).HasColumnName("token").HasMaxLength(120);
                 b.Property(p => p.paid_at).HasColumnName("paid_at");

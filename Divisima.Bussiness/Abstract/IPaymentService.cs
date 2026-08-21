@@ -9,7 +9,10 @@ namespace Divisima.Bussiness.Abstract
     public interface IPaymentService
     {
         Task<(HttpStatusCode, Result)> Initialize(PaymentInitRequestDto dto, int authenticatedCustomerId);
-        Task<(HttpStatusCode, Result)> HandleCallback(PaymentCallbackRequestDto dto);
+        // E2b: imzaZorunlu VARSAYILAN TRUE - fail-closed. Yeni bir cagiran dusunmeden yazarsa
+        // GUVENLI davranisi alir. Gevsek yol TEK bir cagri yerinde ACIKCA secilir:
+        // PaymentController.Callback. Gerekce orada, olcumle birlikte yaziyor.
+        Task<(HttpStatusCode, Result)> HandleCallback(PaymentCallbackRequestDto dto, bool imzaZorunlu = true);
 
         // E2: YALNIZ callback yonlendirmesi icin - token'in ait oldugu siparis id'si (yoksa 0).
         // AYRI ve SALT-OKUR bir metot olarak eklendi: HandleCallback'in imzasi ve donusu

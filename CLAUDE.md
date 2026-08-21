@@ -161,7 +161,10 @@ Bu bolum, yeni bir oturumun tek basina devam edebilmesi icin yazildi.
 - **E4a push `fb2b046` — HER IKI WORKFLOW TAMAMEN YESIL** (run 32392181855 CI + 32392181886 Security).
 - **E1 push `748c592` — HER IKI WORKFLOW TAMAMEN YESIL** (run 32395415468 CI + 32395415528 Security).
 - **E2 (sepet + checkout + odeme) TAMAMLANDI ve push edildi** — asagidaki bolume bak.
-- **Yerel (E2 sonrasi): 154/154 `Category=Sql`, 275/275 tam suit** (Testcontainers'li
+- **E2 push `eb449fe` - HER IKI WORKFLOW TAMAMEN YESIL** (run 32410645333 CI + 32410645097 Security).
+- **E2b (sandbox dogrulama dalgasi) TAMAMLANDI** - asagidaki bolume bak. Gercek Iyzico
+  sandbox'ta uctan uca suruldu: basarili kart, 3DS basarili, 3DS dustu, replay, kismi iade.
+- **Yerel (E2b sonrasi): 161/161 `Category=Sql`, 282/282 tam suit** (Testcontainers'li
   `OrderEndpointTests` HARIC - yerelde Docker kapali, CI'da yesil kosuyor).
 
 ## SPRINT 5 - KAPANDI (run yesil)
@@ -481,10 +484,158 @@ listesinde gorunuyor.
 
 Not: ilk kupon denemem `discount_value` alan adiyla olusturuldugu icin indirim 0 cikti;
 dogru alan `value`. Backend dogruydu, test verisi yanlisti.
+## E2b - SANDBOX DOGRULAMA DALGASI (TAMAMLANDI)
+
+Gercek Iyzico sandbox anahtarlariyla (user-secrets) uctan uca surulen ilk dalga.
+**Mock modun goremedigi uretim kusurlari burada ortaya cikti.** Anahtarlar hicbir yere
+yazilmadi; teshislerde yalniz `IConfiguration`/`Options` nesnesine verildi, ciktiya HIC basilmadi.
+
+### UC ONAYLI BACKEND ISTISNASI
+
+**(1) `Iyzico:CallbackUrl` config fallback.** `Initialize`'da DTO doluysa MEVCUT davranis aynen
+(SSRF guard dahil); BOS ise operator girdisi olan config degeri kullanilir - config kullanici
+girdisi olmadigi icin guard'a TABI DEGIL. Engel olculdu: storefront `callback_url` gondermiyor,
+manager `?? ""` yaziyordu, gercek Iyzico BOS callbackUrl kabul etmiyor; dev adresi
+(`http://localhost:5000/...`) ise guard'dan gecemiyor (yalniz public HTTPS). Dev degeri
+`appsettings.Development.json`'a, aciklamali prod yer tutucusu example.json'a.
+
+**(2) CF callback IMZA MODELI.** OLCULDU (tarayici Network > callback > Payload > Form Data):
+Iyzico CF callback POST'unda TEK alan var, `token` - `signature` alani YOK. Eski kod imzayi
+kosulsuz zorunlu tuttugu icin GERCEK Iyzico ile her gecerli odemenin callback'i reddediliyordu
+(olculdu: callback 4 ms'de 400 doner, retrieve HIC calismaz, odeme Pending kalir, para Iyzico'da).
+Cozum: `HandleCallback(dto, bool imzaZorunlu = true)` - varsayilan TRUE (fail-closed).
+`PaymentController.Callback` TEK yerde `imzaZorunlu: false` veriyor; `Webhook` ACIKCA
+`imzaZorunlu: true`. Imza GELIRSE her iki yolda da dogrulanir. Otorite imza degil: sunucu-sunucu
+retrieve + token zaman asimi (30 dk) + tutar/para birimi/fraud + "yalniz Pending islenebilir".
+`VerifyCallbackSignature`'in KENDISINE dokunulmadi.
+
+**(3) IADE KIMLIGI (B1) + SERBEST BIRAKMA BELLEK ESITLEMESI (B2).**
+
+- **B1:** Iyzico refund `paymentId`'yi DEGIL, odeme KIRILIMININ (itemTransaction)
+  `paymentTransactionId`'sini ister. OLCULDU (gercek retrieve yaniti): ayni odemede
+  `paymentId=37399936` iken `paymentTransactionId=39316344`, `itemTxSayisi=1`. Kirilim sayisinin
+  1 olmasi bizim CF init'imizin sepeti TEK `BasketItem` gondermesinden geliyor -> **tek kolon
+  yeterli**: `payments.item_transaction_id` (migration `20260820234946_ItemTransactionIdForRefund`,
+  `01_schema.sql` guncellendi). Kismi iade bu tek kirilim uzerinden TUTAR bazli yapilir.
+  `itemTxCount != 1` ise `LogError`. Kimlik YOKSA iade SESSIZCE CUZDANA KAYDIRILMAZ - gurultulu
+  duser (kartla odenmis siparisin iadesini magaza kredisine cevirmek musteriye parasini
+  VERMEMEK demektir).
+- **B2:** `ExecuteUpdateAsync` change-tracker'i atladigi icin `ReleaseRefundedAmountAsync` DB'de
+  hakki serbest birakiyor ama cagiranin IZLENEN `Order` nesnesi hala `+granted` tasiyordu;
+  iadeden sonra kosan herhangi bir `SaveChanges` bayat degeri GERI YAZIYORDU. Gecici teshis
+  testiyle olculdu: `serbestBirakma=0,00 bellek=100,00 saveChanges=100,00`. Iki serbest birakma
+  dalina `order.refunded_amount -= ...` eklendi. S6 pini bunu goremiyordu cunku her cagriyi AYRI
+  DI scope'unda yapiyor ve `order` orada DETACHED.
+- **MOCK SERTLESTIRILDI:** mock `RefundAsync` eskiden HER kimlige `Success=true` donuyordu - tip
+  karisikliginin hicbir testte gorunmemesinin sebebi buydu. Artik mock retrieve kendi
+  `ITX-<guid>`'sini uretip kaydediyor, `RefundAsync` yalniz o kimlikleri kabul ediyor.
+
+### FRONTEND (CSP + SERVICE WORKER)
+
+**CSP - her direktif AYRI olculdu**, tahminle eklenmedi. Uc tur, uc ayri blok:
+
+- `script/style/font/img` -> `sandbox-static` / `static` / `cdn.iyzipay.com` (bundle + kart
+  logolari + Inter fontu)
+- `connect-src` -> `sandbox-merchantgw` + `sandbox-consumerapigw` (+ prod karsiliklari). Canli
+  `iyziInit` yapilandirmasi okunarak bulundu: kart POST'u `merchantGatewayBaseUrl`'e gidiyor,
+  engellenince XHR hic tamamlanmiyor ve ODE butonu sonsuza kadar donuyor.
+- `form-action` -> `http://localhost:5000` (callback) ve `sandbox-api.iyzipay.com` (3DS
+  `/payment/mock/init3ds`). Prod karsiliklari `api.divisima.com` / `api.iyzipay.com`
+  **OLCULMEDI isaretiyle** eklendi.
+
+`connect-src`'de bir host bulunmasi `form-action`'i KAPSAMIYOR - bu ders bir tur bedeline
+ogrenildi. SENKRON KURALI (`form-action` = `Iyzico:CallbackUrl` origin'i) example.json'a yazildi.
+
+**SERVICE WORKER (SUPHELI #7 - KAPANDI).** Ayrintili kok sebep ve kapanis olcumu SUPHELI #7
+maddesinde. Ozet: surumlu CACHE + gercek temizlik + `skipWaiting`/`clients.claim`, ve
+navigasyon/`.html`/`.js` NETWORK-FIRST (surum bumpi unutulsa bile duzeltme ulasir). Offline
+yedegi artik YALNIZ navigasyona veriliyor. `pwa-register.js`'e `reg.update()`.
+
+**Hesabim > Siparislerim COKMESI** (SUPHELI #6): E2b yalniz yalani ve cokmeyi kaldirdi
+(`wireAccountOrders`); gercek liste E3 madde (a).
+
+### SANDBOX TURLARI - OLCULEN SONUCLAR
+
+Basarili kart (#28): callback 469 ms (retrieve kostu), Confirmed, `paid_price=1049.70`,
+`fraud=1`, fatura Sent, sadakat TAM 1 satir, stok 17->15, 0 uyari.
+
+Replay (ayni token 2. kez): 302 `success`, 4,4 ms (sorguya ULASMADI), sadakat/fatura/puan/stok
+DEGISMEDI.
+
+Bozuk imza: 302 `status=failed`, odeme Pending, rezervasyon bozulmadi.
+
+3DS DUSTU (#30): `paymentStatus=FAILURE`, `mdStatus=0`, `fraudStatus=1`. Basarisiz dal kusursuz:
+odeme Failed, siparis Cancelled, **fatura 0**, sadakat 0, stok geri, 0 uyari.
+**S7'nin "basarisiz odemede fatura kesilmez" duzeltmesi CANLI dogrulandi.**
+
+3DS BASARILI (#31): Confirmed, `transaction_id=37410742`, **`item_transaction_id=39327281`**
+(B1 canli teyidi - #28'de BOS'tu), fatura Sent, sadakat 1 satir.
+
+Kismi iade (#31): GERCEK Iyzico iadesi BASARILI - online 300,00, `refunded_amount` 0 -> 300,00
+(DB ve bellek), store credit 0, defter 0. Ayni islem #28'de "odeme kirilim kaydi bulunamadi"
+ile dusmustu.
+
+Clamp REDDI (#28): `granted<=0` -> `Success=false`, saglayiciya HIC cagri yok, sayaclar sabit.
+
+**CANLIDA SURULMEYENLER (durust kayit):**
+
+- **Kumulatif clamp KIRPMASI canlida SURULMEDI.** Kirpma kalan hakkin TAMAMINI verdigi icin
+  "#31 kismi-iadeli kalsin" ile birlikte saglanamiyordu; kullanici kismi veriyi secti. Pin
+  `KismiIadeler_UcuncuCagri_KalanHakka_KIRPILIR` + sertlestirilmis mock + dis kontrolu ile kapali.
+- **Fraud reddi dali** (`fraudStatus` 0/-1) sandbox'ta zorlanamadi; S7 pini ile kapali.
+- #28'in "hakki tukenmis" satiri Bulgu 2'nin DUZELTME ONCESI hasari; bugunku kodla olusmaz,
+  clamp fixture'i olarak kullanildi.
+
+**DERS:** bu sandbox'in 3DS SMS kodu SABIT DEGIL - ekranda gosteriliyor. Talimattaki `123456`
+ile denenen tur `mdStatus=0` ile dustu (ve boylece basarisiz dal canli olculdu).
+
+### PINLER
+
+Yeni (7 test):
+`DtoBOS_ConfigDOLU_IstemciyeGidenIstek_CONFIG_ADRESINI_TASIR`,
+`DtoDOLU_DTO_KAZANIR_GecersizDTO_Configle_KURTARILMAZ`,
+`CFCallback_YALNIZ_TOKEN_ile_ISLENIR_GercekIyzicoBicimi`,
+`Webhook_ImzaSIZ_REDDEDILIR_CF_Gevsemesi_SIZMAZ`,
+`Iade_ODEME_KIRILIMI_Kimligiyle_Gonderilir_PaymentId_ILE_DEGIL`,
+`Refund_KirilimKimligi_YOKSA_GURULTULU_DUSER_CuzdanaKAYMAZ`,
+`Refund_SaglayiciReddedince_SerbestBirakilanHak_SonrakiSaveChangesTe_GERI_YAZILMAZ`.
+
+Bilincli DEGISTIRILEN: `ImzaYOKSA_Reddedilir` -> `ImzaYOKSA_Reddedilir_KATI_YOL_WEBHOOK`
+(kirilmadi; `CallbackAsync` servisi dogrudan cagirdigi ve varsayilan strict oldugu icin yesil
+kaldi ama KAPSAMI DARALDI - adi bunu soylemezse pin yalan soyler).
+**KIRILAN PIN YOK** - fail-closed varsayilan secildigi icin hicbir S5 pini kirilmadi.
+
+Harnesta guncellenen 6 pin (ASSERT'LER DEGISMEDI, yalniz sahte saglayici olculen sozlesmeye
+uyduruldu - `RetrieveOverride`'lar artik `ItemTransactionId` tasiyor):
+`KartIadesi_Iyzicoya_DogruTutarla_Gonderilir`, `KumulatifIade_..._IYZICOYA_FAZLA_IADE_GITMEZ`,
+`KismiIadeler_UcuncuCagri_KalanHakka_KIRPILIR`, `SaglayiciIadesi_BASARISIZSA_IadeHakki_BLOKE_KALMAZ`,
+`EszamanliIkiTamIade_...`, `Refund_KartliSiparis_KartVeCuzdanPayinaBOLUNUR`. Ayrica
+`Refund_IyzicoBasarisizsa_...` YESILDI ama YANLIS SEBEPTEN dusuyordu (kimlik yok, saglayici
+reddi degil) - cift-anlam kirici olarak duzeltildi.
+
+### DIS KONTROLU (iki dalga)
+
+Imza dalgasi: 3 assert ters -> 3 AYRI isimli kirmizi. 5. kontrol: kosul `if (true)` yapilip E2b
+oncesi kosulsuz zorunluluk geri getirildi -> yeni pin `status=failed` ile kirildi, kullanicinin
+4. denemesinde gordugu zararin birebir aynisi.
+
+B1+B2 dalgasi: 3 assert ters -> 3 AYRI isimli kirmizi. Iki uretim mutasyonu: **A**
+(`RefundAsync(payment.transaction_id, ...)` + kimlik guard kapali) -> saglayiciya `PAY-KIMLIK`
+gitti (gercek Iyzico'nun reddettigi kimlik) ve kimliksiz kayit SESSIZCE `Success=True` dondu.
+**B** (bellek esitlemesi kaldirildi) -> `refunded_amount` 100.00 bulundu; siparis #28'de canli
+olculen zararin birebir aynisi. Hepsi geri alindi.
+
+### ORTAM NOTU
+
+`dotnet run` ve statik sunucu bash arka planindan baslatilinca kabuk oturumu kapaninca
+OLUYORLAR (E2b'de ikisi de fark edilmeden oldu; API logu hatasiz kesildi). Ikisi de
+`Start-Process` ile AYRIK baslatilmali. Izleyici artik ikisinin sagligini da yokluyor ve
+duseni geri kaldiriyor.
+
 
 ## SIRA
 
-1. **E2 run raporu** (push edildi, rapor bekleniyor)
+1. **E2b run raporu** (push edildi, rapor bekleniyor)
 2. **E3** hesap + siparis takibi
    - CMS sanitizasyonu IKI katman (yazma `InputSanitizer` + okuma DOMPurify)
 3. **Sema kapanis dalgasi** - kalan tek aday: **gift-card expiry**
@@ -505,6 +656,13 @@ dogru alan `value`. Backend dogruydu, test verisi yanlisti.
   step-up `auth_time` refresh'te sifirlanmasi, loyalty oransal geri alma + referral
   clawback, Dashboard tam-tablo agregalari. **Dusen kalem:** Http.Abstractions 2.2.0
   (hicbir csproj'de referans yok).
+- **Iyzico'nun TELEMETRI alan adlari CSP'de ACILMAZ (kalici karar).** `countly.iyzico.com`
+  ve `*.ingest.tr.sentry.io` (o120955...). Iyzico checkout formu kendi
+  Countly analitigine baglaniyor (`campaign_banner_enabled`, `checkout_radio_button_layout_updated`
+  gibi A/B bayraklari) ve Sentry hata toplamaya. Ucuncu taraf izleme; engellendiklerinde
+  form yine ciziliyor ve odeme akisi calisiyor. Resmi Iyzico ALAN ADLARI (static / api /
+  cdn / merchantgw / consumerapigw.iyzipay.com) E2b de OLCULEREK acildi - tahminle degil,
+  her tur konsoldaki ihlal ve canli iyziInit yapilandirmasi okunarak.
 - **Auth modeli**: mevcut hibrit korunuyor (access localStorage + refresh httpOnly
   cookie + kosullu CSRF). Backend ile uyumlu oldugu dogrulandi.
 - **`EnableRetryOnFailure`: S7'de ACILMADI.** S7 engeli kaldirdi (IyzicoPayment artik
@@ -512,7 +670,7 @@ dogru alan `value`. Backend dogruydu, test verisi yanlisti.
   Acmadan once `Program.cs` yorumundaki DIGER manager'lar (OrderManager, GiftCard,
   Loyalty, Referral, Return, StoreCredit) da tasinmali - aksi halde onlarin manuel
   `BeginTransaction` cagrilari retry stratejisi tarafindan REDDEDILIR.
-- **SPRINT 8 = E FAZI SONRASI LAUNCH-ONCESI ZORUNLU DALGA (ALTI KALEM).**
+- **SPRINT 8 = E FAZI SONRASI LAUNCH-ONCESI ZORUNLU DALGA (DOKUZ KALEM).**
   Simdi is yok; E fazi bitince kosulur. Sira onceligi (6) guvenlik oldugu icin ustte.
 
   1. **Kupon `used_count` idempotency** (outbox'in on kosulu). `IncrementCouponUsageWithRetry`
@@ -535,6 +693,28 @@ dogru alan `value`. Backend dogruydu, test verisi yanlisti.
      `SetRefreshTokenCookie` GERCEKTEN kullanilir - login/refresh cookie YAZAR, refresh ucu
      cookie'den OKUR, logout siler; istemci uyarlanir; CSRF double-submit devreye girer.
      Eski govde-tabanli sozlesme pinleri BILINCLI kirilir, yenileri ayni commit'te gelir.
+  7. **`Iyzico:CallbackUrl` uretim FAIL-FAST listesine eklenir.** (E2b'de olculdu)
+     `Program.cs` satir 43-84'teki blok ConnectionStrings / TokenOptions:SecurityKey /
+     Encryption:Key / MailSettings:Host kontrol ediyor; `Iyzico:CallbackUrl` YOK. Uretimde
+     bos kalirsa HER kart odemesi init'te 400 ile duser ve musteri yalniz "Odeme
+     baslatilamadi." goruru - E2b'de bu belirti birebir olculdu. Tam fail-fast konusu.
+  8. **Kayit e-posta validatorunun Iyzico kabul kurallariyla uyumu INCELENIR (rapor).**
+     (E2b'de olculdu) Gercek Iyzico `@divisima.test` adresini "email hatali format ile
+     gonderilmistir" ile REDDEDIYOR; ayni musteri example.com ile 200 aliyor. Yani bizim
+     kabul ettigimiz bir e-posta ile uye olan musteri HIC odeme yapamaz. Ayrica init-400
+     dalinda kullaniciya AYIRT EDILEBILIR mesaj verilmesi degerlendirilir (bugun yalniz
+     "Odeme baslatilamadi." goruluyor). Duzeltme YAPILMADI - turlar example.com hesabiyla suruldu.
+  9. **WEBHOOK TUNEL DOGRULAMASI - LAUNCH ONCESI ZORUNLU** (E2b'de statusu YUKSELTILDI).
+     Onceden "ayri bir dogrulama" olarak deftere yazilmisti; E2b bunun GERCEK bir senaryo
+     oldugunu OLCTU. Siparis `DVS20260821-6958D22788`: odeme Iyzico sandbox'ta ALINDI,
+     sonucu tasiyan form POST'u storefront CSP'si (`form-action 'self'`) tarafindan
+     ENGELLENDI, callback HIC ATESLENMEDI, siparis PENDING kaldi. Uretimde bu "para gitti,
+     siparis yok" demektir. Tasarimda tek telafi `POST /api/payment/webhook` (bant-disi
+     bildirim, ayni HandleCallback mantigi, idempotent) - ama disaridan erisilebilir bir
+     tunel olmadan HIC dogrulanmadi. Kapsam: public tunel -> Iyzico panelinde webhook
+     adresi -> kaybolan callback senaryosu -> webhook'un siparisi Confirmed'a tasidigi
+     OLCULUR. CSP senkron kurali (form-action = Iyzico:CallbackUrl origin'i)
+     `appsettings.Development.example.json` icindeki `//Iyzico` aciklamasina yazildi.
 
 ## SUPHELI DAVRANISLAR - KARAR BEKLEYENLER
 
@@ -562,6 +742,15 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    birebir gozlendi (dosya test bin'ine yazildi, 404 alindi) ve test host'unda
    `UseContentRoot(CWD)` ile hizalandi. Uretim duzeltmesi `WebRootPath` kullanmak olurdu -
    YAPILMADI, karar kullanicinin.
+   **E2b: ARTIK TEORIK DEGIL - CANLI ORTAMDA GERCEKLESTI.** Storefront urun 2 gorselleri
+   icin 404 aliyor. Olculdu: `product_images` tablosunda 3 satir var
+   (`/uploads/products/3088...png` dahil, `is_primary=1`), ama
+   `Divisima.API/wwwroot/uploads/products/` **BOS** ve dosya adi repo genelinde
+   HICBIR YERDE yok. Dosyalari iceren TEK dizin
+   `Divisima.IntegrationTests/bin/Release/net8.0/wwwroot/uploads/products` (test
+   yuklemeleri). Yani E4a'da yuklenen gercek gorseller, o anki CALISMA DIZININE yazilmis
+   ve orasi sunulan dizin DEGIL; sonucta veritabani "gorsel var" diyor, dosya yok,
+   vitrin SONSUZA KADAR 404. Tam olarak yukarida ongorulen zarar. Sprint 8 madde 4.
 4. **Storefront liste yolu `category_name` / `total_stock` / `sizes` DOLDURMUYOR.**
    (E1'de olculdu, pinlendi) `ProductProfile` ucunu de `Ignore` ediyor; admin `GetList`
    `sizes`'i sonradan dolduruyor ama `GetListSearchAndFilterWithPaging` (yorumunda
@@ -579,6 +768,59 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    sozlesmeye (govde) uydurdu; refresh token JS'in erisebildigi yerde duruyor ve bu
    httpOnly'den ZAYIF. Duzeltme BACKEND isi (cookie yaz + cookie'den oku + logout'u
    duzelt), karar kullanicinin.
+6. **Hesabim > Siparislerim ekrani MOCK siparis listesi ciziyordu ve COKUYORDU.**
+   (E2b'de olculdu) `index.html` satir 2524'teki `accOrders()` `MOCK_ORDERS` uzerinde
+   donuyor ve her kalem icin `byId(id).price` okuyor. E1 katalogu gercek API'ye
+   bagladigi icin `byId` artik yalniz GERCEK urunleri biliyor; mock siparislerin kalem
+   id'leri (olculdu: 1, 8, 5, 13, 18, 3) gercek katalogda (olculdu: 2, 1) karsilik
+   BULMUYOR -> `byId(8)` undefined -> "Uncaught TypeError: Cannot read properties of
+   undefined (reading 'price')" ve tum `renderAccount` render'i cokuyor (yakalandi:
+   `router()` cagrisi bu istisnayla duruyor, `accountView` BOS kaliyor).
+   E2b SADECE yalani ve cokmeyi kaldirdi (`api-bridge.js` -> `wireAccountOrders`,
+   `window.accOrders` ezilir, notr durum cizilir). GERCEK listeyi
+   (`/api/order/my-orders` + zaman cizelgesi) baglamak **E3 madde (a)**; oraya kadar
+   ekran gercek siparisleri GOSTERMIYOR.
+7. **[KAPANDI - E2b] SERVICE WORKER SURUMLEME YOK - YAYINLANAN DUZELTME KULLANICIYA ULASMIYORDU.**
+   (E2b'de olculdu; kullanicinin suphesi dogru cikti) `frontend/service-worker.js`:
+   - `const CACHE = "divisima-v1"` **SABIT** - hicbir surumleme/hash yok.
+   - `SHELL = ["/", "/index.html", "/manifest.json", "/api-client.js"]` -> `index.html`
+     (yani **CSP meta etiketi**) install aninda onbellege aliniyor.
+   - API disi her GET **cache-first**: `caches.match(req).then(cached => cached || fetch(...))`.
+     Onbellekte varsa aga HIC cikilmaz.
+   - Fetch handler her GET yanitini onbellege YAZIYOR -> `api-bridge.js` de ilk yuklemede
+     girip sonsuza kadar oradan servis ediliyor.
+   - `activate` yalniz `k !== CACHE` olanlari siliyor; CACHE hic degismedigi icin
+     **hicbir sey silinmiyor**.
+   - SW dosyasi kendisi degismedigi icin tarayici YENI SW kurmuyor; `skipWaiting()` /
+     `clients.claim()` hic devreye girmiyor.
+   Sonuc: ilk ziyaretten sonra `index.html` ve `api-bridge.js` kullanicinin tarayicisinda
+   DONMUS. E2b'de CSP duzeltmeleri ancak Ctrl+Shift+R (navigasyonda SW atlanir) ile
+   ulasti, normal yenileme/yeni sekmede ESKI surum geri geldi - teshis bu yuzden
+   tutarsiz gorunuyordu. URETIMDE ANLAMI: yayinlanan hicbir duzeltme (guvenlik yamasi
+   dahil) mevcut kullanicilara ULASMAZ. Aday duzeltme: CACHE adini her dagitimda degisen
+   bir surume baglamak + navigasyon/`index.html` icin network-first. YAPILMADI -
+   kullanici acikca "olc ve adim adim talimat ver" dedi, kod degisikligi istemedi.
+   **EK KANIT (E2b, 2. olay): ORIGIN ERISILEMEZKEN DE ESKI SURUM SERVIS EDILIYOR.**
+   Statik sunucu (:5173) fark edilmeden olmustu (`curl` -> `http=000`). Tarayici yine de
+   sayfayi ACTI: SW'nin fetch handler'indaki `.catch(() => caches.match("/index.html"))`
+   dali devreye girip ONBELLEKTEKI ESKI index.html'i servis etti - `?v=2` cache-buster'i
+   dahil. Kullanici "duzeltme uygulanmadi" sanirken aslinda SUNUCU KAPALIYDI ve SW bunu
+   GIZLEDI. Uretimdeki karsiligi: origin coktugunde kullanici hicbir hata gormez, aylar
+   once onbellege alinmis bir surumu kullanmaya devam eder ve operasyon kesintiyi
+   musteri tarafinda GOREMEZ. Ayni duzeltme (surumlu CACHE + navigasyonda network-first)
+   bunu da kapatir.
+   **KAPANIS (E2b - kullanicinin KENDI tarayicisinda olculdu).** Duzeltme iki ayak uzerine
+   kuruldu: (a) `VERSION` sabiti -> `CACHE = "divisima-" + VERSION`, `activate` artik
+   `k !== CACHE` olan HER onbellegi gercekten siliyor, `skipWaiting` + `clients.claim`
+   devrede; (b) navigasyon + `.html` + `.js` NETWORK-FIRST, yani VERSION bumpi UNUTULSA
+   BILE yayinlanan duzeltme ulasir - surumleme temizlik icin, tek dayanak degil. Offline
+   yedegi YALNIZ navigasyona veriliyor (bir `.js` istegine HTML donmek "sunucu oldu"
+   durumunu gizliyordu). `pwa-register.js`'e `reg.update()` eklendi - statik sunucu cache
+   basligi gondermedigi icin tarayici SW betigini gec fark edebiliyordu.
+   OLCUM (Bypass KAPALI, elle temizlik YOK, 2 x normal F5): dortlu CSP kontrolu TRUE,
+   `caches.keys()` -> `['divisima-2026-08-21-e2b']` (**`divisima-v1` YOK** - activate sildi),
+   SW kaydi 1. Yani guncelleme kullaniciya ELLE MUDAHALE OLMADAN ulasti.
+
 
 ## SUREC (degismez)
 

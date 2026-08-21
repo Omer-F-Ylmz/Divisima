@@ -58,6 +58,14 @@ namespace Divisima.Core.Integrations.Iyzico
         // doğru tutarı döndürebilsin diye (manager'ın tutar doğrulaması gerçek akıştaki gibi çalışır). Üretimde kullanılmaz.
         private static readonly ConcurrentDictionary<string, decimal> _devTokenAmounts = new();
 
+        // E2b - MOCK MODU IADE KIMLIGI. Gercek Iyzico refund'da paymentId DEGIL, odeme
+        // KIRILIMININ paymentTransactionId'sini ister; yanlis kimlikle cagrilirsa
+        // "Bu isyerine ait odeme kirilim kaydi bulunamadi" ile REDDEDER (olculdu).
+        // Mock eskiden HER kimlige Success=true donuyordu - bu yuzden uretimdeki tip
+        // karisikligi hicbir testte gorunmuyordu. Artik mock da SADECE kendi urettigi
+        // kirilim kimliklerini kabul ediyor; boylece hata CI'da pinlenebilir.
+        private static readonly ConcurrentDictionary<string, byte> _devItemTransactionIds = new();
+
         public async Task<IyzicoCheckoutInitResult> InitializeCheckoutFormAsync(IyzicoCheckoutInitRequest request)
         {
             // Açıklayıcı yorum: Dev/test - gerçek SDK kapalıysa güvenli placeholder
@@ -150,10 +158,14 @@ namespace Divisima.Core.Integrations.Iyzico
             {
                 // Açıklayıcı yorum: Init'te saklanan beklenen tutarı dön (yoksa 0). Gerçek akıştaki tutar doğrulaması test edilebilir.
                 _devTokenAmounts.TryRemove(token, out var devAmount);
+                var devItemTx = "ITX-" + Guid.NewGuid().ToString("N");
+                _devItemTransactionIds[devItemTx] = 1;
                 return new IyzicoPaymentResult
                 {
                     Success = true,
                     PaymentId = Guid.NewGuid().ToString("N"),
+                    ItemTransactionId = devItemTx,
+                    ItemTransactionCount = 1,
                     PaidPrice = devAmount,
                     Currency = "TRY",
                     FraudStatus = "1"
@@ -170,10 +182,27 @@ namespace Divisima.Core.Integrations.Iyzico
             bool paid = result.Status == "success" && result.PaymentStatus == "SUCCESS";
             decimal.TryParse(result.PaidPrice, NumberStyles.Any, ci, out var paidPrice);
 
+            // E2b - ODEME KIRILIMI (itemTransaction). IADE bu kimligi ister, paymentId'yi DEGIL.
+            // Olculdu (gercek sandbox yaniti): paymentId=37399936 iken paymentTransactionId=39316344
+            // ve itemTransaction SAYISI = 1. Sayinin 1 olmasi bizim CF init'imizin sepeti TEK
+            // BasketItem olarak gondermesinden geliyor (bkz. InitializeCheckoutFormAsync).
+            // Sayi 1 DEGILSE tasarim varsayimi bozulmustur: sessizce ilkini secip yanlis tutar
+            // iade etmek yerine GURULTULU loglanir, kimlik yine ilk kirilimdan alinir.
+            var itemTx = result.PaymentItems?.FirstOrDefault()?.PaymentTransactionId;
+            var itemTxCount = result.PaymentItems?.Count ?? 0;
+            if (paid && itemTxCount != 1)
+                _logger.LogError("Iyzico retrieve BEKLENMEYEN kirilim sayisi: {Adet} (beklenen 1). " +
+                                 "Iade kimligi ilk kirilimdan alindi - kismi iade tutari yanlis olabilir. token={Token}",
+                                 itemTxCount, token);
+            if (paid && string.IsNullOrWhiteSpace(itemTx))
+                _logger.LogError("Iyzico retrieve KIRILIM KIMLIGI BOS - bu odeme IADE EDILEMEZ. token={Token}", token);
+
             return new IyzicoPaymentResult
             {
                 Success = paid,
                 PaymentId = result.PaymentId,
+                ItemTransactionId = itemTx,
+                ItemTransactionCount = itemTxCount,
                 ConversationId = result.ConversationId,
                 PaidPrice = paidPrice,
                 Currency = result.Currency,
@@ -198,7 +227,20 @@ namespace Divisima.Core.Integrations.Iyzico
         {
             // Açıklayıcı yorum: Dev/test - gerçek SDK kapalıysa başarılı placeholder
             if (!UseRealSdk)
+            {
+                // E2b: MOCK ARTIK KIMLIK DOGRULUYOR. Eskiden HER kimlige Success=true donuyordu;
+                // bu yuzden uretimdeki tip karisikligi (paymentId yerine paymentTransactionId)
+                // hicbir testte gorunmedi ve ancak GERCEK sandbox turunda ortaya cikti.
+                // Gercek Iyzico yanlis kimlige "Bu isyerine ait odeme kirilim kaydi bulunamadi"
+                // diyor - mock da ayni sekilde REDDEDIYOR ki hata CI'da pinlenebilsin.
+                if (string.IsNullOrWhiteSpace(paymentTransactionId) || !_devItemTransactionIds.ContainsKey(paymentTransactionId))
+                    return new IyzicoRefundResult
+                    {
+                        Success = false,
+                        ErrorMessage = "Bu isyerine ait odeme kirilim kaydi bulunamadi (mock)"
+                    };
                 return new IyzicoRefundResult { Success = true, RefundId = Guid.NewGuid().ToString("N") };
+            }
 
             var options = BuildOptions();
             var ci = CultureInfo.InvariantCulture;

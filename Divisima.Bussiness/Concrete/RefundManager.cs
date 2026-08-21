@@ -74,11 +74,31 @@ namespace Divisima.Bussiness.Concrete
             // 1) Kart iadesi (Iyzico)
             if (hasCard && onlineRefund > 0)
             {
-                var r = await _iyzico.RefundAsync(payment.transaction_id, onlineRefund);
+                // E2b - DOGRU KIMLIK: Iyzico refund odeme KIRILIMININ (itemTransaction)
+                // kimligini ister; paymentId ile cagrilirsa "Bu isyerine ait odeme kirilim kaydi
+                // bulunamadi" ile REDDEDER (gercek sandbox turunda olculdu).
+                // KIMLIK YOKSA SESSIZCE CUZDANA KAYDIRMIYORUZ: kartla odenmis bir siparisin
+                // iadesini magaza kredisine cevirmek musterinin parasini geri VERMEMEK demektir.
+                // Gurultulu basarisizlik dogru davranis - cagiran zaman cizelgesine KRITIK not duser.
+                if (string.IsNullOrWhiteSpace(payment.item_transaction_id))
+                {
+                    await _orderDal.ReleaseRefundedAmountAsync(order.id, granted);
+                    order.refunded_amount -= granted;   // B2: bellekteki bayat deger de geri alinir
+                    return RefundOutcome.Fail();
+                }
+
+                var r = await _iyzico.RefundAsync(payment.item_transaction_id, onlineRefund);
                 if (!r.Success)
                 {
                     // Saglayiciya para GITMEDI -> tahsis edilen iade hakki bloke kalmamali.
                     await _orderDal.ReleaseRefundedAmountAsync(order.id, granted);
+                    // B2 (E2b - OLCULDU): ExecuteUpdateAsync change-tracker'i ATLAR. DB'de hak
+                    // serbest birakilir ama CAGIRANIN elindeki IZLENEN Order nesnesi hala
+                    // +granted tasir; iadeden sonra kosan herhangi bir SaveChanges (zaman
+                    // cizelgesi, sadakat geri alma, fatura iptali) bayat degeri GERI YAZAR.
+                    // Olculdu: serbestBirakmaSonrasi=0,00 bellek=100,00 saveChangesSonrasi=100,00.
+                    // Sonuc: basarisiz bir iade musterinin iade hakkini KALICI tuketiyordu.
+                    order.refunded_amount -= granted;
                     return RefundOutcome.Fail();   // caller rollback etmeli
                 }
                 outcome.RefundId = r.RefundId;
@@ -99,6 +119,9 @@ namespace Divisima.Bussiness.Concrete
                     // Cuzdana YAZILAMADI -> yalniz cuzdan payini serbest birak. Kart payi (varsa) gercekten
                     // gonderildi, onun tahsisi TUKETILMIS kalir; aksi halde ayni para ikinci kez iade edilebilirdi.
                     await _orderDal.ReleaseRefundedAmountAsync(order.id, creditRefund);
+                    // B2: cuzdan payi geri birakilirken bellekteki deger de esitlenir (yukaridaki
+                    // gerekcenin aynisi - aksi halde sonraki SaveChanges bayat degeri geri yazar).
+                    order.refunded_amount -= creditRefund;
                     return RefundOutcome.Fail();
                 }
                 await _creditTxDal.AddAsync(new StoreCreditTransaction

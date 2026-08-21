@@ -18,6 +18,17 @@ namespace Divisima.Entity.Entities
         public string? currency { get; set; }
         public string? fraud_status { get; set; }        // Iyzico fraud skoru (1=onay)
         public string? transaction_id { get; set; }      // provider işlem id (paymentId)
+
+        // E2b - OLCULEREK EKLENDI: Iyzico IADE'de paymentId'yi DEGIL, odeme KIRILIMININ
+        // (itemTransaction) kimligini ister. Ikisi FARKLI degerdir - olculdu: ayni odemede
+        // paymentId=37399936, paymentTransactionId=39316344. Eskiden refund'a transaction_id
+        // (paymentId) gonderiliyordu ve Iyzico "Bu isyerine ait odeme kirilim kaydi bulunamadi"
+        // ile REDDEDIYORDU - yani URETIMDE HICBIR KART IADESI CALISMIYORDU.
+        // TEK kolon YETER: CF init sepeti TEK BasketItem olarak gonderiyor (IyzicoClient.cs),
+        // bu yuzden retrieve TEK kirilim donuyor (olculdu: itemTxSayisi=1, 2 adetlik siparis).
+        // Kismi iade bu tek kirilim uzerinden TUTAR bazli yapilir, kalem bazli degil.
+        // Init sepeti kalem-kalem gondermeye baslarsa BU TASARIM DA DEGISMELIDIR.
+        public string? item_transaction_id { get; set; }
         public string? conversation_id { get; set; }     // eşleme
         public string? token { get; set; }               // Checkout Form sonucu sorgulama anahtarı
         public DateTime? paid_at { get; set; }

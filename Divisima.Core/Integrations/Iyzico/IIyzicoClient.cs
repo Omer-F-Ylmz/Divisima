@@ -47,6 +47,16 @@ namespace Divisima.Core.Integrations.Iyzico
     {
         public bool Success { get; set; }
         public string PaymentId { get; set; }
+
+        // E2b: IADE icin gereken kimlik. Iyzico refund paymentId DEGIL, odeme KIRILIMININ
+        // (itemTransaction) paymentTransactionId'sini ister - olculdu: ayni odemede
+        // paymentId=37399936 iken paymentTransactionId=39316344.
+        public string? ItemTransactionId { get; set; }
+
+        // Kirilim SAYISI. Bizim CF init'imiz sepeti TEK BasketItem gonderdigi icin normalde 1'dir
+        // (olculdu). 1 DEGILSE tasarim varsayimi bozulmustur ve GURULTULU loglanir - sessizce
+        // ilk kirilimi secip yanlis tutar iade etmek yerine bu gorunur olmali.
+        public int ItemTransactionCount { get; set; }
         public string ConversationId { get; set; }
         public decimal PaidPrice { get; set; }            // GERÇEKTEN ödenen tutar (tutar doğrulaması için)
         public int Installment { get; set; } = 1;         // secilen taksit sayisi (Iyzico sonucu)

@@ -95,7 +95,7 @@ namespace Divisima.IntegrationTests
                 {
                     order_id = o.id, payment_provider = "iyzico",
                     payment_status = (byte)PaymentStatusEnum.Success,
-                    amount = 120m, transaction_id = "tx-test", created_at = DateTime.Now
+                    amount = 120m, transaction_id = "tx-test", item_transaction_id = "itx-test", created_at = DateTime.Now
                 });
                 await seed.SaveChangesAsync();
             }
@@ -124,7 +124,7 @@ namespace Divisima.IntegrationTests
                 {
                     order_id = o.id, payment_provider = "iyzico",
                     payment_status = (byte)PaymentStatusEnum.Success,
-                    amount = 100m, transaction_id = "tx-fail", created_at = DateTime.Now
+                    amount = 100m, transaction_id = "tx-fail", item_transaction_id = "itx-fail", created_at = DateTime.Now
                 });
                 await seed.SaveChangesAsync();
             }
@@ -200,6 +200,97 @@ namespace Divisima.IntegrationTests
             var ucuncu = await mgr.RefundToSourceAsync(o, 10m, "hak-bitti");
             ucuncu.Success.Should().BeFalse("hak tukendi - ucuncu iade REDDEDILMELI");
             (await ReadCreditAsync(c.id)).Should().Be(120m, "reddedilen iade bakiyeyi degistirmemeli");
+        }
+
+        // ── E2b) KIMLIK YOKSA IADE SESSIZCE CUZDANA KAYMAZ ─────────────────────────────
+        //
+        // Kartla odenmis bir siparisin iadesini magaza kredisine cevirmek, musteriye parasini
+        // GERI VERMEMEK demektir. Eski kayitlarda (E2b oncesi) item_transaction_id yok; o
+        // odemeler API uzerinden iade EDILEMEZ ve bu GURULTULU olmali - operasyon Iyzico
+        // panelinden elle iade edebilsin diye cagiran zaman cizelgesine KRITIK not duser.
+        [Fact]
+        public async Task Refund_KirilimKimligi_YOKSA_GURULTULU_DUSER_CuzdanaKAYMAZ()
+        {
+            if (Skipped()) return;
+            var c = await NewCustomerAsync();
+            var o = await NewOrderAsync(c.id, total: 100m, onlinePaid: true);
+            await using (var seed = NewContext())
+            {
+                seed.Set<Payment>().Add(new Payment
+                {
+                    order_id = o.id, payment_provider = "iyzico",
+                    payment_status = (byte)PaymentStatusEnum.Success,
+                    amount = 100m, transaction_id = "tx-eski",   // item_transaction_id YOK (eski kayit)
+                    created_at = DateTime.Now
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            var (mgr, iyz, ctx) = NewManager();
+            await using var _ = ctx;
+            var outcome = await mgr.RefundToSourceAsync(o, 100m, "kimliksiz-eski-kayit");
+
+            outcome.Success.Should().BeFalse("kirilim kimligi olmadan iade YAPILAMAZ");
+            iyz.LastRefundAmount.Should().Be(-1m, "saglayiciya HIC cagri gitmemeli - yanlis kimlikle deneme yok");
+            (await ReadCreditAsync(c.id)).Should().Be(0m,
+                "kart iadesi yapilamiyorsa TUTAR SESSIZCE MAGAZA KREDISINE CEVRILMEMELI");
+            (await LedgerCountAsync(c.id)).Should().Be(0, "yapilmayan iade defterde iz birakmamali");
+
+            await using var oku = NewContext();
+            (await oku.Set<Order>().AsNoTracking().SingleAsync(x => x.id == o.id)).refunded_amount
+                .Should().Be(0m, "para gitmedi - iade hakki tuketilmis sayilmamali");
+        }
+
+        // ── E2b/B2) SERBEST BIRAKILAN HAK SONRAKI SaveChanges'TE GERI YAZILMAZ ─────────
+        //
+        // OLCULEN ZARAR: ExecuteUpdateAsync change-tracker'i ATLAR. Saglayici reddettiginde
+        // ReleaseRefundedAmountAsync DB'de hakki serbest birakiyordu, ama CAGIRANIN elindeki
+        // IZLENEN Order nesnesi hala +granted tasiyordu; iadeden sonra kosan herhangi bir
+        // SaveChanges (zaman cizelgesi, sadakat geri alma, fatura iptali) bayat degeri GERI
+        // YAZIYORDU. Olculdu: serbestBirakma=0,00 bellek=100,00 saveChanges=100,00.
+        // Sonuc: basarisiz bir iade musterinin iade hakkini KALICI tuketiyordu.
+        //
+        // Bu pin canli yolun sartini birebir kurar: siparis manager'in context'inde IZLENIYOR
+        // ve iadeden SONRA bir SaveChanges kosuyor. S6 pini (SaglayiciIadesi_..._BLOKE_KALMAZ)
+        // bunu goremiyordu cunku her cagriyi AYRI scope'ta yapiyor ve order orada DETACHED.
+        [Fact]
+        public async Task Refund_SaglayiciReddedince_SerbestBirakilanHak_SonrakiSaveChangesTe_GERI_YAZILMAZ()
+        {
+            if (Skipped()) return;
+            var c = await NewCustomerAsync();
+            var o = await NewOrderAsync(c.id, total: 100m, onlinePaid: true);
+            await using (var seed = NewContext())
+            {
+                seed.Set<Payment>().Add(new Payment
+                {
+                    order_id = o.id, payment_provider = "iyzico",
+                    payment_status = (byte)PaymentStatusEnum.Success,
+                    amount = 100m, transaction_id = "tx-b2", item_transaction_id = "itx-b2",
+                    created_at = DateTime.Now
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using var ctx = NewContext();
+            // CANLI YOLUN SARTI: siparis manager'in kullandigi context'te IZLENIYOR
+            // (OrderManager.ChangeOrderStatus da GetAsync ile izlenen nesne aliyor).
+            var izlenen = await ctx.Set<Order>().SingleAsync(x => x.id == o.id);
+            var iyz = new FakeIyzico { RefundSucceeds = false };
+            var mgr = new RefundManager(new EfPaymentDal(ctx), iyz, new EfCustomerDal(ctx),
+                new EfStoreCreditTransactionDal(ctx), new EfOrderDal(ctx));
+
+            var outcome = await mgr.RefundToSourceAsync(izlenen, 100m, "b2-saglayici-hatasi");
+            outcome.Success.Should().BeFalse("saglayici reddetti");
+            iyz.LastRefundAmount.Should().Be(100m, "POZITIF OLAY: saglayiciya gercekten cagri gitti");
+
+            // Canli akista iadeden SONRA yan etkiler kosuyor ve AYNI context uzerinden
+            // SaveChanges tetikliyor. Bayat deger geri yazilmamali.
+            await ctx.SaveChangesAsync();
+
+            await using var oku = NewContext();
+            (await oku.Set<Order>().AsNoTracking().SingleAsync(x => x.id == o.id)).refunded_amount
+                .Should().Be(0m, "SaveChanges sonrasi da hak SERBEST kalmali - musteri iade hakkini KAYBETMEMELI");
+            izlenen.refunded_amount.Should().Be(0m, "bellekteki deger de esitlenmeli - bayat kalirsa geri yazilir");
         }
     }
 }

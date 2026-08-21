@@ -959,6 +959,26 @@
   }
 
   // ── Başlat ──
+  // ── E2b: MOCK siparis listesi CIZILMEZ ────────────────────────────────────
+  // OLCULEN COKME: index.html'deki accOrders() MOCK_ORDERS uzerinde donuyor ve her kalem
+  // icin byId(id).price okuyor. E1 katalogu gercek API'ye bagladigindan byId artik yalniz
+  // GERCEK urunleri biliyor; mock siparislerin kalem id'leri (olculdu: 1, 8, 5, 13, 18, 3)
+  // gercek katalogda (olculdu: 2, 1) karsilik bulmuyor -> byId(8) undefined ->
+  // "Uncaught TypeError: Cannot read properties of undefined (reading 'price')" ve
+  // Hesabim > Siparislerim render'i cokuyor.
+  //
+  // Kapsam karari: gercek listeyi (/api/order/my-orders + zaman cizelgesi) baglamak E3'un
+  // isi. E2b yalniz YALANI ve COKMEYI kaldiriyor - giris yapmis gercek bir musteriye sahte
+  // siparis gostermek, E1'de konan "yalan veri gostermek bos ekran gostermekten kotudur"
+  // ilkesine aykiri. Bu gecici durum E3'te gercek liste ile DEGISTIRILECEK.
+  function wireAccountOrders() {
+    window.accOrders = function () {
+      return '<div class="wrap" style="padding:24px 0">' +
+        '<p class="muted" style="margin:0 0 14px">Sipariş geçmişin bu ekranda listelenecek.</p>' +
+        '<a class="btn" href="#/kategori/tumu">Alışverişe devam</a></div>';
+    };
+  }
+
   async function init() {
     wireCoupon();
     wireAuth();
@@ -967,6 +987,7 @@
     wireProductDetail();
     wireCart();               // E2: sepet mutasyonlarini sunucuya aynala
     wireCheckoutRouting();    // E2: #/odeme ve #/odeme/sonuc
+    wireAccountOrders();      // E2b: mock siparis listesi cizilmez (olculen cokme)
     // Kategoriler ÖNCE: ürün kategorisi category_id üzerinden çözülüyor (liste yolu
     // category_name döndürmüyor), yükleme sırası ters olursa tüm ürünler "tumu" olur.
     await loadCategories();

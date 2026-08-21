@@ -10,6 +10,14 @@
   window.addEventListener("load", async () => {
     try {
       const reg = await navigator.serviceWorker.register("/service-worker.js");
+      // E2b: GUNCELLEME KONTROLUNU DETERMINISTIK YAP. Statik sunucu cache basligi gondermiyor;
+      // tarayici SW betigini sezgisel onbellekten okuyabilir ve yeni surumu gec fark eder.
+      // Acik update() cagrisi her yuklemede kontrolu zorlar - "yayinlanan duzeltme ulassin"
+      // hedefinin ikinci ayagi (birincisi SW icindeki network-first).
+      try { await reg.update(); } catch (_) { }
+      // Yeni SW devraldiginda gorunur olsun (SUPHELI #7 kapanis dogrulamasi bunu kullanir).
+      navigator.serviceWorker.addEventListener("controllerchange", () =>
+        console.log("Divisima SW: yeni surum devraldi"));
       console.log("Divisima SW kayıtlı:", reg.scope);
     } catch (e) { console.warn("SW kaydı başarısız:", e); }
   });
