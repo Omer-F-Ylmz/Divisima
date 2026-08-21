@@ -18,6 +18,15 @@ Kurallar kullanici tarafindan konulmustur; asistan bunlari kendi basina gevsetem
   cikti (son 100 satir, ortam bilgisi) oraya yazilir.
 - Annotation'lar **PUBLIC**. Oraya yalniz `Failed` / `Expected` / `Actual` satirlari
   basilir; cikti kuyrugu ve ortam bilgisi Summary'de kalir, annotation'a sizdirilmaz.
+- **DEPO DA PUBLIC: KANIT DEPOYA GIRMEDEN MASKELENIR (bir kez bedeli odendi, Sprint 8).**
+  Olcum kaniti olarak yapistirilan ham govdeler (webhook payload'lari, saglayici yanitlari,
+  istek/yanit dokumleri) **jeton ve kimlik tasir**. Sprint 8 push'unda gercek bir Iyzico
+  odeme jetonu (`"token":"<tam GUID>"`) CLAUDE.md'ye BIREBIR yapistirildi ve `secret-scan`
+  (Gitleaks) job'ini KIRDI. KURAL: depoya (kod, yorum, CLAUDE.md, commit mesaji) yazilan her
+  ornek govdede jeton/kimlik **ilk 8 karaktere kirpilir** (`76ee5138-...`). Kanit degeri
+  kaybolmaz - "webhook jetonu `payments.token` ile ESLESIYOR" cumlesi tam degeri gerektirmez.
+  Ayni kural `paymentConversationId`, `iyziReferenceCode`, oturum/refresh jetonlari ve
+  imza degerleri icin de gecerlidir.
 - Run izleme **SHA bazlidir** (`head_sha=` ya da `?branch=main` + SHA eslesmesi).
   "En son run" ile calisilmaz — Dependabot kosulari araya girer ve yanlis run raporlanir.
 
@@ -208,6 +217,31 @@ Bu bolum, yeni bir oturumun tek basina devam edebilmesi icin yazildi.
   kural (bolum 6 ve bolum 7) ilgili yerlerde.
 - **SPRINT 8: ON UC KALEMIN TAMAMI TAMAM.** Madde 9'un 2. turu gercek odemeyle suruldu
   (siparis #34, callback + webhook carpismasi idempotent cikti). Ayrinti Sprint 8 bolumunde.
+- **Sprint 8 push `19d101f` - CI YESIL, SECURITY KIRMIZI (tek job).** Adim bazinda okundu:
+  CI `format-check` iki ZORUNLU adim SUCCESS, `build-and-test`in TUM adimlari SUCCESS
+  ("SQL gerektiren testler" + "Testler + coverage" + "Coverage raporunu yukle"), TESHIS
+  skipped, **failure annotation SIFIR**. Security `dependency-scan` / `tests` / `codeql`
+  SUCCESS; **`secret-scan` -> "Gitleaks (secret taramasi)" FAILURE**, annotation:
+  "Leaks detected, see job summary for details".
+  **KOK SEBEP OLCULDU (uretim kodu DEGIL, BENIM RAPOR ALISKANLIGIM):** madde 9 kanitini
+  CLAUDE.md'ye yapistirirken gercek Iyzico odeme jetonunu BIREBIR yazdim -
+  `"token":"<tam GUID>"`. Push edilen diff tarandi; anahtar-adi + yuksek entropili deger
+  AYNI SATIRDA olan **TEK** yer buydu (gitleaks `generic-api-key` deseni).
+  **TARAMA KAPSAMI OLCULDU** (`gitleaks-action` kaynagi + `security.yml` okundu):
+  ayni dala push'ta `--log-opts=-1` -> **yalniz SON COMMIT**; `schedule`/`workflow_dispatch`'te
+  **hicbir `--log-opts` yok** -> `gitleaks detect` varsayilaniyla **TUM GECMIS**. Depoda
+  haftalik cron VAR (`0 6 * * 1`) ve checkout `fetch-depth: 0`. **Sonuc: kirpma TEK BASINA
+  YETMEZ** - push run'i yesillenir ama haftalik tarama kirmizi kalirdi.
+  DUZELTME (tek commit): iki jeton ilk 8 karaktere kirpildi + **DAR KAPSAMLI**
+  `.gitleaksignore` (YALNIZ iki fingerprint, gerekcesi dosyanin basinda) + kalici maskeleme
+  kurali bolum 1'e + `secret-scan` okuma kurali bolum 7'ye + force-push yasagi SUREC'e.
+  **NOT: jetonlar `19d101f` GECMISINDE KALIYOR** - force-push YASAK (gerekce SUREC'te).
+  Bunlar SANDBOX, TEK KULLANIMLIK, suresi DOLMUS checkout-form jetonlaridir; kimlik bilgisi
+  DEGILDIR.
+  **DOGRULAMA BOSLUGU (durust kayit):** `.gitleaksignore`'un ise yaradigi bir sonraki PUSH
+  run'inda GORULEMEZ (push yalniz son commit'i tarar, orada bulgu zaten yok). Kanit ancak
+  TUM GECMISI tarayan bir kosumdan gelir - Pazartesi cron'u ya da elle `workflow_dispatch`
+  (bugun workflow'da dispatch tetigi YOK; eklemek ayri bir karar).
 - **Yerel (madde 3 + madde 9 sonrasi): 198/198 `Category=Sql`, tam suitte 322 basarili /
   325 toplam** - kirilan 3'un UCU DE `OrderEndpointTests` (Testcontainers; yerelde Docker
   kapali, CI'da yesil kosuyor). Baska kirmizi YOK.
@@ -1134,7 +1168,7 @@ Gercek bildirim (teshis gunlugu, User-Agent `Apache-HttpClient/5.2.3 (Java/17.0.
 
 ```
 govde : {"paymentConversationId":"e160a135...","merchantId":3432888,"status":"SUCCESS",
-         "token":"76ee5138-cc90-481d-884f-90a9978a58a4","iyziReferenceCode":"8fe79c9a-...",
+         "token":"76ee5138-...","iyziReferenceCode":"8fe79c9a-...",
          "iyziEventType":"CHECKOUT_FORM_AUTH","iyziEventTime":1787347437752,
          "iyziPaymentId":37415135}
 baslik: X-Api-Version=V1 | X-Iyz-Signature=   (VAR ama DEGERI BOS)
@@ -1274,7 +1308,7 @@ bildirimi callback'ten **14,6 saniye SONRA** ayni odeme icin geldi:
 ```
 
 Ayni odeme oldugu KANITLI: webhook govdesindeki `token` =
-`f492bf0f-06b1-476b-8779-95e1ad11e2dc` = `payments.token`; `iyziPaymentId 37416082` =
+`f492bf0f-...` = `payments.token`; `iyziPaymentId 37416082` =
 `payments.transaction_id`. 15 ms'lik sure "zaten islendi" dalinin kaniti (E2b'de olculen
 replay suresiyle ayni buyukluk; gercek retrieve 223 ms).
 
@@ -1729,12 +1763,27 @@ KAPANDI. Acik kalan / yeni bulunanlar:
 ## SUREC (degismez)
 
 - **Tek push -> tek run -> tek rapor.** Commit/push karari HER ZAMAN kullanicidan gelir.
+- **FORCE-PUSH YASAK (kalici).** Gecmisi yeniden yazmak paylasilan `main`'i bozar, tum
+  klonlari ayristirir ve daha once verilen HER run raporunun SHA'sini gecersiz kilar -
+  raporlarin kanit degeri SHA'ya bagli oldugu icin bu, gecmis butun kaniti curutur.
+  Depoya yanlislikla giren bir sey varsa cozum: ileriye donuk maskeleme + gerekiyorsa
+  **DAR KAPSAMLI** `.gitleaksignore` fingerprint'i (bkz. `.gitleaksignore` basligi).
+  Gercek bir kimlik bilgisi sizarsa yol farklidir: once **iptal/rotasyon**, sonra karar -
+  o durumda gecmis yeniden yazmak gundeme gelebilir ve karar kullanicinindir.
 - **Push on-onayinin dort kosulu**: (a) `Category=Sql` yerel komut yesil,
   (b) tam suit yesil, (c) Release build 0 hata, (d) o sprintin pinlerinde dis kontrolu
   (>=3 assert ters cevir -> isimli kirmizi gozle -> geri al).
 - **Test sayilari CI'dan OKUNAMAZ.** Job log'u anonim erisime 403, Summary imza istiyor,
   annotation yalniz `Failed` satirlari tasiyor, check-run `output` bos (dordu de denendi).
   Kanit = **adimin SUCCESS olmasi** + yerelde `ci.yml`'dan cikarilan komutun verdigi sayi.
+- **`secret-scan` TERSINE: ANNOTATION'DAN DEGIL ADIM SONUCUNDAN OKUNUR (kalici kural).**
+  Gitleaks bulgusunu **`warning`** seviyeli bir annotation olarak basiyor
+  ("Leaks detected, see job summary for details"); job'da `failure` seviyeli annotation
+  **SIFIR** kaliyor. Yani annotation'a bakan bir okuyucu bu job'i YESIL sanir. Tek durust
+  sinyal **adim sonucu** (`Gitleaks (secret taramasi)` = FAILURE). Ayrintili bulgu listesi
+  Summary'de ve SARIF artefaktinda; ikisi de imza istiyor (artefakt indirme anonim **401**,
+  `code-scanning/alerts` anonim **401** - ikisi de olculdu). Kok sebep bu yuzden **depo
+  taramasiyla** bulunur, kanit kanalindan degil.
 - **`format-check` JOB SONUCUNDAN DEGIL ANNOTATION'DAN OKUNUR (kalici kural).** Adim
   `continue-on-error` altindaysa job YESIL, adim sonucu da API'de `success` gorunur; tek
   durust sinyal `check-runs/{job_id}/annotations` icindeki `annotation_level: failure`

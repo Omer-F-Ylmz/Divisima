@@ -1,0 +1,46 @@
+# ══ DAR KAPSAMLI SECRET-SCAN ISTISNASI - SPRINT 8 ════════════════════════════════════
+#
+# BU DOSYA YALNIZ IKI BULGUYU susturur. Dosya geneline, CLAUDE.md'ye ya da bir KURALA
+# istisna ASLA yazilmaz - oyle bir istisna gelecekteki GERCEK bir sizintiyi korlestirir.
+# Yeni satir eklenecekse: tek bir fingerprint + gerekcesi, ayni bu kalipla.
+#
+# ── NEDEN GEREKLI (OLCULDU, TAHMIN DEGIL) ───────────────────────────────────────────
+# gitleaks/gitleaks-action@v2 kaynagi (src/gitleaks.js, Scan fonksiyonu) okundu:
+#   eventType == "push" ve baseRef == headRef  ->  args.push("--log-opts=-1")
+#       yani AYNI DAL'a push'ta YALNIZ SON COMMIT taranir.
+#   eventType == "pull_request"                ->  --log-opts=--no-merges --first-parent ...
+#   "schedule" / "workflow_dispatch"           ->  HICBIR --log-opts EKLENMEZ
+#       yani `gitleaks detect` CLI varsayilaniyla kosar = TUM GIT GECMISI taranir.
+# security.yml'da haftalik cron VAR ('0 6 * * 1' - her Pazartesi 06:00) ve checkout
+# fetch-depth: 0 ile tum gecmisi getiriyor. Sonuc: jetonu YENI bir commit'te KIRPMAK
+# push run'ini yesillestirir ama HAFTALIK TARAMAYI YESILLESTIRMEZ - bulgu 19d101f
+# commit'inin gecmisinde durmaya devam eder.
+#
+# ── NE SUSTURULUYOR ─────────────────────────────────────────────────────────────────
+# Sprint 8 raporunu yazarken madde 9'un kanitini CLAUDE.md'ye yapistirirken GERCEK bir
+# Iyzico odeme jetonu BIREBIR yazildi. Bunlar:
+#   - IYZICO SANDBOX ortamina aittir (uretim degil),
+#   - CHECKOUT FORM jetonudur: TEK KULLANIMLIK ve 30 DAKIKALIK (HandleCallback'teki
+#     token zaman asimi guard'i), ikisi de COKTAN suresi dolmustur,
+#   - KIMLIK BILGISI DEGILDIR (API anahtari/parola degil; tek bir odeme oturumunun
+#     opak referansi).
+# Yine de depoya girmemeliydiler. Calisma agacinda ilk 8 karaktere KIRPILDILAR ve
+# ileriye donuk KALICI KURAL CLAUDE.md bolum 1'e yazildi ("depo da PUBLIC: kanit
+# depoya girmeden maskelenir").
+#
+# ── NEDEN GECMIS YENIDEN YAZILMIYOR ─────────────────────────────────────────────────
+# force-push YASAK (CLAUDE.md SUREC). Gecmisi yeniden yazmak paylasilan main'i bozar,
+# tum klonlari ayristirir ve daha once verilen her run raporunun SHA'sini gecersiz kilar.
+# Susturulan sey suresi dolmus bir sandbox jetonu oldugu icin bedel bunu haklilastirmaz.
+#
+# ── DOGRULAMA BOSLUGU (DURUST KAYIT) ────────────────────────────────────────────────
+# Bu dosyanin ISE YARADIGI, bir sonraki PUSH run'inda GORULEMEZ: push yalniz son
+# commit'i tarar ve orada zaten bulgu yoktur. Ancak TUM GECMISI tarayan bir kosum
+# (Pazartesi cron'u ya da elle workflow_dispatch) kanit uretir.
+# Fingerprint bicimi gitleaks README'sinden dogrulandi: commit:dosya:kural-id:satir.
+# Kural id "generic-api-key" (gitleaks varsayilan config'i; anahtar kelimeler arasinda
+# "token" var, entropi esigi 3.5). Satir numaralari 19d101f'teki CLAUDE.md'den okundu.
+# 1277 ONLEM AMACLIDIR: o satirda anahtar kelime degerin ONUNDE degil, dolayisiyla
+# eslesip eslesmedigi belirsiz; eslesmiyorsa bu satir sadece etkisiz kalir.
+19d101f5b8e2df55ee1fc0bdd940a0a5bc43c149:CLAUDE.md:generic-api-key:1137
+19d101f5b8e2df55ee1fc0bdd940a0a5bc43c149:CLAUDE.md:generic-api-key:1277
