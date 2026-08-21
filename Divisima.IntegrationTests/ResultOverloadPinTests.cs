@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -205,7 +206,17 @@ namespace Divisima.IntegrationTests
                 "200 + Content-Length: 0 doner - fatura ekrani BOS gelir (E3'te canli olculdu)");
             govde.Should().Contain(seed.OrderNumber, "govde GERCEKTEN bu siparisin faturasi olmali");
             govde.Should().Contain(seed.ProductName, "kalem satirlari cizilmis olmali");
-            govde.Should().Contain("549,90", "genel toplam govdede yer almali");
+            // KULTUR BAGIMLI LITERAL YASAK (CI'da BIR KEZ KIRDI - olculdu).
+            // Ilk hali "549,90" yaziyordu. Yerel makine tr-TR oldugu icin YESIL, GitHub kosucusu
+            // invariant kultur oldugu icin KIRMIZI: uretimdeki "{order.total_price:N2}" AMBIENT
+            // kulturu kullanir ve ayni tutar orada "549.90" olarak basilir.
+            // OLCUM: tr-TR -> "549,90" / "1.049,70";  Invariant -> "549.90" / "1,049.70".
+            // Assert artik uretimin KULLANDIGI bicimi hesaplar; boylece hangi kulturde kosarsa
+            // kossun "toplam govdede var mi" sorusunu olcer.
+            // NOT: uygulamanin kultur PINLEMEMESI ayri bir bulgudur - bkz. SUPHELI #13.
+            var beklenenToplam = 549.90m.ToString("N2", CultureInfo.CurrentCulture);
+            govde.Should().Contain(beklenenToplam,
+                $"genel toplam govdede yer almali (bu kulturde beklenen bicim: {beklenenToplam})");
         }
 
         // ── 2) UC DUZEYI PIN: REFERANS KODU "data" ALANINDA DONER ──────────────────────

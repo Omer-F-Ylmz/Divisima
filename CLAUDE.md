@@ -119,6 +119,13 @@ Dizgede `Database=` **bulunmalidir**: `InvoiceCancellationTests` degiskeni ham k
   govde mesaji ve/veya DB durumu da dogrulanir.
 - **Dis kontrolu:** yeni testlerin gercekten olctugu, assert tersine cevrilip **isimli
   kirmizi** gozlenerek kanitlanir; sonra geri alinir ve kanit raporda belirtilir.
+- **KULTUR BAGIMLI LITERAL YASAK (E3 run'inda BIR KEZ BEDELI ODENDI).** Testte
+  `"549,90"` gibi bicimlenmis sayi/tarih dizgesi ELLE yazilmaz. Yerel makine `tr-TR`,
+  GitHub kosucusu invariant kulturde kosar; ayni assert yerelde YESIL, CI'da KIRMIZI olur
+  (olculdu: tr-TR `549,90`/`1.049,70` - Invariant `549.90`/`1,049.70`). Beklenen deger,
+  uretimin KULLANDIGI bicimle HESAPLANIR: `deger.ToString("N2", CultureInfo.CurrentCulture)`.
+  Not: bu kural testin sorunudur; uygulamanin kultur PINLEMEMESI ayri bir bulgudur
+  (SUPHELI #13).
 
 ## 6b. Rapor bicimi (KALICI)
 
@@ -142,6 +149,19 @@ bicim (tablo/kalin/baglanti) kopyada bos dusuyor.
 - Testleri filtreyle **dislamak yasaktir**: sessiz skip degil, gurultulu hata istenir.
 - Teshis kanallari: `if: failure()` adimi -> Summary (ayrintili) + `::error::`
   annotation (yalniz assert satirlari).
+- **`dotnet test` kosan HER adim ciktisini AYNI teshis dosyasina yazar** (E3 run'inda
+  olculdu). Eskiden yalniz "Testler + coverage" `tee` ediyordu; "SQL gerektiren testler"
+  kirildiginda coverage adimi SKIPPED oluyor, `test-output.txt` HIC OLUSMUYOR ve TESHIS
+  adimindaki `if [ -f "$F" ]` guard'i yuzunden **tek bir `::error::` bile basilmiyordu**.
+  Sonuc: CI job'inda tek failure annotation "Process completed with exit code 1." - hangi
+  testin kirildigi ANONIM OKUYUCUYA gorunmuyor. SQL adimi artik `set -o pipefail` +
+  `tee -a test-output.txt` kullaniyor.
+- **Annotation suzgecinde ONCE test sonucu satirlari, SONRA istisna satirlari.** Tek
+  gecisli `grep | head -20` dosya sirasini korur; uygulamanin Serilog ciktisi test kosumu
+  SIRASINDA onlarca farkli `...Exception:` satiri yazar, `Failed <test adi>` ise kosumun
+  SONUNDA gelir - gurultu ilk 20'yi doldurup asil bilgiyi disarida birakabilir. Olculdu
+  (30 farkli istisna satiri + 1 Failed): eski desende ilk 20'de Failed satiri **0**,
+  iki gecisli desende **1**.
 
 ---
 
@@ -171,6 +191,15 @@ Bu bolum, yeni bir oturumun tek basina devam edebilmesi icin yazildi.
   bolume bak. Icinde E3 elle dogrulamasinda BULUNAN bir uretim hatasinin (SuccessDataResult
   asiri yukleme belirsizligi) KAPSAM SINIRLI duzeltmesi de var; **kok sebep ACIK**, Sprint 8
   madde 11.
+- **E3 push `e8b5042` - HER IKI WORKFLOW KIRMIZI.** Adim bazinda okundu: CI
+  `build-and-test` -> "SQL gerektiren testler (ATLANMAMALI)" **FAILURE** ("Testler + coverage"
+  bu yuzden SKIPPED); Security `tests` -> "Entegrasyon testleri" **FAILURE**. `format-check`
+  job'inin IKI ZORUNLU adimi da SUCCESS ve o job'da failure annotation YOK.
+  **Kok sebep OLCULDU: kirilan tek test `FaturaHTML_Ucu_DOLU_GOVDE_Doner_ContentLength_SIFIR_DEGIL`
+  ve sebep KULTUR BAGIMLI BIR TEST LITERALI** (`Contain("549,90")`). Yerel makine `tr-TR`,
+  GitHub kosucusu invariant: olculdu -> tr-TR `549,90` / `1.049,70`, Invariant `549.90` /
+  `1,049.70`. Uretim kodu dogru calisiyordu (govde DOLU geldi - `Content-Length` asserti
+  GECTI, yalniz `Contain` asserti dustu). **Duzeltme yerelde hazir, push karari kullanicinin.**
 - **Yerel (E3 sonrasi): 168/168 `Category=Sql`, 289/289 tam suit** (Testcontainers'li
   `OrderEndpointTests` HARIC - yerelde Docker kapali, CI'da yesil kosuyor).
 
@@ -818,7 +847,13 @@ eski onbellegi temizlemek icin).
   Acmadan once `Program.cs` yorumundaki DIGER manager'lar (OrderManager, GiftCard,
   Loyalty, Referral, Return, StoreCredit) da tasinmali - aksi halde onlarin manuel
   `BeginTransaction` cagrilari retry stratejisi tarafindan REDDEDILIR.
-- **SPRINT 8 = E FAZI SONRASI LAUNCH-ONCESI ZORUNLU DALGA (ON IKI KALEM).**
+- **SPRINT 8 = E FAZI SONRASI LAUNCH-ONCESI ZORUNLU DALGA (ON UC KALEM).**
+  **COMMIT BOLUNMESI ONAYLI (kullanici karari): UC COMMIT** - guvenlik (6+7+9),
+  dogruluk (1+2+3+4+11+13), yuzey (5+10+12+8). Hepsi **TEK PUSH, TEK RUN**.
+  Gerekce: madde 6 pinleri BILINCLI kiriyor; tek dev commit'te bir regresyon `git bisect`
+  ile ayristirilamazdi, ayrica onlarca dosyalik tek commit okunamazdi.
+  **KALEM SIRASI (onayli):** 9-kurulum -> 6 -> 7 -> 11 -> 1 -> 2 -> 3 -> 13 -> 4 ->
+  5 -> 10 -> 12 -> 8 -> 9-dogrulama.
   Simdi is yok; E fazi bitince kosulur. Sira onceligi (6) guvenlik oldugu icin ustte.
 
   1. **Kupon `used_count` idempotency** (outbox'in on kosulu). `IncrementCouponUsageWithRetry`
@@ -897,6 +932,21 @@ eski onbellegi temizlemek icin).
      katalog yarisi burada da gecerli - erken cagri MOCK urunu acardi), ardindan ELLE
      DOGRULAMA: paylasilan bir baglantiyi temiz sekmede acmak dogru urunu acmali.
      Bkz. SUPHELI #10.
+  13. **KULTUR PINLEME.** (E3 run'inda CANLI ORTAMDA kanitlandi - bkz. SUPHELI #13;
+     kullanici karariyla SUPHELI'den KALEME yukseltildi, DOGRULUK commit'ine girer)
+     Uygulama hicbir yerde kultur pinlemiyor; para/tarih bicimlendirmesi kostugu kabin
+     yereline gore degisiyor. GitHub kosucusu (invariant) fatura tutarini `1,049.70`
+     olarak bastigi icin bu davranis ORTAMDA gorunur oldu.
+     **MAGAZA TEK PAZARLI (TR / TRY) - tasarim buna gore.**
+     Kapsam: (a) tasarim OLCEREK kurulur - aday `Program.cs`'te TEK NOKTA `tr-TR`
+     pinlemesi (`CultureInfo.DefaultThreadCurrentCulture` + `DefaultThreadCurrentUICulture`);
+     `RequestLocalization` alternatifi de olculur ve secim gerekcesiyle yazilir.
+     (b) TUM `:N2` / `:C` / tarih bicimlendirme yuzeyi taranir (fatura HTML'i tek yer
+     degil - e-posta sablonlari, PDF/e-fatura alanlari, log satirlari dahil).
+     **PIN: fatura govdesi KOSUCU KULTURUNDEN BAGIMSIZ olarak `tr` bicimiyle cikar** -
+     test kendi thread kulturunu invariant'a cekip yine `1.049,70` gormeli, yani pin
+     CI'da da (invariant kosucuda) gecerli olmali. Dis kontrolu: pinleme kaldirilinca
+     pin KIRILMALI.
 
 ## SUPHELI DAVRANISLAR - KARAR BEKLEYENLER
 
@@ -1050,6 +1100,22 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    hepsi var. Guvenli taraf bilincli secildi (`style` etiketini acmak CSS enjeksiyonu yuzeyi
    getirir). Kalici cozum adaylari: faturayi `sandbox`'li bir iframe'de servis etmek ya da
    bicimlendirmeyi storefront'un kendi CSS'ine tasimak. Duzeltme YAPILMADI.
+
+13. **UYGULAMA KULTUR PINLEMIYOR - PARA BICIMLENDIRMESI ORTAMA GORE DEGISIYOR.**
+   (E3 run'inda CANLI ORTAMDA kanitlandi) `Program.cs`'te ne `RequestLocalization` ne
+   `CultureInfo.DefaultThreadCurrentCulture` var; `csproj`'de `InvariantGlobalization`
+   ayari da yok (tum cozum tarandi). `OrderManager.GetInvoiceHtml` tutarlari
+   `{order.total_price:N2}` ile, yani **AMBIENT kulturle** basiyor.
+   OLCUM: `tr-TR` -> `549,90` / `1.049,70`;  Invariant -> `549.90` / `1,049.70`.
+   GitHub kosucusu (Linux, LANG=C.UTF-8) invariant kulturde kostugu icin fatura govdesi
+   orada NOKTA ayracli cikti - bu, testin kultur bagimli literalini kirdi ve boylece
+   davranis ORTAMDA GORULDU (teori degil). Uretimdeki anlami: Turk musteriye kesilen
+   faturanin tutari, uygulamanin kostugu kabin/konteyner yerelinden etkileniyor;
+   `LANG` verilmemis bir Linux dagitiminda `1,049.70 TL` yazar.
+   Ayni risk fatura disindaki her `:N2` / `:C` / tarih bicimlendirmesi icin gecerli.
+   **KARAR VERILDI (kullanici): SPRINT 8 MADDE 13'e yukseltildi, DOGRULUK commit'ine
+   girer.** Magaza TEK PAZARLI (TR / TRY); tasarim olcerek kurulacak ve fatura govdesinin
+   kosucu kulturunden BAGIMSIZ `tr` bicimiyle ciktigi pinlenecek.
 
 ## SUREC (degismez)
 

@@ -101,17 +101,27 @@ jobs:
       # testin adi tek tek Actions log'una basilir. [Trait("Category","Sql")] tasiyan TUM siniflar buraya
       # dahil - yeni bir SQL sinifi eklenince workflow degismez, yalniz trait eklenir.
       # Atlanmis olsalardi baglanti hatasiyla bu adim KIRMIZI olurdu.
+      #
+      # TESHIS KANALI BOSLUGU (E3 run 32509947474'te OLCULDU, duzeltildi):
+      # Bu adim eskiden ciktiyi bir DOSYAYA yazmiyordu; yalniz asagidaki "Testler + coverage"
+      # adimi tee kullaniyordu. Bu adim kirildiginda "Testler + coverage" SKIPPED oluyor,
+      # test-output.txt HIC OLUSMUYOR ve TESHIS adimindaki `if [ -f "$F" ]` guard'i yuzunden
+      # ::error:: annotation'i HIC BASILMIYOR. Sonuc: CI job'inin tek failure annotation'i
+      # "Process completed with exit code 1." oluyor - hangi testin kirildigi ANONIM OKUYUCUYA
+      # GORUNMUYOR. (E3'te kirilan testin adi ancak Security workflow'unun annotation'indan
+      # okunabildi.) Artik bu adim da AYNI dosyaya yaziyor; `set -o pipefail` SART - tee
+      # olmadan dotnet test'in cikis kodu maskelenir ve KIRMIZI adim YESIL gorunurdu.
       - name: SQL gerektiren testler (ATLANMAMALI)
-        run: >
-          dotnet test Divisima.IntegrationTests/Divisima.IntegrationTests.csproj
-          --configuration Release
-          --no-build
-          --verbosity normal
-          --logger "console;verbosity=detailed"
-          --filter "Category=Sql"
-          --blame-hang
-          --blame-hang-timeout 8m
-          --blame-hang-dump-type none
+        run: |
+          set -o pipefail
+          dotnet test Divisima.IntegrationTests/Divisima.IntegrationTests.csproj \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "console;verbosity=detailed" \
+            --filter "Category=Sql" \
+            --blame-hang --blame-hang-timeout 8m --blame-hang-dump-type none \
+            2>&1 | tee -a test-output.txt
 
       # Aciklayici yorum: Cikti bir dosyaya da yazilir (tee) - asagidaki TESHIS adimi kirmizi durumda
       # bunu suzup Summary sayfasina koyar. set -o pipefail SART: tee olmadan dotnet test cikis kodu
@@ -168,9 +178,18 @@ jobs:
           # Yigin izi satirlari ("   at Namespace.Method(...)") KASITLI olarak disarida:
           # bunlar sebep degil gurultu. awk ile bire bir tekrar eden satirlar elenir (uygulamanin
           # kendi Serilog cikti satirlari ayni istisnayi defalarca yazabiliyor).
+          #
+          # ONCELIK SIRASI (E3'te olculdu): tek bir grep + "head -20" kullanildiginda satirlar
+          # DOSYA SIRASINDA cikiyor. Uygulamanin kendi Serilog ciktisi test kosumu SIRASINDA
+          # onlarca farkli "...Exception:" satiri yaziyor; "Failed <test adi>" satirlari ise
+          # kosumun SONUNDA geliyor. Yani gurultu ilk 20'yi doldurup ASIL BILGIYI (hangi test
+          # kirildi) disarida birakabiliyordu. Artik iki gecis var: ONCE test sonucu ve assert
+          # satirlari, SONRA kalan istisna satirlari - toplam yine 20 ile sinirli.
           if [ -f "$F" ]; then
-            grep -aE "^[[:space:]]*(Failed|X) |^[[:space:]]*(Expected|Actual) |^[[:space:]]*(-+ )?[A-Za-z][A-Za-z0-9_.]*Exception[ :(]" "$F" \
-              | awk '!seen[$0]++' | head -20 \
+            {
+              grep -aE "^[[:space:]]*(Failed|X) |^[[:space:]]*(Expected|Actual) " "$F"
+              grep -aE "^[[:space:]]*(-+ )?[A-Za-z][A-Za-z0-9_.]*Exception[ :(]" "$F"
+            } | awk '!seen[$0]++' | head -20 \
               | while IFS= read -r line; do echo "::error::${line}"; done
           fi
 
