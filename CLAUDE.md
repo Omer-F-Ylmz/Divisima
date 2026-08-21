@@ -164,7 +164,14 @@ Bu bolum, yeni bir oturumun tek basina devam edebilmesi icin yazildi.
 - **E2 push `eb449fe` - HER IKI WORKFLOW TAMAMEN YESIL** (run 32410645333 CI + 32410645097 Security).
 - **E2b (sandbox dogrulama dalgasi) TAMAMLANDI** - asagidaki bolume bak. Gercek Iyzico
   sandbox'ta uctan uca suruldu: basarili kart, 3DS basarili, 3DS dustu, replay, kismi iade.
-- **Yerel (E2b sonrasi): 161/161 `Category=Sql`, 282/282 tam suit** (Testcontainers'li
+- **Format dalgasi push `1d2b43b` - HER IKI WORKFLOW YESIL** (run 32497264566 CI + 32497264657 Security).
+  Sertlestirilen iki adim (`whitespace` + `style`, ZORUNLU) SUCCESS; **failure annotation SIFIR**
+  (once ayni job "Process completed with exit code 2." tasiyordu).
+- **E3 (hesap + siparis takibi + CMS + iki katman sanitizasyon) TAMAMLANDI** - asagidaki
+  bolume bak. Icinde E3 elle dogrulamasinda BULUNAN bir uretim hatasinin (SuccessDataResult
+  asiri yukleme belirsizligi) KAPSAM SINIRLI duzeltmesi de var; **kok sebep ACIK**, Sprint 8
+  madde 11.
+- **Yerel (E3 sonrasi): 168/168 `Category=Sql`, 289/289 tam suit** (Testcontainers'li
   `OrderEndpointTests` HARIC - yerelde Docker kapali, CI'da yesil kosuyor).
 
 ## SPRINT 5 - KAPANDI (run yesil)
@@ -633,15 +640,156 @@ OLUYORLAR (E2b'de ikisi de fark edilmeden oldu; API logu hatasiz kesildi). Ikisi
 duseni geri kaldiriyor.
 
 
+## E3 - HESAP + SIPARIS TAKIBI + CMS + IKI KATMAN SANITIZASYON (TAMAMLANDI)
+
+Kapsam: (a) Hesabim ekranlari, (b) CMS `#/sozlesme` sayfalari, (c) iki katman sanitizasyon,
+(d) bildirim abonelikleri, (e) elle dogrulama. Backend'e YALNIZ onayli iki istisnayla dokunuldu.
+
+### ONAYLI BACKEND ISTISNALARI (IKI KALEM)
+
+**(1) ICERIK TOHUMLAMA (Secenek A) + YAZMA KATMANI SANITIZASYONU.**
+Olculen engel: storefront 10 sozlesme sayfasina link veriyor ama `contents` tablosu BOSTU ve
+hicbir yerde tohumlama yoktu; metinler `index.html`'de GOMULUYDU. Gomuluyu kaldirip API'ye
+baglamak tohumlama olmadan 10 BOS legal sayfa demekti.
+- `Divisima.Bussiness/Seed/ContentSeeder.cs` - 10 icerik, metinler mevcut gomulu i18n'den
+  BIREBIR cikarildi. **IDEMPOTENT**: slug varsa DOKUNULMAZ (admin'in CMS duzenlemesi sonraki
+  aciliste ezilmez). `AdminSeeder` gibi bayrakla kapatilmadi - bos KVKK/mesafeli satis sayfasi
+  yayinlamak kabul edilebilir bir varsayilan degil.
+- `ContentManager.Update` artik DORT alani da (basliklar DAHIL) `InputSanitizer.Sanitize`'dan
+  geciriyor. Uc `[RequireUserType(Admin)]` korumali ama "yetkili kullanici guvenilir icerik yazar"
+  varsayimi stored XSS icin yetersiz; govde storefront'ta innerHTML ile ciziliyor.
+
+**(2) `SuccessDataResult<string>` ASIRI YUKLEME BELIRSIZLIGI - IKI CAGRI DUZELTILDI.**
+E3 elle dogrulamasinda BULUNDU, kullanici karariyla E3'e ALINDI (gerekce: Faturalarim E3'un
+kendi teslimati ve ucu OLUYDU; dalga bilerek olu sekmeyle kapanmaz).
+- **Kok sebep:** `SuccessDataResult<T>` dort kurucuya sahip; `T = string` oldugunda `(T data)`
+  ile `(string message)` AYNI IMZAYA duser ve C# generic OLMAYAN adayi secer. Tek argumanli
+  `new SuccessDataResult<string>(x)` cagrisinda x MESSAGE'a gider, DATA null kalir - ve
+  `Success` yine `true` oldugu icin **hata SESSIZDIR**.
+- **Olculen zarar:** `OrderManager.GetInvoiceHtml` -> `GET /api/order/{id}/invoice-html`
+  **HTTP 200 + Content-Length: 0** (curl ile sunucu tarafinda olculdu) -> "Faturalarim" ekrani
+  HIC CALISMAMISTI. `ReferralManager.GetOrCreateMyCode` -> `GET /api/referral/my-code`
+  `{"data":null,"success":true,"message":"REF351E93"}` (canli olculdu).
+- **Depo taramasi:** `SuccessDataResult<string>` **4 cagri**, 2'si hatali. Iki argumanli
+  cagrilar (`GiftCardManager.cs:43`, `ProductImageManager.cs:83`) `(T data, string message)`
+  ile eslestigi icin ETKILENMEZ.
+- **Duzeltme KAPSAM SINIRLI:** yalniz o iki cagri `data:` ADLANDIRILMIS ARGUMANA cevrildi.
+  **Kurucu SETINE DOKUNULMADI** - belirsizlik dilde duruyor, YENI yazilacak tek argumanli bir
+  string cagrisi yine sessizce bozuk olur. Kokten cozum **SPRINT 8 MADDE 11**.
+- **Canli teyit (duzeltme sonrasi):** `my-code` -> `{"data":"REF66E826","success":true,"message":null}`;
+  `invoice-html` (siparis #32) -> **Content-Length: 1118**, govdede siparis no + kalem +
+  `KDV (%20): 174,95 TL` + `Genel Toplam: 1.049,70 TL`.
+
+### (c) IKI KATMAN SANITIZASYON
+
+- **Yazma katmani:** `ContentManager.Update` -> `InputSanitizer.Sanitize` (yukarida).
+- **Okuma katmani:** DOMPurify **LOKAL** dosya (CDN degil - CSP'de disa acilan tek istisna
+  Google Fonts degil, hicbir yeni host acilmadi).
+  - Surum **3.4.14**, kaynak resmi `cure53/DOMPurify` GitHub Release'i.
+  - `frontend/vendor/purify.min.js` - **29.204 bayt**,
+    SHA-256 `c2f26ea4fc0d88141c9aa430eb515ac86fce59418ceebd85fa475b87a8d6c3e6`.
+  - Lisans **Apache-2.0 VE MPL-2.0** (MIT DEGIL - ilk raporda yanlis soylenmisti, duzeltildi).
+    Baslik korunarak dahil etmeye uygun, ek islem gerekmiyor. `frontend/vendor/README.txt`
+    surum + kaynak + karma bilgisini tasiyor.
+  - `guvenliHTML()` / `guvenliYaz()` **FAIL-CLOSED**: DOMPurify yuklenmemisse HTML CIZILMEZ,
+    yerine notr bir hata metni yazilir. "Kutuphane yoksa ham bas" davranisi kabul edilmedi.
+- **Kanit:** `IcerikGuncelleme_ScriptliGovde_TEMIZLENMIS_Kaydedilir_MesruHTML_KORUNUR` -
+  script/onerror/onload/`javascript:`/iframe DEPOYA GIRMIYOR, mesru `<h3>`/`<strong>` KORUNUYOR
+  (cift-anlam kirici: "hepsini encode et" cozumu bu asserti gecemez).
+
+### (a) HESABIM EKRANLARI
+
+Yedi sekme gercek uclara baglandi: Ozet (`/api/Account/summary`), Siparislerim
+(`/api/order/my-orders` + tembel `timeline` + `get/{id}`), Iadelerim (`/api/returns/my`),
+Faturalarim (`/api/invoice/my` + `invoice-html` modali), Adreslerim (`/api/address` +
+`upsert` + `remove`), Favorilerim/Kartlar index.html'in kendi cizicilerinde kaldi.
+
+**Iade talebi UI'i** siparis detayinin icinde: kalem + adet + sebep (5 secenek) + tur
+(Iade/Degisim) + aciklama. Uygunluk kurali backend ile AYNI (Delivered + 14 gun); uygun
+degilse buton CIZILMEZ, yerine SEBEP yazilir.
+
+### (d) BILDIRIM ABONELIKLERI
+
+Stok bildirimi (urun detayindaki "gelince haber ver") ve fiyat uyarisi (favoriler cekmecesindeki
+zil) mock akislardan gercek uclara baglandi (`stock-notification/subscribe`, `price-drop/subscribe`).
+
+### OLCULEN VE DUZELTILEN ISTEMCI HATALARI (E3'un kendi yuzeyinde)
+
+| # | Bulgu | Kanit / duzeltme |
+|---|---|---|
+| 1 | Zaman cizelgesinde `status_text` okunuyordu | Alan YOK; iki DTO da (`OrderStatusHistoryDto`, `ReturnResponseDto`) **`status_name`** kullaniyor. Ekranda `—` ve `1` gorunuyordu. Iade durumlari icin ayri etiket haritasi eklendi. |
+| 2 | Hesabim ILK YUKLEME TUZAGI | Sayfa dogrudan `#/hesabim` ile acildiginda MOCK siparisler geri geliyordu (`DVS-20260012`); `router()` biz ezmeden once kosuyor. `wireLegal`'daki yamanin ayni `wireAccount`'a eklendi. |
+| 3 | Favorilerim/Kartlar sekmesi KATALOG YARISI | Bu sekmeler index.html'in `cardHTML -> byId` cizicisini kullanir, yani KATALOGA baglidir. Katalog asenkron geldigi icin dogrudan `#/hesabim/favorilerim` acilisinda **MOCK urun** ciziliyordu (olculdu: favori id 2 -> "Yumusak Triko Kazak / 649 TL"; gercek katalogda id 2 = "E4a Test Urun / 499,90 TL"). `wireAccount` yamasi bu yarisi KAPATMIYOR (o, katalogtan ONCE kosuyor). `loadCatalog()` SONRASINA ikinci bir yeniden cizim eklendi. |
+| 4 | Fiyat uyarisi giris yapmis kullaniciya da "giris yapmalisin" diyordu | `window.userEmail` okunuyordu; index.html o degiskeni kendi yerel deposundan (`dvs_profile`) dolduruyor ve GERCEK giris o alani DOLDURMUYOR (olculdu: giris yapilmis kullanicida `dvs_profile = {name:"E3 Fix", email:""}`). Dogru kaynak `/api/Account/summary`; bir kez cekilip onbellege aliniyor ve `window.userEmail` de esitleniyor. |
+
+`ReturnResponseDto` **urun adi tasimiyor** (yalniz `product_id`) - katalogdan cozuluyor,
+bulunamazsa kimlikle gosteriliyor; uydurma yok.
+
+### PINLER
+
+`ContentSeedAndSanitizeTests` (3):
+- `Tohumlama_IDEMPOTENT_AdminDuzenlemesi_SonrakiAciliste_EZILMEZ`
+- `TohumGovdeleri_Sanitize_ile_DEGISMEDEN_Gecer` (tohum ile yazma katmani arasinda CELISKI YOK)
+- `IcerikGuncelleme_ScriptliGovde_TEMIZLENMIS_Kaydedilir_MesruHTML_KORUNUR`
+
+`ResultOverloadPinTests` (4):
+- `FaturaHTML_Ucu_DOLU_GOVDE_Doner_ContentLength_SIFIR_DEGIL` (UC duzeyi; `ContentLength > 0`
+  DOGRUDAN pinlendi - olculen belirtinin kendisi)
+- `ReferansKodu_Ucu_KODU_data_ALANINDA_Doner_message_te_DEGIL`
+- `SuccessDataResultString_IKI_ARGUMAN_DOGRU_CALISIR_DATA_DOLAR` (cift-anlam kirici)
+- `SuccessDataResult_StringOLMAYAN_TipTe_TEK_ARGUMAN_DATAYA_GIDER` (karsit kontrol)
+
+**BILINCLI KIRILAN PIN:** `SuccessDataResultString_TEK_ARGUMAN_MESSAGE_a_GIDER_DATA_NULL_KALIR_PINLENIR`.
+Bozuk davranisi KABUL EDILMIS gibi sabitliyordu; cagri yerleri duzeltilince yalan soyler hale
+gelirdi. Yerini UC DUZEYI iki pin aldi; kurucu duzeyindeki dogru-davranis ve karsit kontrol
+pinleri KORUNDU.
+
+### DIS KONTROLU
+
+5 assert ters cevrildi -> **5 AYRI isimli kirmizi** (`Tohumlama_IDEMPOTENT...`,
+`TohumGovdeleri_Sanitize...`, `IcerikGuncelleme_ScriptliGovde...`, `FaturaHTML_Ucu...`,
+`ReferansKodu_Ucu...`). Hepsi geri alindi.
+
+**5. kontrol (uretim mutasyonu):** iki cagri `data:` adlandirmasindan tek argumanli eski
+haline dondurulup temiz build alindi -> uc pinleri E3 oncesi zarari **BIREBIR** uretti:
+`Expected resp.Content.Headers.ContentLength to be greater than 0L ... but found 0L` ve
+`Expected dataAlani.ValueKind not to be JsonValueKind.Null ... but it is`. Kurucu duzeyindeki
+iki pin dogru sekilde YESIL kaldi (onlar cagri yerlerine bagli degil). Mutasyon geri alindi.
+
+### ELLE DOGRULAMA (tarayici, uctan uca)
+
+Faturalarim: iki fatura listelendi (`DIV-2026-000028`, `DIV-2026-000031`), modal gercek fatura
+govdesini DOMPurify'dan gecirerek cizdi (`<script>` YOK, 583 bayt DOM). **Not:** faturanin
+satir ici `<style>` blogu DOMPurify izin listesinde olmadigi icin sokuluyor - icerik TAM,
+bicimlendirme sade. Guvenli taraf bilincli secildi.
+
+Siparislerim: 18 gercek siparis, dogru Turkce durum etiketleri. Detay tembel aciliyor
+(kalemler + zaman cizelgesi). Teslim EDILMEMIS siparise iade butonu CIZILMIYOR, sebep yaziliyor.
+
+Iade akisi (uctan uca): siparis #32 gercek admin ucuyla Confirmed -> Preparing -> Shipped ->
+Delivered'a tasindi (`delivered_at` doldu) -> detayda "Iade talebi olustur" CIKTI -> form
+gonderildi -> `return_requests` tablosunda **1 satir** (order 32, product 2, qty 1, reason 0,
+status 0) -> "Iadelerim" sekmesi `Siparis #32 / Beklemede / E4a Test Urun · M · 1 adet` cizdi.
+
+Adreslerim: UI'dan adres olusturuldu ("Ofis") ve silindi; liste her iki islemden sonra tazelendi.
+
+Ozet: sadakat 104, magaza kredisi 0,00 TL, referans kodu, hesap bilgileri + dogrulama durumu.
+
+Bildirimler: urun 1 beden L (DB'de stok 0, UI'da `size-chip out`) -> "gelince haber ver" ->
+`stock_notification_requests` **1 satir** (product 1, size L, `is_notified=0`). Favoriler
+cekmecesindeki zil -> `price_drop_subscriptions` **1 satir** (product 2, giris yapmis
+kullanicinin GERCEK e-postasi, `subscribed_price=499.90`).
+
+SW surumu `2026-08-21-e3`'e cekildi (kod tasiyan dosyalar zaten network-first; surum bumpi
+eski onbellegi temizlemek icin).
+
 ## SIRA
 
-1. **E2b run raporu** (push edildi, rapor bekleniyor)
-2. **E3** hesap + siparis takibi
-   - CMS sanitizasyonu IKI katman (yazma `InputSanitizer` + okuma DOMPurify)
-3. **Sema kapanis dalgasi** - kalan tek aday: **gift-card expiry**
+1. **E3 run raporu** (commit hazir; push karari kullanicidan)
+2. **Sema kapanis dalgasi** - kalan tek aday: **gift-card expiry**
    (`refunded_amount` Sprint 6'da kapandi; seller migration DEGIL - `sellers` ve
    `seller_id` zaten `InitialCreate`'te)
-4. **E4b** (musteri askiya alma, kategori, CMS ekranlari) - launch sonrasi olabilir
+3. **E4b** (musteri askiya alma, kategori, CMS ekranlari) - launch sonrasi olabilir
 
 ## KARARLAR (kapanmis)
 
@@ -689,6 +837,10 @@ duseni geri kaldiriyor.
   5. **Storefront `filter` yolu `category_name` + `total_stock` + `sizes` DOLDURUR**
      (DTO zenginlestirme). Duzeltme sonrasi istemcideki 6-esmanli detay telafisi
      (`api-bridge.js enrichAll`) KALDIRILIR ve pinler guncellenir.
+     **KAPSAMA EKLENDI (kullanici karari): `my-orders` DTO zenginlestirme.** Ayni kok
+     eksiklik: liste yolu ince DTO donduruyor, istemci her satir icin ek cagri yapiyor.
+     E3'te `ReturnResponseDto`'nun **urun adi tasimadigi** da olculdu (yalniz `product_id`);
+     iade listesi urun adini KATALOGDAN cozmek zorunda kaliyor. O da bu kalemin icinde.
   6. **ONCELIKLI (GUVENLIK): refresh token gercekten httpOnly cookie'ye tasinir.**
      `SetRefreshTokenCookie` GERCEKTEN kullanilir - login/refresh cookie YAZAR, refresh ucu
      cookie'den OKUR, logout siler; istemci uyarlanir; CSRF double-submit devreye girer.
@@ -715,6 +867,25 @@ duseni geri kaldiriyor.
      adresi -> kaybolan callback senaryosu -> webhook'un siparisi Confirmed'a tasidigi
      OLCULUR. CSP senkron kurali (form-action = Iyzico:CallbackUrl origin'i)
      `appsettings.Development.example.json` icindeki `//Iyzico` aciklamasina yazildi.
+  10. **BILDIRIM ABONELIKLERI: `unsubscribe` + "aboneliklerim" uclari.** (E3'te olculdu,
+     kullanici karariyla deftere alindi) Backend'de YALNIZ `subscribe` var; tum controller'lar
+     tarandi, abonelikten CIKMA ve "hangi aboneliklerim var" uclari YOK. Sonuc: kullanici
+     kurdugu stok/fiyat bildirimini goremiyor ve KAPATAMIYOR. E3 istemcisi bunu gizlemiyor -
+     abonelik TEK YONLU kuruluyor ve ekranda geri alma sozu verilmiyor; kalici cozum backend.
+     Kapsam: `stock-notification/unsubscribe`, `price-drop/unsubscribe`, ikisi icin "benim
+     aboneliklerim" listesi + Hesabim'da bir sekme.
+  11. **`SuccessDataResult<string>` BELIRSIZLIGININ KOKTEN COZUMU.** (E3'te olculdu; iki
+     cagri E3'te duzeltildi, KOK SEBEP ACIK) `T = string` oldugunda `(T data)` ile
+     `(string message)` ayni imzaya duser ve C# generic OLMAYAN adayi secer; tek argumanli
+     cagri veriyi MESSAGE'a yazar, `Data` null kalir ve `Success` true oldugu icin hata
+     SESSIZ olur. E3 yalniz iki cagri yerini `data:` adlandirilmis argumana cevirdi -
+     **YENI yazilacak tek argumanli bir string cagrisi yine sessizce bozuk olur.**
+     Aday cozumler: (i) kurucu setini yeniden tasarlamak (`(string message)` kurucusunu
+     kaldirip yerine `SuccessDataResult<T>.WithMessage(...)` gibi ayirt edilebilir bir
+     fabrika koymak), (ii) tek-argumanli-string kullanimini yasaklayan bir analyzer/kural.
+     Depo taramasi (E3, referans): `SuccessDataResult<string>` **4 cagri** -
+     `OrderManager.cs`, `ReferralManager.cs` (ikisi de duzeltildi),
+     `GiftCardManager.cs:43`, `ProductImageManager.cs:83` (iki argumanli, ETKILENMEZ).
 
 ## SUPHELI DAVRANISLAR - KARAR BEKLEYENLER
 
@@ -768,7 +939,7 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    sozlesmeye (govde) uydurdu; refresh token JS'in erisebildigi yerde duruyor ve bu
    httpOnly'den ZAYIF. Duzeltme BACKEND isi (cookie yaz + cookie'den oku + logout'u
    duzelt), karar kullanicinin.
-6. **Hesabim > Siparislerim ekrani MOCK siparis listesi ciziyordu ve COKUYORDU.**
+6. **[KAPANDI - E3] Hesabim > Siparislerim ekrani MOCK siparis listesi ciziyordu ve COKUYORDU.**
    (E2b'de olculdu) `index.html` satir 2524'teki `accOrders()` `MOCK_ORDERS` uzerinde
    donuyor ve her kalem icin `byId(id).price` okuyor. E1 katalogu gercek API'ye
    bagladigi icin `byId` artik yalniz GERCEK urunleri biliyor; mock siparislerin kalem
@@ -780,6 +951,9 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    `window.accOrders` ezilir, notr durum cizilir). GERCEK listeyi
    (`/api/order/my-orders` + zaman cizelgesi) baglamak **E3 madde (a)**; oraya kadar
    ekran gercek siparisleri GOSTERMIYOR.
+   **KAPANIS (E3):** yedi sekmenin tamami gercek uclara baglandi; elle dogrulamada 18 gercek
+   siparis, tembel acilan kalem + zaman cizelgesi, iade talebi ve iade listesi uctan uca
+   suruldu. `wireAccountOrders` gecici yamasi kaldirildi.
 7. **[KAPANDI - E2b] SERVICE WORKER SURUMLEME YOK - YAYINLANAN DUZELTME KULLANICIYA ULASMIYORDU.**
    (E2b'de olculdu; kullanicinin suphesi dogru cikti) `frontend/service-worker.js`:
    - `const CACHE = "divisima-v1"` **SABIT** - hicbir surumleme/hash yok.
@@ -821,6 +995,50 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    `caches.keys()` -> `['divisima-2026-08-21-e2b']` (**`divisima-v1` YOK** - activate sildi),
    SW kaydi 1. Yani guncelleme kullaniciya ELLE MUDAHALE OLMADAN ulasti.
 
+
+8. **`SuccessDataResult<string>` ASIRI YUKLEME BELIRSIZLIGI - KOK SEBEP ACIK.**
+   (E3'te olculdu; iki cagri yeri E3'te DUZELTILDI, kok sebep DURUYOR) `T = string` oldugunda
+   `(T data)` ile `(string message)` AYNI imzaya duser; C# generic OLMAYAN adayi secer. Tek
+   argumanli `new SuccessDataResult<string>(x)` veriyi MESSAGE'a yazar, `Data` null kalir ve
+   `Success` true oldugu icin **hata SESSIZDIR**. Olculen zarar: `invoice-html` **200 +
+   Content-Length: 0** (Faturalarim ekrani hic calismamisti) ve `referral/my-code`
+   `{"data":null,...,"message":"REF..."}`. E3 yalniz iki cagriyi `data:` adlandirilmis
+   argumana cevirdi; **kurucu setine dokunulmadi**, yani yeni yazilacak tek argumanli bir
+   string cagrisi yine sessizce bozuk olur. Kokten cozum karari kullanicinin -
+   **SPRINT 8 MADDE 11**. Bugunku davranis uc duzeyinde pinli (`ResultOverloadPinTests`).
+
+9. **Bildirim aboneliklerinde `unsubscribe` ve "aboneliklerim" UCU YOK.** (E3'te olculdu)
+   Tum controller'lar tarandi: yalniz `subscribe` var. Kullanici kurdugu stok/fiyat
+   bildirimini ne GOREBILIYOR ne KAPATABILIYOR. E3 istemcisi bunu gizlemiyor (abonelik TEK
+   YONLU kuruluyor, geri alma sozu verilmiyor) ama kalici cozum backend isi.
+   **SPRINT 8 MADDE 10.**
+
+10. **`#/urun/{id}` PAYLASIM BAGLANTILARI "Sayfa Bulunamadi" veriyor.** (E3'te olculdu)
+   `index.html:2154` `shareUrl(id)` -> `#/urun/<id>` uretiyor ve urun kartindaki WhatsApp /
+   Facebook / X / Pinterest / "baglantiyi kopyala" secenekleri bu adresi paylasiyor. Ancak
+   urun detayi bir ROTA DEGIL, `openDetail(id)` ile acilan bir MODAL; router `#/urun` yolunu
+   TANIMIYOR. Olculdu: `location.hash = "#/urun/1"` -> sayfa basligi **"Sayfa Bulunamadi ·
+   Divisima"**. Uretimdeki anlami: paylasilan her urun baglantisi 404 sayfasina dusuyor -
+   sosyal trafik ve SEO tarafinda dogrudan kayip. E3 KAPSAMI DISI (E3 hesap/CMS/bildirim
+   yuzeyi), duzeltilmedi. Duzeltme adayi: router'a `#/urun/:id` yolu eklemek ve o yolda
+   katalog yuklendikten sonra `openDetail(id)` cagirmak.
+
+11. **`dvs_profile.email` GERCEK GIRISTE DOLDURULMUYOR.** (E3'te olculdu) index.html kendi
+   yerel profil deposunu (`dvs_profile`) ve ondan tureyen `window.userEmail` degiskenini
+   kullaniyor; E1 girisi gercek uclara bagladi ama e-posta alanini DOLDURMUYOR. Olculdu:
+   giris yapilmis kullanicida `dvs_profile = {"name":"E3 Fix","email":""}`. E3 bunu KENDI
+   tuketicisi icin kapatti (fiyat uyarisi artik `/api/Account/summary`'den okuyor ve
+   `window.userEmail`'i de esitliyor), ama index.html'in o degiskeni okuyan DIGER yerleri
+   hala bos gorebilir. Genel duzeltme (girisin profil deposunu gercek ozetle doldurmasi)
+   yapilmadi - karar kullanicinin.
+
+12. **Fatura HTML'inin satir ici `<style>` blogu okuma katmaninda SOKULUYOR.** (E3'te olculdu,
+   BILINCLI) `OrderManager.GetInvoiceHtml` govdeyi satir ici `<style>` ile uretiyor; okuma
+   katmanindaki DOMPurify izin listesinde `style` etiketi YOK, bu yuzden modal faturayi
+   BICIMSIZ (sade tablo) ciziyor. Icerik TAM - siparis no, kalemler, matrah/KDV, genel toplam
+   hepsi var. Guvenli taraf bilincli secildi (`style` etiketini acmak CSS enjeksiyonu yuzeyi
+   getirir). Kalici cozum adaylari: faturayi `sandbox`'li bir iframe'de servis etmek ya da
+   bicimlendirmeyi storefront'un kendi CSS'ine tasimak. Duzeltme YAPILMADI.
 
 ## SUREC (degismez)
 

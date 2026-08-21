@@ -3,6 +3,7 @@ using AutoMapper;
 using Divisima.Bussiness.Abstract;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Results;
+using Divisima.Core.Utilities.Sanitization;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Content;
 
@@ -46,10 +47,20 @@ namespace Divisima.Bussiness.Concrete
             if (content == null)
                 return (HttpStatusCode.NotFound, new ErrorResult(Messages.ContentNotFound));
 
-            content.title_tr = dto.title_tr;
-            content.title_en = dto.title_en;
-            content.body_tr = dto.body_tr;
-            content.body_en = dto.body_en;
+            // E3 - IKI KATMAN SANITIZASYONUN YAZMA KATMANI.
+            // Bu uc [RequireUserType(Admin)] ile korumali, ama "yetkili kullanici guvenilir icerik yazar"
+            // varsayimi stored XSS icin YETERSIZ: admin hesabi ele gecirilebilir, icerik bir baska
+            // sistemden yapistirilabilir, ya da yonetici farkinda olmadan zararli isaretleme kopyalayabilir.
+            // Govde storefront'ta innerHTML ile ciziliyor - yani kayittaki her sey CALISABILIR.
+            // Depoya YALNIZ temizlenmis icerik girer; okuma tarafinda DOMPurify ikinci kalkandir.
+            //
+            // Sanitize HTML'i ENCODE ETMEZ, yalniz tehlikeli kisimlari (script, iframe/object/embed/
+            // form/link/meta/style/base/svg, on*= olay yakalayicilari, javascript:) SOKER. CMS govdesi
+            // mesru HTML (h3/p/strong...) icerdigi icin dogru davranis budur; HtmlEncode icerigi bozardi.
+            content.title_tr = InputSanitizer.Sanitize(dto.title_tr);
+            content.title_en = InputSanitizer.Sanitize(dto.title_en);
+            content.body_tr = InputSanitizer.Sanitize(dto.body_tr);
+            content.body_en = InputSanitizer.Sanitize(dto.body_en);
             content.updated_at = DateTime.Now;
             await _contentDal.UpdateAsync(content);
 

@@ -46,7 +46,11 @@ namespace Divisima.Bussiness.Concrete
                 c.referral_code = code;
                 await _customerDal.UpdateAsync(c);
             }
-            return (HttpStatusCode.OK, new SuccessDataResult<string>(c.referral_code));
+            // ADLANDIRILMIS ARGUMAN ZORUNLU (E3'te olculdu): T = string oldugunda tek argumanli kurucu
+            // "(string message)" ile eslesir ve kod MESSAGE'a giderdi. Uc bu yuzden
+            // {"data":null,"success":true,"message":"REF..."} donuyordu; kodu "data"dan okuyan istemci
+            // BOS aliyordu. "data:" adlandirmasi dogru kurucuyu secer.
+            return (HttpStatusCode.OK, new SuccessDataResult<string>(data: c.referral_code));
         }
 
         public async Task<int?> ResolveReferrer(string code)

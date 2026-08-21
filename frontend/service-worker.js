@@ -37,7 +37,7 @@
 // Bu depoda derleme adımı yok (statik dosyalar olduğu gibi sunuluyor), bu yüzden sürüm elle
 // bumplanan bir sabit. Dağıtım otomasyonu geldiğinde buraya commit SHA'sı yazılmalı; bump
 // unutulursa (a) ayağı devre dışı kalır ama (b) ayağı sayesinde düzeltmeler yine ulaşır.
-const VERSION = "2026-08-21-e2b";
+const VERSION = "2026-08-21-e3";
 const CACHE = "divisima-" + VERSION;
 
 // Açıklama: Uygulama kabuğu (offline açılış için gerekli çekirdek dosyalar)

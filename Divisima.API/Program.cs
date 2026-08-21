@@ -373,6 +373,12 @@ using (var _seedScope = app.Services.CreateScope())
     {
         var _seeder = _seedScope.ServiceProvider.GetRequiredService<Divisima.Bussiness.Seed.AdminSeeder>();
         await _seeder.SeedAsync();
+
+        // E3: legal icerik tohumlama. IDEMPOTENT - slug zaten varsa DOKUNULMAZ, yani admin'in
+        // CMS'ten yaptigi duzenleme sonraki aciliste EZILMEZ. AdminSeed gibi bayrakla kapatilmis
+        // DEGIL: bos legal sayfa yayinlamak (KVKK, mesafeli satis) kabul edilebilir bir varsayilan degil.
+        var _contentSeeder = _seedScope.ServiceProvider.GetRequiredService<Divisima.Bussiness.Seed.ContentSeeder>();
+        await _contentSeeder.SeedAsync();
     }
     catch (Exception _seedEx)
     {

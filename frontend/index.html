@@ -3031,6 +3031,9 @@ if(!lsGet('dvs_nl')){setTimeout(function(){var dm=document.getElementById('modal
 
 </script>
 <script>window.DIVISIMA_API_BASE="http://localhost:5000";</script>
+<!-- E3: okuma katmani sanitizasyonu (iki katmanli savunmanin ikinci ayagi). api-bridge.js icindeki
+     guvenliHTML() bunu kullandigi icin BRIDGE'TEN ONCE yuklenir. Surum/kaynak/SHA-256: frontend/vendor/README.txt -->
+<script src="/vendor/purify.min.js"></script>
 <script src="/api-client.js"></script>
 <script src="/api-bridge.js"></script>
 <script src="/pwa-register.js"></script>

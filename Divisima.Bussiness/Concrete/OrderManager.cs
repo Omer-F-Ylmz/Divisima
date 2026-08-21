@@ -481,7 +481,12 @@ Tarih: {order.created_at:dd.MM.yyyy}</p>
 </div>
 <p style=""font-size:11px;color:#888;margin-top:24px"">Bu belge bilgilendirme amaçlıdır. Resmi e-fatura ayrıca düzenlenir.</p>
 </body></html>";
-            return (HttpStatusCode.OK, new SuccessDataResult<string>(html));
+            // ADLANDIRILMIS ARGUMAN ZORUNLU (E3'te olculdu): T = string oldugunda "(T data)" ile
+            // "(string message)" AYNI imzaya duser ve C# generic OLMAYAN adayi secer. Tek argumanli
+            // cagrida html MESSAGE'a giderdi, Data null kalirdi; controller Content(ok.Data) yazdigi
+            // icin uc "HTTP 200 + Content-Length: 0" donerdi - yani fatura ekrani BOS gelirdi.
+            // "data:" adlandirmasi (string message) adayini eleyerek dogru kurucuyu secer.
+            return (HttpStatusCode.OK, new SuccessDataResult<string>(data: html));
         }
 
         // Açıklayıcı yorum: MANUEL ÖDEME ONAYI (admin) - Havale/EFT parası hesaba geçince sipariş onaylanır.

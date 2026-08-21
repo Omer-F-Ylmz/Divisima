@@ -959,24 +959,545 @@
   }
 
   // ── Başlat ──
-  // ── E2b: MOCK siparis listesi CIZILMEZ ────────────────────────────────────
-  // OLCULEN COKME: index.html'deki accOrders() MOCK_ORDERS uzerinde donuyor ve her kalem
-  // icin byId(id).price okuyor. E1 katalogu gercek API'ye bagladigindan byId artik yalniz
-  // GERCEK urunleri biliyor; mock siparislerin kalem id'leri (olculdu: 1, 8, 5, 13, 18, 3)
-  // gercek katalogda (olculdu: 2, 1) karsilik bulmuyor -> byId(8) undefined ->
-  // "Uncaught TypeError: Cannot read properties of undefined (reading 'price')" ve
-  // Hesabim > Siparislerim render'i cokuyor.
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // E3 - HESABIM EKRANLARI (gercek API) + CMS + BILDIRIM ABONELIGI
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // ── OKUMA KATMANI SANITIZASYONU (iki katmanin ikincisi) ────────────────────
+  // Yazma katmani ContentManager'da (InputSanitizer). Bu ikinci kalkan, depodaki
+  // icerik BIR SEKILDE kirli kalsa bile (eski kayit, dogrudan SQL, baska bir yazma
+  // yolu) tarayicida CALISMAMASINI saglar. innerHTML'e giden HER dis kaynakli
+  // HTML buradan gecer.
   //
-  // Kapsam karari: gercek listeyi (/api/order/my-orders + zaman cizelgesi) baglamak E3'un
-  // isi. E2b yalniz YALANI ve COKMEYI kaldiriyor - giris yapmis gercek bir musteriye sahte
-  // siparis gostermek, E1'de konan "yalan veri gostermek bos ekran gostermekten kotudur"
-  // ilkesine aykiri. Bu gecici durum E3'te gercek liste ile DEGISTIRILECEK.
-  function wireAccountOrders() {
-    window.accOrders = function () {
-      return '<div class="wrap" style="padding:24px 0">' +
-        '<p class="muted" style="margin:0 0 14px">Sipariş geçmişin bu ekranda listelenecek.</p>' +
-        '<a class="btn" href="#/kategori/tumu">Alışverişe devam</a></div>';
+  // FAIL-CLOSED: DOMPurify yuklenmemisse HTML ENJEKTE EDILMEZ. Sessizce ham HTML
+  // basmak, iki katmanli savunmayi tek katmana indirmek olurdu.
+  function guvenliHTML(ham) {
+    if (typeof window.DOMPurify === "undefined" || !window.DOMPurify.sanitize) {
+      console.error("DOMPurify yuklenmedi - HTML icerik CIZILMEDI (fail-closed).");
+      return null;
+    }
+    return window.DOMPurify.sanitize(ham || "", {
+      // Legal sayfa + fatura icerigi: metin, basliklar, listeler, tablolar, baglantilar.
+      ALLOWED_TAGS: ["h1", "h2", "h3", "h4", "p", "br", "hr", "strong", "b", "em", "i", "u",
+        "ul", "ol", "li", "a", "span", "div", "table", "thead", "tbody", "tr", "th", "td", "small"],
+      ALLOWED_ATTR: ["href", "title", "colspan", "rowspan", "class"],
+      // javascript:/data: protokolleri disarida
+      ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|tel:|#|\/)/i,
+    });
+  }
+
+  function guvenliYaz(el, ham, hataMetni) {
+    var temiz = guvenliHTML(ham);
+    if (temiz === null) {
+      el.innerHTML = '<p class="muted">' + (hataMetni || "İçerik güvenli şekilde gösterilemedi.") + "</p>";
+      return false;
+    }
+    el.innerHTML = temiz;
+    return true;
+  }
+
+  // ── Ortak yardimcilar ──────────────────────────────────────────────────────
+  var DURUM_ETIKET = {
+    "Pending": "Onay bekliyor", "Confirmed": "Onaylandı", "Preparing": "Hazırlanıyor",
+    "Shipped": "Kargoda", "Delivered": "Teslim edildi", "Cancelled": "İptal edildi"
+  };
+  function durumEtiket(s) { return DURUM_ETIKET[s] || s || "—"; }
+  // Iade durumlari AYRI enum (ReturnStatusEnum): Pending/Approved/Rejected/Completed.
+  var IADE_DURUM = { "Pending": "Beklemede", "Approved": "Onaylandı", "Rejected": "Reddedildi", "Completed": "Tamamlandı" };
+  function iadeDurumEtiket(s) { return IADE_DURUM[s] || s || "—"; }
+  // Urun adi: iade DTO'su product_name TASIMIYOR (olculdu - ReturnResponseDto yalniz product_id
+  // veriyor). Katalogdan cozulur; katalogda yoksa kimlikle gosterilir (uydurma yok).
+  function urunAdi(pid) {
+    try { var p = (typeof byId === "function") ? byId(pid) : null; if (p) return (typeof nameOf === "function") ? nameOf(p) : (p.name || ("Ürün #" + pid)); } catch (_) { }
+    return "Ürün #" + pid;
+  }
+  function trTarih(iso) {
+    if (!iso) return "—";
+    try { return new Date(iso).toLocaleDateString("tr-TR", { day: "2-digit", month: "long", year: "numeric" }); }
+    catch (_) { return String(iso).slice(0, 10); }
+  }
+  function paraTL(n) { return (Number(n) || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " TL"; }
+  function bosDurum(metin, ctaMetin, ctaHref) {
+    return '<div class="wrap" style="padding:24px 0"><p class="muted" style="margin:0 0 14px">' + esc(metin) + "</p>" +
+      (ctaMetin ? '<a class="btn" href="' + ctaHref + '">' + esc(ctaMetin) + "</a>" : "") + "</div>";
+  }
+  function yukleniyor(metin) {
+    return '<div class="wrap" style="padding:24px 0"><p class="muted">' + esc(metin || "Yükleniyor…") + "</p></div>";
+  }
+
+  // IADE UYGUNLUGU - backend kurali BIREBIR yansitilir (ReturnManager.cs:22,59,64-66):
+  // siparis DELIVERED olmali VE teslim tarihinden (yoksa siparis tarihinden) 14 gun gecmemis olmali.
+  // Uygun degilse dugme CIZILMEZ ve SEBEBI yazilir - kullanici 400 yiyip sasirmasin.
+  var IADE_PENCERESI_GUN = 14;
+  function iadeUygunlugu(siparis) {
+    if (siparis.order_status !== "Delivered")
+      return { uygun: false, sebep: "İade talebi yalnızca teslim edilmiş siparişler için açılabilir." };
+    var taban = siparis.delivered_at || siparis.created_at;
+    var son = new Date(taban);
+    son.setDate(son.getDate() + IADE_PENCERESI_GUN);
+    if (son < new Date())
+      return { uygun: false, sebep: "İade süresi doldu (teslimden sonra " + IADE_PENCERESI_GUN + " gün)." };
+    return { uygun: true, sonTarih: son };
+  }
+
+  // ── Sekme icerikleri ───────────────────────────────────────────────────────
+  async function sekmeOzet(el) {
+    try {
+      var s = unwrap(await api.account.summary());
+      el.innerHTML =
+        '<div class="acc-tiles">' +
+        '<div class="acc-tile"><div class="at-head"><b>Sadakat puanı</b></div><p style="font-size:22px;margin:6px 0">' + (s.loyalty_points || 0) + "</p></div>" +
+        '<div class="acc-tile"><div class="at-head"><b>Mağaza kredisi</b></div><p style="font-size:22px;margin:6px 0">' + paraTL(s.store_credit) + "</p></div>" +
+        '<div class="acc-tile"><div class="at-head"><b>Referans kodun</b></div><p style="font-size:18px;margin:6px 0">' + esc(s.referral_code || "—") + "</p></div>" +
+        "</div>" +
+        '<div class="acc-tile" style="margin-top:14px"><div class="at-head"><b>Hesap</b></div>' +
+        "<p>" + esc(s.name || "") + " · " + esc(s.email || "") + (s.phone ? " · " + esc(s.phone) : "") + "</p>" +
+        '<p class="muted">E-posta doğrulaması: ' + (s.email_verified ? "yapıldı" : "bekliyor") +
+        " · İki adımlı doğrulama: " + (s.two_factor_enabled ? "açık" : "kapalı") + "</p></div>";
+    } catch (e) {
+      el.innerHTML = bosDurum("Hesap özeti alınamadı: " + (e && e.message ? e.message : "bilinmeyen hata"));
+    }
+  }
+
+  async function sekmeSiparisler(el) {
+    try {
+      var liste = unwrap(await api.orders.my()) || [];
+      if (!liste.length) { el.innerHTML = bosDurum("Henüz siparişin yok.", "Alışverişe başla", "#/kategori/tumu"); return; }
+      // NOT: my-orders DTO'su KALEM ICERMIYOR (OrderListResponseDto: id, order_number,
+      // order_status, total, created_at). Kalemler ve zaman cizelgesi ancak ACILINCA,
+      // siparis basina ayri cagriyla getirilir - gereksiz N+1 istegi onlemek icin tembel.
+      el.innerHTML = liste.map(function (o) {
+        return '<div class="acc-order" data-oid="' + o.id + '">' +
+          '<div class="ao-head"><div class="ao-hl"><span class="ao-no">' + esc(o.order_number) + "</span>" +
+          '<span class="ao-date">' + trTarih(o.created_at) + "</span></div>" +
+          '<span class="ao-badge">' + esc(durumEtiket(o.order_status)) + "</span></div>" +
+          '<div class="ao-body"><div class="ao-meta"><b>' + paraTL(o.total) + "</b></div></div>" +
+          '<div class="od-detail" hidden></div>' +
+          '<div class="ao-actions"><button class="ao-btn" data-siparis-ac="' + o.id + '">Detay ve takip</button></div>' +
+          "</div>";
+      }).join("");
+    } catch (e) {
+      el.innerHTML = bosDurum("Siparişler alınamadı: " + (e && e.message ? e.message : "bilinmeyen hata"));
+    }
+  }
+
+  // Siparis detayi + zaman cizelgesi (tembel yuklenir)
+  async function siparisDetayAc(kart, orderId) {
+    var kutu = kart.querySelector(".od-detail");
+    if (!kutu) return;
+    if (!kutu.hidden) { kutu.hidden = true; return; }
+    kutu.hidden = false;
+    kutu.innerHTML = yukleniyor();
+    try {
+      var d = unwrap(await api.orders.get(orderId)) || {};
+      var kalemler = d.items || d.order_items || [];
+      var satirlar = kalemler.map(function (k) {
+        var ad = k.product_name || k.name || ("Ürün #" + (k.product_id || "?"));
+        return '<div class="od-row"><div class="od-info"><b>' + esc(ad) + "</b>" +
+          "<span>" + esc(k.size || "") + (k.quantity ? " · " + k.quantity + " adet" : "") + "</span></div>" +
+          '<div class="od-price">' + paraTL(k.unit_price != null ? k.unit_price : k.price) + "</div></div>";
+      }).join("");
+
+      var cizelge = "";
+      try {
+        var tl2 = unwrap(await api.orders.timeline(orderId)) || [];
+        cizelge = '<div class="od-track">' + tl2.map(function (a) {
+          var not = a.note || a.description || "";
+          return '<div class="od-step done"><b>' + esc(durumEtiket(a.status_name)) + "</b>" +
+            '<span class="muted"> · ' + trTarih(a.created_at) + (not ? " · " + esc(not) : "") + "</span></div>";
+        }).join("") + "</div>";
+      } catch (_) {
+        cizelge = '<p class="muted">Takip bilgisi alınamadı.</p>';
+      }
+
+      var uygun = iadeUygunlugu({ order_status: d.order_status, delivered_at: d.delivered_at, created_at: d.created_at });
+      var iadeBlok = uygun.uygun
+        ? '<button class="ao-btn primary" data-iade-ac="' + orderId + '">İade talebi oluştur</button>'
+        : '<p class="muted" style="margin:8px 0 0">' + esc(uygun.sebep) + "</p>";
+
+      kutu.innerHTML = cizelge + satirlar +
+        '<div class="od-sum"><span>Toplam</span><b>' + paraTL(d.total) + "</b></div>" +
+        '<div class="ao-actions" style="margin-top:10px">' +
+        '<button class="ao-btn" data-fatura="' + orderId + '">Faturayı görüntüle</button>' + iadeBlok + "</div>";
+    } catch (e) {
+      kutu.innerHTML = '<p class="muted">Detay alınamadı: ' + esc(e && e.message ? e.message : "hata") + "</p>";
+    }
+  }
+
+  async function sekmeIadeler(el) {
+    try {
+      var liste = unwrap(await api.returns.my()) || [];
+      if (!liste.length) {
+        el.innerHTML = bosDurum("Henüz iade talebin yok. Teslim edilmiş bir siparişin detayından iade talebi oluşturabilirsin.",
+          "Siparişlerime git", "#/hesabim/siparislerim");
+        return;
+      }
+      el.innerHTML = '<div class="acc-tiles">' + liste.map(function (r) {
+        return '<div class="acc-tile"><div class="at-head"><b>Sipariş #' + esc(String(r.order_id || "")) + "</b>" +
+          '<span class="at-def">' + esc(iadeDurumEtiket(r.status_name)) + "</span></div>" +
+          "<p>" + esc(urunAdi(r.product_id)) + " · " + esc(r.size || "") +
+          " · " + (r.quantity || 1) + " adet</p>" +
+          '<p class="muted">' + trTarih(r.created_at) + (r.refund_amount != null ? " · " + paraTL(r.refund_amount) : "") + "</p></div>";
+      }).join("") + "</div>";
+    } catch (e) {
+      el.innerHTML = bosDurum("İadeler alınamadı: " + (e && e.message ? e.message : "bilinmeyen hata"));
+    }
+  }
+
+  async function sekmeFaturalar(el) {
+    try {
+      var liste = unwrap(await api.invoices.my()) || [];
+      if (!liste.length) { el.innerHTML = bosDurum("Henüz faturan yok."); return; }
+      el.innerHTML = '<div class="acc-tiles">' + liste.map(function (f) {
+        return '<div class="acc-tile"><div class="at-head"><b>' + esc(f.invoice_number || ("#" + f.id)) + "</b></div>" +
+          "<p>" + paraTL(f.total) + " · " + trTarih(f.created_at || f.issued_at) + "</p>" +
+          '<div class="ao-actions"><button class="ao-btn" data-fatura="' + (f.order_id || "") + '">Görüntüle</button></div></div>';
+      }).join("") + "</div>";
+    } catch (e) {
+      el.innerHTML = bosDurum("Faturalar alınamadı: " + (e && e.message ? e.message : "bilinmeyen hata"));
+    }
+  }
+
+  async function sekmeAdresler(el) {
+    try {
+      var liste = unwrap(await api.address.list()) || [];
+      var form = '<div class="ao-actions" style="margin-bottom:12px"><button class="ao-btn primary" data-adres-yeni>+ Yeni adres</button></div>';
+      if (!liste.length) { el.innerHTML = form + bosDurum("Kayıtlı adresin yok."); return; }
+      el.innerHTML = form + '<div class="acc-tiles">' + liste.map(function (a) {
+        return '<div class="acc-tile"><div class="at-head"><b>' + esc(a.title) + "</b>" +
+          (a.is_default ? '<span class="at-def">Varsayılan</span>' : "") + "</div>" +
+          "<p>" + esc(a.full_name) + (a.phone ? " · " + esc(a.phone) : "") + "</p>" +
+          "<p>" + esc(a.city) + " / " + esc(a.district) + "</p>" +
+          '<p class="muted">' + esc(a.full_address) + "</p>" +
+          '<div class="ao-actions"><button class="ao-btn" data-adres-sil="' + a.id + '">Sil</button></div></div>';
+      }).join("") + "</div>";
+    } catch (e) {
+      el.innerHTML = bosDurum("Adresler alınamadı: " + (e && e.message ? e.message : "bilinmeyen hata"));
+    }
+  }
+
+  // Kartlarim: MOCK bir yerel kart deposuydu. E2'de kart bilgisinin bize HIC gelmedigi
+  // (Iyzico kendi sayfasinda topluyor) tespit edilmisti; sahte "kayitli kart" listesi
+  // gostermek dogrudan yalan olur. Notr ve DOGRU bilgi cizilir.
+  function sekmeKartlar(el) {
+    el.innerHTML = '<div class="wrap" style="padding:24px 0"><p class="muted" style="margin:0 0 8px">' +
+      "Kart bilgilerin Divisima'da saklanmaz." + "</p>" +
+      '<p class="muted">Ödeme sırasında kartın, ödeme sağlayıcının kendi güvenli sayfasında alınır; ' +
+      "bize hiçbir zaman ulaşmaz.</p></div>";
+  }
+
+  // ── Fatura goruntuleme (sunucu HTML'i -> DOMPurify -> modal) ───────────────
+  // Fatura HTML'i BIZIM sunucudan geliyor ama yine de okuma katmanindan gecer:
+  // "kendi sunucum guvenli" varsayimi, iki katmanli savunmanin amacini bosa cikarir.
+  function faturaModalAc(orderId) {
+    var eski = document.getElementById("e3FaturaModal");
+    if (eski) eski.remove();
+    var m = document.createElement("div");
+    m.id = "e3FaturaModal";
+    m.setAttribute("role", "dialog");
+    m.setAttribute("aria-modal", "true");
+    m.setAttribute("aria-label", "Fatura");
+    m.style.cssText = "position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:20px";
+    m.innerHTML = '<div style="background:#fff;color:#111;max-width:860px;width:100%;max-height:88vh;overflow:auto;border-radius:10px;padding:18px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px">' +
+      "<b>Fatura</b><button id=\"e3FaturaKapat\" class=\"btn ghost\">Kapat</button></div>" +
+      '<div id="e3FaturaGovde">Yükleniyor…</div></div>';
+    document.body.appendChild(m);
+    m.querySelector("#e3FaturaKapat").onclick = function () { m.remove(); };
+    m.addEventListener("click", function (e) { if (e.target === m) m.remove(); });
+
+    api.orders.invoiceHtml(orderId).then(function (html) {
+      var kutu = document.getElementById("e3FaturaGovde");
+      if (!kutu) return;
+      // SAVUNMA SATIRI: uc bos govde donerse SESSIZ bos modal yerine DURUM soylenir.
+      // E3 elle dogrulamasinda bu dal GERCEKTEN tetiklendi - kok sebep SuccessDataResult<string>
+      // asiri yukleme belirsizligiydi (T=string iken "(T data)" ile "(string message)" ayni
+      // imzaya duser, C# non-generic olani secer -> HTML Message a gider, Data NULL kalir ve
+      // controller Content(ok.Data) yazdigi icin uc 200 + Content-Length: 0 dondu).
+      // E3 KAPSAMINDA DUZELTILDI (OrderManager artik "data:" adlandirilmis argumani kullanir);
+      // bu dal yine de duruyor - belirsizlik dilde kaldigi icin (Sprint 8 madde 11).
+      if (!html || !String(html).trim()) {
+        kutu.innerHTML = '<p class="muted">Fatura içeriği şu an alınamıyor. ' +
+          "Sipariş numaranla müşteri hizmetlerinden fatura talep edebilirsin.</p>";
+        return;
+      }
+      guvenliYaz(kutu, html, "Fatura güvenli şekilde gösterilemedi.");
+    }).catch(function (e) {
+      document.getElementById("e3FaturaGovde").textContent = "Fatura alınamadı: " + (e && e.message ? e.message : "hata");
+    });
+  }
+
+  // ── Iade talebi formu (siparis detayinin icinde) ───────────────────────────
+  var IADE_SEBEPLERI = [
+    [0, "Beden uymadı"], [1, "Ürün beklediğim gibi değil"], [2, "Hatalı/kusurlu ürün"],
+    [3, "Yanlış ürün gönderildi"], [4, "Diğer"]
+  ];
+  async function iadeFormuAc(kart, orderId) {
+    var kutu = kart.querySelector(".od-detail");
+    if (!kutu || kutu.querySelector(".e3-iade-form")) return;
+    var d;
+    try { d = unwrap(await api.orders.get(orderId)) || {}; }
+    catch (e) { toast("Sipariş bilgisi alınamadı."); return; }
+    var kalemler = (d.items || d.order_items || []).filter(function (k) { return !k.is_cancelled; });
+    if (!kalemler.length) { toast("İade edilebilecek kalem bulunamadı."); return; }
+
+    var f = document.createElement("div");
+    f.className = "e3-iade-form";
+    f.style.cssText = "border-top:1px solid rgba(0,0,0,.12);margin-top:12px;padding-top:12px";
+    f.innerHTML =
+      "<h4 style=\"margin:0 0 8px\">İade talebi</h4>" +
+      '<label style="display:block;margin-bottom:8px">Ürün<select id="e3IadeKalem" style="width:100%">' +
+      kalemler.map(function (k, i) {
+        var ad = k.product_name || k.name || ("Ürün #" + k.product_id);
+        return '<option value="' + i + '">' + esc(ad) + " · " + esc(k.size || "") + " · " + (k.quantity || 1) + " adet</option>";
+      }).join("") + "</select></label>" +
+      '<label style="display:block;margin-bottom:8px">Adet<input id="e3IadeAdet" type="number" min="1" value="1" style="width:100%"></label>' +
+      '<label style="display:block;margin-bottom:8px">Sebep<select id="e3IadeSebep" style="width:100%">' +
+      IADE_SEBEPLERI.map(function (s) { return '<option value="' + s[0] + '">' + esc(s[1]) + "</option>"; }).join("") + "</select></label>" +
+      '<label style="display:block;margin-bottom:8px">Tür<select id="e3IadeTur" style="width:100%">' +
+      '<option value="0">İade</option><option value="1">Değişim</option></select></label>' +
+      '<label style="display:block;margin-bottom:10px">Açıklama (isteğe bağlı)<textarea id="e3IadeAcik" rows="2" style="width:100%"></textarea></label>' +
+      '<button class="ao-btn primary" id="e3IadeGonder">Talebi gönder</button>';
+    kutu.appendChild(f);
+
+    f.querySelector("#e3IadeGonder").onclick = async function () {
+      var i = +f.querySelector("#e3IadeKalem").value;
+      var k = kalemler[i];
+      var adet = Math.max(1, Math.min(+f.querySelector("#e3IadeAdet").value || 1, k.quantity || 1));
+      var btn = f.querySelector("#e3IadeGonder");
+      btn.disabled = true;
+      try {
+        // customer_id GONDERILMEZ - JWT'den override ediliyor (ReturnCreateRequestDto yorumu).
+        await api.returns.create({
+          order_id: orderId, product_id: k.product_id, size: k.size || "",
+          quantity: adet, reason: +f.querySelector("#e3IadeSebep").value,
+          return_type: +f.querySelector("#e3IadeTur").value,
+          description: f.querySelector("#e3IadeAcik").value.trim()
+        });
+        toast("İade talebin alındı.");
+        f.innerHTML = '<p class="muted">İade talebin oluşturuldu. Durumunu “İadelerim” sekmesinden takip edebilirsin.</p>';
+      } catch (e) {
+        btn.disabled = false;
+        toast("İade talebi oluşturulamadı: " + (e && e.message ? e.message : "hata"));
+      }
     };
+  }
+
+  // ── Adres formu ────────────────────────────────────────────────────────────
+  function adresFormuAc(el) {
+    if (el.querySelector(".e3-adres-form")) return;
+    var f = document.createElement("div");
+    f.className = "e3-adres-form acc-tile";
+    f.style.cssText = "margin-bottom:12px";
+    f.innerHTML =
+      '<input id="e3AdBaslik" placeholder="Adres başlığı (Ev/İş)" style="width:100%;margin-bottom:6px">' +
+      '<input id="e3AdAd" placeholder="Ad Soyad" style="width:100%;margin-bottom:6px">' +
+      '<input id="e3AdTel" placeholder="Telefon" style="width:100%;margin-bottom:6px">' +
+      '<input id="e3AdIl" placeholder="İl" style="width:100%;margin-bottom:6px">' +
+      '<input id="e3AdIlce" placeholder="İlçe" style="width:100%;margin-bottom:6px">' +
+      '<textarea id="e3AdTam" rows="2" placeholder="Açık adres" style="width:100%;margin-bottom:6px"></textarea>' +
+      '<label style="display:block;margin-bottom:8px"><input type="checkbox" id="e3AdVars"> Varsayılan adresim olsun</label>' +
+      '<button class="ao-btn primary" id="e3AdKaydet">Adresi kaydet</button>';
+    el.insertBefore(f, el.firstChild);
+    f.querySelector("#e3AdKaydet").onclick = async function () {
+      var p = {
+        // id GONDERILMEZ -> yeni kayit. customer_id sunucuda token'dan set edilir.
+        title: f.querySelector("#e3AdBaslik").value.trim(),
+        full_name: f.querySelector("#e3AdAd").value.trim(),
+        phone: f.querySelector("#e3AdTel").value.trim(),
+        city: f.querySelector("#e3AdIl").value.trim(),
+        district: f.querySelector("#e3AdIlce").value.trim(),
+        full_address: f.querySelector("#e3AdTam").value.trim(),
+        is_default: f.querySelector("#e3AdVars").checked
+      };
+      if (!p.title || !p.city || !p.full_address) { toast("Başlık, il ve açık adres zorunlu."); return; }
+      try { await api.address.upsert(p); toast("Adres kaydedildi."); sekmeAdresler(el); }
+      catch (e) { toast("Adres kaydedilemedi: " + (e && e.message ? e.message : "hata")); }
+    };
+  }
+
+  // ── renderAccount OVERRIDE ─────────────────────────────────────────────────
+  var E3_SEKMELER = [
+    ["ozet", "Özet"], ["siparislerim", "Siparişlerim"], ["iadelerim", "İadelerim"],
+    ["faturalarim", "Faturalarım"], ["adreslerim", "Adreslerim"],
+    ["favorilerim", "Favorilerim"], ["kartlarim", "Kayıtlı Kartlar"], ["bilgilerim", "Hesap Bilgilerim"]
+  ];
+
+  function wireAccount() {
+    window.renderAccount = function (tab) {
+      tab = tab || "ozet";
+      var side = '<div class="acc-side"><div class="acc-user"><div class="acc-ava">' +
+        esc((window.userName || "U").charAt(0).toUpperCase()) + '</div><div class="acc-uname"><b>' +
+        esc(window.userName || "—") + "</b><small>Üye</small></div></div><nav class=\"acc-nav\">" +
+        E3_SEKMELER.map(function (x) {
+          return '<a href="#/hesabim/' + x[0] + '" class="acc-link' + (x[0] === tab ? " on" : "") + '">' + esc(x[1]) + "</a>";
+        }).join("") + '<a href="#/" class="acc-link acc-logout" id="accLogout">Çıkış Yap</a></nav></div>';
+
+      accountView.innerHTML = '<div class="cat-banner"><div class="wrap"><div class="breadcrumb"><a href="#/">Anasayfa</a> &nbsp;/&nbsp; Hesabım</div>' +
+        '<h1 class="serif">Merhaba, ' + esc((window.userName || "").split(" ")[0] || window.userName || "—") + "</h1></div></div>" +
+        '<section class="wrap acc-grid">' + side + '<div class="acc-content">' + yukleniyor() + "</div></section>";
+
+      var lo = document.getElementById("accLogout");
+      if (lo) lo.onclick = function (e) { e.preventDefault(); logout(); };
+
+      var el = accountView.querySelector(".acc-content");
+      if (!el) return;
+
+      if (tab === "ozet") sekmeOzet(el);
+      else if (tab === "siparislerim") sekmeSiparisler(el);
+      else if (tab === "iadelerim") sekmeIadeler(el);
+      else if (tab === "faturalarim") sekmeFaturalar(el);
+      else if (tab === "adreslerim") sekmeAdresler(el);
+      else if (tab === "kartlarim") sekmeKartlar(el);
+      else if (tab === "favorilerim") el.innerHTML = (typeof accFavs === "function" ? accFavs() : "");
+      else if (tab === "bilgilerim") el.innerHTML = (typeof accProfile === "function" ? accProfile() : "");
+
+      el.addEventListener("click", function (e) {
+        var ac = e.target.closest("[data-siparis-ac]");
+        if (ac) { siparisDetayAc(ac.closest(".acc-order"), +ac.getAttribute("data-siparis-ac")); return; }
+        var fa = e.target.closest("[data-fatura]");
+        if (fa) { var oid = +fa.getAttribute("data-fatura"); if (oid) faturaModalAc(oid); return; }
+        var ia = e.target.closest("[data-iade-ac]");
+        if (ia) { iadeFormuAc(ia.closest(".acc-order"), +ia.getAttribute("data-iade-ac")); return; }
+        if (e.target.closest("[data-adres-yeni]")) { adresFormuAc(el); return; }
+        var as = e.target.closest("[data-adres-sil]");
+        if (as) {
+          var aid = +as.getAttribute("data-adres-sil");
+          api.address.remove(aid).then(function () { toast("Adres silindi."); sekmeAdresler(el); })
+            .catch(function (er) { toast("Adres silinemedi: " + (er && er.message ? er.message : "hata")); });
+          return;
+        }
+        var fav = e.target.closest("[data-fadd]");
+        if (fav && typeof addToCart === "function") { addToCart(+fav.getAttribute("data-fadd"), "", 1, null); return; }
+      });
+
+      var ps = document.getElementById("pfSave");
+      if (ps && typeof saveProfileForm === "function") ps.onclick = saveProfileForm;
+    };
+
+    // ILK YUKLEME TUZAGI (wireLegal ile ayni - E2'de sepette, E3'te sozlesmede yasandi):
+    // index.html'in kendi script'i router()'i BIZ ezmeden ONCE calistiriyor. Sayfa dogrudan
+    // #/hesabim ile acildiysa ekranda ESKI accOrders() cizilir ve MOCK_ORDERS gorunur
+    // (olculdu: DVS-20260012 gibi sahte siparis numaralari). Ezdikten sonra yeniden cizeriz.
+    if (location.hash.indexOf("#/hesabim") === 0 && typeof window.loggedIn !== "undefined" && window.loggedIn) {
+      var _tab = location.hash.replace(/^#\/?/, "").split("?")[0].split("/")[1] || "ozet";
+      window.renderAccount(_tab);
+    }
+  }
+
+  // ── (b) CMS: #/sozlesme sayfalari API'den ──────────────────────────────────
+  // Gomulu LEGAL nesnesi ARTIK KULLANILMIYOR. Icerik content/get/{slug}'dan gelir ve
+  // okuma katmani (DOMPurify) uzerinden cizilir.
+  function wireLegal() {
+    window.showLegal = function (slug) {
+      slug = slug || "mesafeli-satis";
+      setView("legal");
+      var L = (window.lang === "en") ? "en" : "tr";
+      legalView.innerHTML = '<div class="cat-banner"><div class="wrap"><div class="breadcrumb"><a href="#/">Anasayfa</a> &nbsp;/&nbsp; Sözleşmeler</div>' +
+        '<h1 class="serif">…</h1></div></div><section class="wrap legal-wrap"><div class="legal-doc" id="e3LegalGovde">' +
+        yukleniyor() + "</div></section>";
+
+      api.content.get(slug).then(function (r) {
+        var c = unwrap(r) || {};
+        var baslik = (L === "en" && c.title_en) ? c.title_en : c.title_tr;
+        var govde = (L === "en" && c.body_en) ? c.body_en : c.body_tr;
+        var h1 = legalView.querySelector("h1");
+        if (h1) h1.textContent = baslik || "Sözleşme";
+        var kutu = document.getElementById("e3LegalGovde");
+        if (kutu) guvenliYaz(kutu, govde, "Sözleşme metni güvenli şekilde gösterilemedi.");
+        document.title = (baslik || "Sözleşme") + " · Divisima";
+      }).catch(function (e) {
+        var kutu = document.getElementById("e3LegalGovde");
+        if (kutu) kutu.innerHTML = '<p class="muted">Bu sayfa şu an görüntülenemiyor' +
+          (e && e.status === 404 ? " (içerik bulunamadı)" : "") + ".</p>";
+      });
+      window.scrollTo(0, 0);
+    };
+
+    // ILK YUKLEME TUZAGI (E2'de sepette birebir yasandi): index.html'in kendi script'i
+    // router()'i BIZ ezmeden ONCE bir kez calistiriyor. Sayfa dogrudan #/sozlesme/... ile
+    // acildiysa ekranda ESKI (gomulu LEGAL) surum kalir ve API yolu hic denenmez.
+    // O yuzden ezdikten sonra, zaten o sayfadaysak YENIDEN cizeriz.
+    if (location.hash.indexOf("#/sozlesme") === 0) {
+      var _slug = location.hash.replace(/^#\/?/, "").split("?")[0].split("/")[1] || "mesafeli-satis";
+      window.showLegal(_slug);
+    }
+  }
+
+  // ── (d) BILDIRIM ABONELIKLERI: mock akislar gercek uclara baglanir ─────────
+  // OLCULEN SOZLESME BOSLUGU: backend'de YALNIZ "subscribe" var; unsubscribe ve
+  // "aboneliklerim" ucu YOK (tum controller'larda arandi). Bu yuzden:
+  //  - Stok bildirimi: gercek POST yapilir.
+  //  - Fiyat uyarisi: TEK YONLU "abone ol" olur; eskiden yereldeki listeyi acip kapatan
+  //    bir anahtardi ve sunucuda karsiligi YOKTU - "kapattim" demek YALAN olurdu.
+  function wireNotify() {
+    // openNotify(p, size) kutuyu ciziyor ama urun/beden bilgisini DOM'a birakmiyor.
+    // Sarmalayip global olarak saklariz - abonelik POST'u bunlari gonderecek.
+    if (typeof window.openNotify === "function") {
+      var _openNotify = window.openNotify;
+      window.openNotify = function (p, size) {
+        window.__e3NotifyPid = p ? p.id : null;
+        window.__e3NotifySize = size || "";
+        return _openNotify.apply(this, arguments);
+      };
+    }
+
+    // Stok bildirimi (urun detayindaki "gelince haber ver" kutusu)
+    document.addEventListener("click", function (e) {
+      var b = e.target.closest("#notifyBtn");
+      if (!b) return;
+      var box = b.closest(".notify-box") || b.parentNode.parentNode;
+      var inp = document.getElementById("notifyEmail");
+      var em = inp ? inp.value.trim() : "";
+      if (!em || em.indexOf("@") < 1) { if (inp) { inp.style.borderColor = "#b85c5c"; inp.focus(); } return; }
+      var pid = window.__e3NotifyPid, size = window.__e3NotifySize;
+      if (!pid) { toast("Ürün bilgisi bulunamadı."); return; }
+      e.preventDefault(); e.stopPropagation();
+      b.disabled = true;
+      api.stockNotification.subscribe(pid, size || "", em).then(function () {
+        if (box) box.innerHTML = '<div class="notify-done"><span class="nd-ic">✓</span> Stoğa girince ' + esc(em) + " adresine haber vereceğiz.</div>";
+        toast("Bildirim kaydın alındı.");
+      }).catch(function (er) {
+        b.disabled = false;
+        toast("Kayıt yapılamadı: " + (er && er.message ? er.message : "hata"));
+      });
+    }, true);
+
+    // OLCULEN E3 HATASI: burada once "window.userEmail" okunuyordu. index.html o degiskeni
+    // kendi yerel profil deposundan (dvs_profile) dolduruyor ve GERCEK giris o alani
+    // DOLDURMUYOR (olculdu: giris yapilmis kullanicida dvs_profile = {name:"E3 Fix", email:""}),
+    // yani giris yapmis kullaniciya da "giris yapmalisin" deniyordu. Dogru kaynak sunucudur:
+    // /api/Account/summary. Bir kez cekilip onbellege alinir.
+    var _epostaOnbellek = null;
+    async function kullaniciEpostasi() {
+      var yerel = (window.userEmail || "").trim();
+      if (yerel) return yerel;
+      if (_epostaOnbellek) return _epostaOnbellek;
+      try {
+        var s = unwrap(await api.account.summary()) || {};
+        _epostaOnbellek = (s.email || "").trim();
+        if (_epostaOnbellek) window.userEmail = _epostaOnbellek;   // index.html tarafi da faydalansin
+        return _epostaOnbellek;
+      } catch (e) { return ""; }
+    }
+
+    // Fiyat uyarisi (favorilerdeki zil dugmesi) - TEK YONLU abonelik
+    document.addEventListener("click", async function (e) {
+      var pa = e.target.closest("[data-palert]");
+      if (!pa) return;
+      e.preventDefault(); e.stopPropagation();
+      var pid = +pa.getAttribute("data-palert");
+      var em = await kullaniciEpostasi();
+      if (!em) { toast("Fiyat uyarısı için giriş yapmalısın."); return; }
+      if (pa.classList.contains("on")) { toast("Bu ürün için zaten fiyat uyarısı kurdun."); return; }
+      api.priceDrop.subscribe(pid, em).then(function () {
+        pa.classList.add("on");
+        toast("Fiyat düşerse haber vereceğiz.");
+      }).catch(function (er) {
+        toast("Fiyat uyarısı kurulamadı: " + (er && er.message ? er.message : "hata"));
+      });
+    }, true);
   }
 
   async function init() {
@@ -987,11 +1508,28 @@
     wireProductDetail();
     wireCart();               // E2: sepet mutasyonlarini sunucuya aynala
     wireCheckoutRouting();    // E2: #/odeme ve #/odeme/sonuc
-    wireAccountOrders();      // E2b: mock siparis listesi cizilmez (olculen cokme)
+    // E3: Hesabim ekranlari gercek API'ye baglandi - E2b'deki gecici wireAccountOrders
+    // (yalniz cokmeyi kaldiran notr durum) ARTIK GEREKSIZ, yerini tam ekran aldi.
+    wireAccount();            // E3 (a): ozet + siparisler/zaman cizelgesi + iade + fatura + adres
+    wireLegal();              // E3 (b): #/sozlesme icerigi content/get/{slug}'dan + DOMPurify
+    wireNotify();             // E3 (d): stok / fiyat dususu abonelikleri gercek uclara
     // Kategoriler ÖNCE: ürün kategorisi category_id üzerinden çözülüyor (liste yolu
     // category_name döndürmüyor), yükleme sırası ters olursa tüm ürünler "tumu" olur.
     await loadCategories();
     await loadCatalog();
+
+    // KATALOG SONRASI YENIDEN CIZIM (E3 elle dogrulamasinda OLCULDU):
+    // Hesabim ekranindaki "Favorilerim" ve "Kayitli Kartlar" sekmeleri index.html in
+    // KENDI cizicilerini (cardHTML -> byId) kullanir, yani KATALOGA baglidir. Katalog
+    // asenkron yuklendigi icin sayfa dogrudan #/hesabim/favorilerim ile acildiginda
+    // ekran MOCK urunle ciziliyordu (olculdu: favori id 2 icin "Yumusak Triko Kazak /
+    // 649 TL" gorundu; gercek katalogda id 2 = "E4a Test Urun / 499,90 TL").
+    // wireAccount icindeki ilk yukleme yamasi BU YARISI KAPATMIYOR - o, katalog
+    // gelmeden ONCE kosuyor. Katalog geldikten SONRA bir kez daha cizeriz.
+    if (location.hash.indexOf("#/hesabim") === 0 && typeof window.renderAccount === "function") {
+      var _t = location.hash.replace(/^#\/?/, "").split("?")[0].split("/")[1] || "ozet";
+      window.renderAccount(_t);
+    }
   }
 
   if (document.readyState === "loading") {

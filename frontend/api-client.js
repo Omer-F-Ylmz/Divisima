@@ -51,6 +51,8 @@
       this.content = this._buildContent();
       this.device = this._buildDevice();
       this.stockNotification = this._buildStockNotification();
+      this.priceDrop = this._buildPriceDrop();
+      this.account = this._buildAccount();
       this.recentlyViewed = this._buildRecentlyViewed();
       this.stock = this._buildStock();
       this.productImage = this._buildProductImage();
@@ -337,6 +339,10 @@
         place(payload) { return api._post("/api/order/place", payload); },
         get(id) { return api._get("/api/order/get/" + id); },
         my() { return api._get("/api/order/my-orders"); },
+        // E3 - FATURA HTML. Uc "text/html" doner, JSON DEGIL; _parse JSON cozemezse ham metni
+        // dondurdugu icin burada HTML dizesi elde edilir. ROTA SIRASI: {orderId}/invoice-html
+        // (timeline'in tersine - timeline "timeline/{orderId}", bu ise "{orderId}/invoice-html").
+        invoiceHtml(orderId) { return api._get("/api/order/" + orderId + "/invoice-html"); },
       };
     }
     _buildPayment() {
@@ -411,6 +417,28 @@
       return {
         // Açıklama: Stoksuz ürün+beden için "gelince haber ver" aboneliği
         subscribe(productId, size, email) { return api._post("/api/stocknotification/subscribe", { product_id: productId, size: size, email: email }); },
+      };
+    }
+
+    // E3 - FIYAT DUSUSU ABONELIGI.
+    // ROTA TUZAGI (olculdu): PriceDropController "[Route(\"api/price-drop\")]" ile ACIKCA
+    // TIRELI tanimlanmis; StockNotificationController ise "[Route(\"api/[controller]\")]"
+    // yani TIRESIZ. Yan yana iki farkli kural - E4a'daki "api/product-image" tuzaginin tekrari.
+    _buildPriceDrop() {
+      const api = this;
+      return {
+        subscribe(productId, email) { return api._post("/api/price-drop/subscribe", { product_id: productId, email: email }); },
+      };
+    }
+
+    // E3 - HESAP. AccountController sinif duzeyinde [RequireUserType(Customer)].
+    _buildAccount() {
+      const api = this;
+      return {
+        summary() { return api._get("/api/account/summary"); },
+        updateProfile(payload) { return api._put("/api/account/profile", payload); },
+        changePassword(payload) { return api._post("/api/account/change-password", payload); },
+        notificationPreferences(payload) { return api._put("/api/account/notification-preferences", payload); },
       };
     }
 

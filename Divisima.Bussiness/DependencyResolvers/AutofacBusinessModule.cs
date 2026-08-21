@@ -135,6 +135,8 @@ namespace Divisima.Bussiness.DependencyResolvers.Autofac
             builder.RegisterType<OutboxService>().As<IOutboxService>().InstancePerLifetimeScope();
             builder.RegisterType<OutboxProcessor>().AsSelf().InstancePerLifetimeScope();
             builder.RegisterType<Divisima.Bussiness.Seed.AdminSeeder>().AsSelf().InstancePerLifetimeScope();
+            // E3: legal icerik tohumlayici (idempotent - mevcut slug'a DOKUNMAZ).
+            builder.RegisterType<Divisima.Bussiness.Seed.ContentSeeder>().AsSelf().InstancePerLifetimeScope();
             builder.RegisterType<EfOutboxMessageDal>().As<IOutboxMessageDal>().InstancePerLifetimeScope();
 
             // ── Fraud/hız kontrolü ──
