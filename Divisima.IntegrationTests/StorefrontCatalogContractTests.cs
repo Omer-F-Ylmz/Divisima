@@ -19,7 +19,7 @@ namespace Divisima.IntegrationTests
     // ki backend sessizce degistiginde vitrin bozulmadan ONCE kirmizi gorelim.
     //
     // Ikisi MEVCUT DAVRANIS pini (SUPHELI - duzeltme karari kullanicinin):
-    //   - filter yolu category_name / total_stock / sizes DOLDURMUYOR
+    //   - filter yolu category_name / total_stock / sizes DOLDURMUYORDU (SPRINT 8 MADDE 5'te DUZELTILDI)
     //   - getlist ADMIN ister (storefront kullanamaz)
     [Trait("Category", "Sql")]
     public class StorefrontCatalogContractTests : IAsyncLifetime
@@ -180,13 +180,21 @@ namespace Divisima.IntegrationTests
             tam.StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
-        // ── 3) SUPHELI PINI: liste yolu category_name / total_stock / sizes DOLDURMUYOR ──
-        // ProductProfile bu ucunu Ignore ediyor; admin GetList sizes'i sonradan dolduruyor
-        // ama storefront filter yolu HICBIRINI doldurmuyor. Ham veriyle her urun
-        // "kategorisiz + 0 stok + bedensiz" -> vitrin bastan sona "Tukendi" gorunur.
-        // Istemci bunu detay ucundan telafi ediyor (api-bridge.js enrichAll).
+        // ── 3) SPRINT 8 MADDE 5: LISTE YOLU ARTIK category_name / total_stock / sizes DOLDURUYOR ──
+        //
+        // ESKI PIN BILINCLI KIRILDI: "Filter_ListeYolu_CategoryName_TotalStock_Sizes_DOLDURMUYOR_PINLENIR".
+        // O pin, E1'de OLCULEN bir SUPHELI davranisi sabitliyordu: liste yolu bu uc alani hic
+        // doldurmuyordu, ham veriyle vitrindeki her urun "kategorisiz + 0 stok + bedensiz"
+        // gorunuyor ve bastan sona "Tukendi" yaziyordu. Istemci bunu urun basina AYRI detay
+        // cagrisiyla telafi ediyordu (6 eszamanli; bir vitrin sayfasi 1 + 24 = 25 istek).
+        // Sprint 8'de backend duzeltildi ve o telafi KALDIRILDI - dolayisiyla eski pin artik
+        // YANLIS bir sozlesmeyi savunuyordu ve yerini bu pin aldi.
+        //
+        // CIFT-ANLAM KIRICI: "sizes dolu" demek yetmez - SATILABILIR bedenin geldigi, rezerve
+        // edilmis bedenin GELMEDIGI de olculur. Aksi halde "tum bedenleri dondur" gibi yanlis
+        // bir uygulama da testi gecerdi.
         [Fact]
-        public async Task Filter_ListeYolu_CategoryName_TotalStock_Sizes_DOLDURMUYOR_PINLENIR()
+        public async Task Filter_ListeYolu_CategoryName_TotalStock_Sizes_DOLDURUR()
         {
             if (Skipped()) return;
             var anon = _factory!.CreateClient();
@@ -198,19 +206,22 @@ namespace Divisima.IntegrationTests
             items.Should().NotBeNull().And.NotBeEmpty("tohum urun listede olmali (vakum kirici)");
 
             var row = items!.First(i => i.id == _productId);
-            row.price.Should().Be(250m, "fiyat DOLU gelir - eksik olan alanlar belirli");
-            row.category_id.Should().Be(_categoryId, "kategori ID'si gelir (isim gelmez)");
+            row.price.Should().Be(250m);
+            row.category_id.Should().Be(_categoryId);
 
-            row.category_name.Should().BeNull("MEVCUT DAVRANIS: liste yolu category_name doldurmuyor");
-            row.total_stock.Should().Be(0, "MEVCUT DAVRANIS: gercek stok 7 olmasina ragmen total_stock 0 doner");
-            row.sizes.Should().BeEmpty("MEVCUT DAVRANIS: liste yolu sizes doldurmuyor");
+            row.category_name.Should().NotBeNullOrWhiteSpace(
+                "liste yolu artik kategori ADINI donduruyor - istemci ayrica kategori listesi cekmek zorunda degil");
+            row.total_stock.Should().Be(7,
+                "SATILABILIR stok donmeli (stock_quantity - reserved_quantity). Tohum: 10 fiziksel, 3 rezerve.");
+            row.sizes.Should().NotBeEmpty("liste yolu artik musait bedenleri donduruyor");
 
-            // CIFT-ANLAM KIRICI: veri YOK degil, LISTE YOLU getirmiyor. Detay ucu gercegi veriyor.
+            // Detay ucu FIZIKSEL stogu (10) donmeye devam eder - iki uc AYRI sorulari yanitliyor.
+            // Bu, "liste yolu detaydan kopyaliyor" gibi bir yanlis okumayi da engeller.
             var detay = await anon.GetAsync($"/api/product/get/{_productId}");
             detay.StatusCode.Should().Be(HttpStatusCode.OK);
             var d = await detay.Content.ReadFromJsonAsync<DetailEnvelope>();
             d!.data!.stocks.Should().ContainSingle().Which.stock_quantity.Should().Be(7,
-                "detay ucu GERCEK stogu donuyor - istemci telafisi buna dayaniyor");
+                "detay ucu kendi sozlesmesini korur");
         }
 
         // ── 4) ARAMA PARAMETRE ADI: "query" (q DEGIL) ────────────────────────────────────

@@ -200,6 +200,19 @@ Bu bolum, yeni bir oturumun tek basina devam edebilmesi icin yazildi.
   GitHub kosucusu invariant: olculdu -> tr-TR `549,90` / `1.049,70`, Invariant `549.90` /
   `1,049.70`. Uretim kodu dogru calisiyordu (govde DOLU geldi - `Content-Length` asserti
   GECTI, yalniz `Contain` asserti dustu). **Duzeltme yerelde hazir, push karari kullanicinin.**
+- **E3 kirmizisi ve duzeltmesi push `91f8d21` - HER IKI WORKFLOW YESIL**
+  (run 32513034626 CI + 32513034566 Security; adim bazinda + annotation duzeyinde dogrulandi:
+  `format-check` job'inda ve `build-and-test` job'inda **failure annotation SIFIR**).
+  Kirmizinin sebebi: testte KULTUR BAGIMLI bir literal (`Contain("549,90")`). Yerel makine
+  tr-TR, GitHub kosucusu invariant. Uretim kodu dogru calisiyordu. Ayrintisi ve iki kalici
+  kural (bolum 6 ve bolum 7) ilgili yerlerde.
+- **SPRINT 8: ON UC KALEMIN TAMAMI TAMAM.** Madde 9'un 2. turu gercek odemeyle suruldu
+  (siparis #34, callback + webhook carpismasi idempotent cikti). Ayrinti Sprint 8 bolumunde.
+- **Yerel (madde 3 + madde 9 sonrasi): 198/198 `Category=Sql`, tam suitte 322 basarili /
+  325 toplam** - kirilan 3'un UCU DE `OrderEndpointTests` (Testcontainers; yerelde Docker
+  kapali, CI'da yesil kosuyor). Baska kirmizi YOK.
+- **Yerel (Sprint 8 madde 3/9 ONCESI): 188/188 `Category=Sql`, 312/312 tam suit, Release 0
+  hata, format kapilari TEMIZ.**
 - **Yerel (E3 sonrasi): 168/168 `Category=Sql`, 289/289 tam suit** (Testcontainers'li
   `OrderEndpointTests` HARIC - yerelde Docker kapali, CI'da yesil kosuyor).
 
@@ -812,13 +825,523 @@ kullanicinin GERCEK e-postasi, `subscribed_price=499.90`).
 SW surumu `2026-08-21-e3`'e cekildi (kod tasiyan dosyalar zaten network-first; surum bumpi
 eski onbellegi temizlemek icin).
 
+## SPRINT 8 - LAUNCH ONCESI ZORUNLU DALGA (11/13 TAMAM, 2 KALEM KULLANICIDA)
+
+Kalem sirasi ve UC COMMIT bolunmesi kullanici karari (bkz. Sprint 8 defteri basligi).
+**KOD YAZILDI, COMMIT ATILMADI**: guvenlik commit'i madde 9'a, dogruluk commit'i madde 3
+kararina bagli. Asagidakilerin tamami YERELDE yesil ve dis kontrolunden gecti.
+
+### DURUM TABLOSU
+
+**ON UC KALEMIN TAMAMI TAMAM: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13.**
+Madde 9'un 2. turu tunel uzerinden gercek odemeyle suruldu ve tam yesil (siparis #34);
+gecici teshis middleware'i ve gecici CSP satiri KALDIRILDI.
+
+### MADDE 6 - REFRESH TOKEN httpOnly COOKIE (ONCELIKLI, GUVENLIK)
+
+Kapsam OLCUMLE GENISLEDI ve kullanici onayladi: **uc parca ayrilamaz.**
+- `AntiforgeryMiddleware` yalniz "refresh_token cookie'si VAR + Bearer YOK" durumunda
+  devreye giriyor. Cookie hic yazilmadigi icin middleware BUGUNE KADAR HIC CALISMADI.
+- `csrf_token` cookie'sini depoda **hicbir yer YAZMIYORDU** (tarandi; tek gecen yer
+  middleware'in kendi okumasi). Yani cookie yazilmaya baslandigi an `/api/auth/refresh`
+  kalici **403** verirdi.
+- Ucuncu uyusmazlik: istemci `XSRF-TOKEN` cookie'sini okuyup `X-XSRF-TOKEN` gonderiyordu;
+  middleware `csrf_token` / `X-CSRF-Token` bekliyor. **UC YONLU AD UYUSMAZLIGI** - iki taraf
+  da kendi adiyla calisiyordu, hicbir zaman eslesmedi. Istemci backend'in adlarina hizalandi.
+
+YAPILAN: login / refresh / verify-2fa sonrasi `OturumCerezleriniYaz` - refresh_token httpOnly
+cookie'ye yazilir, csrf_token cookie'si yazilir, **refresh token YANIT GOVDESINDEN SILINIR**.
+`Refresh` action'i govde ALMIYOR (parametre kaldirildi - kalsaydi istemci cookie modelini
+sessizce bypass edebilirdi). `Logout` cookie'yi okuyor ve siliyor - o satir artik GERCEKTEN
+calisiyor. Istemci refresh token'i ne goruyor ne sakliyor; eski surumden kalan localStorage
+kalintisi ilk kurulumda TEMIZLENIYOR.
+
+**OLCUMLE ALINAN UC KARAR:**
+1. **`Secure = true` SABIT, ortam guard'i YOK.** "Development'ta kapatmak gerekir mi?" sorusu
+   TARAYICIDA olculdu: giris -> `document.cookie` csrf_token'i GORDU; access token bilerek
+   bozuldu -> sessiz yenileme BASARILI (yani httpOnly+Secure refresh cookie duz HTTP uzerinde
+   de saklanmis VE geri gonderilmis). Tarayicilar `localhost`u guvenilir origin sayiyor.
+   Guard eklenseydi kod, hicbir sey kazandirmadan uretim disinda Secure'u kapatan bir yol
+   tasiyacakti.
+2. **Cookie YOLLARI FARKLI.** `refresh_token` -> `/api/auth` (dar; her istekte tasinmasin).
+   `csrf_token` -> `/`. ZORUNLU: `document.cookie` yalnizca GECERLI SAYFA YOLUYLA eslesen
+   cerezleri dondurur. Ilk yazimda ikisi de `/api/auth` idi ve TARAYICIDA OLCULDU: giristen
+   sonra `document.cookie` BOS dondu - istemci basligi dolduramaz, yenileme kalici 403 olurdu.
+3. **CSRF degeri HEX, base64 DEGIL.** Base64'un `+`, `/`, `=` karakterleri Cookie basliginda
+   bozulup karsilastirmayi sessizce dusuruyordu (ilk kosumda birebir bu 403 alindi).
+
+`Cookies:Domain` ayari eklendi (dev BOS, uretimde `.divisima.com`): storefront (divisima.com)
+ile API (api.divisima.com) FARKLI HOSTLAR; host-only bir cerezi storefront JS'i OKUYAMAZ ve
+double-submit yarim kalir. example.json'a olcum gerekcesiyle yazildi.
+
+**KIRILAN PIN YOK - DURUST KAYIT.** Kullanicinin beklentisi "govde-tabanli eski pinler bilincli
+kirilir" idi; TARANDI ve HTTP duzeyinde `/api/auth/refresh` pini HIC YOKTU. Var olan iki pin
+(`Refresh_YeniCiftUretir_ESKI_RefreshToken_REDDEDILIR`, `PasifHesabin_RefreshToken_i_Reddedilir`)
+`IAuthService`'i DOGRUDAN cagiriyor; servis imzasi degismedigi icin ikisi de SAG KALDI.
+Uydurma bir "kirilan pin" raporlanmadi.
+
+PINLER (`RefreshCookieContractTests`, 4): cookie yazilir + govdede refresh token YOK ·
+cookie'siz 401 **ve gecerli token GOVDEDE bile 401** (eski yol gercekten kapali) · CSRF
+basligi yoksa/yanlissa 403, dogruysa **200** (vakum kirici) · `Secure` her ortamda isaretli.
+
+### MADDE 7 - Iyzico:CallbackUrl URETIM FAIL-FAST
+
+`Program.cs` fail-fast blogunda (ConnectionStrings / SecurityKey / Encryption:Key /
+MailSettings:Host kalibi). Bos ya da HTTPS olmayan degerle uretim host'u ACILMAZ. Mesaj CSP
+`form-action` senkron kuralini da hatirlatiyor. example.json'daki `//Iyzico` aciklamasina
+fail-fast notu eklendi.
+
+PINLER (`ConfigFailFastTests`, 3): bos -> acilmaz (mesajda hem ayar adi hem `form-action`
+aranir) · HTTPS degil -> acilmaz · **gecerli deger -> ACILIR** (vakum kirici; bu olmadan
+"uretim host'u zaten hic acilmiyor" durumunda da iki pin yesil kalirdi).
+
+### MADDE 11 - SuccessDataResult BELIRSIZLIGININ KOK COZUMU
+
+Depo TARANDI (olcum, tahmin degil):
+  SuccessDataResult<T>(T data, string message) -> 27 cagri
+  SuccessDataResult<T>(T data)                 -> 16 cagri (hepsi veri niyetli)
+  SuccessDataResult<T>(string message)         -> **0 cagri**
+  ErrorDataResult<T>(T data, ...) / (T data)   -> **0 cagri**
+  ErrorDataResult<T>(string message)           -> 23 cagri (hepsi `Messages.X`)
+  Parametresiz kurucular                       -> 0 cagri
+
+Yani belirsizligi URETEN kurucular ZATEN OLUYDU. Analyzer/kural yazmak yerine KALDIRILDILAR:
+`SuccessDataResult<T>` -> yalniz `(T data, string message)` + `(T data)`; tek arguman HER ZAMAN
+veri. `ErrorDataResult<T>` -> yalniz `(string message)`; tek arguman HER ZAMAN mesaj.
+Hicbir `T` icin cakisan iki kurucu kalmadi. **Build 0 hata, TEK BIR cagri yeri degismedi** -
+bu da kaldirilanlarin gercekten olu oldugunun kaniti.
+Ileride veri tasiyan hata sonucu gerekirse kurucu GERI EKLENMEZ, ayirt edilebilir bir fabrika
+(`ErrorDataResult<T>.WithData`) eklenir; gerekce koda yazildi.
+
+E3'un `data:` adlandirmalari BIRAKILDI (artik gerekli degil ama niyeti acik tutuyor); yorumlari
+durustlestirildi. Pin seti E3'un TERSINI sabitleyen yeni pinle genisledi
+(`SuccessDataResultString_TEK_ARGUMAN_ARTIK_DATAYA_GIDER_BELIRSIZLIK_KALKTI`) + `ErrorDataResult`
+icin cift-anlam kirici.
+
+### MADDE 1 - KUPON SAYACI IDEMPOTENT
+
+`used_count += 1` yerine `coupon_usages` satirlarindan **TURETME** (tek SQL ifadesi,
+`ExecuteUpdateAsync`). Turetme TANIMI GEREGI idempotenttir.
+**DURUST DUZELTME:** ilk yorumumda "oku-degistir-yaz yarisi da vardi" yazmistim - YANLISTI.
+`coupons.row_version` DbContext'te `IsRowVersion()` ile yapilandirilmis GERCEK bir concurrency
+token; kayip guncelleme istisnaya donusuyor ve retry onu yakaliyordu. **Tek gercek sorun
+IDEMPOTENCY'di** ve yeniden deneme onu KURTARAMAZ (ikinci artis hata degil, basarili yazma).
+
+Ikinci savunma hatti: `UX_coupon_usages_coupon_order` UNIQUE indeksi. Migration Sprint 6
+kalibiyla - kirli veride **satir SILMEDEN** `RAISERROR` ile gurultulu duser.
+`database/mssql/01_schema.sql` guncellendi.
+
+PINLER (`CouponCounterAndInvoiceGuardTests`): sayac uc kez kossa da 1 kalir (once GERCEKTEN 1
+oldugu dogrulanir - vakum kirici) · ayni siparise ikinci kullanim satiri veritabaninda ENGELLENIR.
+
+### MADDE 2 - FATURA DURUM GUARD'I
+
+`InvoiceManager.GenerateForOrder` artik `Pending` ve `Cancelled` siparisleri reddediyor
+(`InvoiceOrderNotBillable`). Fatura MALI BIR BEYANDIR: iptal edilmise kesmek ciroyu sisirir,
+odenmemise kesmek musteriye olmayan bir borc gonderir.
+
+PINLER: iptal edilmise kesilmez (400 + satir YOK; cift-anlam kirici mesaj kontrolu) · Pending'e
+kesilmez · **onayliya KESILIR** (vakum + cift-anlam kirici; guard'in DAR oldugunu bu kanitliyor).
+
+### MADDE 13 - KULTUR PINLEME
+
+`Program.cs`'te TEK NOKTA `tr-TR` pinlemesi (`DefaultThreadCurrentCulture` +
+`DefaultThreadCurrentUICulture`).
+
+**`RequestLocalization` SECILMEDI - iki olculmus gerekce:** (a) magaza tek pazarli, bicimin
+istemcinin `Accept-Language`'ine gore degismesi Ingilizce tarayicidan siparis verene NOKTA
+ayracli Turk faturasi cikarirdi; (b) fatura / fiyat-dususu e-postasi / outbox ARKA PLAN
+islerinde de uretiliyor, orada istek hatti YOK - middleware o yolu hic kapsamazdi.
+
+ETKILENEN YUZEY (tarandi): `OrderManager` (fatura HTML'i - 11 tutar + 1 tarih),
+`PriceDropManager` (2 tutar). `IyzicoClient` ZATEN acikca `InvariantCulture` kullaniyor -
+saglayiciya giden tutarlar ETKILENMEZ. `{Guid:N}` kullanimlari sayi bicimi DEGIL Guid bicimi.
+
+PINLER (`CulturePinTests`, 2): surec kulturu `tr-TR` · fatura govdesi KOSUCU KULTURUNDEN
+BAGIMSIZ `1.049,70` tasir (assert ACIKCA `tr-TR` ile hesaplanir, `CurrentCulture` ile DEGIL -
+invariant kosucuda da ayni degeri bekler) + invariant bicimin govdede BULUNMADIGI (cift-anlam).
+
+5. KONTROL: pinleme kaldirildi + kosucu invariant'a cekildi -> IKI PIN DE KIRILDI
+(`DefaultThreadCurrentCulture` `""`, fatura tr bicimi tasimiyor). E3'teki CI kirmizisi birebir
+yeniden uretildi. Geri alindi.
+
+### MADDE 4 - LocalImageStorage WebRootPath
+
+`Directory.GetCurrentDirectory()/wwwroot/...` yerine `IWebHostEnvironment.WebRootPath`
+(yoksa `ContentRootPath/wwwroot`).
+
+ASIL KANIT TESTTE: `AdminStockAndImageTests`'teki **`UseContentRoot(CWD)` hizalamasi KALDIRILDI**.
+O ayar uretimdeki gercek ayrismayi test icinde GIZLIYORDU - ve o ayrisma E2b'de canli
+gerceklesti (DB'de 3 gorsel satiri, `Divisima.API/wwwroot/uploads/products` BOS, dosyalar test
+bin'inde). Hizalama olmadan 5/5 yesil: yazma ile statik sunum artik FARKLI calisma dizininde
+bile ortusuyor. Ayar geri konursa pin anlamini yitirir; gerekce koda yazildi.
+
+### MADDE 5 - DTO ZENGINLESTIRME + ISTEMCI TELAFISININ KALDIRILMASI
+
+`ListeyiZenginlestirAsync` TEK yardimci olarak eklendi ve **hem admin `GetList` hem storefront
+`filter`** yoluna baglandi - onceden yalniz admin yolu `sizes` dolduruyordu, iki yol
+ayrisiyordu. N+1 YOK: kategoriler ve stoklar tek sorguda.
+
+TASARIM: `total_stock` ve `sizes` **`available`** uzerinden (`stock_quantity - reserved_quantity`).
+Bir bedenin tamami baskalarinin sepetinde rezerveyse o beden SATILABILIR DEGILDIR ve vitrinde
+"var" gorunmemeli.
+
+`ReturnResponseDto`'ya `product_name` + `order_number` eklendi. Bu yalniz fazladan is degil
+YANLISLIK da duzeltti: pasiflenmis / katalogdan cikmis urunun iadesi "Urun #12" gorunuyordu.
+Iade kaydi GECMISE ait bir belgedir; adi kaydin kendisi tasimali.
+
+**`my-orders` icin DURUST BULGU: zenginlestirilecek bir sey YOK.** Olculdu - istemci liste icin
+TEK cagri yapiyor, detayi kullanici siparis actiginda tembel cekiyor. Bu bir N+1 degil, mesru
+lazy loading. Olculen N+1 KATALOG yolundaydi ve o kapandi. Uydurma is cikarilmadi.
+
+ISTEMCI TELAFISI KALDIRILDI: `enrichAll` (6 eszamanli, urun basina detay cagrisi) silindi.
+Detay zenginlestirmesi TEMBEL kaldi (`wireProductDetail` - kullanici urunu actiginda).
+TARAYICIDA OLCULDU: **1 filter cagrisi, 0 detay cagrisi** (once 1 + 24). Kategori adlari cozulu,
+stoklar 16/15 (rezerve dusulmus), urun 1'in stoksuz `L` bedeni listede YOK.
+
+**BILINCLI KIRILAN PIN:** `Filter_ListeYolu_..._DOLDURMUYOR_PINLENIR` -> `..._DOLDURUR`.
+Eski pin E1'de olculen SUPHELI davranisi sabitliyordu; backend duzelince YANLIS bir sozlesmeyi
+savunur hale geldi. Yeni pin cift-anlam kirici: rezerve edilmis bedenin GELMEDIGI de assert
+ediliyor.
+
+### MADDE 10 - BILDIRIM ABONELIKLERI (unsubscribe + "aboneliklerim")
+
+Backend'de YALNIZ `subscribe` vardi. Eklenen: `GET /my`, `DELETE /{id}`,
+`GET /unsubscribe?token=` - her iki tur icin (stok bildirimi + fiyat dususu).
+
+**TASARIM KARARI (olcume dayali):** abonelik ANONIM kurulabiliyor, dolayisiyla cikma yolu
+kimlik dogrulamasi ISTEYEMEZ - yoksa uye olmayan abone verdigi izni geri alamaz.
+"E-posta + urun ile cik" SECILMEDI: herkes herkesi cikarabilirdi ve uc "bu e-posta abone mi?"
+sorusuna yanit veren bir SIZINTI KANALI olurdu. Cozum: satir basina TAHMIN EDILEMEZ jeton
+(32 bayt HEX - base64'un `+/=` karakterleri URL'de bozuluyor), UNIQUE indeksli, e-postadaki
+baglantida tasiniyor.
+
+Giris yapmis kullanici tarafinda sahiplik **JWT'deki e-posta** ile dogrulaniyor
+(`ICurrentUserService.GetRequiredEmail()` eklendi), istemci girdisiyle DEGIL. Baskasinin
+aboneligine **404** doner - 403 demek varligi sizdirirdi.
+
+MIGRATION: `AddColumn` tum mevcut satirlara AYNI varsayilani yazdigi icin UNIQUE indeks 2+
+satirda kurulamazdi; `NEWID()` ile SATIR BASINA geri doldurma eklendi.
+
+`Api:PublicBaseUrl` ayari (bos ise `Storage:PublicBaseUrl`'e duser - gorseller de API'nin
+wwwroot'undan servis ediliyor, ayni origin). Ikisi de bossa e-postaya baglanti YERINE
+"Hesabim > Bildirimlerim" yonlendirmesi yazilir - sessizce bos birakilmaz.
+
+Hesabim'a **"Bildirimlerim"** sekmesi geldi; iki tur TEK listede, "Kaldir" butonuyla.
+
+YAN ETKI (5 test kirildi, duzeltildi): `unsubscribe_token` NOT NULL olunca dogrudan DbContext
+ile satir ekleyen 4 test kurgusu `Cannot insert the value NULL` ile kirildi. Kolonu opsiyonel
+yapmak yerine KURGULAR uretimle ayni sozlesmeye uyduruldu - token'siz bir satir hicbir zaman
+abonelikten cikarilamaz, yani kolon gercekten zorunlu olmali. `ClaimBeforeSendTests`'teki
+fabrika HER CAGRIDA kendi jetonunu uretiyor: sabit deger verilseydi ikinci satir, testin
+OLCTUGU filtreli-unique yerine JETON unique'ine takilir ve test yanlis sebepten kirilirdi.
+
+PINLER (`NotificationSubscriptionTests`, 5): liste yalniz kendi e-postasini doner (baskasininkinin
+listede OLMADIGI da assert) · baskasininki silinemez, satir KALIR · kendi satiri silinir ·
+yanlis jeton reddedilir + dogru jeton ANONIM calisir · fiyat uyarisi tarafi da ayni sozlesmeyi tasir.
+
+### MADDE 12 - PAYLASIM BAGLANTILARI (TESHIS DUZELTMESI)
+
+**E3'teki teshisim YANLISTI ve duzeltildi** - ayrinti SUPHELI #10'da. Router `#/urun` yolunu
+TANIYOR (`index.html:2077`); olculdu: gorunen view `home`, `detailOpenId` 1, yani urun detayi
+GERCEKTEN aciliyor. "Sayfa Bulunamadi" bir 404 SAYFASI DEGIL, SAYFA BASLIGIYDI.
+
+GERCEK KUSUR IKI TANE: (a) `setDocTitle()`in `urun` dali yok ve router onu `openDetail`DEN
+SONRA cagirdigi icin dogru baslik eziliyor; (b) katalog yarisi - acilistaki router mock
+PRODUCTS ile kosuyor, katalog sonrasi yeniden yonlendirme yalniz `#/kategori` icin yapiliyordu
+(Favorilerim'de bu oturumda olculen yarisin aynisi).
+
+Duzeltme `api-bridge.js`'te: `setDocTitle` sarmalandi + katalog sonrasi `urunRotasiniTazele()`.
+OLCULEN SONUC: baslik "Sayfa Bulunamadi · Divisima" -> **"Siyah Midi Elbise · Divisima"**.
+
+### MADDE 8 - E-POSTA VALIDATORU INCELEMESI + AYIRT EDILEBILIR MESAJ
+
+INCELEME SONUCU: kayit validatoru FluentValidation'in permisif `.EmailAddress()` kuralini
+kullaniyor ve RFC 2606'da TEST/OZEL kullanim icin AYRILMIS ust alan adlarini (`.test`,
+`.example`, `.invalid`, `.localhost`) KABUL EDIYOR. Gercek Iyzico reddediyor (E2b'de olculdu).
+Yani bizim kabul ettigimiz bir e-posta ile uye olan musteri HIC kart odemesi yapamiyor.
+
+YAPILAN: init hatasinda sebep KENDIMIZ tespit ediliyor. Saglayicinin ham hata metni ne
+musteriye yansitiliyor ne de METIN ESLESTIRMESI yapiliyor (yabanci bir API'nin dizgesine
+bagimli olmak kirilgan). Teslim edilemez ust alan adi varsa ayirt edilebilir mesaj; DIGER TUM
+init hatalarinda eski genel mesaj KORUNUYOR.
+
+**YAPILMADI - SUPHELI, KARAR KULLANICININ:** kayit validatoru sikilastirilmadi. `.test` gibi
+adresleri kayitta reddetmek ayri bir URUN karari; gecerli ama alisilmadik adresleri kapida
+cevirmek gercek musteri kaybettirebilir.
+
+PINLER (`PaymentInitMessageTests`, 2): teslim edilemez adreste ayirt edilebilir mesaj (ve ham
+saglayici metninin SIZMADIGI) · gecerli adreste **genel mesaj korunur** - bu cift-anlam kirici
+olmadan "her hatada e-posta mesaji donen" yanlis teshisli bir uygulama da testi gecerdi.
+
+### MADDE 3 - PaymentConfirmed OUTBOX'A (SECENEK A - DORT ADIM DA)
+
+Kullanici karari: **A** (tek `PaymentConfirmed` mesaji, dort adim da outbox'ta). Gerekce:
+kaybedilen yan etki SESSIZ ve KALICI, gecikme GORUNUR ve GECICI; kupon sayacini inline
+birakmak (B) gerekcesiz bir ikilik yaratirdi.
+
+Yeni: `Events/PaymentConfirmedEvent.cs`, `IPaymentConfirmedSideEffects.cs`,
+`PaymentConfirmedSideEffects.cs` (fatura -> sadakat -> referans odulu -> kupon sayaci).
+Mesaj **A bolgesi transaction'inin ICINDE** yaziliyor; commit sonrasi B bolgesi kalmadi.
+
+**EK UNIQUE KISIT (kullanici karari):** `UX_store_credit_referee_reward` on
+`store_credit_transactions(customer_id)` filtreli - "davet edilen odulu" satiri musteri basina
+TEK. Boylece idempotentlik tablosundaki son "kosullu" satir (oku-sonra-davran guard'i) DB
+duzeyine indi. Migration `20260821202442_RefereeRewardUniquenessSprint8`, Sprint 6 kalibiyla:
+kirli veride **satir SILMEDEN** `RAISERROR`. `database/mssql/01_schema.sql` guncellendi.
+
+**OLCUMLE BULUNAN IKI GERCEK KUSUR** (ikisi de tahminle degil, teshisle):
+
+1. **OUTBOX DONGU ZEHIRLENMESI.** Isleyici ve outbox'in kendi defter yazimi AYNI DbContext'te
+   kosuyordu. Bir yan etki adimi `SaveChanges` sirasinda patlayinca (or.
+   `UX_loyalty_transactions_order_earn` ihlali - at-least-once'ta BEKLENEN durum) basarisiz
+   varlik change tracker'da **"Added" halinde KALIYOR**; hemen ardindaki `_outboxDal.UpdateAsync(msg)`
+   ayni context'te `SaveChanges` yapinca o bekleyen varligi TEKRAR yazmaya calisip AYNI hatayla
+   patliyor - bu kez OUTBOX'IN KENDI KAYDINDA. Zarar: istisna dongunun DISINA cikiyor,
+   `retry_count` HIC kaydedilmiyor, ayni parti sonsuza kadar yeniden isleniyor ve ayni turdaki
+   DIGER mesajlar hic islenmiyor. **Cozum: mesaj basina AYRI DI scope** - zehirlenen context o
+   scope ile atiliyor.
+2. **SADAKAT "KAZAYLA" IDEMPOTENTTI.** `EarnPoints` duplicate-key istisnasini YUTUP 500
+   donuyordu ve isleyici sonucu KONTROL ETMIYORDU - yani gercek bir hata da "basarili" sayilirdi.
+   Iki taraf da duzeltildi: `EarnFromOrder` basta ACIKCA "bu siparis icin kazanim var mi" diye
+   soruyor, isleyici de `Result.Success`'i kontrol edip basarisizlikta ISTISNA firlatiyor.
+
+Musteri gorunurlugu (sart iii): sonuc sayfasi metni yalnizca "Siparisin onaylandi ve
+hazirlanmaya basliyor" diyor - fatura/puan hakkinda SOZ VERMIYOR, bu yuzden DOKUNULMADI.
+
+PINLER (`PaymentConfirmedOutboxTests`, 2): ayni mesajin IKINCI teslimati dort adimin
+HICBIRINDE fazla etki uretmez (fatura tek, puan tek, odul tek, sayac dogru) · islem yarida
+cokerse retry'da TAMAMLANIR. 5 denemede Failed olan mesaj H53 kalibiyla GURULTULU kaliyor
+(log + zaman cizelgesine "KRITIK" notu).
+
+YAN ETKI: S6/S7'nin 5 pini outbox'a gecisle kirildi ve `OutboxBosaltAsync()` bosaltmalariyla
+onarildi. `BBolgesi_HATASI_...` BILINCLI olarak
+`YanEtkiHatasi_OdemeSUCCESS_KALIR_Mesaj_YENIDEN_DENENIR_ve_TAMAMLANIR` olarak yeniden yazildi -
+eski adi artik var olmayan bir mimariyi (commit sonrasi B bolgesi) tarif ediyordu.
+
+### MADDE 9 - WEBHOOK TUNEL DOGRULAMASI (1. TUR TAMAM, 2. TUR BEKLIYOR)
+
+Kullanici public bir Cloudflare tuneli acti ve Iyzico panelinde "Isyeri Bildirimleri Url"
+alanina `<tunel>/api/payment/webhook` girdi. `Iyzico:CallbackUrl` user-secrets'te tunel
+adresine cekildi (depoya GIRMEDI). 1. tur TASARIMI: CSP `form-action`'a tunel **BILEREK**
+eklenmedi -> callback engellenir, siparis Pending kalir, WEBHOOK'un kurtarmasi olculur.
+
+**1. TUR SONUCU: KURTARMA YOLU CALISMIYORDU.** Kullanici 1.049,70 odedi (3DS kapali).
+Callback CSP tarafindan engellendi (beklendigi gibi). Webhook GELDI - ve bizim ucumuz
+**400** dondu.
+
+Gercek bildirim (teshis gunlugu, User-Agent `Apache-HttpClient/5.2.3 (Java/17.0.15)`):
+
+```
+govde : {"paymentConversationId":"e160a135...","merchantId":3432888,"status":"SUCCESS",
+         "token":"76ee5138-cc90-481d-884f-90a9978a58a4","iyziReferenceCode":"8fe79c9a-...",
+         "iyziEventType":"CHECKOUT_FORM_AUTH","iyziEventTime":1787347437752,
+         "iyziPaymentId":37415135}
+baslik: X-Api-Version=V1 | X-Iyz-Signature=   (VAR ama DEGERI BOS)
+```
+
+**IMZA GERCEGI:** govdede `signature` alani YOK; baslik adi `X-Iyz-Signature`
+(dokumanlardaki `X-IYZ-SIGNATURE-V3` DEGIL) ve BOS geliyor. Devir notundaki hipotez
+("imza V3 basliginda olabilir") kismen dogruydu - baslik var ama DOLU DEGIL.
+
+**IKI BAGIMSIZ ENGEL** (tunel uzerinden uc kontrollu istekle IZOLE EDILDI):
+
+| Deneme | Sonuc |
+|---|---|
+| Iyzico'nun gonderdigi gibi (`X-Api-Version: V1` + bos imza) | **400, govde BOS** |
+| Surum basligi yok, imza yok | 400 `"Ödeme imzası doğrulanamadı"` |
+| Surum basligi yok, govdede signature | 400 `"Ödeme imzası doğrulanamadı"` |
+
+**CANLI ZARAR:** siparis **#33 `DVS20260822-02477199B6`** - Iyzico'da odeme SUCCESS
+(`iyziPaymentId 37415135`), bizde `status=0` / `payment_status=0` / `transaction_id=NULL`,
+`outbox_messages` BOS. Yani **"para gitti, siparis yok"** birebir uretildi.
+
+#### ENGEL 1 - `X-Api-Version: V1`
+
+`HeaderApiVersionReader("X-Api-Version")` bu degeri ayristiramiyor; istek CONTROLLER'A HIC
+ULASMADAN bos govdeli 400 yiyor (log: `Request contained the API version 'V1', which is not valid`).
+
+**KULLANICININ ONERDIGI COZUM (`[ApiVersionNeutral]`) OLCULDU VE YETMEDI - UC KEZ:**
+
+| Deneme | Sonuc |
+|---|---|
+| `[ApiVersionNeutral]` **action** duzeyinde | HALA 400 (bos govde) |
+| `[ApiVersionNeutral]` **controller** duzeyinde | HALA 400 (bos govde) |
+| Boru hattinin basinda basligi silen `app.Use(...)` | HALA 400 (bos govde) |
+
+Sebep OLCULDU: uygulama `app.UseRouting()`'i ACIKCA cagirmiyor, bu yuzden yonlendirme (ve
+`ApiVersionMatcherPolicy`) boru hattinin BASINA ekleniyor - kullanici middleware'lerinden ONCE
+kosuyor. Ayrica reddi yapan katman endpoint'in versiyon-NOTRLUGUNE bakmiyor.
+
+**UYGULANAN COZUM: `Divisima.API/Versioning/WebhookExemptHeaderApiVersionReader.cs`** -
+`HeaderApiVersionReader`'i sarmalar, YALNIZ `/api/payment/webhook` yolunda basligi yok sayar.
+O yolda hicbir okuyucu deger uretmedigi icin `AssumeDefaultVersionWhenUnspecified` devreye
+girip 1.0 seciliyor. `[ApiVersionNeutral]` action uzerinde BIRAKILDI (niyeti dogru ifade
+ediyor) ama 400'u COZEN SEY O DEGIL - iki tarafta da yorumla capraz referans verildi.
+
+#### ENGEL 2 - IMZA (BILINCLI GEVSEME)
+
+`Webhook` action'i artik `imzaZorunlu: false`. Otorite E2b'deki CF callback modelinin AYNISI:
+token opak + sunucu-sunucu retrieve + 30 dk zaman asimi + tutar/para birimi/fraud + "yalniz
+Pending islenir". **Gevseme "imzayi yok say" DEGIL:** imza gelirse (govdede ya da
+`X-Iyz-Signature` basliginda) AYNEN dogrulanir ve tutmazsa 400 doner.
+
+**BILEREK YAPILMADI:** `X-IYZ-SIGNATURE-V3` basligi verifier'a BAGLANMADI. Bizim
+`VerifyCallbackSignature` HMAC-SHA256(secretKey, token) hesaplar; V3 imzasi FARKLI bir govde
+uzerinden uretilir. Olculmemis bir esleme yazmak, o baslik dolmaya basladigi gun HER GERCEK
+bildirimi reddederdi - bugun duzelttigimiz kesintinin BIREBIR aynisi. Imza dogrulamasi
+basarisiz oldugunda artik ADIYLA `LogWarning` dusuluyor ki bicim degisirse sessiz kalmasin.
+
+#### BEDEL (AMPLIFIKASYON) - OLCULDU, ENDISEDEN DAR CIKTI
+
+"Her sahte istek bir retrieve" endisesi olculdu ve **yanlis cikti**: `HandleCallback`
+retrieve'e gelmeden ONCE token'i BIZIM tablomuzda ariyor. Bizim olmayan token **404** ile
+duser ve **disari HIC cikilmaz** (pin: `RetrieveCallCount == 0`). Retrieve'e ancak (a) bizim
+urettigimiz, (b) hala Pending, (c) 30 dk'dan yeni bir token ulasabilir.
+
+Rate limit kapsami olculdu ve **IKI YOL AYRISIYORDU**:
+- Redis yolu (`RedisRateLimitMiddleware`): path eslesmesi `/payment/` -> **10/dk**, webhook DAHIL.
+- Yerlesik yol (varsayilan; `Redis:Enabled=false`): webhook yalniz GlobalLimiter'in **100/dk**'sinda.
+
+Webhook action'ina `[EnableRateLimiting("payment")]` eklendi. **YENI BIR SAYI DEGIL** - iki yolu
+Program.cs'teki policy tanimin ACIK NIYETINE ("Redis middleware'indeki payment scope (10/dk) ile
+tutarli") hizaliyor.
+
+#### PINLER (`WebhookContractTests`, 8)
+
+- `WebhookV1SurumBasligiyla_VERSIYONLAMAYA_TAKILMAZ_ve_ISLENIR` (200 + odeme GERCEKTEN islendi
+  + govde BOS DEGIL - versiyonlama reddi bos govdeliydi)
+- `AyniV1Basligi_BASKA_BIR_UCTA_HALA_400_KAPSAM_DAR_KALDI` (cift-anlam kirici: ayni uc
+  BASLIKSIZ 200 doner)
+- `ImzasizGercekBildirim_RETRIEVE_OTORITESIYLE_Islenir` (retrieve TAM 1)
+- `BizimOlmayanToken_404_ve_IYZICOYA_HIC_CIKILMAZ_AmplifikasyonDAR` (retrieve 0)
+- `TokenBIZIM_ama_RETRIEVE_DUSERSE_YanEtkiSIZ_Reddedilir` (fatura 0, puan 0, outbox mesaji 0)
+- `AyniTokenTekrari_ZATEN_ISLENDI_RetrieveARTMAZ_YanEtkiYOK` (retrieve 1'de kalir, mesaj 1'de kalir)
+- `ImzaGELIRSE_DOGRULANIR_Govde_ve_BASLIK_YanlisImzayi_REDDEDER` (uc dal: govde yanlis, BASLIK
+  yanlis, DOGRU imza -> sonuncusu vakum kirici)
+- `Webhook_PAYMENT_KOVASINDA_OnBirinci_Istek_429` (AYRI host, uretim varsayilani; ilk on istek
+  404 aliyor - yani uygulamaya ULASIYORLAR)
+
+**BILINCLI KIRILAN PIN (kullanici ACIKCA yetkilendirdi):**
+`Webhook_ImzaSIZ_REDDEDILIR_CF_Gevsemesi_SIZMAZ` -> `Webhook_YONLENDIRILMEZ_JSON_Doner`.
+Eski pin E2b'de DOGRU bir seyi sabitliyordu ama dayandigi VARSAYIM ("webhook'ta imza gelir")
+gercek bildirimle CURUTULDU; pin, gercek bildirimi reddeden davranisi savunur hale gelmisti.
+Imza asserti kaldirildi, E2'nin kendi iddiasi (yonlendirme YOK + JSON) kaldi ve VAKUM KIRICI
+eklendi (imzasiz bildirim GERCEKTEN islenmis olmali).
+
+#### DIS KONTROLU
+
+5 assert ters -> **5 AYRI ISIMLI KIRMIZI**. Hepsi geri alindi.
+
+#### 5. KONTROL (URETIM MUTASYONU) - IKI DALGA
+
+- **M1** (okuyucu muafiyeti geri alindi): yalniz `WebhookV1SurumBasligiyla_...` kirildi ->
+  400. Diger 7 pin YESIL kaldi - muafiyetin gercekten DAR oldugunun kaniti.
+- **M2** (`imzaZorunlu: true` geri getirildi): **7 AYRI ISIMLI KIRMIZI**, iki farkli sinifta.
+  En onemlisi `Webhook_YONLENDIRILMEZ_JSON_Doner` -> `payment_status` `0x00` (Pending) bulundu:
+  **siparis #33'un canli durumunun BIREBIR aynisi**. Hepsi geri alindi.
+
+#### TUNEL UZERINDEN UCTAN UCA TEYIT (yan etkisiz)
+
+Iyzico'nun GERCEK baslik setiyle (`X-Api-Version: V1` + bos `X-Iyz-Signature` +
+`Apache-HttpClient` UA) tunele POST -> **404 + bizim JSON govdemiz**. Yani istek artik
+controller'a ULASIYOR (once ciplak 400 idi). Uydurma token kullanildi - #33 kanitina
+DOKUNULMADI.
+
+#### SIPARIS #33: KURTARILAMADI - DURUST KAYIT
+
+Kurtarma plani (ayni token'la webhook'u tekrar tetiklemek) **OLCULDU VE CALISMIYOR**:
+`payments.id=20` `created_at = 2026-08-22 00:23:00`, olcum ani `01:21:29` -> **58 dakika**.
+`HandleCallback`'in 30 dk token zaman asimi guard'i devreye girer ve odemeyi **Failed**
+yapardi - yani kurtarmak yerine kanit da bozulurdu. Tekrar TETIKLENMEDI. Karar kullanicida
+(bkz. SUPHELI #15 - bu guard'in webhook kurtarma yolunu da sinirlamasi AYRI bir bulgudur).
+
+#### 2. TUR - TAMAMLANDI, TAM YESIL (siparis #34)
+
+CSP `form-action` tunel origin'i ile senkronlandi (gecici satir; tur bitince GERI ALINDI).
+Kullanici gercek bir odeme yapti: **`DVS20260822-174E953852`**, E4a M x3, **1.549,60**.
+Sonuc sayfasi GELDI, durum Confirmed.
+
+**(a) NORMAL YOL** - `HTTP POST /api/payment/callback responded 302 in 223.7 ms`
+(223 ms = retrieve GERCEKTEN kostu). Storefront sonuc sayfasi cizildi.
+
+**(b) CALLBACK + WEBHOOK CARPISMASI - IDEMPOTENTLIK CANLI KANITLANDI.** Iyzico'nun bant-disi
+bildirimi callback'ten **14,6 saniye SONRA** ayni odeme icin geldi:
+
+```
+01:53:48.500  POST /api/payment/callback  -> 302  in 223.7 ms   (retrieve KOSTU)
+01:54:03.149  POST /api/payment/webhook   -> 200  in  15.0 ms   (SORGUYA ULASMADI)
+```
+
+Ayni odeme oldugu KANITLI: webhook govdesindeki `token` =
+`f492bf0f-06b1-476b-8779-95e1ad11e2dc` = `payments.token`; `iyziPaymentId 37416082` =
+`payments.transaction_id`. 15 ms'lik sure "zaten islendi" dalinin kaniti (E2b'de olculen
+replay suresiyle ayni buyukluk; gercek retrieve 223 ms).
+
+Yan etki sayilari (tam olarak BIRER):
+
+```
+orders   #34  status=1 (Confirmed)  total=1549.60  is_online_payment_done=1
+payments #21  payment_status=1      transaction_id=37416082  item_transaction_id=39332690
+outbox        PaymentConfirmed x1   status=1 (Processed)  retry_count=0   (tabloda TEK mesaj)
+invoices      1 satir  DIV-2026-000034  status=1 (Sent)
+loyalty       1 satir  154 puan
+timeline      2 satir  ("Sipariş oluşturuldu", "Ödeme onaylandı")  UYARI/KRITIK notu: 0
+stock    M    stock_quantity=10  reserved_quantity=0   (3 adet satildi, rezervasyon kapandi)
+```
+
+`item_transaction_id` dolu geldi - E2b'nin B1 duzeltmesi bu turda da canli teyit edildi.
+
+**TEMIZLIK YAPILDI:** gecici CSP satiri geri alindi, `WebhookDiagnosticMiddleware.cs` SILINDI
+ve `Program.cs`'teki kaydi kaldirildi. Depo tarandi: `WebhookDiagnostic`, `trycloudflare`,
+`GECICI TESHIS` - kod/yapilandirma dosyalarinda SIFIR kalinti.
+
+**ACIK KALAN (bloke etmiyor):** Iyzico panelinde webhook icin ayri bir imza anahtari/secret
+olup olmadigi. Kullanici Isyeri Bildirimleri karti, IP/Back URL Yonetimi ve Eklentiler
+sayfalarina baktigini belirtti ama yanit sablonu doldurulmadan geldi - **KESIN CEVAP YOK**.
+Bulunursa `X-Iyz-Signature` dolmaya baslar; o zaman imza BICIMI olculmelidir (bkz. V3 notu -
+bicim varsayimiyla baglamak kesintiyi geri getirir).
+
+### DIS KONTROLU (SPRINT 8)
+
+7 assert ters cevrildi -> **7 AYRI ISIMLI KIRMIZI**, her biri farkli test sinifindan:
+`ConfigFailFastTests.Uretimde_IyzicoCallbackUrl_BOSSA_UYGULAMA_ACILMAZ`,
+`PaymentInitMessageTests.InitHatasi_TESLIM_EDILEMEZ_EPOSTADA_AYIRT_EDILEBILIR_MESAJ_Doner`,
+`CulturePinTests.FaturaGovdesi_KOSUCU_KULTURUNDEN_BAGIMSIZ_tr_BICIMI_Tasir`,
+`RefreshCookieContractTests.Login_RefreshTokenI_HTTPONLY_COOKIEYE_YAZAR_GOVDEDE_BIRAKMAZ`,
+`NotificationSubscriptionTests.Aboneliklerim_YALNIZ_KENDI_EPOSTASININ_Aboneliklerini_Doner`,
+`StorefrontCatalogContractTests.Filter_ListeYolu_CategoryName_TotalStock_Sizes_DOLDURUR`,
+`CouponCounterAndInvoiceGuardTests.KuponSayaci_TURETILIR_AyniAdim_IKI_KEZ_Kossa_da_FAZLA_SAYMAZ`.
+Hepsi geri alindi. Ayrica madde 13 icin AYRI bir 5. kontrol (uretim mutasyonu) yapildi.
+
+### YEREL DOGRULAMA (Sprint 8 sonrasi)
+
+312/312 tam suit · 188/188 `Category=Sql` · Release 0 hata ·
+`dotnet format` whitespace + style `--verify-no-changes` TEMIZ.
+
+### SURECTE YASANAN (kayit)
+
+- Bir `sed` satir-numarali duzenlemesi kaydi ve `frontend/api-bridge.js`'in ILK 10 SATIRINI
+  bozdu. Fark edildi, hasar OLCULDU (yalniz 1-10 arasi), onarildi ve tarayicida sozdizimi
+  hatasi olmadigi dogrulandi. **DERS: bu dosyada satir-numarali `sed` KULLANILMAZ** - desen
+  tabanli duzenleme ya da Edit araci kullanilir.
+- Biçim kapisi iki kez is gordu: EF'in urettigi migration dosyalari CRLF+BOM ile geliyor ve
+  elle eklenen `using` satirlari siralamayi bozabiliyor. **Migration uretildikten sonra
+  `dotnet format whitespace --include <migration dosyalari>` kosulur.**
+
 ## SIRA
 
-1. **E3 run raporu** (commit hazir; push karari kullanicidan)
-2. **Sema kapanis dalgasi** - kalan tek aday: **gift-card expiry**
+1. **KARAR BEKLEYEN - SIPARIS #33** (para alindi, Pending). Token 30 dk guard'ini asti;
+   tekrar tetiklemek onu Failed yapardi. Sandbox siparisi oldugu icin aciliyeti yok ama
+   ARDINDAKI BULGU launch'i ilgilendiriyor: **SUPHELI #15**.
+2. **YENI SUPHELILER - KARAR KULLANICIDA:** #14 (surum okuyucusu kirilganligi, genel),
+   #15 (30 dk zaman asimi webhook kurtarma yolunu da siniriyor), #16 (`Webhook:AllowedIps`
+   bos - yalniz yapilandirma isi, imzasiz uctaki en guclu ek katman), #17 (callback rate
+   limit policy'si disinda).
+3. **Sema kapanis dalgasi** - kalan tek aday: **gift-card expiry**
    (`refunded_amount` Sprint 6'da kapandi; seller migration DEGIL - `sellers` ve
    `seller_id` zaten `InitialCreate`'te)
-3. **E4b** (musteri askiya alma, kategori, CMS ekranlari) - launch sonrasi olabilir
+4. **E4b** (musteri askiya alma, kategori, CMS ekranlari) - launch sonrasi olabilir
 
 ## KARARLAR (kapanmis)
 
@@ -833,6 +1356,14 @@ eski onbellegi temizlemek icin).
   step-up `auth_time` refresh'te sifirlanmasi, loyalty oransal geri alma + referral
   clawback, Dashboard tam-tablo agregalari. **Dusen kalem:** Http.Abstractions 2.2.0
   (hicbir csproj'de referans yok).
+  **YENI KALEM (Sprint 8 madde 8 eki - kullanici karari): RFC 2606 ust alan adlarini KAYITTA
+  reddetme.** Kayit validatoru FluentValidation'in permisif `.EmailAddress()` kuralini kullaniyor
+  ve `.test` / `.example` / `.invalid` / `.localhost` adreslerini KABUL EDIYOR; gercek Iyzico
+  reddediyor (E2b'de olculdu), yani o adresle uye olan musteri HIC kart odemesi yapamiyor.
+  Sprint 8'de AYIRT EDILEBILIR MESAJ eklendi (init hatasinda sebep soyleniyor, saglayicinin ham
+  metni sizdirilmiyor) ve bu YETERLI goruldu. Validatoru sikilastirmak ayri bir URUN karari:
+  gecerli ama alisilmadik adresleri kapida cevirmek gercek musteri kaybettirebilir.
+  **Sprint 8'e GIRMEZ.**
 - **Iyzico'nun TELEMETRI alan adlari CSP'de ACILMAZ (kalici karar).** `countly.iyzico.com`
   ve `*.ingest.tr.sentry.io` (o120955...). Iyzico checkout formu kendi
   Countly analitigine baglaniyor (`campaign_banner_enabled`, `checkout_radio_button_layout_updated`
@@ -921,7 +1452,15 @@ eski onbellegi temizlemek icin).
      Depo taramasi (E3, referans): `SuccessDataResult<string>` **4 cagri** -
      `OrderManager.cs`, `ReferralManager.cs` (ikisi de duzeltildi),
      `GiftCardManager.cs:43`, `ProductImageManager.cs:83` (iki argumanli, ETKILENMEZ).
-  12. **OLU PAYLASIM BAGLANTILARI: router'a `#/urun/<id>` rotasi.** (E3'te olculdu,
+  12. **PAYLASIM BAGLANTILARININ BASLIGI (kapsam OLCUMLE DARALDI).**
+     **DUZELTME: "router'a rota eklenmesi" GEREKMEDI - rota ZATEN VARDI** (`index.html:2077`).
+     E3'teki teshis yanlisti; ayrinti SUPHELI #10'da. Gercek is iki kalemdi ve yapildi:
+     (a) `setDocTitle()`in `urun` dali olmadigi icin baslik "Sayfa Bulunamadi" kaliyordu -
+         ustelik router bu fonksiyonu `openDetail`den SONRA cagirip dogru basligi eziyordu;
+     (b) katalog yarisi - acilistaki router mock PRODUCTS ile kosuyordu.
+     Olculen sonuc: baslik "Sayfa Bulunamadi · Divisima" -> "Siyah Midi Elbise · Divisima".
+
+     Eski (YANLIS) kapsam metni, kayit icin: (E3'te olculdu,
      kullanici karariyla LAUNCH ONCESINE alindi - "paylasilan linklerin 404'u launch'a
      tasinmaz") `index.html:2154` `shareUrl(id)` -> `#/urun/<id>` uretiyor ve urun
      kartindaki WhatsApp / Facebook / X / Pinterest / "baglantiyi kopyala" secenekleri bu
@@ -1074,7 +1613,26 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    YONLU kuruluyor, geri alma sozu verilmiyor) ama kalici cozum backend isi.
    **SPRINT 8 MADDE 10.**
 
-10. **`#/urun/{id}` PAYLASIM BAGLANTILARI "Sayfa Bulunamadi" veriyor.** (E3'te olculdu)
+10. **[KAPANDI - SPRINT 8 MADDE 12] `#/urun/{id}` PAYLASIM BAGLANTILARI.**
+   **ONEMLI DUZELTME: bu maddenin E3'teki TESHISI YANLISTI.** Asagidaki eski metin
+   "router `#/urun` yolunu TANIMIYOR" diyordu; Sprint 8'de kaynak okunup TEKRAR olculdu ve
+   yol `index.html:2077`'de MEVCUT cikti:
+   `else if(top==='urun'){ showHome(); var _pid=+h[1]; if(byId(_pid)) openDetail(_pid); }`
+   Olcum: `#/urun/1` ile acilan sayfada gorunen view **"home"**, `detailOpenId` **1** - yani
+   urun detayi GERCEKTEN aciliyor. Gordugum "Sayfa Bulunamadi" bir 404 SAYFASI DEGIL, SAYFA
+   BASLIGIYDI; ilk raporda bu ikisi karistirilmisti.
+   **GERCEK KUSUR IKI TANEYDI (ikisi de duzeltildi):**
+   (a) `setDocTitle()` icinde `urun` dali YOK - bilinmeyen yol dalina duser. Ustelik router
+       onu `openDetail`DEN SONRA cagiriyor, yani `setProductSchema`'nin koydugu dogru baslik
+       hemen EZILIYOR. Paylasilan her urun baglantisi sekmede ve sosyal onizlemede
+       "Sayfa Bulunamadi" gorunuyordu.
+   (b) Katalog yarisi: acilista router PRODUCTS'in O ANDAKI (mock) icerigiyle calisiyor,
+       gercek katalog asenkron geliyor ve `loadCatalog` sonrasi yeniden yonlendirme YALNIZ
+       `#/kategori` icin yapiliyordu (Favorilerim'de bu oturumda olculen yarisin aynisi).
+   Duzeltme `api-bridge.js`'te: `setDocTitle` sarmalandi + katalog sonrasi `urunRotasiniTazele()`.
+   OLCULEN SONUC: baslik "Sayfa Bulunamadi · Divisima" -> **"Siyah Midi Elbise · Divisima"**.
+
+   Eski (YANLIS) teshis, kayit icin: (E3'te olculdu)
    `index.html:2154` `shareUrl(id)` -> `#/urun/<id>` uretiyor ve urun kartindaki WhatsApp /
    Facebook / X / Pinterest / "baglantiyi kopyala" secenekleri bu adresi paylasiyor. Ancak
    urun detayi bir ROTA DEGIL, `openDetail(id)` ile acilan bir MODAL; router `#/urun` yolunu
@@ -1116,6 +1674,57 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    **KARAR VERILDI (kullanici): SPRINT 8 MADDE 13'e yukseltildi, DOGRULUK commit'ine
    girer.** Magaza TEK PAZARLI (TR / TRY); tasarim olcerek kurulacak ve fatura govdesinin
    kosucu kulturunden BAGIMSIZ `tr` bicimiyle ciktigi pinlenecek.
+
+14. **`X-Api-Version` BASLIGI AYRISTIRILAMAZSA TUM API BLANKET 400 VERIYOR.** (Sprint 8
+   madde 9'da olculdu) `HeaderApiVersionReader("X-Api-Version")` ayristiramadigi bir degerle
+   karsilasinca istegi **hangi uca giderse gitsin** bos govdeli 400 ile dusuruyor - ve bunu
+   endpoint'in versiyon-NOTRLUGUNE bakmadan yapiyor (`[ApiVersionNeutral]` action ve controller
+   duzeyinde AYRI AYRI denendi, ikisi de ENGELLEMEDI). Yani basligi "V1", "v1.0-beta", "latest"
+   gibi bir degerle gonderen HERHANGI bir ucuncu taraf entegrasyonu, uctan bagimsiz olarak
+   erisemez hale gelir. Ustelik yanit govdesi BOS oldugu icin karsi taraf sebebi goremez -
+   Iyzico entegrasyonunda tam olarak bu yasandi ve teshis ancak sunucu logundan yapilabildi.
+   Sprint 8 madde 9 YALNIZ `/api/payment/webhook` yolunu muaf tutti (kapsam bilerek dar,
+   pinli). **GENEL COZUM KARARI KULLANICININ:** aday (i) ayristirilamayan degeri YOK SAYAN
+   tolere edici bir okuyucu (mevcut istemciler etkilenmez, bozuk baslik sessizce varsayilana
+   duser), (ii) 400'u KORUYUP govdeye acik bir hata mesaji koymak (teshis edilebilir olur ama
+   entegrasyon yine kirilir). Bugunku davranis DIGER uclar icin pinli
+   (`AyniV1Basligi_BASKA_BIR_UCTA_HALA_400_KAPSAM_DAR_KALDI`).
+
+15. **30 DK TOKEN ZAMAN ASIMI WEBHOOK KURTARMA YOLUNU DA SINIRLIYOR.** (Sprint 8 madde 9'da
+   olculdu) `HandleCallback`'teki `payment.created_at.AddMinutes(30) < DateTime.Now` guard'i
+   TARAYICI callback replay'i icin dogru bir savunmadir; ama webhook AYNI kodu kullaniyor ve
+   webhook FARKLI zamanlama karakteristigine sahip bir kanaldir (saglayici bildirimi
+   geciktirebilir ya da saatler sonra yeniden deneyebilir). Bugunku davranis: 30 dakikadan
+   eski bir GERCEK bildirim geldiginde odeme **Failed** isaretleniyor ve 400 donuyor - yani
+   parasi ALINMIS bir odeme "basarisiz" olarak defterlenip mutabakat kaybediliyor. Siparis #33
+   canli ornek: kurtarma denenemedi cunku token 58 dakikalikti ve tetiklenseydi kanit da
+   bozulurdu. Bugun siparis Pending kaliyor (Failed'dan daha durust bir hal), ama bu SANS
+   eseri - guard tetiklenseydi Failed olurdu. Aday cozumler: (i) webhook yolunda zaman asimini
+   uygulamamak (otorite zaten retrieve - saglayici odemenin gercek durumunu soyluyor),
+   (ii) zaman asimini gecen ama retrieve'i SUCCESS donen odemeler icin "elle mutabakat"
+   kuyrugu acmak. Duzeltme YAPILMADI, karar kullanicinin.
+
+16. **`Webhook:AllowedIps` ALLOWLIST'I VAR AMA BOS - VE PROXY ARKASINDA CALISMAZ.**
+   (Sprint 8 madde 9'da bulundu) `WebhookIpAllowlistMiddleware` `/api/payment/webhook` yolunu
+   saglayici IP araliklarina kapatabiliyor, ama `Webhook:AllowedIps` listesi depoda HICBIR
+   YERDE doldurulmamis; bos oldugu icin middleware TAMAMEN atlaniyor. Bu, imza olmayan bir
+   ucta mevcut EN GUCLU ek savunma katmani ve yalniz YAPILANDIRMA isi - kod degisikligi
+   gerektirmiyor. Sprint 8'de olculen gercek Iyzico bildirimi
+   `Cf-Connecting-Ip=213.226.118.95` tasiyordu (tunel uzerinden gorulen kaynak).
+   **IKI UYARI:** (a) saglayici IP'leri degisebilir - liste bayatlarsa GERCEK bildirimler 403
+   yer ve kurtarma yolu yine olur, yani liste ancak izlenirse guvenlidir; (b) middleware
+   `RemoteIpAddress` okuyor - ters proxy/LB arkasinda `ForwardedHeaders:KnownProxies`
+   DOLDURULMAZSA bu deger proxy'nin IP'sidir ve allowlist ya herkesi gecirir ya herkesi
+   reddeder. Iki ayar birlikte anlamlidir (ayni not rate limit bolumunde de var).
+   Duzeltme YAPILMADI, karar kullanicinin.
+
+17. **`/api/payment/callback` RATE LIMIT POLICY'SI DISINDA.** (Sprint 8 madde 9'da olculdu)
+   `[EnableRateLimiting("payment")]` yalniz `Initialize` uzerindeydi; madde 9'da `Webhook`'a da
+   eklendi. `Callback` HALA yalniz GlobalLimiter'in 100/dk'sinda (yerlesik yolda). Redis yolu
+   path eslesmesiyle (`/payment/`) onu da 10/dk'ya bagliyor - yani IKI YAPILANDIRMA HALA
+   AYRISIYOR, sadece webhook icin hizalandi. Callback bir TARAYICI ucu oldugu icin farkli
+   degerlendirilebilir (musteri basina dogal olarak seyrek), ama ayrisma bilincli bir karar
+   degil, sadece kapsam disinda kalmis bir bosluk. Duzeltme YAPILMADI, karar kullanicinin.
 
 ## SUREC (degismez)
 

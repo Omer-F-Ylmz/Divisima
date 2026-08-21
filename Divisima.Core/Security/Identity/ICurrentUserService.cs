@@ -11,5 +11,11 @@ namespace Divisima.Core.Security.Identity
         bool IsAdmin { get; }
         // Açıklayıcı yorum: Müşteri id'si zorunlu olan yerlerde çağrılır; yoksa yetkisiz.
         int GetRequiredUserId();
+
+        // SPRINT 8 MADDE 10: bildirim abonelikleri E-POSTA ile anahtarlaniyor (uc anonim de
+        // kullanilabildigi icin customer_id yok). "Aboneliklerim" ve "kendi aboneligimi sil"
+        // uclari bu yuzden token'daki e-postaya ihtiyac duyuyor. Istemci girdisinden ALINMAZ -
+        // JWT claim'inden okunur (IDOR engeli, GetRequiredUserId ile ayni gerekce).
+        string GetRequiredEmail();
     }
 }

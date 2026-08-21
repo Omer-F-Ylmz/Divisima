@@ -28,11 +28,11 @@
   var api = new DivisimaAPI(API_BASE);
   window.divisimaApi = api; // konsoldan erişim
 
-  // Sayfa boyutu bilinçli olarak KÜÇÜK: liste yolu stok/beden döndürmediği için her ürünün
-  // detayı ayrıca çekiliyor (aşağıdaki enrichAll). 24 ürün = 24 detay çağrısı, kabul edilebilir.
-  // Backend liste yolunu doldurduğu gün bu telafi kaldırılır ve sayfa boyutu serbest kalır.
+  // SPRINT 8 MADDE 5: sayfa boyutu ARTIK TELAFIYE BAGLI DEGIL.
+  // Onceki not: "liste yolu stok/beden dondurmedigi icin her urunun detayi ayrica cekiliyor;
+  // 24 urun = 24 detay cagrisi". Backend liste yolu doldurulunca o telafi kaldirildi.
+  // 24 degeri korunuyor - bu artik bir SINIR degil, makul bir sayfa boyutu.
   var CATALOG_PAGE_SIZE = 24;
-  var ENRICH_CONCURRENCY = 6;
 
   // ── Yardımcılar ──
   function notify(msg) {
@@ -93,7 +93,7 @@
       price: Number(p.price) || 0,
       old: p.old_price ? Number(p.old_price) : 0,
       cart: Number(p.price) || 0,
-      stock: Number(p.total_stock) || 0,   // liste yolu 0 döner; enrichAll detaydan düzeltir
+      stock: Number(p.total_stock) || 0,   // SPRINT 8 madde 5: liste yolu ARTIK gercek degeri donduruyor
       sizes: (p.sizes && p.sizes.length) ? p.sizes.map(function (s) { return isNaN(+s) ? s : +s; }) : [],
       col: p.color_hex || "#cccccc",
       img: api.resolveUrl(p.image_url) // göreli URL'i API tabanına çöz (yoksa "" - frontend placeholder üretir)
@@ -196,20 +196,9 @@
   }
 
   // ── Ürünler (gerçek API - ANONİM yol) ──────────────────────────────────────
-  // Liste yolunun döndürmediği stok/beden/açıklamayı detay ucundan tamamla.
-  // Sınırlı eşzamanlılık: tarayıcı bağlantı havuzunu ve sunucuyu boğmadan.
-  async function enrichAll(products) {
-    var queue = products.slice();
-    async function worker() {
-      while (queue.length) {
-        var p = queue.shift();
-        await enrichProduct(p.id);
-      }
-    }
-    var workers = [];
-    for (var i = 0; i < Math.min(ENRICH_CONCURRENCY, products.length); i++) workers.push(worker());
-    await Promise.all(workers);
-  }
+  // SPRINT 8 MADDE 5: "enrichAll" (6 eszamanli, urun basina detay cagrisi) KALDIRILDI.
+  // Backend liste yolu artik category_name + total_stock + sizes donduruyor; telafiye
+  // gerek kalmadi. Detay zenginlestirmesi tembel hale geldi (bkz. wireProductDetail).
 
   async function loadCatalog(filter) {
     try {
@@ -229,10 +218,15 @@
       }
       var mapped = list.map(mapProduct);
       replaceProducts(mapped);
-      rerender();                       // ilk çizim (fiyat/ad/görsel hazır)
-      await enrichAll(mapped);          // stok/beden/açıklama detaydan
-      rerender();                       // gerçek stokla yeniden çiz
-      console.log("Divisima: " + mapped.length + " ürün API'den yüklendi (detayla zenginleştirildi)");
+      // SPRINT 8 MADDE 5: EAGER ZENGINLESTIRME KALDIRILDI.
+      // Liste yolu artik category_name + total_stock + sizes DOLDURUYOR (backend), dolayisiyla
+      // grid icin urun basina AYRI detay cagrisi GEREKMIYOR. Onceden bir vitrin sayfasi
+      // 1 + 24 = 25 istek demekti; artik TEK istek.
+      // Detay (aciklama + beden BAZINDA stok) hala gerekli ama TEMBEL: wireProductDetail,
+      // kullanici urunu ACTIGINDA enrichProduct'i cagiriyor. Bu bir N+1 degil, kullanici
+      // eylemine bagli tek cagri.
+      rerender();
+      console.log("Divisima: " + mapped.length + " ürün API'den yüklendi (tek istek)");
       return mapped;
     } catch (e) {
       replaceProducts([]);             // mock KALMAZ - yalan vitrin gösterilmez
@@ -1006,9 +1000,13 @@
   // Iade durumlari AYRI enum (ReturnStatusEnum): Pending/Approved/Rejected/Completed.
   var IADE_DURUM = { "Pending": "Beklemede", "Approved": "Onaylandı", "Rejected": "Reddedildi", "Completed": "Tamamlandı" };
   function iadeDurumEtiket(s) { return IADE_DURUM[s] || s || "—"; }
-  // Urun adi: iade DTO'su product_name TASIMIYOR (olculdu - ReturnResponseDto yalniz product_id
-  // veriyor). Katalogdan cozulur; katalogda yoksa kimlikle gosterilir (uydurma yok).
-  function urunAdi(pid) {
+  // SPRINT 8 MADDE 5: iade satiri ARTIK "product_name" tasiyor (backend doldurdu).
+  // Onceden yalniz product_id geliyordu ve ad KATALOGDAN cozuluyordu; bu yalniz fazladan is
+  // degil, YANLIS da olabiliyordu - pasiflenmis ya da katalogdan cikmis bir urunun iadesi
+  // "Urun #12" gorunuyordu. Iade kaydi GECMISE ait bir belgedir; adi kaydin kendisi tasimali.
+  // Once sunucunun verdigi ad, yoksa katalog, o da yoksa kimlik. Hicbir asamada UYDURMA ad yok.
+  function urunAdi(pid, sunucuAdi) {
+    if (sunucuAdi) return sunucuAdi;
     try { var p = (typeof byId === "function") ? byId(pid) : null; if (p) return (typeof nameOf === "function") ? nameOf(p) : (p.name || ("Ürün #" + pid)); } catch (_) { }
     return "Ürün #" + pid;
   }
@@ -1136,7 +1134,7 @@
       el.innerHTML = '<div class="acc-tiles">' + liste.map(function (r) {
         return '<div class="acc-tile"><div class="at-head"><b>Sipariş #' + esc(String(r.order_id || "")) + "</b>" +
           '<span class="at-def">' + esc(iadeDurumEtiket(r.status_name)) + "</span></div>" +
-          "<p>" + esc(urunAdi(r.product_id)) + " · " + esc(r.size || "") +
+          "<p>" + esc(urunAdi(r.product_id, r.product_name)) + " · " + esc(r.size || "") +
           " · " + (r.quantity || 1) + " adet</p>" +
           '<p class="muted">' + trTarih(r.created_at) + (r.refund_amount != null ? " · " + paraTL(r.refund_amount) : "") + "</p></div>";
       }).join("") + "</div>";
@@ -1318,9 +1316,64 @@
   }
 
   // ── renderAccount OVERRIDE ─────────────────────────────────────────────────
+
+  // ── (SPRINT 8 MADDE 10) BILDIRIMLERIM ──────────────────────────────────────
+  //
+  // OLCULEN BOSLUK: backend'de YALNIZ "subscribe" vardi - kullanici kurdugu stok/fiyat
+  // bildirimini ne gorebiliyor ne kapatabiliyordu. Uclar eklendi, bu ekran onlari kullaniyor.
+  // Iki farkli tablo (stok / fiyat dususu) kullanici icin TEK liste; her satir turunu soyluyor.
+  async function sekmeBildirimler(el) {
+    el.innerHTML = yukleniyor();
+    var stok = [], fiyat = [], hata = null;
+    try {
+      // Iki uc BAGIMSIZ: biri patlarsa digeri yine gosterilir (hepsini birden kaybetmeyelim).
+      var sonuclar = await Promise.allSettled([api.stockNotification.mine(), api.priceDrop.mine()]);
+      if (sonuclar[0].status === "fulfilled") stok = unwrap(sonuclar[0].value) || [];
+      if (sonuclar[1].status === "fulfilled") fiyat = unwrap(sonuclar[1].value) || [];
+      if (sonuclar[0].status === "rejected" && sonuclar[1].status === "rejected") {
+        hata = (sonuclar[0].reason && sonuclar[0].reason.message) || "hata";
+      }
+    } catch (e) { hata = (e && e.message) ? e.message : "hata"; }
+
+    if (hata) {
+      el.innerHTML = '<p class="muted">Bildirim aboneliklerin şu an alınamıyor (' + esc(hata) + ").</p>";
+      return;
+    }
+
+    var hepsi = stok.concat(fiyat);
+    if (!hepsi.length) {
+      el.innerHTML = '<p class="muted">Henüz bildirim aboneliğin yok. Tükenmiş bir bedende ' +
+        "“gelince haber ver”e, favorilerinde de fiyat uyarısı ziline basarak abone olabilirsin.</p>";
+      return;
+    }
+
+    // En yeni ustte. created_at sunucudan ISO geliyor; Date ile karsilastirilir.
+    hepsi.sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); });
+
+    el.innerHTML = hepsi.map(function (s) {
+      var stokMu = s.type === "stock";
+      var ad = s.product_name || ("Ürün #" + s.product_id);
+      var ayrinti = stokMu
+        ? (s.size ? "Beden " + esc(s.size) : "Tüm bedenler")
+        : ("Takip fiyatı " + paraTL(s.subscribed_price));
+      // is_notified: bildirim GONDERILMIS demek. Satiri gizlemiyoruz - kullanici "bana haber
+      // verilmis mi" sorusunun yanitini gorebilmeli; ama durumu ACIKCA yaziyoruz.
+      var durum = s.is_notified
+        ? '<span class="muted">Haber verildi</span>'
+        : '<span class="muted">Bekliyor</span>';
+      return '<div class="acc-tile" style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:10px">' +
+        "<div><b>" + esc(ad) + "</b><br>" +
+        '<span class="muted">' + (stokMu ? "Stok bildirimi" : "Fiyat uyarısı") + " · " + ayrinti + "</span><br>" +
+        durum + "</div>" +
+        '<button class="btn ghost" data-bildirim-sil="' + s.id + '" data-bildirim-tur="' +
+        (stokMu ? "stock" : "price_drop") + '">Kaldır</button></div>';
+    }).join("");
+  }
   var E3_SEKMELER = [
     ["ozet", "Özet"], ["siparislerim", "Siparişlerim"], ["iadelerim", "İadelerim"],
     ["faturalarim", "Faturalarım"], ["adreslerim", "Adreslerim"],
+    // SPRINT 8 MADDE 10: bildirim abonelikleri artik GORULEBILIR ve KAPATILABILIR.
+    ["bildirimlerim", "Bildirimlerim"],
     ["favorilerim", "Favorilerim"], ["kartlarim", "Kayıtlı Kartlar"], ["bilgilerim", "Hesap Bilgilerim"]
   ];
 
@@ -1349,6 +1402,7 @@
       else if (tab === "iadelerim") sekmeIadeler(el);
       else if (tab === "faturalarim") sekmeFaturalar(el);
       else if (tab === "adreslerim") sekmeAdresler(el);
+      else if (tab === "bildirimlerim") sekmeBildirimler(el);
       else if (tab === "kartlarim") sekmeKartlar(el);
       else if (tab === "favorilerim") el.innerHTML = (typeof accFavs === "function" ? accFavs() : "");
       else if (tab === "bilgilerim") el.innerHTML = (typeof accProfile === "function" ? accProfile() : "");
@@ -1361,6 +1415,17 @@
         var ia = e.target.closest("[data-iade-ac]");
         if (ia) { iadeFormuAc(ia.closest(".acc-order"), +ia.getAttribute("data-iade-ac")); return; }
         if (e.target.closest("[data-adres-yeni]")) { adresFormuAc(el); return; }
+        // SPRINT 8 MADDE 10: abonelik kaldirma. Tur satirda tasiniyor cunku iki AYRI uc var
+        // (stok / fiyat dususu) ve id'ler bagimsiz - tur olmadan hangi uca gidilecegi bilinemez.
+        var bs = e.target.closest("[data-bildirim-sil]");
+        if (bs) {
+          var bid = +bs.getAttribute("data-bildirim-sil");
+          var tur = bs.getAttribute("data-bildirim-tur");
+          var cagri = (tur === "stock") ? api.stockNotification.remove(bid) : api.priceDrop.remove(bid);
+          cagri.then(function () { toast("Bildirim aboneliğin kaldırıldı."); sekmeBildirimler(el); })
+            .catch(function (er) { toast("Kaldırılamadı: " + (er && er.message ? er.message : "hata")); });
+          return;
+        }
         var as = e.target.closest("[data-adres-sil]");
         if (as) {
           var aid = +as.getAttribute("data-adres-sil");
@@ -1500,6 +1565,58 @@
     }, true);
   }
 
+
+  // ── (SPRINT 8 MADDE 12) PAYLASIM BAGLANTILARI: #/urun/<id> ─────────────────
+  //
+  // OLCUM DUZELTMESI (ONEMLI): E3 raporunda "router #/urun yolunu TANIMIYOR" yazilmisti -
+  // BU YANLISTI. index.html:2077'deki router'da yol VAR:
+  //     else if(top==='urun'){ showHome(); var _pid=+h[1]; if(byId(_pid)) openDetail(_pid); }
+  // Yeniden olculdu: #/urun/1 ile acilan sayfada gorunen view "home", `detailOpenId` 1 -
+  // yani urun detayi GERCEKTEN aciliyor. Gozlenen "Sayfa Bulunamadi" bir 404 SAYFASI degil,
+  // SAYFA BASLIGIYDI.
+  //
+  // GERCEK KUSUR IKI TANE:
+  //  (1) BASLIK. `setDocTitle()` icinde 'urun' dali YOK; bilinmeyen yol dalina duser ve
+  //      "Sayfa Bulunamadi · Divisima" yazar. Ustelik router bu fonksiyonu openDetail'DEN
+  //      SONRA cagiriyor, yani openDetail'in setProductSchema ile koydugu dogru baslik
+  //      hemen EZILIYOR. Paylasilan her urun baglantisi tarayici sekmesinde ve sosyal
+  //      onizlemede "Sayfa Bulunamadi" gorunuyor.
+  //  (2) KATALOG YARISI. Acilista router, PRODUCTS'in O ANDAKI icerigiyle calisiyor; gercek
+  //      katalog ASENKRON geliyor ve `loadCatalog` sonrasi yeniden yonlendirme YALNIZ
+  //      "#/kategori" icin yapiliyordu. Bu, Hesabim > Favorilerim'de bu oturumda OLCULEN
+  //      yarisin aynisi (mock urun cizilmisti).
+  function urunRotasiniTazele() {
+    if (location.hash.indexOf("#/urun") !== 0) return;
+    var m = location.hash.match(/^#\/urun\/(\d+)/);
+    if (!m) return;
+    var id = +m[1];
+    if (typeof byId !== "function" || !byId(id)) return;   // urun katalogda yoksa dokunma
+    if (typeof openDetail === "function") openDetail(id);
+    urunBasligiDuzelt(id);
+  }
+
+  function urunBasligiDuzelt(id) {
+    if (typeof byId !== "function") return;
+    var p = byId(id);
+    if (!p) return;
+    var ad = (typeof nameOf === "function") ? nameOf(p) : p.name;
+    if (ad) document.title = ad + " · Divisima";
+  }
+
+  function wireUrunRotasi() {
+    // setDocTitle'i SARMALA: router onu openDetail'den SONRA cagirdigi icin dogru basligi
+    // eziyordu. Sarmalayici once orijinali calistirir (diger yollar aynen kalsin), sonra
+    // yalniz #/urun yolunda basligi duzeltir.
+    if (typeof window.setDocTitle === "function") {
+      var _setDocTitle = window.setDocTitle;
+      window.setDocTitle = function () {
+        _setDocTitle.apply(this, arguments);
+        var m = location.hash.match(/^#\/urun\/(\d+)/);
+        if (m) urunBasligiDuzelt(+m[1]);
+      };
+    }
+    // Ilk yukleme + katalog sonrasi tazeleme init() icinde yapiliyor.
+  }
   async function init() {
     wireCoupon();
     wireAuth();
@@ -1513,6 +1630,7 @@
     wireAccount();            // E3 (a): ozet + siparisler/zaman cizelgesi + iade + fatura + adres
     wireLegal();              // E3 (b): #/sozlesme icerigi content/get/{slug}'dan + DOMPurify
     wireNotify();             // E3 (d): stok / fiyat dususu abonelikleri gercek uclara
+    wireUrunRotasi();         // Sprint 8 madde 12: paylasim baglantilarinin basligi
     // Kategoriler ÖNCE: ürün kategorisi category_id üzerinden çözülüyor (liste yolu
     // category_name döndürmüyor), yükleme sırası ters olursa tüm ürünler "tumu" olur.
     await loadCategories();
@@ -1526,6 +1644,10 @@
     // 649 TL" gorundu; gercek katalogda id 2 = "E4a Test Urun / 499,90 TL").
     // wireAccount icindeki ilk yukleme yamasi BU YARISI KAPATMIYOR - o, katalog
     // gelmeden ONCE kosuyor. Katalog geldikten SONRA bir kez daha cizeriz.
+    // Sprint 8 madde 12: katalog geldikten SONRA urun rotasini tazele (yaris kapatilir) ve
+    // basligi duzelt. Acilistaki router cagrisi PRODUCTS henuz gercek degilken kosuyor.
+    urunRotasiniTazele();
+
     if (location.hash.indexOf("#/hesabim") === 0 && typeof window.renderAccount === "function") {
       var _t = location.hash.replace(/^#\/?/, "").split("?")[0].split("/")[1] || "ozet";
       window.renderAccount(_t);

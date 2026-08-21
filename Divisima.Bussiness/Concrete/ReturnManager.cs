@@ -21,6 +21,8 @@ namespace Divisima.Bussiness.Concrete
     {
         private const int ReturnWindowDays = 14;   // teslimden sonra iade süresi
 
+        // SPRINT 8 MADDE 5: iade listesine urun adi doldurmak icin.
+        private readonly IProductDal _productDal;
         private readonly IReturnRequestDal _returnDal;
         private readonly IOrderDal _orderDal;
         private readonly IOrderItemDal _orderItemDal;
@@ -32,8 +34,10 @@ namespace Divisima.Bussiness.Concrete
         private readonly IUnitOfWork _unitOfWork;
 
         public ReturnManager(IReturnRequestDal returnDal, IOrderDal orderDal, IOrderItemDal orderItemDal, IIyzicoClient iyzico, IStockService stockService,
-            ICustomerDal customerDal, IStoreCreditTransactionDal creditTxDal, IUnitOfWork unitOfWork, IRefundService refundService)
+            ICustomerDal customerDal, IStoreCreditTransactionDal creditTxDal, IUnitOfWork unitOfWork, IRefundService refundService,
+            IProductDal productDal)
         {
+            _productDal = productDal;
             _returnDal = returnDal;
             _refundService = refundService;
             _orderDal = orderDal;
@@ -178,14 +182,40 @@ namespace Divisima.Bussiness.Concrete
         public async Task<(HttpStatusCode, Result)> GetMyReturns(int customerId)
         {
             var returns = await _returnDal.GetListAsync(r => r.customer_id == customerId);
-            return (HttpStatusCode.OK, new SuccessDataResult<List<ReturnResponseDto>>(returns.Select(Map).ToList()));
+            return (HttpStatusCode.OK, new SuccessDataResult<List<ReturnResponseDto>>(await ZenginlestirAsync(returns)));
         }
 
         public async Task<(HttpStatusCode, Result)> GetPendingReturns()
         {
             var returns = await _returnDal.GetListAsync(r => r.status == (byte)ReturnStatusEnum.Pending);
-            return (HttpStatusCode.OK, new SuccessDataResult<List<ReturnResponseDto>>(returns.Select(Map).ToList()));
+            return (HttpStatusCode.OK, new SuccessDataResult<List<ReturnResponseDto>>(await ZenginlestirAsync(returns)));
         }
+
+        // SPRINT 8 MADDE 5: urun adi ve siparis numarasi DTO'ya doldurulur.
+        // N+1 YOK: urunler ve siparisler TEK sorguda cekilip sozlukten eslestirilir.
+        // Urun silinmis/pasiflenmisse ad null kalir - istemci o zaman kimlikle gosterir;
+        // UYDURMA ad yazilmaz.
+        private async Task<List<ReturnResponseDto>> ZenginlestirAsync(List<ReturnRequest> returns)
+        {
+            var liste = returns.Select(Map).ToList();
+            if (liste.Count == 0) return liste;
+
+            var urunIds = liste.Select(x => x.product_id).Distinct().ToList();
+            var urunAdlari = (await _productDal.GetListNoTrackingAsync(p => urunIds.Contains(p.id)))
+                .ToDictionary(p => p.id, p => p.name);
+
+            var siparisIds = liste.Select(x => x.order_id).Distinct().ToList();
+            var siparisNolar = (await _orderDal.GetListNoTrackingAsync(o => siparisIds.Contains(o.id)))
+                .ToDictionary(o => o.id, o => o.order_number);
+
+            foreach (var x in liste)
+            {
+                if (urunAdlari.TryGetValue(x.product_id, out var ad)) x.product_name = ad;
+                if (siparisNolar.TryGetValue(x.order_id, out var no)) x.order_number = no;
+            }
+            return liste;
+        }
+
 
         // Açıklayıcı yorum: Entity -> DTO
         private static ReturnResponseDto Map(ReturnRequest r) => new()

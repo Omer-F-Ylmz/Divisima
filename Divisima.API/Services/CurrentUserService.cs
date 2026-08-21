@@ -42,5 +42,15 @@ namespace Divisima.API.Services
         {
             return UserId ?? throw new UnauthorizedAccessException("Kimlik doğrulanamadı.");
         }
+
+        // SPRINT 8 MADDE 10: JwtHelper token'a ClaimTypes.Email yaziyor (olculdu) - e-posta
+        // ISTEMCI GIRDISINDEN degil buradan okunur.
+        public string GetRequiredEmail()
+        {
+            var email = User?.FindFirst(ClaimTypes.Email)?.Value;
+            if (string.IsNullOrWhiteSpace(email))
+                throw new UnauthorizedAccessException("Kimlik doğrulanamadı.");
+            return email;
+        }
     }
 }

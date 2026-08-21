@@ -31,9 +31,13 @@ namespace Divisima.Bussiness.Concrete
         // icin para kaybi yok ama musteri 199 gorup 249 oduyordu = guven sorunu.)
         private void InvalidateStorefrontCache() => _cache.RemoveByPrefix("merch:");
 
+        // SPRINT 8 MADDE 5: liste yolu artik category_name dolduruyor - kategori adlarina erisim gerekli.
+        private readonly ICategoryDal _categoryDal;
+
         public ProductManager(IProductDal productDal, IProductStockDal productStockDal, IProductReviewDal productReviewDal, IMapper mapper,
-            IPriceDropService priceDropService, ICacheService cache)
+            IPriceDropService priceDropService, ICacheService cache, ICategoryDal categoryDal)
         {
+            _categoryDal = categoryDal;
             _productDal = productDal;
             _productStockDal = productStockDal;
             _productReviewDal = productReviewDal;
@@ -286,15 +290,10 @@ namespace Divisima.Bussiness.Concrete
             var products = await _productDal.GetListAsync(p => p.is_active);
             var data = _mapper.Map<List<ProductListResponseDto>>(products);
 
-            // Açıklayıcı yorum: Bedenleri doldur (frontend sizes[]). N+1 önlemek için tüm stok tek sorgu + grupla.
-            var allStocks = await _productStockDal.GetListAsync(st => st.is_active && st.stock_quantity > 0);
-            var byProduct = allStocks.GroupBy(st => st.product_id)
-                .ToDictionary(g => g.Key, g => g.Select(st => st.size).Distinct().ToList());
-            foreach (var item in data)
-            {
-                if (byProduct.TryGetValue(item.id, out var sizes))
-                    item.sizes = sizes;
-            }
+            // SPRINT 8 MADDE 5: bedenler ARTIK ortak yardimcidan - kategori adi ve toplam stok da
+            // burada doluyor. Onceden yalniz "sizes" doldurulurdu ve storefront yolu HICBIRINI
+            // doldurmuyordu; iki yol ayrisiyordu. Tek yardimci, bir daha ayrisamazlar.
+            await ListeyiZenginlestirAsync(data);
 
             return (HttpStatusCode.OK, new SuccessDataResult<List<ProductListResponseDto>>(data, Messages.ProductListed));
         }
@@ -313,6 +312,11 @@ namespace Divisima.Bussiness.Concrete
                 dto.sort, dto.page, dto.size);
 
             var list = _mapper.Map<List<ProductListResponseDto>>(items);
+
+            // SPRINT 8 MADDE 5: category_name + total_stock + sizes ARTIK BURADA doluyor.
+            // Bu satir olmadan vitrindeki her urun "kategorisiz + 0 stok + bedensiz" geliyordu
+            // ve istemci urun basina ayri detay cagrisi yapmak zorunda kaliyordu.
+            await ListeyiZenginlestirAsync(list);
 
             // Açıklayıcı yorum: Sayfalama meta bilgisiyle sar ({X}PagingListResponseDto kalıbı)
             var paged = new ProductPagingListResponseDto
@@ -347,5 +351,63 @@ namespace Divisima.Bussiness.Concrete
             return (HttpStatusCode.OK, new SuccessDataResult<System.Collections.Generic.List<Divisima.Entity.Entities.Product>>(variants.ToList()));
         }
 
+
+        // ── SPRINT 8 MADDE 5 - LISTE DTO ZENGINLESTIRME (TEK YERDE) ────────────────
+        //
+        // OLCULEN BOSLUK (E1'de bulundu, E1 pini ile sabitlenmisti): storefront'un kullandigi
+        // "GetListSearchAndFilterWithPaging" yolu `category_name`, `total_stock` ve `sizes`
+        // alanlarini HIC DOLDURMUYORDU (ProductProfile ucunu de Ignore ediyor). Ham veriyle
+        // vitrindeki HER urun "kategorisiz + 0 stok + bedensiz" gorunuyor, yani bastan sona
+        // "Tukendi" yaziyordu. E1 bunu ISTEMCIDE telafi etti: urun basina AYRI detay cagrisi
+        // (6 eszamanli, sayfa boyutu 24) - yani bir vitrin sayfasi 25 istek demekti.
+        //
+        // Admin "GetList" yolu bedenleri zaten dolduruyordu ama kategori/stok orada da yoktu.
+        // Iki yol AYNI yardimciya baglandi: bir daha ayrisamazlar.
+        //
+        // N+1 YOK: kategoriler ve stoklar TEK sorguda cekilip sozlukten eslestirilir.
+        private async Task ListeyiZenginlestirAsync(List<ProductListResponseDto> data)
+        {
+            if (data == null || data.Count == 0) return;
+
+            // 1) KATEGORI ADI - yalniz listedeki kategoriler cekilir.
+            var katIds = data.Select(d => d.category_id).Distinct().ToList();
+            var katAdlari = (await _categoryDal.GetListNoTrackingAsync(c => katIds.Contains(c.id)))
+                .ToDictionary(c => c.id, c => c.name);
+
+            // 2) BEDENLER + TOPLAM STOK - tek sorgu, urune gore gruplanir.
+            // "available" (stock_quantity - reserved_quantity) kullanilir: bir bedenin tamami
+            // baskalarinin sepetinde rezerveyse o beden SATILABILIR DEGILDIR ve vitrinde
+            // "var" gibi gorunmemeli. (CLAUDE.md: stok assertleri available uzerinden yapilir.)
+            var urunIds = data.Select(d => d.id).Distinct().ToList();
+            var stoklar = await _productStockDal.GetListNoTrackingAsync(
+                st => st.is_active && urunIds.Contains(st.product_id));
+
+            var stokSozluk = stoklar
+                .GroupBy(st => st.product_id)
+                .ToDictionary(
+                    g => g.Key,
+                    g => (
+                        Toplam: g.Sum(st => Math.Max(0, st.stock_quantity - st.reserved_quantity)),
+                        Bedenler: g.Where(st => st.stock_quantity - st.reserved_quantity > 0)
+                                   .Select(st => st.size)
+                                   .Distinct()
+                                   .ToList()
+                    ));
+
+            foreach (var item in data)
+            {
+                if (katAdlari.TryGetValue(item.category_id, out var ad)) item.category_name = ad;
+                if (stokSozluk.TryGetValue(item.id, out var s))
+                {
+                    item.total_stock = s.Toplam;
+                    item.sizes = s.Bedenler;
+                }
+                else
+                {
+                    item.total_stock = 0;
+                    item.sizes = new List<string>();
+                }
+            }
+        }
     }
 }
