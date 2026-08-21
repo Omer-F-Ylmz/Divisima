@@ -11,5 +11,8 @@ namespace Divisima.Entity.Entities
         public bool is_notified { get; set; }
         public DateTime created_at { get; set; }
         public DateTime? notified_at { get; set; }
+
+        // SPRINT 8 MADDE 10 - ABONELIKTEN CIKMA JETONU (StockNotificationRequest ile ayni gerekce).
+        public string unsubscribe_token { get; set; }
     }
 }

@@ -20,5 +20,17 @@ namespace Divisima.DataAccess.Concrete.EntityFramework
             return await Context.Set<Coupon>()
                 .FirstOrDefaultAsync(c => c.code.ToUpper() == normalized && c.is_active);
         }
+
+        // SPRINT 8 MADDE 1: used_count'u coupon_usages satirlarindan TURET.
+        // TEK ifade, TEK gidis-donus; okuma ve yazma arasinda yaris yok. `ExecuteUpdateAsync`
+        // change-tracker'i ATLAR (bkz. CLAUDE.md tuzagi) - cagiranin elindeki `Coupon` nesnesi
+        // BAYAT kalir; bu metodun cagricisi zaten sayaci okumuyor, ama okuyacaksa taze
+        // (`GetListNoTrackingAsync`) okumak zorunda.
+        public async Task<int> SyncUsedCountAsync(int couponId) =>
+            await Context.Set<Coupon>()
+                .Where(c => c.id == couponId)
+                .ExecuteUpdateAsync(s => s.SetProperty(
+                    c => c.used_count,
+                    c => Context.Set<CouponUsage>().Count(u => u.coupon_id == c.id)));
     }
 }

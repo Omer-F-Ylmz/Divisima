@@ -140,6 +140,10 @@ namespace Divisima.IntegrationTests
             {
                 var req = new StockNotificationRequest
                 {
+                    // SPRINT 8 MADDE 10: unsubscribe_token artik ZORUNLU (NOT NULL). Tokensiz bir satir
+                    // hicbir zaman abonelikten cikarilamaz - o yuzden kolon opsiyonel BIRAKILMADI ve
+                    // dogrudan insert yapan test kurgulari da uretimle ayni sozlesmeye uyuyor.
+                    unsubscribe_token = Divisima.Core.Utilities.Security.UnsubscribeToken.Yeni(),
                     product_id = 1,
                     size = "M",
                     email = $"stok-{Guid.NewGuid():N}@divisima.test",
@@ -179,6 +183,10 @@ namespace Divisima.IntegrationTests
             {
                 var sub = new PriceDropSubscription
                 {
+                    // SPRINT 8 MADDE 10: unsubscribe_token artik ZORUNLU (NOT NULL). Tokensiz bir satir
+                    // hicbir zaman abonelikten cikarilamaz - o yuzden kolon opsiyonel BIRAKILMADI ve
+                    // dogrudan insert yapan test kurgulari da uretimle ayni sozlesmeye uyuyor.
+                    unsubscribe_token = Divisima.Core.Utilities.Security.UnsubscribeToken.Yeni(),
                     product_id = 7,
                     email = $"fiyat-{Guid.NewGuid():N}@divisima.test",
                     subscribed_price = 250m,
@@ -221,7 +229,12 @@ namespace Divisima.IntegrationTests
                 email = email,
                 is_notified = bildirildi,
                 created_at = DateTime.Now,
-                notified_at = bildirildi ? DateTime.Now : null
+                notified_at = bildirildi ? DateTime.Now : null,
+                // SPRINT 8 MADDE 10: unsubscribe_token ZORUNLU (NOT NULL) ve UNIQUE. Her cagri
+                // KENDI jetonunu uretmeli - sabit bir deger verilseydi ikinci satir bu testin
+                // OLCTUGU filtreli-unique yerine JETON unique'ine takilir ve test yanlis sebepten
+                // yesil/kirmizi olurdu.
+                unsubscribe_token = Divisima.Core.Utilities.Security.UnsubscribeToken.Yeni()
             };
 
             int ilkId;

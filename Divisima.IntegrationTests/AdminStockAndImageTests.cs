@@ -42,13 +42,18 @@ namespace Divisima.IntegrationTests
             protected override void ConfigureWebHost(IWebHostBuilder builder)
             {
                 TestHostConfig.Apply(builder);
-                // STATIK SUNUM HIZALAMASI (olculdu, tahmin degil):
-                // LocalImageStorage dosyayi Directory.GetCurrentDirectory()/wwwroot/uploads/products
-                // altina yaziyor; UseStaticFiles ise ContentRoot/wwwroot'tan servis ediyor.
-                // Testte bu ikisi AYRI dizin (CWD = test bin, ContentRoot = Divisima.API) - dosya
-                // yaziliyor ama 404 donuyordu. Content root'u CWD'ye cekerek ikisini esitliyoruz.
-                // NOT: bu bir TEST ayari; uretimde ayni ayrisma mumkun (bkz. rapor - SUPHELI).
-                builder.UseContentRoot(Directory.GetCurrentDirectory());
+                // SPRINT 8 MADDE 4 - BU HIZALAMA KALDIRILDI (ve pin haline geldi).
+                //
+                // Burada eskiden `builder.UseContentRoot(Directory.GetCurrentDirectory())` vardi.
+                // Gerekcesi: LocalImageStorage dosyayi CALISMA DIZINI/wwwroot altina yaziyor,
+                // UseStaticFiles ise ContentRoot/wwwroot'tan servis ediyordu; testte bu ikisi AYRI
+                // dizin oldugu icin (CWD = test bin, ContentRoot = Divisima.API) dosya yaziliyor
+                // ama 404 donuyordu. Yani test, URETIMDEKI GERCEK BIR AYRISMAYI kendi ayariyla
+                // GIZLIYORDU - ve o ayrisma E2b'de canli ortamda gerceklesti.
+                //
+                // LocalImageStorage artik `IWebHostEnvironment.WebRootPath`e yaziyor. Hizalama
+                // ayari KALDIRILDI: bu sinifin yesil kalmasi, yazma ile sunumun FARKLI calisma
+                // dizininde bile ortustugunun KANITIDIR. Ayar geri konursa pin anlamini yitirir.
                 builder.ConfigureServices(services =>
                 {
                     var d = services.SingleOrDefault(x => x.ServiceType == typeof(DbContextOptions<DivisimaDbContext>));
@@ -70,7 +75,11 @@ namespace Divisima.IntegrationTests
             {
                 // wwwroot HOST BASLAMADAN ONCE var olmali: UseStaticFiles, WebRootPath yoksa
                 // NullFileProvider'a duser ve dizin sonradan olussa bile 404 dondurur.
-                Directory.CreateDirectory(Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"));
+                // SPRINT 8 MADDE 4: artik CWD degil, gercek content root'un altindaki wwwroot
+                // (yani sunumun bakacagi ve LocalImageStorage'in yazacagi TEK dizin) hazirlanir.
+                Directory.CreateDirectory(Path.Combine(
+                    Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "..", "..", "Divisima.API")),
+                    "wwwroot"));
 
                 await using (var pre = NewContext())
                 {

@@ -23,6 +23,15 @@ namespace Divisima.IntegrationTests
             public Task NotifyBackInStock(int productId, string size) => Task.CompletedTask;
             public Task<(HttpStatusCode, Result)> Subscribe(StockNotificationSubscribeRequestDto dto)
                 => throw new NotSupportedException("Stok testlerinde kullanilmaz.");
+            // SPRINT 8 MADDE 10: abonelik yonetimi uclari eklendi. Bu sahte, stok testlerinde
+            // yalniz NotifyBackInStock icin var; digerleri cagrilirsa GURULTULU duser (sessiz
+            // bir varsayilan donmek, testin yanlis yolu olctugunu gizlerdi).
+            public Task<(HttpStatusCode, Result)> GetMine(string email)
+                => throw new NotSupportedException("Stok testlerinde kullanilmaz.");
+            public Task<(HttpStatusCode, Result)> RemoveMine(int id, string email)
+                => throw new NotSupportedException("Stok testlerinde kullanilmaz.");
+            public Task<(HttpStatusCode, Result)> UnsubscribeByToken(string token)
+                => throw new NotSupportedException("Stok testlerinde kullanilmaz.");
         }
 
         // Aciklayici yorum: HER cagri KENDI context/manager ciftini alir - EF DbContext thread-safe

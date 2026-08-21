@@ -15,6 +15,14 @@ namespace Divisima.Bussiness.Concrete
     // Açıklayıcı yorum: Referans (arkadaşını getir) iş kuralları. Ödül ilk sipariş TAMAMLANINCA iki tarafa mağaza kredisi.
     public class ReferralManager : IReferralService
     {
+        // SPRINT 8 MADDE 3 - SEBEP METINLERI SABIT.
+        // DAVET EDILEN odulu MUSTERI BASINA TEKILDIR ve bu tekillik artik VERITABANINDA
+        // zorlaniyor: UX_store_credit_referee_reward filtreli UNIQUE indeksi TAM BU METNE
+        // bakiyor. Metin degisirse indeks eslesmez ve koruma SESSIZCE kalkar - ikisi BIRLIKTE
+        // degistirilmeli. DAVET EDEN odulu ise TEKRARLANABILIR (her davet icin bir odul).
+        public const string RefereeRewardReason = "Referans ödülü (davet edilen)";
+        public const string ReferrerRewardReason = "Referans ödülü (davet eden)";
+
         private readonly ICustomerDal _customerDal;
         private readonly IOrderDal _orderDal;
         private readonly IStoreCreditTransactionDal _creditTxDal;
@@ -46,10 +54,11 @@ namespace Divisima.Bussiness.Concrete
                 c.referral_code = code;
                 await _customerDal.UpdateAsync(c);
             }
-            // ADLANDIRILMIS ARGUMAN ZORUNLU (E3'te olculdu): T = string oldugunda tek argumanli kurucu
-            // "(string message)" ile eslesir ve kod MESSAGE'a giderdi. Uc bu yuzden
-            // {"data":null,"success":true,"message":"REF..."} donuyordu; kodu "data"dan okuyan istemci
-            // BOS aliyordu. "data:" adlandirmasi dogru kurucuyu secer.
+            // ADLANDIRILMIS ARGUMAN (E3'te ZORUNLUYDU, Sprint 8 madde 11'den sonra ARTIK DEGIL):
+            // T = string iken tek argumanli kurucu "(string message)" ile eslesirdi ve kod MESSAGE'a
+            // giderdi. Uc bu yuzden {"data":null,"success":true,"message":"REF..."} donuyordu; kodu
+            // "data"dan okuyan istemci BOS aliyordu. Sprint 8'de o kurucu KALDIRILDI; adlandirma
+            // artik gerekli degil ama NIYETI acik tuttugu icin BIRAKILDI.
             return (HttpStatusCode.OK, new SuccessDataResult<string>(data: c.referral_code));
         }
 
@@ -77,7 +86,7 @@ namespace Divisima.Bussiness.Concrete
             // Önceki "Count != 1" kontrolü İPTALDE sıfırlanıyordu -> sipariş ver+iptal et+tekrar ver ile ödül FARMING mümkündü.
             // Ledger (StoreCreditTransaction) kalıcı: iptal edilse bile ödül kaydı kalır -> tekrar tetiklenmez.
             var alreadyRewarded = await _creditTxDal.GetAsync(t =>
-                t.customer_id == c.id && t.reason == "Referans ödülü (davet edilen)");
+                t.customer_id == c.id && t.reason == RefereeRewardReason);
             if (alreadyRewarded != null) return;
 
             var referrer = await _customerDal.GetAsync(x => x.id == c.referred_by.Value && x.is_active);
@@ -100,7 +109,7 @@ namespace Divisima.Bussiness.Concrete
                     customer_id = referrer.id,
                     amount = ReferrerReward,
                     type = (byte)LedgerEntryTypeEnum.Earn,
-                    reason = "Referans ödülü (davet eden)",
+                    reason = ReferrerRewardReason,
                     order_id = orderId,
                     created_at = DateTime.Now
                 });
@@ -118,7 +127,7 @@ namespace Divisima.Bussiness.Concrete
                     customer_id = c.id,
                     amount = RefereeReward,
                     type = (byte)LedgerEntryTypeEnum.Earn,
-                    reason = "Referans ödülü (davet edilen)",
+                    reason = RefereeRewardReason,
                     order_id = orderId,
                     created_at = DateTime.Now
                 });

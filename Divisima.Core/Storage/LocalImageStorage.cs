@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -9,15 +10,38 @@ namespace Divisima.Core.Storage
     {
         private readonly IConfiguration _config;
         private readonly ILogger<LocalImageStorage> _logger;
+        private readonly IWebHostEnvironment _env;
 
-        public LocalImageStorage(IConfiguration config, ILogger<LocalImageStorage> logger)
+        public LocalImageStorage(IConfiguration config, ILogger<LocalImageStorage> logger, IWebHostEnvironment env)
         {
             _config = config;
             _logger = logger;
+            _env = env;
         }
 
-        // Açıklayıcı yorum: Fiziksel kök (wwwroot/uploads) ve genel URL öneki
-        private string PhysicalRoot => Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", "products");
+        // SPRINT 8 MADDE 4 - YAZMA VE SUNUM AYNI DIZINE BAKAR.
+        //
+        // ONCEKI HALI: `Directory.GetCurrentDirectory()/wwwroot/uploads/products`.
+        // `UseStaticFiles` ise dosyalari `IWebHostEnvironment.WebRootPath`ten (varsayilan olarak
+        // ContentRoot/wwwroot) SUNUYOR. Bu ikisi yalnizca CALISMA DIZINI content root ile AYNI
+        // oldugunda ortusur. `dotnet run --project` ve normal yayinlarda ortusuyor; ama calisma
+        // dizini farkli baslatilan bir serviste (systemd'de WorkingDirectory verilmemis, Windows
+        // Service) yukleme HIC SUNULMAYAN bir dizine yazilir: uc "basarili" doner, gorsel
+        // SONSUZA KADAR 404 verir.
+        //
+        // BU TEORIK DEGIL - E2b'DE CANLI ORTAMDA GERCEKLESTI (olculdu): `product_images`
+        // tablosunda 3 satir vardi (is_primary=1 dahil), ama `Divisima.API/wwwroot/uploads/products`
+        // BOSTU ve dosyalar yalnizca `Divisima.IntegrationTests/bin/Release/net8.0/wwwroot/...`
+        // altinda bulundu. Veritabani "gorsel var" diyordu, vitrin 404 aliyordu.
+        //
+        // WebRootPath dogru kaynaktir: sunum hangi dizinden yapiliyorsa yazma da oraya yapilir.
+        // WebRootPath'in BOS olabilecegi tek durum wwwroot dizininin hic olmamasidir; o zaman
+        // ContentRoot/wwwroot'a duseriz - yine sunumun bakacagi yer.
+        private string PhysicalRoot => Path.Combine(
+            string.IsNullOrWhiteSpace(_env.WebRootPath)
+                ? Path.Combine(_env.ContentRootPath, "wwwroot")
+                : _env.WebRootPath,
+            "uploads", "products");
         private string UrlPrefix => (_config["Storage:PublicBaseUrl"] ?? "").TrimEnd('/') + "/uploads/products";
 
         public async Task<string> SaveAsync(byte[] content, string fileName, string contentType)

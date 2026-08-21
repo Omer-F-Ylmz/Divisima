@@ -127,6 +127,9 @@ namespace Divisima.Core.Utilities.Constants
         // ── Ödeme ──
         public static string PaymentInitiated = "Ödeme başlatıldı.";
         public static string PaymentInitFailed = "Ödeme başlatılamadı.";
+        // SPRINT 8 MADDE 8: init hatasinin AYIRT EDILEBILIR dali. Musteriye "ne yapabilirsin"
+        // sorusunun yaniti verilir; saglayicinin ham hata metni YANSITILMAZ.
+        public static string PaymentBuyerEmailNotAccepted = "Ödeme sağlayıcısı hesabındaki e-posta adresini kabul etmiyor. Hesap Bilgilerim sayfasından gerçek bir e-posta adresi girip tekrar deneyebilirsin.";
         public static string PaymentSuccess = "Ödeme başarılı, siparişiniz onaylandı.";
         public static string PaymentFailed = "Ödeme başarısız, sipariş iptal edildi.";
         public static string PaymentNotFound = "Ödeme kaydı bulunamadı.";
@@ -209,6 +212,10 @@ namespace Divisima.Core.Utilities.Constants
 
         // ── Fatura ──
         public static string InvoiceAlreadyExists = "Bu sipariş için fatura zaten oluşturulmuş.";
+        // SPRINT 8 MADDE 2: fatura yalniz onaylanmis (ve sonrasi) siparisler icin kesilir.
+        // Pending -> para henuz alinmadi; Cancelled -> siparis yok hukmunde. Ikisine de fatura
+        // kesmek mali bir yanlis beyandir (ciroyu sisirir, musteriye odenmemis borc gonderir).
+        public static string InvoiceOrderNotBillable = "Bu siparişin durumu faturalamaya uygun değil (iptal edilmiş ya da ödemesi tamamlanmamış).";
         public static string InvoiceGenerated = "Fatura oluşturuldu.";
 
         // ── Fatura iptali (sipariş iptal edilince) ──
@@ -261,6 +268,10 @@ namespace Divisima.Core.Utilities.Constants
         public static string OrderPlaceFailed = "Sipariş oluşturulamadı, lütfen tekrar deneyin.";
         public static string InvalidEmail = "Geçersiz e-posta adresi.";
         public static string StockNotificationSubscribed = "Stok geldiğinde size haber vereceğiz.";
+        // SPRINT 8 MADDE 10 - abonelik yonetimi mesajlari.
+        public static string StockNotificationNotFound = "Bildirim aboneliği bulunamadı.";
+        public static string PriceDropNotFound = "Fiyat uyarısı aboneliği bulunamadı.";
+        public static string NotificationUnsubscribed = "Bildirim aboneliğin kaldırıldı.";
         public static string StockNotificationAlreadySubscribed = "Bu ürün için zaten bildirim talebiniz var.";
         public static string RecentlyViewedRecorded = "Görüntüleme kaydedildi.";
         public static string ProfileNameRequired = "Ad boş olamaz.";

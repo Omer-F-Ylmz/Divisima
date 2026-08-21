@@ -208,15 +208,15 @@ namespace Divisima.IntegrationTests
             govde.Should().Contain(seed.ProductName, "kalem satirlari cizilmis olmali");
             // KULTUR BAGIMLI LITERAL YASAK (CI'da BIR KEZ KIRDI - olculdu).
             // Ilk hali "549,90" yaziyordu. Yerel makine tr-TR oldugu icin YESIL, GitHub kosucusu
-            // invariant kultur oldugu icin KIRMIZI: uretimdeki "{order.total_price:N2}" AMBIENT
-            // kulturu kullanir ve ayni tutar orada "549.90" olarak basilir.
-            // OLCUM: tr-TR -> "549,90" / "1.049,70";  Invariant -> "549.90" / "1,049.70".
-            // Assert artik uretimin KULLANDIGI bicimi hesaplar; boylece hangi kulturde kosarsa
-            // kossun "toplam govdede var mi" sorusunu olcer.
-            // NOT: uygulamanin kultur PINLEMEMESI ayri bir bulgudur - bkz. SUPHELI #13.
-            var beklenenToplam = 549.90m.ToString("N2", CultureInfo.CurrentCulture);
+            // invariant kultur oldugu icin KIRMIZI.
+            // SPRINT 8 MADDE 13'ten SONRA beklenti SERTLESTI: uygulama artik kulturu tr-TR'ye
+            // PINLIYOR (Program.cs), dolayisiyla fatura govdesi KOSUCU KULTURUNDEN BAGIMSIZ
+            // olarak tr bicimiyle cikmali. Assert bu yuzden CurrentCulture'a degil ACIKCA
+            // tr-TR'ye bakiyor - CI'da (invariant kosucu) da ayni sonucu bekler.
+            var beklenenToplam = 549.90m.ToString("N2", new CultureInfo("tr-TR"));
             govde.Should().Contain(beklenenToplam,
-                $"genel toplam govdede yer almali (bu kulturde beklenen bicim: {beklenenToplam})");
+                $"genel toplam tr bicimiyle govdede yer almali (beklenen: {beklenenToplam}) - " +
+                "uygulama kulturu pinlemezse kosucu yerelinde '549.90' cikar ve bu assert kirilir");
         }
 
         // ── 2) UC DUZEYI PIN: REFERANS KODU "data" ALANINDA DONER ──────────────────────
@@ -266,15 +266,50 @@ namespace Divisima.IntegrationTests
 
         // ── 4) KURUCU DUZEYI KARSIT KONTROL: T string DEGILSE BELIRSIZLIK YOK ──────────
         //
-        // Belirsizligin KAYNAGINI sabitler: yalniz T = string oldugunda iki kurucu ayni imzaya
-        // duser. Sprint 8 madde 11 tam olarak bu daralmis yuzeyi hedefler.
+        // Belirsizligin KAYNAGINI sabitler: eskiden yalniz T = string oldugunda iki kurucu ayni
+        // imzaya duserdi. Sprint 8 madde 11 tam olarak o daralmis yuzeyi hedefledi.
         [Fact]
         public void SuccessDataResult_StringOLMAYAN_TipTe_TEK_ARGUMAN_DATAYA_GIDER()
         {
             var r = new SuccessDataResult<int>(42);
 
-            r.Data.Should().Be(42, "T=int iken (T data) ile (string message) FARKLI imzalardir");
+            r.Data.Should().Be(42, "tek argumanli kurucu HER ZAMAN veri alir");
             r.Message.Should().BeNullOrEmpty();
+        }
+
+        // ── 5) SPRINT 8 MADDE 11: BELIRSIZLIK KOKTEN KALKTI ───────────────────────────
+        //
+        // E3'te bu cagri dizeyi MESSAGE'a yaziyor, Data'yi null birakiyordu ve Success true
+        // oldugu icin hata SESSIZ kaliyordu. Cagri yerleri o zaman "data:" adlandirilmis
+        // argumanla kurtarilmisti; belirsizligin KENDISI dilde duruyordu.
+        // Sprint 8'de `SuccessDataResult<T>(string message)` kurucusu KALDIRILDI (depo tarandi:
+        // 0 cagri). Artik tek argumanli cagrinin baska gidecek yeri YOK.
+        //
+        // BU PIN E3'TEKININ TERSIDIR - ayni ifade, ZITINI bekliyor. E3 pini bozuk davranisi
+        // sabitliyordu; bu pin duzeltilmis davranisi sabitler.
+        [Fact]
+        public void SuccessDataResultString_TEK_ARGUMAN_ARTIK_DATAYA_GIDER_BELIRSIZLIK_KALKTI()
+        {
+            var r = new SuccessDataResult<string>("FATURA-HTML");
+
+            r.Data.Should().Be("FATURA-HTML",
+                "T=string olsa bile tek argumanli kurucu VERI alir - (string message) kurucusu artik YOK");
+            r.Message.Should().BeNullOrEmpty("dize MESSAGE'a KAYMAMALI - E3'teki sessiz hatanin ta kendisiydi");
+            r.Success.Should().BeTrue();
+        }
+
+        // CIFT-ANLAM KIRICI: ErrorDataResult'ta cozum TERS yonde - orada TUM cagrilar mesaj
+        // niyetli oldugu icin (olculdu: 23 cagri, hepsi Messages.X) veri tasiyan kurucular
+        // kaldirildi. Yani ayni "tek arguman" ifadesi iki sinifta FARKLI ve KESIN anlam tasiyor;
+        // ikisi de artik belirsiz DEGIL.
+        [Fact]
+        public void ErrorDataResultString_TEK_ARGUMAN_HER_ZAMAN_MESAJDIR()
+        {
+            var r = new ErrorDataResult<string>("Bir hata olustu.");
+
+            r.Message.Should().Be("Bir hata olustu.");
+            r.Data.Should().BeNull("hata sonucu veri tasimaz - veri tasiyan kurucular kaldirildi");
+            r.Success.Should().BeFalse();
         }
     }
 }

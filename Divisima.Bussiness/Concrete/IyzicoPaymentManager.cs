@@ -1,5 +1,6 @@
 using System.Net;
 using Divisima.Bussiness.Abstract;
+using Divisima.Bussiness.Events;
 using Divisima.Core.DataAccess;
 using Divisima.Core.Integrations.Iyzico;
 using Divisima.Core.Utilities.Constants;
@@ -37,6 +38,8 @@ namespace Divisima.Bussiness.Concrete
         private readonly IStoreCreditTransactionDal _creditTxDal;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IOrderConfirmationService _orderConfirmation;
+        // SPRINT 8 MADDE 3: odeme onayi yan etkileri outbox uzerinden islenir.
+        private readonly Divisima.Bussiness.Outbox.IOutboxService _outboxService;
         // Aciklayici yorum: Iyzico:CallbackUrl - DTO callback_url BOS geldiginde kullanilan OPERATOR girdisi (E2b).
         private readonly IConfiguration _config;
         // Commit sonrasi yan etkiler artik SESSIZ dusmuyor - patlayan adim adiyla loglanir (S7).
@@ -49,7 +52,8 @@ namespace Divisima.Bussiness.Concrete
 IOrderStatusHistoryService statusHistory,
 ILoyaltyService loyaltyService,
 IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitOfWork unitOfWork,
-            IOrderConfirmationService orderConfirmation, IConfiguration config, ILogger<IyzicoPaymentManager> logger)
+            IOrderConfirmationService orderConfirmation, IConfiguration config, ILogger<IyzicoPaymentManager> logger,
+            Divisima.Bussiness.Outbox.IOutboxService outboxService)
         {
             _logger = logger;
             _paymentDal = paymentDal;
@@ -67,6 +71,7 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
             _creditTxDal = creditTxDal;
             _unitOfWork = unitOfWork;
             _orderConfirmation = orderConfirmation;
+            _outboxService = outboxService;
             _config = config;
         }
 
@@ -133,7 +138,26 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
                 BuyerEmail = customer?.email ?? ""
             });
             if (!init.Success)
+            {
+                // SPRINT 8 MADDE 8 - AYIRT EDILEBILIR MESAJ.
+                // Onceden her init hatasi ayni "Odeme baslatilamadi." mesajini donuyordu; musteri
+                // ne oldugunu ve ne yapabilecegini goremiyordu. E2b'de OLCULEN gercek vaka:
+                // gercek Iyzico "@divisima.test" adresini "email hatali format ile gonderilmistir"
+                // ile REDDEDIYOR; AYNI musteri example.com adresiyle 200 aliyor. Yani BIZIM kabul
+                // ettigimiz bir e-posta ile uye olan musteri HIC kart odemesi yapamiyor.
+                //
+                // Saglayicinin ham hata metnini MUSTERIYE YANSITMIYORUZ (isyeri/yapilandirma
+                // ayrintisi sizabilir) ve metin ESLESTIRMESI de yapmiyoruz (yabanci bir API'nin
+                // dizgesine bagimli olmak kirilgandir). Bunun yerine sebebi KENDIMIZ tespit
+                // ediyoruz: alici e-postasi teslim edilemez bir ust alan adiysa mesaj ONA gore
+                // olur. Diger tum hatalar eski genel mesajda kalir - yanlis teshis vermeyiz.
+                var aliciEposta = customer?.email ?? "";
+                if (TeslimEdilemezEposta(aliciEposta))
+                    return (HttpStatusCode.BadRequest,
+                        new ErrorDataResult<PaymentInitResponseDto>(Messages.PaymentBuyerEmailNotAccepted));
+
                 return (HttpStatusCode.BadRequest, new ErrorDataResult<PaymentInitResponseDto>(Messages.PaymentInitFailed));
+            }
 
             await _paymentDal.AddAsync(new Payment
             {
@@ -177,12 +201,34 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
             // (v) yalniz Pending odeme islenebiliyor. Sahte bir callback bunlarin hicbirini
             // atlayamaz - retrieve odenmemis bir token icin basari DONMEZ.
             //
-            // GEVSEME SINIRLI: imza GELDIYSE yine dogrulanir (asagidaki kosul), ve webhook yolu
-            // imzaZorunlu=true ile cagrildigi icin oradaki zorunluluk AYNEN durur.
+            // GEVSEME SINIRLI: imza GELDIYSE yine dogrulanir (asagidaki kosul).
+            //
+            // SPRINT 8 MADDE 9 - WEBHOOK YOLU DA GEVSEDI (E2b'deki bu yorum ARTIK GECERSIZ:
+            // "webhook imzaZorunlu=true ile cagrildigi icin oradaki zorunluluk AYNEN durur").
+            // 22 Agustos 2026'da GERCEK Iyzico bildirimi olculdu: govdede "signature" alani YOK,
+            // baslikta "X-Iyz-Signature" VAR ama BOS. Yani saglayici bu yolda da imza gondermiyor
+            // ve kosulsuz zorunluluk her GERCEK bildirimi reddediyordu (canli kanit: siparis #33 -
+            // para alindi, siparis Pending kaldi). Otorite artik ACIKCA retrieve zinciri.
+            // AYRINTI VE GEREKCE: PaymentController.Webhook uzerindeki blok.
+            //
+            // imzaZorunlu HALA VAR ve varsayilani TRUE: gevseme iki cagri yerinde ACIKCA
+            // yaziliyor, yeni bir cagiran yanlislikla gevsemis yola dusmuyor (fail-closed).
             if (imzaZorunlu || !string.IsNullOrWhiteSpace(dto.signature))
             {
                 if (!_iyzico.VerifyCallbackSignature(dto.token, dto.signature))
+                {
+                    // GORUNURLUK: imza GELDIGI halde tutmuyorsa bu ya sahte bir istektir ya da
+                    // saglayicinin imza BICIMI bizimkinden farklidir (or. panelde bir webhook
+                    // anahtari acilir ve X-Iyz-Signature V3 bicimiyle dolmaya baslar). Ikinci
+                    // durum SESSIZ kalirsa kesinti yine teshis edilemez halde geri gelir -
+                    // bu yuzden ADIYLA loglanir.
+                    _logger.LogWarning(
+                        "ODEME IMZA DOGRULANAMADI. imzaZorunlu={Zorunlu} imzaGeldiMi={Geldi} token={Token}. " +
+                        "Imza GELDIGI halde tutmuyorsa saglayicinin imza BICIMI degismis olabilir - " +
+                        "Sprint 8 madde 9 notuna bak.",
+                        imzaZorunlu, !string.IsNullOrWhiteSpace(dto.signature), dto.token);
                     return (HttpStatusCode.BadRequest, new ErrorResult(Messages.PaymentSignatureInvalid));
+                }
             }
 
             // NoTracking (S6): bu ilk okuma yalniz GUARD icin. Tracked okunursa DbContext bu satiri
@@ -319,6 +365,22 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
 
                         // Açıklayıcı yorum: Zaman çizelgesine "Onaylandı" kaydı (ödeme başarılı - transaction içinde)
                         await _statusHistory.RecordAsync(order.id, (byte)OrderStatusEnum.Confirmed, "Ödeme onaylandı");
+
+                        // SPRINT 8 MADDE 3 - YAN ETKILER OUTBOX'A TASINDI.
+                        // Olay TRANSACTION ICINDE yazilir: "odeme Success oldu ama olay kaybedildi"
+                        // durumu OLUSAMAZ. Onceden dort adim (fatura, sadakat, referans, kupon
+                        // sayaci) commit SONRASI best-effort kosuyordu; patlarlarsa adiyla loglanip
+                        // zaman cizelgesine not dusuluyor ama HIC YENIDEN DENENMIYORDU - gecici bir
+                        // aksaklik yan etkiyi KALICI OLARAK kaybettiriyordu.
+                        // Bedeli: eventual consistency (~1 dk, Cron.Minutely). Musteri siparis
+                        // onayini ANINDA gorur; fatura/puan bir dakikaya kadar gecikebilir.
+                        await _outboxService.WriteAsync("PaymentConfirmed", new PaymentConfirmedEvent
+                        {
+                            order_id = order.id,
+                            customer_id = order.customer_id,
+                            total_price = order.total_price,
+                            coupon_code = order.coupon_code
+                        });
                     }
                     else
                     {
@@ -374,26 +436,14 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
             // ciplak "catch { }" idi: puan/referans/kupon sayaci sessizce dusuyordu.
             if (odemeGecerli)
             {
-                // FATURA - ODEME DOGRULANDIKTAN SONRA (S7). Onceden dogrulamadan ONCE cagriliyordu:
-                // fraud reddi ile IPTAL edilen siparise de fatura kesiliyor ve saglayiciya "Sent"
-                // olarak gidiyordu. Artik yalniz ONAYLANMIS siparise kesilir. Dort onay yolu (COD,
-                // tam magaza kredisi, havale onayi, bu online callback) ayni cagriyi kullanir.
-                await YanEtkiUygulaAsync(order.id, "fatura",
-                    () => _orderConfirmation.ApplyConfirmedSideEffectsAsync(order.id));
-
-                // Sadakat puani (kendi transaction'ini acar - bu yuzden commit SONRASI).
-                await YanEtkiUygulaAsync(order.id, "sadakat puani",
-                    () => _loyaltyService.EarnFromOrder(order.customer_id, order.total_price, order.id));
-
-                // Referans odulu (davet edilen musterinin ilk siparisinde iki tarafa kredi).
-                await YanEtkiUygulaAsync(order.id, "referans odulu",
-                    () => _referralService.RewardOnFirstOrder(order.customer_id, order.id));
-
-                // Kupon used_count artisi optimistic-concurrency retry ile.
-                if (!string.IsNullOrWhiteSpace(order.coupon_code))
-                    await YanEtkiUygulaAsync(order.id, "kupon sayaci",
-                        () => IncrementCouponUsageWithRetry(order.coupon_code));
-
+                // SPRINT 8 MADDE 3: DORT YAN ETKI BURADAN KALKTI.
+                // Fatura / sadakat puani / referans odulu / kupon sayaci artik A bolgesindeki
+                // transaction icinde yazilan "PaymentConfirmed" outbox mesajiyla, OutboxProcessor
+                // tarafindan uygulaniyor (bkz. PaymentConfirmedSideEffects).
+                // KAZANC: adimlar artik YENIDEN DENENIYOR - gecici bir aksaklik yan etkiyi kalici
+                // olarak kaybettirmiyor. 5 denemede de basarisiz olursa mesaj Failed olur ve
+                // GURULTULU kalir (zaman cizelgesine "KRITIK" notu + log).
+                // BEDEL: eventual consistency (~1 dk). Musteri siparis onayini ANINDA gorur.
                 return (HttpStatusCode.OK, new SuccessResult(Messages.PaymentSuccess));
             }
 
@@ -438,28 +488,54 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
                 }
             }
         }
-        // Açıklayıcı yorum: Kupon used_count'u optimistic concurrency ile güvenli artır.
-        // Cafixo DAL her UpdateAsync'te SaveChanges yaptığından, çakışmada taze yükleyip yeniden deneriz.
-        private async Task IncrementCouponUsageWithRetry(string couponCode)
+        // SPRINT 8 MADDE 1 - KUPON SAYACI ARTIK IDEMPOTENT.
+        //
+        // ONCEKI HALI: `IncrementCouponUsageWithRetry` - kuponu oku, `used_count += 1`, yaz;
+        // `DbUpdateConcurrencyException` gelirse 5 kez yeniden dene.
+        // ESZAMANLILIK YONU DOGRUYDU (olculdu): `coupons.row_version` DbContext'te
+        // `IsRowVersion()` ile yapilandirilmis gercek bir concurrency token; kayip guncelleme
+        // istisnaya donusuyor ve retry onu yakaliyordu. SORUN ORADA DEGILDI.
+        // GERCEK SORUN: IDEMPOTENT DEGILDI. Callback bugun tam bir kez kostugu icin zararsizdi,
+        // ama B bolgesi at-least-once bir mekanizmaya (outbox - madde 3) tasindiginda AYNI
+        // siparis icin sayac birden fazla artardi; kupon limiti gercekte dolmadan "dolmus"
+        // gorunur ve gecerli musteriler reddedilirdi. Yeniden deneme bunu KURTARAMAZ - cunku
+        // ikinci artis bir HATA degil, basarili bir yazma olarak gorunur.
+        //
+        // YENI HALI: sayac `coupon_usages` satirlarindan TURETILIR (tek SQL ifadesi).
+        // Turetme TANIMI GEREGI idempotenttir - kac kez cagrilirsa cagrilsin ayni sonucu verir.
+        // Yan fayda: oku-degistir-yaz dongusu tamamen kalktigi icin retry/istisna yolu da
+        // gereksizlesti. Kullanim satirinin kendisi A bolgesindeki transaction icinde yazildigi
+        // ve `(coupon_id, order_id)` UNIQUE indeksi ile korundugu icin ayni siparis iki kez
+        // sayilamaz - sayac yanlis bir kaynaktan turetilemez.
+        private async Task SyncCouponUsageCountAsync(string couponCode)
         {
-            const int maxRetry = 5;
-            for (int attempt = 0; attempt < maxRetry; attempt++)
-            {
-                try
-                {
-                    var coupon = await _couponDal.GetByCodeAsync(couponCode);
-                    if (coupon == null) return;
-                    coupon.used_count += 1;
-                    await _couponDal.UpdateAsync(coupon);
-                    return; // başarılı
-                }
-                catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
-                {
-                    // Açıklayıcı yorum: Başka bir ödeme aynı kuponu güncelledi - taze değerle yeniden dene
-                    if (attempt == maxRetry - 1) return; // son deneme de başarısız - sessiz geç (soft limit)
-                }
-            }
+            var coupon = await _couponDal.GetByCodeAsync(couponCode);
+            if (coupon == null) return;
+            await _couponDal.SyncUsedCountAsync(coupon.id);
         }
 
+
+        // SPRINT 8 MADDE 8 - TESLIM EDILEMEZ UST ALAN ADLARI.
+        // RFC 2606 / RFC 6761 bu adlari TEST ve OZEL kullanim icin AYIRMISTIR; internette
+        // hicbir zaman gercek bir posta kutusuna cozulemezler. ".local" ise mDNS icin ayrildi.
+        // Yani bu adreslerdeki bir musteri e-postayi HIC alamaz - odeme saglayicisinin
+        // reddetmesi de bu yuzden dogru davranistir.
+        //
+        // KAPSAM BILINCLI OLARAK DAR: burasi YALNIZ odeme init'i basarisiz olduktan SONRA,
+        // musteriye DOGRU sebebi soylemek icin kullanilir. KAYIT validatorune DOKUNULMADI -
+        // kayit kurallarini sikilastirmak ayri bir urun karari (rapora "SUPHELI" olarak yazildi):
+        // gecerli ama alisilmadik adresleri reddetmek gercek musteriyi kapida cevirebilir.
+        private static readonly string[] TeslimEdilemezUstAlanlar =
+            { ".test", ".example", ".invalid", ".localhost", ".local" };
+
+        private static bool TeslimEdilemezEposta(string eposta)
+        {
+            if (string.IsNullOrWhiteSpace(eposta)) return false;
+            var e = eposta.Trim().ToLowerInvariant();
+            var at = e.LastIndexOf('@');
+            if (at < 0 || at == e.Length - 1) return false;
+            var alan = e.Substring(at + 1);
+            return TeslimEdilemezUstAlanlar.Any(son => alan.EndsWith(son, StringComparison.Ordinal));
+        }
     }
 }

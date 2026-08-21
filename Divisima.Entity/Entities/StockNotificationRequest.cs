@@ -13,5 +13,13 @@ namespace Divisima.Entity.Entities
         public bool is_notified { get; set; } // bildirim gönderildi mi (tekrar gönderilmez)
         public DateTime created_at { get; set; }
         public DateTime? notified_at { get; set; } // ne zaman haber verildi
+
+        // SPRINT 8 MADDE 10 - ABONELIKTEN CIKMA JETONU.
+        // Abonelik ANONIM kurulabiliyor (uc AllowAnonymous, kayit e-posta ile). Dolayisiyla
+        // "cikma" da kimlik dogrulamasi gerektiremez - aksi halde uye olmayan bir abone izni
+        // GERI ALAMAZ. Kimlik yerine TAHMIN EDILEMEZ bir jeton kullanilir; e-postadaki baglanti
+        // bu jetonu tasir. (E-posta + urun ile cikma kabul edilseydi herkes herkesi abonelikten
+        // cikarabilir ve "bu e-posta abone mi" sorusuna yanit veren bir sizinti kanali olusurdu.)
+        public string unsubscribe_token { get; set; }
     }
 }

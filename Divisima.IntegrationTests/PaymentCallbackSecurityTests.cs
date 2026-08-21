@@ -305,6 +305,33 @@ namespace Divisima.IntegrationTests
             await WithScopeAsync(sp => sp.GetRequiredService<IPaymentService>()
                 .HandleCallback(new PaymentCallbackRequestDto { token = token, signature = signature }));
 
+        // ── SPRINT 8 MADDE 3 - OUTBOX'I BOSALT ────────────────────────────────────────
+        //
+        // Odeme onayinin dort yan etkisi (fatura, sadakat, referans odulu, kupon sayaci) artik
+        // callback'in ICINDE degil, "PaymentConfirmed" outbox mesajiyla ve OutboxProcessor
+        // tarafindan uygulaniyor. Uretimde bunu `Cron.Minutely` tetikliyor; testte o zamanlayiciyi
+        // BEKLEYEMEYIZ, dolayisiyla isleyici ACIKCA cagrilir.
+        //
+        // BU BIR TEST KOLAYLIGI DEGIL, SOZLESMENIN PARCASI: asagidaki pinler "yan etki UYGULANDI"
+        // iddiasini olcuyor ve o iddia ARTIK isleyici kostuktan SONRA dogru. Cagriyi atlamak,
+        // pinlerin yanlis bir ani (henuz uygulanmamis durumu) olcmesi demek olurdu.
+        private async Task OutboxBosaltAsync() =>
+            await WithScopeAsync(async sp =>
+            {
+                await sp.GetRequiredService<Divisima.Bussiness.Outbox.OutboxProcessor>().ProcessPendingAsync();
+                return true;
+            });
+
+        // Callback + outbox bosaltma: "odeme onaylandi VE yan etkileri uygulandi" durumuna
+        // getiren tek adim. Yalniz BASARILI dalda anlamli (basarisiz dalda olay yazilmaz).
+        private async Task<(HttpStatusCode code, Divisima.Core.Utilities.Results.Result result)> CallbackVeYanEtkilerAsync(
+            string token, string? signature)
+        {
+            var r = await CallbackAsync(token, signature);
+            await OutboxBosaltAsync();
+            return r;
+        }
+
         private static async Task<Payment> ReadPaymentAsync(int orderId)
         {
             await using var ctx = NewContext();
@@ -450,6 +477,11 @@ namespace Divisima.IntegrationTests
             var sonuclar = await Task.WhenAll(Enumerable.Range(0, callers)
                 .Select(_ => CallbackAsync(token, Sign(token))));
 
+            // SPRINT 8 MADDE 3: yan etkiler outbox'a tasindi. Sekiz paralel callback'ten YALNIZ
+            // BIRI kazanir ve YALNIZ o TEK bir "PaymentConfirmed" mesaji yazar; isleyici bir kez
+            // kosar. Pinin olctugu "sadakat TAM 1 satir" iddiasi bu adimdan SONRA anlamlidir.
+            await OutboxBosaltAsync();
+
             var kodlar = string.Join(",", sonuclar.Select(s => (int)s.code));
 
             // ASIL SINAV: yan etki TEK. Stok bir kez dusmus, odeme basarili, siparis onayli.
@@ -534,10 +566,15 @@ namespace Divisima.IntegrationTests
 
             var ilk = await CallbackAsync(token, Sign(token));
             ilk.result.Success.Should().BeTrue("ilk callback isi yapmali");
+            await OutboxBosaltAsync();
             ControllableIyzicoClient.RetrieveCallCount.Should().Be(1);
 
             var ikinci = await CallbackAsync(token, Sign(token));
             ikinci.code.Should().Be(HttpStatusCode.OK);
+
+            // SPRINT 8 MADDE 3: yan etkiler outbox uzerinden. Ikinci callback idempotency
+            // guard'inda durdugu icin IKINCI BIR MESAJ YAZMAZ; isleyici tek mesaji isler.
+            await OutboxBosaltAsync();
             ControllableIyzicoClient.RetrieveCallCount.Should().Be(1,
                 "ikinci callback idempotency guard'inda durmali - sorguya ULASMAMALI");
 
@@ -939,7 +976,7 @@ namespace Divisima.IntegrationTests
                 Installment = 1
             };
 
-            (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue("odeme basarili olmali");
+            (await CallbackVeYanEtkilerAsync(token, Sign(token))).result.Success.Should().BeTrue("odeme basarili olmali");
 
             decimal siparisTutari;
             await using (var ctx = NewContext())
@@ -1140,12 +1177,22 @@ namespace Divisima.IntegrationTests
             // transaction icinde oldugu kod okunarak degil, kupon senaryosu ayri surulerek
             // dogrulanmali (kapsam disi - bkz. rapor).
 
+            // SPRINT 8 MADDE 3 - ROLLBACK OLAY MESAJINI DA GERI ALIR.
+            // "PaymentConfirmed" outbox mesaji A bolgesindeki transaction ICINDE yaziliyor.
+            // Rollback olunca mesaj da YOK olur - aksi halde yan etkiler HIC ONAYLANMAMIS bir
+            // odeme icin uygulanirdi (fatura kesilir, puan verilir). Bu, olay yazimini
+            // transaction ICINE koymanin gerekcesini DOGRUDAN olcuyor.
+            await using (var ctx = NewContext())
+                (await ctx.Set<OutboxMessage>().CountAsync(m => m.event_type == "PaymentConfirmed"))
+                    .Should().Be(0, "rollback outbox mesajini da geri almali");
+
             // YENIDEN GIRIS TEMIZ: ayni token, calisan bagimlilikla tekrar gelirse is TAMAMLANIR.
             // (Vakum kirici: yukaridaki "hicbir sey olmadi" iddialari, akis tamamen bozuk olsa da
             //  yesil kalirdi. Burasi akisin GERCEKTEN calistigini kanitliyor.)
             KontrolluStatusHistory.RecordPatlasin = false;
             var ikinci = await CallbackAsync(token, Sign(token));
             ikinci.result.Success.Should().BeTrue($"yeniden giris basarili olmali: {ikinci.result.Message}");
+            await OutboxBosaltAsync();   // SPRINT 8 MADDE 3: yan etkiler artik isleyicide
 
             (await ReadPaymentAsync(orderId)).payment_status.Should().Be((byte)PaymentStatusEnum.Success);
             (await ReadOrderAsync(orderId)).status.Should().Be((byte)OrderStatusEnum.Confirmed);
@@ -1165,10 +1212,24 @@ namespace Divisima.IntegrationTests
                 "iki ayri deneme yapildi - ilki rollback'le bittigi icin ikincisi guard'a TAKILMAMALI");
         }
 
-        // (ii) B BOLGESI hatasi -> odeme SUCCESS kalir (para gercekten alindi), hata GORUNUR olur,
-        // A bolgesi bozulmaz. Enjeksiyon: sadakat puani (bugun ciplak "catch { }" ile dusuyordu).
+        // (ii) SPRINT 8 MADDE 3 - YAN ETKI HATASI: ODEME SUCCESS KALIR, HATA YENIDEN DENENIR.
+        //
+        // ESKI PIN BILINCLI KIRILDI VE YENIDEN YAZILDI:
+        //   "BBolgesi_HATASI_OdemeSUCCESS_KALIR_Hata_GORUNUR_ABolgesi_BOZULMAZ"
+        // Eski sozlesme: dort yan etki commit SONRASI ayri ayri sariliyordu; biri patlayinca
+        // digerleri KOSMAYA DEVAM EDIYOR ve patlayan adim ADIYLA zaman cizelgesine yaziliyordu -
+        // ama HIC YENIDEN DENENMIYORDU. Sprint 8'de adimlar tek bir outbox mesajina tasindi;
+        // "adim adi zaman cizelgesinde" iddiasi ARTIK YANLIS bir sozlesmeyi savunuyordu.
+        //
+        // YENI SOZLESME - DAHA GUCLU: hata artik KAYBOLMUYOR, YENIDEN DENENIYOR.
+        //   1) Odeme SUCCESS kalir, A bolgesi bozulmaz (para gercekten alindi).
+        //   2) Patlayan adim uygulanmaz.
+        //   3) Mesaj "islendi" SAYILMAZ - Pending kalir, retry_count artar, hata metni kaydedilir.
+        //   4) Hata giderilip isleyici tekrar kosunca is TAMAMLANIR ve daha once uygulanmis
+        //      adim (fatura) IDEMPOTENT oldugu icin CIFTLENMEZ.
+        // (4) eski mimaride IMKANSIZDI - kayip yan etki kalici oluyordu.
         [Fact]
-        public async Task BBolgesi_HATASI_OdemeSUCCESS_KALIR_Hata_GORUNUR_ABolgesi_BOZULMAZ()
+        public async Task YanEtkiHatasi_OdemeSUCCESS_KALIR_Mesaj_YENIDEN_DENENIR_ve_TAMAMLANIR()
         {
             if (Skipped()) return;
             var (orderId, token, amount) = await NewPendingPaymentAsync(qty: 2, stock: 10);
@@ -1189,26 +1250,49 @@ namespace Divisima.IntegrationTests
 
             KontrolluLoyalty.EarnPatlasin = true;
             var r = await CallbackAsync(token, Sign(token));
-            r.result.Success.Should().BeTrue("commit sonrasi yan etki hatasi odemeyi BOZMAZ - para alindi");
+            r.result.Success.Should().BeTrue("yan etki hatasi odemeyi BOZMAZ - para alindi");
+            await OutboxBosaltAsync();   // isleyici kosar ve sadakat adiminda patlar
 
             // A bolgesi bozulmadi.
             (await ReadPaymentAsync(orderId)).payment_status.Should().Be((byte)PaymentStatusEnum.Success);
             (await ReadOrderAsync(orderId)).status.Should().Be((byte)OrderStatusEnum.Confirmed);
             (await ReadStockAsync(productId)).physical.Should().Be(fizikselOnce - 2, "stok dususu kalici");
 
-            await using var ctx = NewContext();
-            // Patlayan adim GERCEKTEN uygulanmadi (vakum kirici - flag isliyor mu?).
-            (await ctx.Set<LoyaltyTransaction>().CountAsync(t => t.order_id == orderId))
-                .Should().Be(0, "patlayan adim uygulanmamali");
-            // Diger B adimlari etkilenmedi - bir adimin hatasi zinciri KESMEZ.
-            (await ctx.Set<Invoice>().CountAsync(i => i.order_id == orderId))
-                .Should().Be(1, "fatura adimi patlayan adimdan BAGIMSIZ calismali");
+            await using (var ctx = NewContext())
+            {
+                // Patlayan adim GERCEKTEN uygulanmadi (vakum kirici - bayrak isliyor mu?).
+                (await ctx.Set<LoyaltyTransaction>().CountAsync(t => t.order_id == orderId))
+                    .Should().Be(0, "patlayan adim uygulanmamali");
+                // Ondan ONCEKI adim uygulandi - handler sirali kosuyor.
+                (await ctx.Set<Invoice>().CountAsync(i => i.order_id == orderId))
+                    .Should().Be(1, "fatura adimi sadakat adimindan ONCE kosar ve uygulanir");
 
-            // ASIL SINAV: hata GORUNUR. Hangi adimin patladigi zaman cizelgesinde ayirt edilebilir.
-            var notlar = await ctx.Set<OrderStatusHistory>().AsNoTracking()
-                .Where(h => h.order_id == orderId).Select(h => h.note).ToListAsync();
-            notlar.Should().Contain(n => n != null && n.Contains("sadakat puani"),
-                $"patlayan adim ADIYLA kaydedilmeli - sessiz dusmemeli. Notlar: {string.Join(" | ", notlar)}");
+                // ASIL SINAV (YENI): mesaj ISLENDI SAYILMAZ - yeniden denenecek.
+                var mesaj = await ctx.Set<OutboxMessage>().AsNoTracking()
+                    .SingleAsync(m => m.event_type == "PaymentConfirmed");
+                mesaj.status.Should().Be((byte)0, "hata sonrasi mesaj Pending kalmali - yeniden denenecek");
+                mesaj.retry_count.Should().Be(1, "deneme sayaci artmali");
+                mesaj.error.Should().NotBeNullOrWhiteSpace("hata metni kaydedilmeli - sessiz dusmemeli");
+                mesaj.processed_at.Should().BeNull();
+            }
+
+            // YENIDEN DENEME: hata giderilir, isleyici tekrar kosar.
+            KontrolluLoyalty.EarnPatlasin = false;
+            await OutboxBosaltAsync();
+
+            await using (var son = NewContext())
+            {
+                (await son.Set<LoyaltyTransaction>().CountAsync(t => t.order_id == orderId
+                        && t.type == (byte)LedgerEntryTypeEnum.Earn))
+                    .Should().Be(1, "yeniden denemede sadakat TAM BIR kez verilmeli - eski mimaride HIC verilmezdi");
+                (await son.Set<Invoice>().CountAsync(i => i.order_id == orderId))
+                    .Should().Be(1, "ilk denemede kesilen fatura CIFTLENMEMELI - adim idempotent");
+
+                var mesaj = await son.Set<OutboxMessage>().AsNoTracking()
+                    .SingleAsync(m => m.event_type == "PaymentConfirmed");
+                mesaj.status.Should().Be((byte)1, "basarili yeniden denemede mesaj Processed olmali");
+                mesaj.processed_at.Should().NotBeNull();
+            }
         }
 
         // (iv) BASARISIZ dalda cuzdan iadesi + defter kaydi ATOMIK.

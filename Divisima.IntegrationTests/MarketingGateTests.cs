@@ -245,6 +245,10 @@ namespace Divisima.IntegrationTests
 
                 ctx.Set<StockNotificationRequest>().Add(new StockNotificationRequest
                 {
+                    // SPRINT 8 MADDE 10: unsubscribe_token artik ZORUNLU (NOT NULL). Tokensiz bir satir
+                    // hicbir zaman abonelikten cikarilamaz - o yuzden kolon opsiyonel BIRAKILMADI ve
+                    // dogrudan insert yapan test kurgulari da uretimle ayni sozlesmeye uyuyor.
+                    unsubscribe_token = Divisima.Core.Utilities.Security.UnsubscribeToken.Yeni(),
                     product_id = productId,
                     size = "M",
                     email = $"stok-{Guid.NewGuid():N}@divisima.test",
@@ -260,7 +264,11 @@ namespace Divisima.IntegrationTests
             await using (var ctx = NewContext())
             {
                 var mgr = new StockNotificationManager(
-                    new EfStockNotificationRequestDal(ctx), new EfProductDal(ctx), mail);
+                    new EfStockNotificationRequestDal(ctx), new EfProductDal(ctx), mail,
+                    // SPRINT 8 MADDE 10: yapilandirma abonelikten-cikma baglantisinin TABANI icin.
+                    // BOS birakiliyor - bu testler mail GONDERIMINI olcuyor, baglanti metnini degil;
+                    // taban bossa manager baglanti yerine "Hesabim > Bildirimlerim" metni yaziyor.
+                    new ConfigurationBuilder().Build());
                 await mgr.NotifyBackInStock(productId, "M");
             }
 

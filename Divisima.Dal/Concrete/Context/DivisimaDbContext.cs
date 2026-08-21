@@ -205,6 +205,17 @@ namespace Divisima.DataAccess.Concrete.Context
                 b.Property(u => u.order_id).HasColumnName("order_id");
                 b.Property(u => u.discount_applied).HasColumnName("discount_applied").HasColumnType("decimal(18,2)");
                 b.Property(u => u.created_at).HasColumnName("created_at");
+
+                // SPRINT 8 MADDE 1 - IKINCI SAVUNMA HATTI.
+                // used_count artik bu tablodan TURETILIYOR; dolayisiyla sayacin dogrulugu
+                // "ayni siparis icin iki kullanim satiri olusamaz" garantisine baglandi.
+                // Uygulama katmani zaten satiri transaction icinde yaziyor, ama at-least-once
+                // bir yeniden deneme (outbox - madde 3) ya da paralel bir callback ayni siparis
+                // icin ikinci satiri deneyebilir. Veritabani duzeyinde ENGELLENIR.
+                // (Sprint 6'daki UX_loyalty_transactions_order_earn ile ayni kalip.)
+                b.HasIndex(u => new { u.coupon_id, u.order_id })
+                    .IsUnique()
+                    .HasDatabaseName("UX_coupon_usages_coupon_order");
             });
 
             // Açıklayıcı yorum: Collection tablo + kolon konfigürasyonu
@@ -596,6 +607,11 @@ namespace Divisima.DataAccess.Concrete.Context
                 b.Property(n => n.is_notified).HasColumnName("is_notified");
                 b.Property(n => n.created_at).HasColumnName("created_at");
                 b.Property(n => n.notified_at).HasColumnName("notified_at");
+                // SPRINT 8 MADDE 10 - abonelikten cikma jetonu. Aramanin TEK yolu bu oldugu icin
+                // UNIQUE + indeksli; jeton uretimi cakisirsa insert gurultulu duser (sessizce
+                // ikinci bir abonelik olusmaz).
+                b.Property(n => n.unsubscribe_token).HasColumnName("unsubscribe_token").HasMaxLength(64).IsRequired();
+                b.HasIndex(n => n.unsubscribe_token).IsUnique().HasDatabaseName("UX_stock_notification_requests_token");
                 // Açıklayıcı yorum: NotifyBackInStock sorgusu (product_id + size + is_notified) için bileşik index
                 b.HasIndex(n => new { n.product_id, n.size, n.is_notified });
             });
@@ -820,6 +836,26 @@ namespace Divisima.DataAccess.Concrete.Context
                 b.Property(t => t.order_id).HasColumnName("order_id");
                 b.Property(t => t.created_at).HasColumnName("created_at");
                 b.HasIndex(t => new { t.customer_id, t.created_at });
+
+                // SPRINT 8 MADDE 3 - REFERANS ODULU IDEMPOTENCY'SI DB DUZEYINE INDI.
+                // Yan etkiler outbox'a tasindi ve at-least-once oldu. Dort adimin ucunun
+                // idempotentlik dayanagi zaten VERITABANINDAYDI (fatura: "zaten var" kontrolu,
+                // sadakat: UX_loyalty_transactions_order_earn, kupon: turetme + UNIQUE).
+                // Referans odulunun tek korumasi UYGULAMA KATMANINDAKI oku-sonra-davran guard'iydi:
+                // "bu musteriye daha once davet-edilen odulu verildi mi?" Eszamanli iki teslimat
+                // ikisi de "verilmemis" okuyup IKI KEZ odeyebilirdi. Kisit DB'ye indirildi.
+                //
+                // FILTRELI: yalniz DAVET EDILEN odulu tekil. "Davet EDEN" odulu TEKRARLANABILIR -
+                // bir kullanici birden fazla kisiyi davet edebilir ve her biri icin odul alir.
+                // Filtresiz bir (customer_id, reason) kisiti o mesru davranisi KIRARDI.
+                //
+                // DIKKAT - DIZGE BAGIMLILIGI: filtre, ReferralManager'daki sebep metnine BIREBIR
+                // baglidir (RefereeRewardReason sabiti). Metin degisirse indeks eslesmez ve koruma
+                // SESSIZCE kalkar; ikisi BIRLIKTE degistirilmeli.
+                b.HasIndex(t => t.customer_id)
+                    .IsUnique()
+                    .HasFilter("[reason] = N'Referans ödülü (davet edilen)'")
+                    .HasDatabaseName("UX_store_credit_referee_reward");
             });
             modelBuilder.Entity<ConsentRecord>(b =>
             {
@@ -855,6 +891,9 @@ namespace Divisima.DataAccess.Concrete.Context
                 b.Property(p => p.is_notified).HasColumnName("is_notified");
                 b.Property(p => p.created_at).HasColumnName("created_at");
                 b.Property(p => p.notified_at).HasColumnName("notified_at");
+                // SPRINT 8 MADDE 10 - abonelikten cikma jetonu (stok bildirimiyle ayni gerekce).
+                b.Property(p => p.unsubscribe_token).HasColumnName("unsubscribe_token").HasMaxLength(64).IsRequired();
+                b.HasIndex(p => p.unsubscribe_token).IsUnique().HasDatabaseName("UX_price_drop_subscriptions_token");
                 b.HasIndex(p => new { p.product_id, p.is_notified });
             });
 

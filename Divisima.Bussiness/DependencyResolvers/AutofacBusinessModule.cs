@@ -133,6 +133,9 @@ namespace Divisima.Bussiness.DependencyResolvers.Autofac
             // Açıklayıcı yorum: Kalan (opsiyonel): Address, Customer profil servisi
             // ── Outbox (garantili event) ──
             builder.RegisterType<OutboxService>().As<IOutboxService>().InstancePerLifetimeScope();
+            // SPRINT 8 MADDE 3: odeme onayi yan etkileri (fatura + sadakat + referans + kupon sayaci).
+            builder.RegisterType<Divisima.Bussiness.Events.PaymentConfirmedSideEffects>()
+                .As<Divisima.Bussiness.Events.IPaymentConfirmedSideEffects>().InstancePerLifetimeScope();
             builder.RegisterType<OutboxProcessor>().AsSelf().InstancePerLifetimeScope();
             builder.RegisterType<Divisima.Bussiness.Seed.AdminSeeder>().AsSelf().InstancePerLifetimeScope();
             // E3: legal icerik tohumlayici (idempotent - mevcut slug'a DOKUNMAZ).

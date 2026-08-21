@@ -52,6 +52,22 @@ namespace Divisima.Bussiness.Concrete
             if (order == null)
                 return (HttpStatusCode.NotFound, new ErrorResult(Messages.OrderNotFound));
 
+            // SPRINT 8 MADDE 2 - SIPARIS DURUMU GUARD'I.
+            // Bu uc, var olan HERHANGI bir siparis id'si icin fatura kesiyordu; tek koruma
+            // "cagiran dogru yerden cagirsin" varsayimiydi. Sprint 7'de odeme akisindaki cagri
+            // onay dalina tasindi ve o yol duzeldi, ama UCUN KENDISI korumasiz kaldi - baska
+            // bir cagri yolu (admin ekrani, toplu is, ileride outbox yeniden denemesi) IPTAL
+            // EDILMIS ya da HENUZ ODENMEMIS bir siparise fatura kesebilirdi.
+            // Fatura mali bir beyandir: iptal edilmis siparise kesilen fatura ciroyu sisirir ve
+            // musteriye odenmemis bir borc gonderir.
+            //
+            // KURAL: yalnizca ONAYLANMIS VE SONRASI durumlar faturalanabilir.
+            //   Pending(0)   -> HAYIR (para henuz alinmadi)
+            //   Cancelled(5) -> HAYIR (siparis yok hukmunde)
+            //   Confirmed(1) / Preparing(2) / Shipped(3) / Delivered(4) -> EVET
+            if (order.status == (byte)OrderStatusEnum.Pending || order.status == (byte)OrderStatusEnum.Cancelled)
+                return (HttpStatusCode.BadRequest, new ErrorResult(Messages.InvoiceOrderNotBillable));
+
             // Açıklayıcı yorum: Idempotent - bu sipariş için fatura zaten varsa tekrar üretme
             var existing = await _invoiceDal.GetAsync(i => i.order_id == orderId);
             if (existing != null)

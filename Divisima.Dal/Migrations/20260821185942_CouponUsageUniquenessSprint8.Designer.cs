@@ -4,6 +4,7 @@ using Divisima.DataAccess.Concrete.Context;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Divisima.Dal.Migrations
 {
     [DbContext(typeof(DivisimaDbContext))]
-    partial class DivisimaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260821185942_CouponUsageUniquenessSprint8")]
+    partial class CouponUsageUniquenessSprint8
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1534,17 +1537,7 @@ namespace Divisima.Dal.Migrations
                         .HasColumnType("decimal(18,2)")
                         .HasColumnName("subscribed_price");
 
-                    b.Property<string>("unsubscribe_token")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)")
-                        .HasColumnName("unsubscribe_token");
-
                     b.HasKey("id");
-
-                    b.HasIndex("unsubscribe_token")
-                        .IsUnique()
-                        .HasDatabaseName("UX_price_drop_subscriptions_token");
 
                     b.HasIndex("product_id", "email")
                         .IsUnique()
@@ -2410,17 +2403,7 @@ namespace Divisima.Dal.Migrations
                         .HasColumnType("nvarchar(20)")
                         .HasColumnName("size");
 
-                    b.Property<string>("unsubscribe_token")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)")
-                        .HasColumnName("unsubscribe_token");
-
                     b.HasKey("id");
-
-                    b.HasIndex("unsubscribe_token")
-                        .IsUnique()
-                        .HasDatabaseName("UX_stock_notification_requests_token");
 
                     b.HasIndex("product_id", "size", "email")
                         .IsUnique()
@@ -2517,11 +2500,6 @@ namespace Divisima.Dal.Migrations
                         .HasColumnName("type");
 
                     b.HasKey("id");
-
-                    b.HasIndex("customer_id")
-                        .IsUnique()
-                        .HasDatabaseName("UX_store_credit_referee_reward")
-                        .HasFilter("[reason] = N'Referans ödülü (davet edilen)'");
 
                     b.HasIndex("customer_id", "created_at");
 

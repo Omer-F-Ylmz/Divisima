@@ -9,6 +9,8 @@ using Divisima.Entity.Entities;
 using FluentAssertions;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Divisima.IntegrationTests
@@ -93,8 +95,31 @@ namespace Divisima.IntegrationTests
             public Task PublishAsync(OrderPlacedEvent evt) => Task.CompletedTask;
         }
 
+        // SPRINT 8 MADDE 3: isleyiciye odeme-onayi yan etkileri ve zaman cizelgesi bagimliligi eklendi.
+        // Bu sinif E-POSTA mesajlarini olcuyor; odeme dali CAGRILMAZ, cagrilirsa GURULTULU duser
+        // (sessiz bir sahte donmek, testin yanlis yolu olctugunu gizlerdi).
+        // SPRINT 8 MADDE 3: isleyici odeme dalinda MESAJ BASINA AYRI SCOPE aciyor. Bu sinif
+        // E-POSTA mesajlarini olcuyor; odeme dali CAGRILMAZ, dolayisiyla scope da hic istenmez.
+        // Istenirse GURULTULU duser - sessiz bir sahte, testin yanlis yolu olctugunu gizlerdi.
+        private sealed class CagrilmayanScopeFactory : IServiceScopeFactory
+        {
+            public IServiceScope CreateScope()
+                => throw new NotSupportedException("Mail sozlesme testlerinde odeme dali kullanilmaz.");
+        }
+
+        private sealed class CagrilmayanZamanCizelgesi : Divisima.Bussiness.Abstract.IOrderStatusHistoryService
+        {
+            public Task RecordAsync(int orderId, byte status, string note)
+                => throw new NotSupportedException("Mail sozlesme testlerinde kullanilmaz.");
+            public Task<(System.Net.HttpStatusCode, Divisima.Core.Utilities.Results.Result)> GetTimeline(int orderId, int customerId)
+                => throw new NotSupportedException("Mail sozlesme testlerinde kullanilmaz.");
+        }
+
         private static OutboxProcessor NewProcessor(DivisimaDbContext ctx, IMailService mail) =>
-            new OutboxProcessor(new EfOutboxMessageDal(ctx), new NoopOrderPlacedPublisher(), mail);
+            new OutboxProcessor(new EfOutboxMessageDal(ctx), new NoopOrderPlacedPublisher(), mail,
+                new CagrilmayanZamanCizelgesi(),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<OutboxProcessor>.Instance,
+                new CagrilmayanScopeFactory());
 
         private static async Task<int> SeedEmailMessageAsync()
         {
@@ -253,6 +278,10 @@ namespace Divisima.IntegrationTests
 
                 ctx.Set<StockNotificationRequest>().Add(new StockNotificationRequest
                 {
+                    // SPRINT 8 MADDE 10: unsubscribe_token artik ZORUNLU (NOT NULL). Tokensiz bir satir
+                    // hicbir zaman abonelikten cikarilamaz - o yuzden kolon opsiyonel BIRAKILMADI ve
+                    // dogrudan insert yapan test kurgulari da uretimle ayni sozlesmeye uyuyor.
+                    unsubscribe_token = Divisima.Core.Utilities.Security.UnsubscribeToken.Yeni(),
                     product_id = productId,
                     size = "M",
                     email = $"abone-{Guid.NewGuid():N}@divisima.test",
@@ -266,7 +295,11 @@ namespace Divisima.IntegrationTests
             await using (var ctx = NewContext())
             {
                 var mgr = new Divisima.Bussiness.Concrete.StockNotificationManager(
-                    new EfStockNotificationRequestDal(ctx), new EfProductDal(ctx), mail);
+                    new EfStockNotificationRequestDal(ctx), new EfProductDal(ctx), mail,
+                    // SPRINT 8 MADDE 10: yapilandirma abonelikten-cikma baglantisinin TABANI icin.
+                    // BOS birakiliyor - bu testler mail GONDERIMINI olcuyor, baglanti metnini degil;
+                    // taban bossa manager baglanti yerine "Hesabim > Bildirimlerim" metni yaziyor.
+                    new ConfigurationBuilder().Build());
                 await mgr.NotifyBackInStock(productId, "M");
             }
 

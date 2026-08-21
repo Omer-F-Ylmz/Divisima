@@ -72,6 +72,24 @@ namespace Divisima.Bussiness.Concrete
         // Açıklayıcı yorum: Sipariş tutarından puan hesapla + kazandır (ödeme başarısında çağrılır)
         public async Task<(HttpStatusCode, Result)> EarnFromOrder(int customerId, decimal orderTotal, int orderId)
         {
+            // SPRINT 8 MADDE 3 - IDEMPOTENCY ACIKCA ELE ALINIR.
+            // Yan etkiler outbox'a tasindi ve teslimat AT-LEAST-ONCE oldu: ayni siparis icin bu
+            // metot birden fazla cagrilabilir. Onceden ikinci cagri
+            // UX_loyalty_transactions_order_earn ihlaline dusuyor, EarnPoints o istisnayi ICERIDE
+            // yutup 500 donuyordu. Sonuc "kazara dogru"ydu: kopya satir olusmuyordu ama
+            //   (a) cagiran basarisizligi GERCEK bir hatadan AYIRT EDEMIYORDU,
+            //   (b) her yeniden teslimat gereksiz bir transaction + rollback maliyeti cikariyordu.
+            // Artik ONCE soruyoruz: bu siparis icin kazanim ZATEN VAR MI? Varsa BASARI doneriz.
+            // Boylece cagiran "basarisiz sonuc = yeniden dene" kuralini guvenle uygulayabilir.
+            //
+            // NOT: bu okuma bir YARISI kapatmaz (iki es zamanli teslimat ikisi de "yok" gorebilir) -
+            // orada VERITABANI indeksi devreye girer ve ikincisi hata alir. Iki katman birlikte:
+            // okuma normal yolu ucuzlatir, indeks dogrulugu GARANTI eder.
+            var zatenKazanildi = await _txDal.AnyAsync(t =>
+                t.order_id == orderId && t.type == (byte)LedgerEntryTypeEnum.Earn);
+            if (zatenKazanildi)
+                return (HttpStatusCode.OK, new SuccessResult(Messages.LoyaltyEarned));
+
             int basePoints = (int)Math.Floor(orderTotal / SpendPerPoint);
             // Açıklayıcı yorum: SADAKAT SEVİYESİ ÇARPANI uygula - Gold %50, Platinum 2x fazla puan kazanır.
             // (Aksi halde tier sistemi kozmetikti; çarpan hiç kullanılmıyordu.)
@@ -82,6 +100,7 @@ namespace Divisima.Bussiness.Concrete
             int points = (int)Math.Floor(basePoints * LoyaltyTierHelper.PointMultiplier(tier));
             return await EarnPoints(customerId, points, "Sipariş puanı", orderId);
         }
+
 
         // Açıklayıcı yorum: SİPARİŞ İPTALİNDE PUAN GERİ ALIMI (farming engeli). Puanlar ödemede kazanılıyor;
         // iptal edilince kazanılan puan geri alınmazsa müşteri "sipariş ver -> puan kazan -> iptal et -> refund AL +

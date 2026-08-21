@@ -134,6 +134,11 @@ CREATE TABLE coupon_usages (
     discount_applied DECIMAL(18,2) NOT NULL,
     created_at DATETIME2 NOT NULL
 );
+-- Siparis basina TEK kupon kullanimi (Sprint 8 madde 1). coupons.used_count artik bu
+-- tablodan TURETILIYOR; sayacin dogrulugu "ayni siparis iki kez sayilamaz" garantisine bagli.
+-- At-least-once bir yeniden deneme (outbox) ya da paralel bir callback ikinci satiri
+-- yazamaz. UX_loyalty_transactions_order_earn ile ayni kalip.
+CREATE UNIQUE INDEX UX_coupon_usages_coupon_order ON coupon_usages (coupon_id, order_id);
 
 CREATE TABLE customers (
     id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
@@ -358,8 +363,12 @@ CREATE TABLE price_drop_subscriptions (
     subscribed_price DECIMAL(18,2) NOT NULL,
     is_notified BIT NOT NULL,
     created_at DATETIME2 NOT NULL,
-    notified_at DATETIME2 NULL
+    notified_at DATETIME2 NULL,
+    -- Sprint 8 madde 10: abonelikten cikma jetonu. Abonelik ANONIM kurulabildigi icin cikma
+    -- yolu kimlik dogrulamasi isteyemez; jeton e-postadaki baglantinin sahiplik kanitidir.
+    unsubscribe_token NVARCHAR(64) NOT NULL
 );
+CREATE UNIQUE INDEX UX_price_drop_subscriptions_token ON price_drop_subscriptions (unsubscribe_token);
 
 CREATE TABLE products (
     id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
@@ -530,8 +539,11 @@ CREATE TABLE stock_notification_requests (
     email NVARCHAR(256) NOT NULL,
     is_notified BIT NOT NULL,
     created_at DATETIME2 NOT NULL,
-    notified_at DATETIME2 NULL
+    notified_at DATETIME2 NULL,
+    -- Sprint 8 madde 10: abonelikten cikma jetonu (price_drop_subscriptions ile ayni gerekce).
+    unsubscribe_token NVARCHAR(64) NOT NULL
 );
+CREATE UNIQUE INDEX UX_stock_notification_requests_token ON stock_notification_requests (unsubscribe_token);
 
 CREATE TABLE stock_reservations (
     id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
@@ -554,6 +566,14 @@ CREATE TABLE store_credit_transactions (
     order_id INT NULL,
     created_at DATETIME2 NOT NULL
 );
+-- Sprint 8 madde 3: DAVET EDILEN referans odulu MUSTERI BASINA TEKIL. Yan etkiler outbox'a
+-- tasindi ve at-least-once oldu; oncesinde tek koruma uygulama katmanindaki oku-sonra-davran
+-- guard'iydi ve eszamanli iki teslimat IKI KEZ odeyebilirdi. FILTRELI: "davet EDEN" odulu
+-- TEKRARLANABILIR (bir kullanici birden fazla kisiyi davet edebilir).
+-- DIKKAT: filtre ReferralManager.RefereeRewardReason metnine BIREBIR baglidir - ikisi BIRLIKTE
+-- degistirilmeli, aksi halde koruma SESSIZCE kalkar.
+CREATE UNIQUE INDEX UX_store_credit_referee_reward ON store_credit_transactions (customer_id)
+    WHERE reason = N'Referans ödülü (davet edilen)';
 
 CREATE TABLE sub_categories (
     id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
