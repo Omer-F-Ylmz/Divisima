@@ -3,7 +3,12 @@ root = true
 
 [*]
 charset = utf-8
-end_of_line = crlf
+# E2b-format dalgasi: OLCULDU - deponun icerigi neredeyse tamamen LF (650 dosyanin yalniz
+# ~20'sinde CR; .sln ve .sh dahil her sey LF). "crlf" ilani gercekle celisiyordu ve dotnet
+# format bunu 27.447 ENDOFLINE hatasi olarak raporluyordu; kapi da continue-on-error ile
+# gizlendigi icin yillarca gorunmedi. Politika GERCEGE uyduruldu. .gitattributes bunu
+# checkout tarafinda da zorluyor (eol=lf), boylece Windows ve CI ayni seyi goruyor.
+end_of_line = lf
 insert_final_newline = true
 trim_trailing_whitespace = true
 indent_style = space

@@ -1,7 +1,7 @@
 using Divisima.Bussiness.Abstract;
-using Microsoft.AspNetCore.Authorization;
 using Divisima.Core.Security.Authorization;
 using Divisima.Core.Utilities.Enums;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Swashbuckle.AspNetCore.Annotations;
 

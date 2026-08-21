@@ -1,7 +1,7 @@
+using Divisima.API.Filters;
 using Divisima.Bussiness.Abstract;
 using Divisima.Core.Security.Authorization;
 using Divisima.Core.Utilities.Enums;
-using Divisima.API.Filters;
 using Microsoft.AspNetCore.Mvc;
 using Swashbuckle.AspNetCore.Annotations;
 

@@ -1,5 +1,5 @@
-using FluentValidation;
 using Divisima.Entity.Dtos.Device;
+using FluentValidation;
 
 namespace Divisima.Bussiness.ValidationRules.FluentValidation
 {

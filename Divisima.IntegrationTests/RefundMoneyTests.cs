@@ -1,8 +1,8 @@
 using Divisima.Bussiness.Concrete;
 using Divisima.Core.Integrations.Iyzico;
 using Divisima.Core.Utilities.Enums;
-using Divisima.DataAccess.Concrete.EntityFramework;
 using Divisima.DataAccess.Concrete.Context;
+using Divisima.DataAccess.Concrete.EntityFramework;
 using Divisima.Entity.Entities;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -93,9 +93,13 @@ namespace Divisima.IntegrationTests
             {
                 seed.Set<Payment>().Add(new Payment
                 {
-                    order_id = o.id, payment_provider = "iyzico",
+                    order_id = o.id,
+                    payment_provider = "iyzico",
                     payment_status = (byte)PaymentStatusEnum.Success,
-                    amount = 120m, transaction_id = "tx-test", item_transaction_id = "itx-test", created_at = DateTime.Now
+                    amount = 120m,
+                    transaction_id = "tx-test",
+                    item_transaction_id = "itx-test",
+                    created_at = DateTime.Now
                 });
                 await seed.SaveChangesAsync();
             }
@@ -122,9 +126,13 @@ namespace Divisima.IntegrationTests
             {
                 seed.Set<Payment>().Add(new Payment
                 {
-                    order_id = o.id, payment_provider = "iyzico",
+                    order_id = o.id,
+                    payment_provider = "iyzico",
                     payment_status = (byte)PaymentStatusEnum.Success,
-                    amount = 100m, transaction_id = "tx-fail", item_transaction_id = "itx-fail", created_at = DateTime.Now
+                    amount = 100m,
+                    transaction_id = "tx-fail",
+                    item_transaction_id = "itx-fail",
+                    created_at = DateTime.Now
                 });
                 await seed.SaveChangesAsync();
             }
@@ -218,9 +226,11 @@ namespace Divisima.IntegrationTests
             {
                 seed.Set<Payment>().Add(new Payment
                 {
-                    order_id = o.id, payment_provider = "iyzico",
+                    order_id = o.id,
+                    payment_provider = "iyzico",
                     payment_status = (byte)PaymentStatusEnum.Success,
-                    amount = 100m, transaction_id = "tx-eski",   // item_transaction_id YOK (eski kayit)
+                    amount = 100m,
+                    transaction_id = "tx-eski",   // item_transaction_id YOK (eski kayit)
                     created_at = DateTime.Now
                 });
                 await seed.SaveChangesAsync();
@@ -263,9 +273,12 @@ namespace Divisima.IntegrationTests
             {
                 seed.Set<Payment>().Add(new Payment
                 {
-                    order_id = o.id, payment_provider = "iyzico",
+                    order_id = o.id,
+                    payment_provider = "iyzico",
                     payment_status = (byte)PaymentStatusEnum.Success,
-                    amount = 100m, transaction_id = "tx-b2", item_transaction_id = "itx-b2",
+                    amount = 100m,
+                    transaction_id = "tx-b2",
+                    item_transaction_id = "itx-b2",
                     created_at = DateTime.Now
                 });
                 await seed.SaveChangesAsync();

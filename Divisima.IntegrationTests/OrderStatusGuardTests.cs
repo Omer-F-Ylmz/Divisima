@@ -101,9 +101,14 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             var c = new Customer
             {
-                name = "Guard Testi", email = $"guard-{Guid.NewGuid():N}@divisima.test", phone = "5550000000",
-                password_hash = new byte[] { 1 }, password_salt = new byte[] { 2 },
-                is_active = true, email_verified = true, created_at = DateTime.Now
+                name = "Guard Testi",
+                email = $"guard-{Guid.NewGuid():N}@divisima.test",
+                phone = "5550000000",
+                password_hash = new byte[] { 1 },
+                password_salt = new byte[] { 2 },
+                is_active = true,
+                email_verified = true,
+                created_at = DateTime.Now
             };
             ctx.Set<Customer>().Add(c);
             await ctx.SaveChangesAsync();
@@ -113,8 +118,12 @@ namespace Divisima.IntegrationTests
                 customer_id = c.id,
                 order_number = $"ORD-{Guid.NewGuid():N}".Substring(0, 18),
                 status = (byte)status,
-                subtotal = 200m, total_price = 200m, store_credit_used = 0m,
-                is_online_payment_done = false, currency = "TRY", created_at = DateTime.Now
+                subtotal = 200m,
+                total_price = 200m,
+                store_credit_used = 0m,
+                is_online_payment_done = false,
+                currency = "TRY",
+                created_at = DateTime.Now
             };
             ctx.Set<Order>().Add(o);
             await ctx.SaveChangesAsync();

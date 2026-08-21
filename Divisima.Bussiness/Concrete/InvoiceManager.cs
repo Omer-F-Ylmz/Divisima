@@ -1,14 +1,14 @@
 using System.Net;
-using Microsoft.Extensions.Configuration;
-using Divisima.Core.Utilities.Pricing;
 using Divisima.Bussiness.Abstract;
 using Divisima.Core.Integrations.EInvoice;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Enums;
+using Divisima.Core.Utilities.Pricing;
 using Divisima.Core.Utilities.Results;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Invoice;
 using Divisima.Entity.Entities;
+using Microsoft.Extensions.Configuration;
 
 namespace Divisima.Bussiness.Concrete
 {

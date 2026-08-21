@@ -1,5 +1,5 @@
-using Microsoft.AspNetCore.Authorization;
 using Divisima.Core.Utilities.Enums;
+using Microsoft.AspNetCore.Authorization;
 
 namespace Divisima.Core.Security.Authorization
 {

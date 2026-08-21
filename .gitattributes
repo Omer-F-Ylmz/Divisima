@@ -1,0 +1,45 @@
+# Divisima - SATIR SONU POLITIKASI (kok neden duzeltmesi)
+#
+# NEDEN VAR: format-check kapisi uzun suredir DUSUYORDU ve continue-on-error ile gizleniyordu.
+# Olculdu (bayt duzeyinde): deponun icerigi neredeyse tamamen LF (650 izlenen dosyanin yalniz
+# ~20'sinde CR var; .sln ve .sh dahil her sey LF), ama .editorconfig "end_of_line = crlf"
+# ilan ediyordu. dotnet format bu celiskiyi 27.447 ENDOFLINE hatasi olarak raporluyordu.
+# Kok neden BU CELISKIYDI - dosyalarin kendisi degil.
+#
+# COZUM YONU: politikayi GERCEGE uydur. Depo LF, o halde her yerde LF.
+#   - .editorconfig  -> end_of_line = lf
+#   - buradaki eol=lf -> checkout HER PLATFORMDA LF verir; core.autocrlf ayarindan BAGIMSIZ.
+#     (Onceki durum: Windows'ta autocrlf=true, ubuntu CI'da tanimsiz -> iki taraf farkli
+#      goruyordu ve kapi yalniz CI'da dusuyordu.)
+#
+# ALTERNATIF REDDEDILDI: her seyi CRLF'e cevirmek (.gitattributes eol=crlf). Depo icerigi LF
+# oldugu icin bu ~28.000 satirlik bir icerik diff'i uretirdi; izole bir bicimlendirme
+# commit'inin amacina aykiri.
+
+# Varsayilan: metin dosyalarini otomatik algila, calisma agacinda LF ver.
+* text=auto eol=lf
+
+# Kabuk betikleri LF ZORUNLU - CRLF ile Linux'ta "bad interpreter" hatasi verir.
+*.sh text eol=lf
+
+# ILERIYE DONUK KURAL (su an depoda eslesen dosya YOK - olculdu):
+# Windows batch dosyalari CRLF ister; ileride eklenirse dogru dogsunlar.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Ikili dosyalar - git bunlara satir sonu donusumu UYGULAMAMALI.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.zip binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.dll binary
+*.pfx binary
+*.snk binary

@@ -42,7 +42,8 @@ namespace Divisima.Bussiness.Concrete
                         product_id = dto.product_id,
                         attribute_key = pair.key.Trim().ToLowerInvariant(),
                         attribute_value = pair.value.Trim().ToLowerInvariant(),
-                        is_active = true, created_at = DateTime.Now
+                        is_active = true,
+                        created_at = DateTime.Now
                     });
                 }
             }

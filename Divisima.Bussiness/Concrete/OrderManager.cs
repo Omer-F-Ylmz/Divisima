@@ -1,20 +1,20 @@
-using System.Net;
 using System.Linq;
-using Divisima.Core.Integrations.Iyzico;
+using System.Net;
 using AutoMapper;
 using Divisima.Bussiness.Abstract;
 using Divisima.Bussiness.Events;
 using Divisima.Bussiness.Outbox;
-using Divisima.Core.Utilities.Constants;
-using Divisima.Core.Utilities.Orders;
-using Divisima.Core.Utilities.Locking;
-using Divisima.Core.Utilities.Pricing;
-using Divisima.Core.Utilities.Shipping;
-using Divisima.Core.Utilities.Enums;
-using Divisima.Core.Utilities.Results;
 using Divisima.Core.DataAccess;
+using Divisima.Core.Integrations.Iyzico;
 using Divisima.Core.Integrations.Notifications;
+using Divisima.Core.Utilities.Constants;
+using Divisima.Core.Utilities.Enums;
+using Divisima.Core.Utilities.Locking;
 using Divisima.Core.Utilities.Notifications;
+using Divisima.Core.Utilities.Orders;
+using Divisima.Core.Utilities.Pricing;
+using Divisima.Core.Utilities.Results;
+using Divisima.Core.Utilities.Shipping;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Order;
 using Divisima.Entity.Entities;
@@ -47,7 +47,7 @@ namespace Divisima.Bussiness.Concrete
         private readonly IMapper _mapper;
         private readonly IDistributedLock _distributedLock;
         private readonly IOrderConfirmationService _orderConfirmation;
-        
+
 
         // Açıklayıcı yorum: Frontend sabitleri (FREE_SHIP=2000, kargo 49.9)
         private const decimal FreeShipThreshold = 2000m;
@@ -329,8 +329,12 @@ namespace Divisima.Bussiness.Concrete
                     }
                     await _creditTxDal.AddAsync(new StoreCreditTransaction
                     {
-                        customer_id = dto.customer_id, amount = creditToApply, type = (byte)LedgerEntryTypeEnum.Redeem,
-                        reason = "Sipariş ödemesi (mağaza kredisi)", order_id = order.id, created_at = DateTime.Now
+                        customer_id = dto.customer_id,
+                        amount = creditToApply,
+                        type = (byte)LedgerEntryTypeEnum.Redeem,
+                        reason = "Sipariş ödemesi (mağaza kredisi)",
+                        order_id = order.id,
+                        created_at = DateTime.Now
                     });
                 }
 
@@ -786,8 +790,12 @@ Tarih: {order.created_at:dd.MM.yyyy}</p>
                     }
                     await _creditTxDal.AddAsync(new StoreCreditTransaction
                     {
-                        customer_id = customerId, amount = itemRefund, type = (byte)LedgerEntryTypeEnum.Earn,
-                        reason = "Kısmi iptal iadesi", order_id = order.id, created_at = DateTime.Now
+                        customer_id = customerId,
+                        amount = itemRefund,
+                        type = (byte)LedgerEntryTypeEnum.Earn,
+                        reason = "Kısmi iptal iadesi",
+                        order_id = order.id,
+                        created_at = DateTime.Now
                     });
                     refundedTotal += itemRefund;
                 }
@@ -816,8 +824,12 @@ Tarih: {order.created_at:dd.MM.yyyy}</p>
                         }
                         await _creditTxDal.AddAsync(new StoreCreditTransaction
                         {
-                            customer_id = customerId, amount = leftoverRefund, type = (byte)LedgerEntryTypeEnum.Earn,
-                            reason = "Tam iptal - kalan (kargo) iadesi", order_id = order.id, created_at = DateTime.Now
+                            customer_id = customerId,
+                            amount = leftoverRefund,
+                            type = (byte)LedgerEntryTypeEnum.Earn,
+                            reason = "Tam iptal - kalan (kargo) iadesi",
+                            order_id = order.id,
+                            created_at = DateTime.Now
                         });
                         refundedTotal += leftoverRefund;
                     }
@@ -861,7 +873,9 @@ Tarih: {order.created_at:dd.MM.yyyy}</p>
             var (earliest, latest) = DeliveryEstimator.Estimate(order.created_at);
             var dto = new Divisima.Entity.Dtos.Order.EstimatedDeliveryDto
             {
-                order_id = orderId, earliest = earliest, latest = latest
+                order_id = orderId,
+                earliest = earliest,
+                latest = latest
             };
             return (HttpStatusCode.OK, new SuccessDataResult<Divisima.Entity.Dtos.Order.EstimatedDeliveryDto>(dto));
         }

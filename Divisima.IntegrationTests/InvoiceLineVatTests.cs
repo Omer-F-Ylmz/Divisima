@@ -95,8 +95,11 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             var c = new Category
             {
-                name = "KDV Kategori", slug = $"kdv-{Guid.NewGuid():N}",
-                vat_rate = vatRate, is_active = true, created_at = DateTime.Now
+                name = "KDV Kategori",
+                slug = $"kdv-{Guid.NewGuid():N}",
+                vat_rate = vatRate,
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Set<Category>().Add(c);
             await ctx.SaveChangesAsync();
@@ -108,9 +111,16 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             var p = new Product
             {
-                name = "KDV Urun", brand = "T", category_id = categoryId, price = price,
-                description = "kdv testi urunu", color_hex = "#111111", product_type = 0,
-                vat_rate = productVatRate, is_active = true, created_at = DateTime.Now
+                name = "KDV Urun",
+                brand = "T",
+                category_id = categoryId,
+                price = price,
+                description = "kdv testi urunu",
+                color_hex = "#111111",
+                product_type = 0,
+                vat_rate = productVatRate,
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Products.Add(p);
             await ctx.SaveChangesAsync();
@@ -123,9 +133,14 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             var c = new Customer
             {
-                name = "KDV Testi", email = $"kdv-{Guid.NewGuid():N}@divisima.test", phone = "5550000000",
-                password_hash = new byte[] { 1 }, password_salt = new byte[] { 2 },
-                is_active = true, email_verified = true, created_at = DateTime.Now
+                name = "KDV Testi",
+                email = $"kdv-{Guid.NewGuid():N}@divisima.test",
+                phone = "5550000000",
+                password_hash = new byte[] { 1 },
+                password_salt = new byte[] { 2 },
+                is_active = true,
+                email_verified = true,
+                created_at = DateTime.Now
             };
             ctx.Set<Customer>().Add(c);
             await ctx.SaveChangesAsync();
@@ -136,8 +151,12 @@ namespace Divisima.IntegrationTests
                 customer_id = c.id,
                 order_number = $"ORD-{Guid.NewGuid():N}".Substring(0, 18),
                 status = (byte)OrderStatusEnum.Confirmed,
-                subtotal = toplam, total_price = toplam, discount_amount = 0m,
-                store_credit_used = 0m, is_online_payment_done = true, currency = "TRY",
+                subtotal = toplam,
+                total_price = toplam,
+                discount_amount = 0m,
+                store_credit_used = 0m,
+                is_online_payment_done = true,
+                currency = "TRY",
                 created_at = DateTime.Now
             };
             ctx.Set<Order>().Add(o);
@@ -147,8 +166,13 @@ namespace Divisima.IntegrationTests
             {
                 ctx.Set<OrderItem>().Add(new OrderItem
                 {
-                    order_id = o.id, product_id = it.productId, size = "M", quantity = it.qty,
-                    unit_price = it.unitPrice, is_cancelled = false, created_at = DateTime.Now
+                    order_id = o.id,
+                    product_id = it.productId,
+                    size = "M",
+                    quantity = it.qty,
+                    unit_price = it.unitPrice,
+                    is_cancelled = false,
+                    created_at = DateTime.Now
                 });
             }
             await ctx.SaveChangesAsync();
@@ -330,10 +354,14 @@ namespace Divisima.IntegrationTests
             {
                 var c = new Customer
                 {
-                    name = "Silinmis Kullanici", email = $"deleted_{Guid.NewGuid():N}@divisima.invalid",
+                    name = "Silinmis Kullanici",
+                    email = $"deleted_{Guid.NewGuid():N}@divisima.invalid",
                     phone = null,                       // <- KVKK anonimlestirmesi
-                    password_hash = Array.Empty<byte>(), password_salt = Array.Empty<byte>(),
-                    is_active = true, email_verified = true, created_at = DateTime.Now
+                    password_hash = Array.Empty<byte>(),
+                    password_salt = Array.Empty<byte>(),
+                    is_active = true,
+                    email_verified = true,
+                    created_at = DateTime.Now
                 };
                 ctx.Set<Customer>().Add(c);
                 await ctx.SaveChangesAsync();
@@ -343,8 +371,12 @@ namespace Divisima.IntegrationTests
                     customer_id = c.id,
                     order_number = $"ORD-{Guid.NewGuid():N}".Substring(0, 18),
                     status = (byte)OrderStatusEnum.Confirmed,
-                    subtotal = 1100m, total_price = 1100m, discount_amount = 0m,
-                    store_credit_used = 0m, is_online_payment_done = true, currency = "TRY",
+                    subtotal = 1100m,
+                    total_price = 1100m,
+                    discount_amount = 0m,
+                    store_credit_used = 0m,
+                    is_online_payment_done = true,
+                    currency = "TRY",
                     created_at = DateTime.Now
                 };
                 ctx.Set<Order>().Add(o);
@@ -353,16 +385,28 @@ namespace Divisima.IntegrationTests
 
                 ctx.Set<OrderItem>().Add(new OrderItem
                 {
-                    order_id = o.id, product_id = urunId, size = "M", quantity = 1,
-                    unit_price = 1100m, is_cancelled = false, created_at = DateTime.Now
+                    order_id = o.id,
+                    product_id = urunId,
+                    size = "M",
+                    quantity = 1,
+                    unit_price = 1100m,
+                    is_cancelled = false,
+                    created_at = DateTime.Now
                 });
 
                 // Adres de NULL telefonlu olabilir (silme kaskadi).
                 ctx.Set<Address>().Add(new Address
                 {
-                    customer_id = c.id, title = "-", full_name = "Silinmiş", phone = null,
-                    city = "-", district = "-", full_address = "-",
-                    is_default = false, is_active = false, created_at = DateTime.Now
+                    customer_id = c.id,
+                    title = "-",
+                    full_name = "Silinmiş",
+                    phone = null,
+                    city = "-",
+                    district = "-",
+                    full_address = "-",
+                    is_default = false,
+                    is_active = false,
+                    created_at = DateTime.Now
                 });
                 await ctx.SaveChangesAsync();
             }

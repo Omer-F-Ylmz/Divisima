@@ -1,5 +1,5 @@
-using Divisima.DataAccess.Concrete.Context;
 using Divisima.DataAccess.Abstract;
+using Divisima.DataAccess.Concrete.Context;
 using Divisima.Entity.Entities;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
@@ -216,8 +216,11 @@ namespace Divisima.IntegrationTests
 
             static StockNotificationRequest Kayit(string email, bool bildirildi) => new()
             {
-                product_id = 42, size = "L", email = email,
-                is_notified = bildirildi, created_at = DateTime.Now,
+                product_id = 42,
+                size = "L",
+                email = email,
+                is_notified = bildirildi,
+                created_at = DateTime.Now,
                 notified_at = bildirildi ? DateTime.Now : null
             };
 

@@ -99,9 +99,15 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             var c = new Customer
             {
-                name = "Iptal Testi", email = $"cancel-{Guid.NewGuid():N}@divisima.test", phone = "5550000000",
-                password_hash = new byte[] { 1 }, password_salt = new byte[] { 2 },
-                is_active = true, email_verified = true, store_credit = credit, created_at = DateTime.Now
+                name = "Iptal Testi",
+                email = $"cancel-{Guid.NewGuid():N}@divisima.test",
+                phone = "5550000000",
+                password_hash = new byte[] { 1 },
+                password_salt = new byte[] { 2 },
+                is_active = true,
+                email_verified = true,
+                store_credit = credit,
+                created_at = DateTime.Now
             };
             ctx.Set<Customer>().Add(c);
             var cat = new Category { name = "K", slug = $"k{Guid.NewGuid():N}", is_active = true, created_at = DateTime.Now };
@@ -110,15 +116,26 @@ namespace Divisima.IntegrationTests
 
             var p = new Product
             {
-                name = "Iptal Urun", brand = "T", category_id = cat.id, price = price,
-                description = "d", color_hex = "#000", product_type = 0, is_active = true, created_at = DateTime.Now
+                name = "Iptal Urun",
+                brand = "T",
+                category_id = cat.id,
+                price = price,
+                description = "d",
+                color_hex = "#000",
+                product_type = 0,
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Products.Add(p);
             await ctx.SaveChangesAsync();
             ctx.ProductStocks.Add(new ProductStock
             {
-                product_id = p.id, size = "M", stock_quantity = stock, reserved_quantity = 0,
-                is_active = true, created_at = DateTime.Now
+                product_id = p.id,
+                size = "M",
+                stock_quantity = stock,
+                reserved_quantity = 0,
+                is_active = true,
+                created_at = DateTime.Now
             });
             await ctx.SaveChangesAsync();
             return (c.id, p.id);

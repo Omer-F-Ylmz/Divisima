@@ -12,10 +12,10 @@ namespace Divisima.Core.Utilities.Orders
             if (from == to) return true; // no-op (idempotent güncelleme)
             return from switch
             {
-                OrderStatusEnum.Pending   => to == OrderStatusEnum.Confirmed || to == OrderStatusEnum.Cancelled,
+                OrderStatusEnum.Pending => to == OrderStatusEnum.Confirmed || to == OrderStatusEnum.Cancelled,
                 OrderStatusEnum.Confirmed => to == OrderStatusEnum.Preparing || to == OrderStatusEnum.Cancelled,
-                OrderStatusEnum.Preparing => to == OrderStatusEnum.Shipped   || to == OrderStatusEnum.Cancelled,
-                OrderStatusEnum.Shipped   => to == OrderStatusEnum.Delivered,
+                OrderStatusEnum.Preparing => to == OrderStatusEnum.Shipped || to == OrderStatusEnum.Cancelled,
+                OrderStatusEnum.Shipped => to == OrderStatusEnum.Delivered,
                 OrderStatusEnum.Delivered => false, // terminal
                 OrderStatusEnum.Cancelled => false, // terminal
                 _ => false

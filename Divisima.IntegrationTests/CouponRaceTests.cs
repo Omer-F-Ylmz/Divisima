@@ -108,16 +108,27 @@ namespace Divisima.IntegrationTests
                 {
                     var p = new Product
                     {
-                        name = "Yaris Urun", brand = "T", category_id = cat.id, price = 100m,
-                        description = "d", color_hex = "#000", product_type = 0, is_active = true, created_at = DateTime.Now
+                        name = "Yaris Urun",
+                        brand = "T",
+                        category_id = cat.id,
+                        price = 100m,
+                        description = "d",
+                        color_hex = "#000",
+                        product_type = 0,
+                        is_active = true,
+                        created_at = DateTime.Now
                     };
                     ctx.Products.Add(p);
                     await ctx.SaveChangesAsync();
                     productIds.Add(p.id);
                     ctx.ProductStocks.Add(new ProductStock
                     {
-                        product_id = p.id, size = "M", stock_quantity = 50, reserved_quantity = 0,
-                        is_active = true, created_at = DateTime.Now
+                        product_id = p.id,
+                        size = "M",
+                        stock_quantity = 50,
+                        reserved_quantity = 0,
+                        is_active = true,
+                        created_at = DateTime.Now
                     });
                     await ctx.SaveChangesAsync();
                 }
@@ -125,9 +136,14 @@ namespace Divisima.IntegrationTests
                 var cpn = new Coupon
                 {
                     code = ("R" + Guid.NewGuid().ToString("N").Substring(0, 11)).ToUpperInvariant(),
-                    discount_type = (byte)DiscountTypeEnum.Fixed, value = 30m, min_amount = 0m,
-                    usage_limit = 1, per_user_limit = 0, first_order_only = false,
-                    is_active = true, created_at = DateTime.Now
+                    discount_type = (byte)DiscountTypeEnum.Fixed,
+                    value = 30m,
+                    min_amount = 0m,
+                    usage_limit = 1,
+                    per_user_limit = 0,
+                    first_order_only = false,
+                    is_active = true,
+                    created_at = DateTime.Now
                 };
                 ctx.Set<Coupon>().Add(cpn);
                 await ctx.SaveChangesAsync();
@@ -137,9 +153,15 @@ namespace Divisima.IntegrationTests
                 {
                     var c = new Customer
                     {
-                        name = "Yarisci", email = $"race-{Guid.NewGuid():N}@divisima.test", phone = "5550000000",
-                        password_hash = new byte[] { 1 }, password_salt = new byte[] { 2 },
-                        is_active = true, email_verified = true, store_credit = 0m, created_at = DateTime.Now
+                        name = "Yarisci",
+                        email = $"race-{Guid.NewGuid():N}@divisima.test",
+                        phone = "5550000000",
+                        password_hash = new byte[] { 1 },
+                        password_salt = new byte[] { 2 },
+                        is_active = true,
+                        email_verified = true,
+                        store_credit = 0m,
+                        created_at = DateTime.Now
                     };
                     ctx.Set<Customer>().Add(c);
                     await ctx.SaveChangesAsync();

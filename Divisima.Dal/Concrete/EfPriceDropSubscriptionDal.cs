@@ -11,7 +11,7 @@ namespace Divisima.DataAccess.Concrete.EntityFramework
         public EfPriceDropSubscriptionDal(DivisimaDbContext context) : base(context)
         {
         }
-    
+
         // Açıklayıcı yorum: ATOMİK claim - is_notified'ı YALNIZ false ise true yap (tek UPDATE). affected=1 -> bu çağrı kazandı.
         // Eşzamanlı bildirim çağrıları aynı kaydı çift göndermesin (outbox TryClaimAsync deseni).
         public async Task<bool> TryClaimForNotificationAsync(int id)
@@ -29,5 +29,5 @@ namespace Divisima.DataAccess.Concrete.EntityFramework
                 .Where(x => x.id == id)
                 .ExecuteUpdateAsync(s => s.SetProperty(x => x.is_notified, false));
         }
-}
+    }
 }

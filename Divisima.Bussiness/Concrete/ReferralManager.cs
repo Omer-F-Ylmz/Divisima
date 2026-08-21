@@ -1,12 +1,12 @@
-using Divisima.Core.DataAccess;
 using System;
 using System.Linq;
 using System.Net;
 using Divisima.Bussiness.Abstract;
+using Divisima.Core.DataAccess;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Enums;
-using Divisima.Core.Utilities.Results;
 using Divisima.Core.Utilities.Orders;
+using Divisima.Core.Utilities.Results;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Entities;
 
@@ -93,8 +93,12 @@ namespace Divisima.Bussiness.Concrete
                 }
                 await _creditTxDal.AddAsync(new StoreCreditTransaction
                 {
-                    customer_id = referrer.id, amount = ReferrerReward, type = (byte)LedgerEntryTypeEnum.Earn,
-                    reason = "Referans ödülü (davet eden)", order_id = orderId, created_at = DateTime.Now
+                    customer_id = referrer.id,
+                    amount = ReferrerReward,
+                    type = (byte)LedgerEntryTypeEnum.Earn,
+                    reason = "Referans ödülü (davet eden)",
+                    order_id = orderId,
+                    created_at = DateTime.Now
                 });
 
                 // Concurrency DUZELTMESI: ATOMIK odul (lost update engeli)
@@ -107,8 +111,12 @@ namespace Divisima.Bussiness.Concrete
                 }
                 await _creditTxDal.AddAsync(new StoreCreditTransaction
                 {
-                    customer_id = c.id, amount = RefereeReward, type = (byte)LedgerEntryTypeEnum.Earn,
-                    reason = "Referans ödülü (davet edilen)", order_id = orderId, created_at = DateTime.Now
+                    customer_id = c.id,
+                    amount = RefereeReward,
+                    type = (byte)LedgerEntryTypeEnum.Earn,
+                    reason = "Referans ödülü (davet edilen)",
+                    order_id = orderId,
+                    created_at = DateTime.Now
                 });
 
                 await _unitOfWork.CommitAsync();

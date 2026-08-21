@@ -1,10 +1,10 @@
 using System.Net;
 using Divisima.Bussiness.Abstract;
+using Divisima.Core.Utilities.Dtos;
+using Divisima.Core.Utilities.Results;
 using Divisima.DataAccess.Concrete.Context;
 using Divisima.Entity.Dtos.Admin;
 using Divisima.Entity.Entities;
-using Divisima.Core.Utilities.Dtos;
-using Divisima.Core.Utilities.Results;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -109,17 +109,25 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             var cat = new Category
             {
-                name = "Pasif Kategori", slug = $"pasif-{Guid.NewGuid():N}",
-                is_active = true, created_at = DateTime.Now
+                name = "Pasif Kategori",
+                slug = $"pasif-{Guid.NewGuid():N}",
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Set<Category>().Add(cat);
             await ctx.SaveChangesAsync();
 
             var p = new Product
             {
-                name = "Pasif Urun", brand = "T", category_id = cat.id, price = 60m,
-                description = "pasif hesap testi urunu", color_hex = "#0C0C0C",
-                product_type = 0, is_active = true, created_at = DateTime.Now
+                name = "Pasif Urun",
+                brand = "T",
+                category_id = cat.id,
+                price = 60m,
+                description = "pasif hesap testi urunu",
+                color_hex = "#0C0C0C",
+                product_type = 0,
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Products.Add(p);
             await ctx.SaveChangesAsync();
@@ -244,15 +252,25 @@ namespace Divisima.IntegrationTests
             {
                 ctx.Set<Customer>().Add(new Customer
                 {
-                    name = "Pasif Musteri", email = pasifEmail, phone = "5550000001",
-                    password_hash = new byte[] { 1 }, password_salt = new byte[] { 2 },
-                    is_active = false, email_verified = true, created_at = DateTime.Now
+                    name = "Pasif Musteri",
+                    email = pasifEmail,
+                    phone = "5550000001",
+                    password_hash = new byte[] { 1 },
+                    password_salt = new byte[] { 2 },
+                    is_active = false,
+                    email_verified = true,
+                    created_at = DateTime.Now
                 });
                 ctx.Set<Customer>().Add(new Customer
                 {
-                    name = "Aktif Musteri", email = aktifEmail, phone = "5550000002",
-                    password_hash = new byte[] { 1 }, password_salt = new byte[] { 2 },
-                    is_active = true, email_verified = true, created_at = DateTime.Now
+                    name = "Aktif Musteri",
+                    email = aktifEmail,
+                    phone = "5550000002",
+                    password_hash = new byte[] { 1 },
+                    password_salt = new byte[] { 2 },
+                    is_active = true,
+                    email_verified = true,
+                    created_at = DateTime.Now
                 });
                 await ctx.SaveChangesAsync();
             }

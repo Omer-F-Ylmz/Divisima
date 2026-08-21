@@ -1,13 +1,13 @@
-using Divisima.Entity.Dtos.Guest;
 using System;
-using Divisima.Core.Utilities.Sanitization;
 using System.Net;
 using System.Security.Cryptography;
 using Divisima.Bussiness.Abstract;
 using Divisima.Core.Security.Hashing;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Results;
+using Divisima.Core.Utilities.Sanitization;
 using Divisima.DataAccess.Abstract;
+using Divisima.Entity.Dtos.Guest;
 using Divisima.Entity.Dtos.Order;
 using Divisima.Entity.Entities;
 
@@ -58,7 +58,9 @@ namespace Divisima.Bussiness.Concrete
                 is_active = true,
                 email_verified = false,
                 created_at = DateTime.Now,
-                notify_email = true, notify_sms = false, notify_push = false
+                notify_email = true,
+                notify_sms = false,
+                notify_push = false
             };
             await _customerDal.AddAsync(guest);
 

@@ -102,24 +102,37 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             var c = new Customer
             {
-                name = "Iade Testi", email = $"return-{Guid.NewGuid():N}@divisima.test", phone = "5550000000",
-                password_hash = new byte[] { 1 }, password_salt = new byte[] { 2 },
-                is_active = true, email_verified = true, created_at = DateTime.Now
+                name = "Iade Testi",
+                email = $"return-{Guid.NewGuid():N}@divisima.test",
+                phone = "5550000000",
+                password_hash = new byte[] { 1 },
+                password_salt = new byte[] { 2 },
+                is_active = true,
+                email_verified = true,
+                created_at = DateTime.Now
             };
             ctx.Set<Customer>().Add(c);
             var cat = new Category
             {
-                name = "Iade Kategori", slug = $"iade-{Guid.NewGuid():N}",
-                is_active = true, created_at = DateTime.Now
+                name = "Iade Kategori",
+                slug = $"iade-{Guid.NewGuid():N}",
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Set<Category>().Add(cat);
             await ctx.SaveChangesAsync();
 
             var p = new Product
             {
-                name = "Iade Urun", brand = "T", category_id = cat.id, price = unitPrice,
-                description = "iade testi urunu", color_hex = "#303030",
-                product_type = 0, is_active = true, created_at = DateTime.Now
+                name = "Iade Urun",
+                brand = "T",
+                category_id = cat.id,
+                price = unitPrice,
+                description = "iade testi urunu",
+                color_hex = "#303030",
+                product_type = 0,
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Products.Add(p);
             await ctx.SaveChangesAsync();
@@ -129,8 +142,12 @@ namespace Divisima.IntegrationTests
                 customer_id = c.id,
                 order_number = $"ORD-{Guid.NewGuid():N}".Substring(0, 18),
                 status = (byte)OrderStatusEnum.Delivered,
-                subtotal = subtotal, total_price = subtotal - discount, discount_amount = discount,
-                store_credit_used = 0m, is_online_payment_done = true, currency = "TRY",
+                subtotal = subtotal,
+                total_price = subtotal - discount,
+                discount_amount = discount,
+                store_credit_used = 0m,
+                is_online_payment_done = true,
+                currency = "TRY",
                 created_at = DateTime.Now.AddDays(-createdDaysAgo),
                 delivered_at = deliveredDaysAgo.HasValue ? DateTime.Now.AddDays(-deliveredDaysAgo.Value) : null
             };
@@ -139,8 +156,13 @@ namespace Divisima.IntegrationTests
 
             ctx.Set<OrderItem>().Add(new OrderItem
             {
-                order_id = o.id, product_id = p.id, size = "M", quantity = quantity,
-                unit_price = unitPrice, is_cancelled = false, created_at = DateTime.Now
+                order_id = o.id,
+                product_id = p.id,
+                size = "M",
+                quantity = quantity,
+                unit_price = unitPrice,
+                is_cancelled = false,
+                created_at = DateTime.Now
             });
             await ctx.SaveChangesAsync();
             return (c.id, o.id, p.id);
@@ -148,8 +170,14 @@ namespace Divisima.IntegrationTests
 
         private static ReturnCreateRequestDto Talep(int customerId, int orderId, int productId, int quantity) => new()
         {
-            customer_id = customerId, order_id = orderId, product_id = productId,
-            size = "M", quantity = quantity, reason = 0, return_type = 0, description = "iade talebi"
+            customer_id = customerId,
+            order_id = orderId,
+            product_id = productId,
+            size = "M",
+            quantity = quantity,
+            reason = 0,
+            return_type = 0,
+            description = "iade talebi"
         };
 
         // Pencere 14 gun. Iki yon birden sinanir: created_at eski ama teslim yeni -> KABUL;

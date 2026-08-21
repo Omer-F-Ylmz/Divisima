@@ -2,10 +2,10 @@ using System.Globalization;
 using System.Net;
 using AutoMapper;
 using Divisima.Bussiness.Abstract;
-using Divisima.Core.Utilities.Results;
+using Divisima.Core.Utilities.Caching;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Pricing;
-using Divisima.Core.Utilities.Caching;
+using Divisima.Core.Utilities.Results;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Product;
 using Divisima.Entity.Entities;
@@ -120,8 +120,14 @@ namespace Divisima.Bussiness.Concrete
                 if (!grouped.ContainsKey(key))
                     grouped[key] = (new Product
                     {
-                        name = name, brand = brand, category_id = categoryId, price = price, sale_price = salePrice,
-                        description = cols[5].Trim(), color_hex = cols[6].Trim(), product_type = productType
+                        name = name,
+                        brand = brand,
+                        category_id = categoryId,
+                        price = price,
+                        sale_price = salePrice,
+                        description = cols[5].Trim(),
+                        color_hex = cols[6].Trim(),
+                        product_type = productType
                     }, new List<(string, int)>());
                 if (!string.IsNullOrWhiteSpace(size))
                     grouped[key].stocks.Add((size, qty));
@@ -139,7 +145,11 @@ namespace Divisima.Bussiness.Concrete
                 foreach (var (size, qty) in kv.Value.stocks)
                     await _productStockDal.AddAsync(new ProductStock
                     {
-                        product_id = h.id, size = size, stock_quantity = qty, is_active = true, created_at = DateTime.Now
+                        product_id = h.id,
+                        size = size,
+                        stock_quantity = qty,
+                        is_active = true,
+                        created_at = DateTime.Now
                     });
                 imported++;
             }

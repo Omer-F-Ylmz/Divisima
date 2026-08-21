@@ -124,32 +124,50 @@ namespace Divisima.IntegrationTests
             {
                 var c = new Customer
                 {
-                    name = "Callback Testi", email = $"cb-{Guid.NewGuid():N}@divisima.test", phone = "5550000000",
-                    password_hash = new byte[] { 1 }, password_salt = new byte[] { 2 },
-                    is_active = true, email_verified = true, created_at = DateTime.Now
+                    name = "Callback Testi",
+                    email = $"cb-{Guid.NewGuid():N}@divisima.test",
+                    phone = "5550000000",
+                    password_hash = new byte[] { 1 },
+                    password_salt = new byte[] { 2 },
+                    is_active = true,
+                    email_verified = true,
+                    created_at = DateTime.Now
                 };
                 ctx.Set<Customer>().Add(c);
                 var cat = new Category
                 {
-                    name = "CB Kategori", slug = $"cb-{Guid.NewGuid():N}",
-                    vat_rate = 0.10m, is_active = true, created_at = DateTime.Now
+                    name = "CB Kategori",
+                    slug = $"cb-{Guid.NewGuid():N}",
+                    vat_rate = 0.10m,
+                    is_active = true,
+                    created_at = DateTime.Now
                 };
                 ctx.Set<Category>().Add(cat);
                 await ctx.SaveChangesAsync();
 
                 var p = new Product
                 {
-                    name = "CB Urun", brand = "T", category_id = cat.id, price = 300m,
-                    description = "callback testi", color_hex = "#123456",
-                    product_type = 0, is_active = true, created_at = DateTime.Now
+                    name = "CB Urun",
+                    brand = "T",
+                    category_id = cat.id,
+                    price = 300m,
+                    description = "callback testi",
+                    color_hex = "#123456",
+                    product_type = 0,
+                    is_active = true,
+                    created_at = DateTime.Now
                 };
                 ctx.Products.Add(p);
                 await ctx.SaveChangesAsync();
 
                 ctx.ProductStocks.Add(new ProductStock
                 {
-                    product_id = p.id, size = "M", stock_quantity = stock, reserved_quantity = 0,
-                    is_active = true, created_at = DateTime.Now
+                    product_id = p.id,
+                    size = "M",
+                    stock_quantity = stock,
+                    reserved_quantity = 0,
+                    is_active = true,
+                    created_at = DateTime.Now
                 });
                 await ctx.SaveChangesAsync();
                 customerId = c.id; productId = p.id;
@@ -158,7 +176,9 @@ namespace Divisima.IntegrationTests
             var place = await WithScopeAsync(f, sp => sp.GetRequiredService<IOrderService>().PlaceOrder(
                 new OrderCreateRequestDto
                 {
-                    customer_id = customerId, coupon_code = "", use_store_credit = 0m,
+                    customer_id = customerId,
+                    coupon_code = "",
+                    use_store_credit = 0m,
                     payment_method = 0,
                     items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = 1 } }
                 }));

@@ -99,9 +99,14 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             var c = new Customer
             {
-                name = "Moderasyon Testi", email = $"mod-{Guid.NewGuid():N}@divisima.test", phone = "5550000000",
-                password_hash = new byte[] { 1 }, password_salt = new byte[] { 2 },
-                is_active = true, email_verified = true, created_at = DateTime.Now
+                name = "Moderasyon Testi",
+                email = $"mod-{Guid.NewGuid():N}@divisima.test",
+                phone = "5550000000",
+                password_hash = new byte[] { 1 },
+                password_salt = new byte[] { 2 },
+                is_active = true,
+                email_verified = true,
+                created_at = DateTime.Now
             };
             ctx.Set<Customer>().Add(c);
             await ctx.SaveChangesAsync();
@@ -113,17 +118,25 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             var cat = new Category
             {
-                name = "Mod Kategori", slug = $"mod-{Guid.NewGuid():N}",
-                is_active = true, created_at = DateTime.Now
+                name = "Mod Kategori",
+                slug = $"mod-{Guid.NewGuid():N}",
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Set<Category>().Add(cat);
             await ctx.SaveChangesAsync();
 
             var p = new Product
             {
-                name = "Mod Urun", brand = "T", category_id = cat.id, price = 100m,
-                description = "moderasyon testi urunu", color_hex = "#0B0B0B",
-                product_type = 0, is_active = true, created_at = DateTime.Now
+                name = "Mod Urun",
+                brand = "T",
+                category_id = cat.id,
+                price = 100m,
+                description = "moderasyon testi urunu",
+                color_hex = "#0B0B0B",
+                product_type = 0,
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Products.Add(p);
             await ctx.SaveChangesAsync();
@@ -135,8 +148,10 @@ namespace Divisima.IntegrationTests
             var r = await WithScopeAsync(sp => sp.GetRequiredService<IProductReviewService>()
                 .Add(new ProductReviewAddRequestDto
                 {
-                    customer_id = customerId, product_id = productId,
-                    rating = rating, comment = "Urun beklentimi karsiladi."
+                    customer_id = customerId,
+                    product_id = productId,
+                    rating = rating,
+                    comment = "Urun beklentimi karsiladi."
                 }));
             r.Item2.Success.Should().BeTrue($"yorum eklenebilmeli: {r.Item2.Message}");
 
@@ -240,22 +255,36 @@ namespace Divisima.IntegrationTests
                     customer_id = customerId,
                     order_number = $"ORD-{Guid.NewGuid():N}".Substring(0, 18),
                     status = (byte)OrderStatusEnum.Delivered,
-                    subtotal = 200m, total_price = 200m, store_credit_used = 0m,
-                    is_online_payment_done = true, currency = "TRY",
-                    created_at = DateTime.Now, delivered_at = DateTime.Now
+                    subtotal = 200m,
+                    total_price = 200m,
+                    store_credit_used = 0m,
+                    is_online_payment_done = true,
+                    currency = "TRY",
+                    created_at = DateTime.Now,
+                    delivered_at = DateTime.Now
                 };
                 ctx.Set<Order>().Add(o);
                 await ctx.SaveChangesAsync();
 
                 ctx.Set<OrderItem>().Add(new OrderItem
                 {
-                    order_id = o.id, product_id = iptalEdilen, size = "M", quantity = 1,
-                    unit_price = 100m, is_cancelled = true, created_at = DateTime.Now
+                    order_id = o.id,
+                    product_id = iptalEdilen,
+                    size = "M",
+                    quantity = 1,
+                    unit_price = 100m,
+                    is_cancelled = true,
+                    created_at = DateTime.Now
                 });
                 ctx.Set<OrderItem>().Add(new OrderItem
                 {
-                    order_id = o.id, product_id = teslimEdilen, size = "M", quantity = 1,
-                    unit_price = 100m, is_cancelled = false, created_at = DateTime.Now
+                    order_id = o.id,
+                    product_id = teslimEdilen,
+                    size = "M",
+                    quantity = 1,
+                    unit_price = 100m,
+                    is_cancelled = false,
+                    created_at = DateTime.Now
                 });
                 await ctx.SaveChangesAsync();
             }

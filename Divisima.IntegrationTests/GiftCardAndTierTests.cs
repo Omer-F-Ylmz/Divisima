@@ -33,7 +33,10 @@ namespace Divisima.IntegrationTests
             var g = new GiftCard
             {
                 code = ("GC" + Guid.NewGuid().ToString("N").Substring(0, 10)).ToUpperInvariant(),
-                initial_amount = amount, balance = amount, is_active = true, created_at = DateTime.Now
+                initial_amount = amount,
+                balance = amount,
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Set<GiftCard>().Add(g);
             await ctx.SaveChangesAsync();

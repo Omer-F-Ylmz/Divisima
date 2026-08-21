@@ -29,10 +29,16 @@ namespace Divisima.IntegrationTests
             var c = new Coupon
             {
                 code = ("T" + Guid.NewGuid().ToString("N").Substring(0, 11)).ToUpperInvariant(),
-                discount_type = type, value = value, min_amount = minAmount,
-                max_discount_amount = maxDiscount, expire_date = expire,
-                usage_limit = usageLimit, per_user_limit = 0,
-                first_order_only = firstOrderOnly, is_active = true, created_at = DateTime.Now
+                discount_type = type,
+                value = value,
+                min_amount = minAmount,
+                max_discount_amount = maxDiscount,
+                expire_date = expire,
+                usage_limit = usageLimit,
+                per_user_limit = 0,
+                first_order_only = firstOrderOnly,
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Set<Coupon>().Add(c);
             await ctx.SaveChangesAsync();
@@ -44,7 +50,9 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             return await NewManager(ctx).ValidateCoupon(new CouponValidateRequestDto
             {
-                code = code, cart_total = cartTotal, customer_id = customerId
+                code = code,
+                cart_total = cartTotal,
+                customer_id = customerId
             });
         }
 

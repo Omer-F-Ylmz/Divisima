@@ -831,6 +831,21 @@ KAPANDI. Acik kalan / yeni bulunanlar:
 - **Test sayilari CI'dan OKUNAMAZ.** Job log'u anonim erisime 403, Summary imza istiyor,
   annotation yalniz `Failed` satirlari tasiyor, check-run `output` bos (dordu de denendi).
   Kanit = **adimin SUCCESS olmasi** + yerelde `ci.yml`'dan cikarilan komutun verdigi sayi.
+- **`format-check` JOB SONUCUNDAN DEGIL ANNOTATION'DAN OKUNUR (kalici kural).** Adim
+  `continue-on-error` altindaysa job YESIL, adim sonucu da API'de `success` gorunur; tek
+  durust sinyal `check-runs/{job_id}/annotations` icindeki `annotation_level: failure`
+  satiridir. E2b run raporunda bu ortaya cikti: format adimi en az E2'den beri exit 2
+  veriyordu ve onceki raporlarda "SUCCESS" olarak gecmisti (job duzeyinde dogru, adim
+  duzeyinde yaniltici). Format dalgasinda kapi sertlestirildi (`continue-on-error` kaldirildi),
+  ama kural genel: **`continue-on-error` tasiyan HER adim annotation'dan okunur.**
+- **Sunucular `Start-Process` ile AYRIK baslatilir.** `dotnet run` ve statik sunucu bash arka
+  planindan baslatilirsa kabuk oturumu kapaninca SESSIZCE olurler (E2b'de ikisi de yasandi;
+  API logu hatasiz kesildi, storefront'ta SW eski sayfayi servis edip kesintiyi gizledi).
+  Uzun sureli izleyici ikisinin sagligini da yoklamali.
+- **`--no-build` ile kosulan test, DEGISTIRILEN kodu DOGRULAMAZ.** Format dalgasinda bir kez
+  yasandi: `dotnet format` 116 dosyayi degistirdi, `dotnet build` calisan API yuzunden dosya
+  kilidiyle 8 hata verdi, ama `--no-build` testler ESKI ikililerden gecip yesil gorundu.
+  Kod degistiyse ONCE temiz build, SONRA test.
 - **Izleyici adabi**: nabiz >= 300 sn, tur basina TEK konsolide cagri, kota yandiysa bekle.
   Dependabot run'i beklenmez - asil iki workflow (CI + Security) yeter.
 - **PAT veya tarayici eklentisi ASLA istenmez.**

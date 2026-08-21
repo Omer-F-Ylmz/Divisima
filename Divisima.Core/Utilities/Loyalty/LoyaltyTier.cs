@@ -16,7 +16,7 @@ namespace Divisima.Core.Utilities.Loyalty
         {
             if (totalSpent >= 25000m) return LoyaltyTier.Platinum;
             if (totalSpent >= 10000m) return LoyaltyTier.Gold;
-            if (totalSpent >= 2500m)  return LoyaltyTier.Silver;
+            if (totalSpent >= 2500m) return LoyaltyTier.Silver;
             return LoyaltyTier.Bronze;
         }
 
@@ -24,17 +24,17 @@ namespace Divisima.Core.Utilities.Loyalty
         public static decimal PointMultiplier(LoyaltyTier tier) => tier switch
         {
             LoyaltyTier.Platinum => 2.0m,
-            LoyaltyTier.Gold     => 1.5m,
-            LoyaltyTier.Silver   => 1.2m,
+            LoyaltyTier.Gold => 1.5m,
+            LoyaltyTier.Silver => 1.2m,
             _ => 1.0m
         };
 
         // Bir sonraki seviyeye kalan tutar (0 = en üst seviye)
         public static decimal AmountToNextTier(decimal totalSpent) => GetTier(totalSpent) switch
         {
-            LoyaltyTier.Bronze   => 2500m - totalSpent,
-            LoyaltyTier.Silver   => 10000m - totalSpent,
-            LoyaltyTier.Gold     => 25000m - totalSpent,
+            LoyaltyTier.Bronze => 2500m - totalSpent,
+            LoyaltyTier.Silver => 10000m - totalSpent,
+            LoyaltyTier.Gold => 25000m - totalSpent,
             _ => 0m
         };
     }

@@ -1,7 +1,7 @@
 using System.Net;
-using Divisima.Core.Utilities.Pricing;
 using Divisima.Bussiness.Abstract;
 using Divisima.Core.Utilities.Constants;
+using Divisima.Core.Utilities.Pricing;
 using Divisima.Core.Utilities.Results;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Cart;
@@ -73,8 +73,12 @@ namespace Divisima.Bussiness.Concrete
                 {
                     await _cartItemDal.AddAsync(new CartItem
                     {
-                        cart_id = cart.id, product_id = dto.product_id, size = dto.size,
-                        quantity = dto.quantity, is_active = true, created_at = DateTime.Now
+                        cart_id = cart.id,
+                        product_id = dto.product_id,
+                        size = dto.size,
+                        quantity = dto.quantity,
+                        is_active = true,
+                        created_at = DateTime.Now
                     });
                 }
                 catch
@@ -121,8 +125,11 @@ namespace Divisima.Bussiness.Concrete
                         product.sale_start, product.sale_end, DateTime.Now);
                     response.items.Add(new CartLineDto
                     {
-                        product_id = product.id, product_name = product.name, size = item.size,
-                        quantity = item.quantity, unit_price = effectivePrice,
+                        product_id = product.id,
+                        product_name = product.name,
+                        size = item.size,
+                        quantity = item.quantity,
+                        unit_price = effectivePrice,
                         line_total = effectivePrice * item.quantity
                     });
                 }
@@ -162,7 +169,9 @@ namespace Divisima.Bussiness.Concrete
             {
                 await _wishlistItemDal.AddAsync(new Divisima.Entity.Entities.WishlistItem
                 {
-                    customer_id = customerId, product_id = productId, created_at = DateTime.Now
+                    customer_id = customerId,
+                    product_id = productId,
+                    created_at = DateTime.Now
                 });
             }
             return (HttpStatusCode.OK, new SuccessResult(Messages.CartSavedForLater));
@@ -177,7 +186,10 @@ namespace Divisima.Bussiness.Concrete
             // Açıklayıcı yorum: Sepete ekle - mevcut AddItem stok kontrolünü yeniden kullan
             var addResult = await AddItem(new Divisima.Entity.Dtos.Cart.CartItemRequestDto
             {
-                customer_id = customerId, product_id = productId, size = size, quantity = 1
+                customer_id = customerId,
+                product_id = productId,
+                size = size,
+                quantity = 1
             });
             if (addResult.Item1 != HttpStatusCode.OK && addResult.Item1 != HttpStatusCode.Created)
                 return addResult; // stok yok vb.

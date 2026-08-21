@@ -12,7 +12,7 @@ namespace Divisima.DataAccess.Concrete.EntityFramework
         public EfCartDal(DivisimaDbContext context) : base(context)
         {
         }
-    
+
         // ATOMIK claim - tek UPDATE: reminder_sent_at NULL ise damgala. affected=1 -> bu calistirma kazandi.
         public async Task<bool> TryClaimReminderAsync(int cartId)
         {
@@ -29,5 +29,5 @@ namespace Divisima.DataAccess.Concrete.EntityFramework
                 .Where(c => c.id == cartId)
                 .ExecuteUpdateAsync(s => s.SetProperty(c => c.reminder_sent_at, (DateTime?)null));
         }
-}
+    }
 }

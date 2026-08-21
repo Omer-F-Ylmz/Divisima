@@ -99,9 +99,14 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             var c = new Customer
             {
-                name = "Indeks Testi", email = $"index-{Guid.NewGuid():N}@divisima.test", phone = "5550000000",
-                password_hash = new byte[] { 1 }, password_salt = new byte[] { 2 },
-                is_active = true, email_verified = true, created_at = DateTime.Now
+                name = "Indeks Testi",
+                email = $"index-{Guid.NewGuid():N}@divisima.test",
+                phone = "5550000000",
+                password_hash = new byte[] { 1 },
+                password_salt = new byte[] { 2 },
+                is_active = true,
+                email_verified = true,
+                created_at = DateTime.Now
             };
             ctx.Set<Customer>().Add(c);
             await ctx.SaveChangesAsync();
@@ -113,8 +118,10 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             var cat = new Category
             {
-                name = "Indeks Kategori", slug = $"idx-{Guid.NewGuid():N}",
-                is_active = true, created_at = DateTime.Now
+                name = "Indeks Kategori",
+                slug = $"idx-{Guid.NewGuid():N}",
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Set<Category>().Add(cat);
             await ctx.SaveChangesAsync();
@@ -126,9 +133,15 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             var p = new Product
             {
-                name = "Indeks Urun", brand = "T", category_id = categoryId, price = 50m,
-                description = "indeks testi urunu", color_hex = "#404040",
-                product_type = 0, is_active = true, created_at = DateTime.Now
+                name = "Indeks Urun",
+                brand = "T",
+                category_id = categoryId,
+                price = 50m,
+                description = "indeks testi urunu",
+                color_hex = "#404040",
+                product_type = 0,
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Products.Add(p);
             await ctx.SaveChangesAsync();
@@ -264,9 +277,15 @@ namespace Divisima.IntegrationTests
                 for (int i = 0; i < 120; i++)
                     ctx.Products.Add(new Product
                     {
-                        name = $"Sayfalama Urun {i}", brand = "T", category_id = categoryId, price = 10m + i,
-                        description = "sayfalama testi", color_hex = "#505050",
-                        product_type = 0, is_active = true, created_at = DateTime.Now
+                        name = $"Sayfalama Urun {i}",
+                        brand = "T",
+                        category_id = categoryId,
+                        price = 10m + i,
+                        description = "sayfalama testi",
+                        color_hex = "#505050",
+                        product_type = 0,
+                        is_active = true,
+                        created_at = DateTime.Now
                     });
                 await ctx.SaveChangesAsync();
             }

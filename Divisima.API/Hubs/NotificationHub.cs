@@ -1,6 +1,6 @@
+using Divisima.Core.Utilities.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
-using Divisima.Core.Utilities.Enums;
 
 namespace Divisima.API.Hubs
 {

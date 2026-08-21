@@ -1,8 +1,8 @@
-﻿using System.IdentityModel.Tokens.Jwt;
-using Divisima.Core.Security.Tokens;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using Divisima.Core.Entities.Abstract;
+using Divisima.Core.Security.Tokens;
 using Divisima.Core.Utilities.Enums;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;

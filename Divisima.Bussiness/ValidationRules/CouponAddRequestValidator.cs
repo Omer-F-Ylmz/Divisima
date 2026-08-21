@@ -1,6 +1,6 @@
-using FluentValidation;
-using Divisima.Entity.Dtos.Coupon;
 using Divisima.Core.Utilities.Enums;
+using Divisima.Entity.Dtos.Coupon;
+using FluentValidation;
 
 namespace Divisima.Bussiness.ValidationRules.FluentValidation
 {

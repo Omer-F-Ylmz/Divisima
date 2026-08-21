@@ -1,6 +1,6 @@
 using System.Text;
-using Microsoft.AspNetCore.Authorization;
 using Divisima.DataAccess.Abstract;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Divisima.API.Controllers

@@ -1,15 +1,15 @@
-using Divisima.Core.DataAccess;
 using System;
-using Divisima.Entity.Dtos.Loyalty;
-using Divisima.Core.Utilities.Loyalty;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using Divisima.Bussiness.Abstract;
+using Divisima.Core.DataAccess;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Enums;
+using Divisima.Core.Utilities.Loyalty;
 using Divisima.Core.Utilities.Results;
 using Divisima.DataAccess.Abstract;
+using Divisima.Entity.Dtos.Loyalty;
 using Divisima.Entity.Entities;
 
 namespace Divisima.Bussiness.Concrete
@@ -56,8 +56,12 @@ namespace Divisima.Bussiness.Concrete
                 }
                 await _txDal.AddAsync(new LoyaltyTransaction
                 {
-                    customer_id = customerId, points = points, type = (byte)LedgerEntryTypeEnum.Earn,
-                    reason = reason, order_id = orderId, created_at = DateTime.Now
+                    customer_id = customerId,
+                    points = points,
+                    type = (byte)LedgerEntryTypeEnum.Earn,
+                    reason = reason,
+                    order_id = orderId,
+                    created_at = DateTime.Now
                 });
                 await _unitOfWork.CommitAsync();
             }
@@ -112,8 +116,12 @@ namespace Divisima.Bussiness.Concrete
             {
                 await _txDal.AddAsync(new LoyaltyTransaction
                 {
-                    customer_id = customerId, points = toDeduct, type = (byte)LedgerEntryTypeEnum.Redeem,
-                    reason = reverseReason, order_id = orderId, created_at = DateTime.Now
+                    customer_id = customerId,
+                    points = toDeduct,
+                    type = (byte)LedgerEntryTypeEnum.Redeem,
+                    reason = reverseReason,
+                    order_id = orderId,
+                    created_at = DateTime.Now
                 });
             }
             return (HttpStatusCode.OK, new SuccessResult());
@@ -148,13 +156,21 @@ namespace Divisima.Bussiness.Concrete
                 }
                 await _txDal.AddAsync(new LoyaltyTransaction
                 {
-                    customer_id = customerId, points = points, type = (byte)LedgerEntryTypeEnum.Redeem,
-                    reason = "Krediye çevrildi", order_id = null, created_at = DateTime.Now
+                    customer_id = customerId,
+                    points = points,
+                    type = (byte)LedgerEntryTypeEnum.Redeem,
+                    reason = "Krediye çevrildi",
+                    order_id = null,
+                    created_at = DateTime.Now
                 });
                 await _creditTxDal.AddAsync(new StoreCreditTransaction
                 {
-                    customer_id = customerId, amount = creditAmount, type = (byte)LedgerEntryTypeEnum.Earn,
-                    reason = "Puan dönüşümü", order_id = null, created_at = DateTime.Now
+                    customer_id = customerId,
+                    amount = creditAmount,
+                    type = (byte)LedgerEntryTypeEnum.Earn,
+                    reason = "Puan dönüşümü",
+                    order_id = null,
+                    created_at = DateTime.Now
                 });
                 await _unitOfWork.CommitAsync();
             }

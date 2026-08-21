@@ -1,8 +1,8 @@
 using Divisima.Core.DataAccess.EntityFramework;
 using Divisima.DataAccess.Abstract;
-using Microsoft.EntityFrameworkCore;
 using Divisima.DataAccess.Concrete.Context;
 using Divisima.Entity.Entities;
+using Microsoft.EntityFrameworkCore;
 
 namespace Divisima.DataAccess.Concrete.EntityFramework
 {

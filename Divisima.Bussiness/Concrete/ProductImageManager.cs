@@ -88,8 +88,11 @@ namespace Divisima.Bussiness.Concrete
             var images = await _imageDal.GetListAsync(i => i.product_id == productId);
             var dtos = images.OrderBy(i => i.sort_order).Select(i => new ProductImageDto
             {
-                id = i.id, product_id = i.product_id, image_url = i.image_url,
-                sort_order = i.sort_order, is_primary = i.is_primary
+                id = i.id,
+                product_id = i.product_id,
+                image_url = i.image_url,
+                sort_order = i.sort_order,
+                is_primary = i.is_primary
             }).ToList();
             return (HttpStatusCode.OK, new SuccessDataResult<List<ProductImageDto>>(dtos));
         }

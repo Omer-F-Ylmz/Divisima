@@ -1,5 +1,5 @@
-using System.Text.RegularExpressions;
 using System.Net;
+using System.Text.RegularExpressions;
 
 namespace Divisima.Core.Utilities.Sanitization
 {

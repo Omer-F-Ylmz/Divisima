@@ -1,9 +1,9 @@
-using Divisima.Core.DataAccess;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using Divisima.Bussiness.Abstract;
+using Divisima.Core.DataAccess;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Enums;
 using Divisima.Core.Utilities.Results;
@@ -47,8 +47,12 @@ namespace Divisima.Bussiness.Concrete
                 }
                 await _txDal.AddAsync(new StoreCreditTransaction
                 {
-                    customer_id = customerId, amount = amount, type = (byte)LedgerEntryTypeEnum.Earn,
-                    reason = reason, order_id = orderId, created_at = DateTime.Now
+                    customer_id = customerId,
+                    amount = amount,
+                    type = (byte)LedgerEntryTypeEnum.Earn,
+                    reason = reason,
+                    order_id = orderId,
+                    created_at = DateTime.Now
                 });
                 await _unitOfWork.CommitAsync();
             }
@@ -75,8 +79,12 @@ namespace Divisima.Bussiness.Concrete
                 }
                 await _txDal.AddAsync(new StoreCreditTransaction
                 {
-                    customer_id = customerId, amount = amount, type = (byte)LedgerEntryTypeEnum.Redeem,
-                    reason = reason, order_id = orderId, created_at = DateTime.Now
+                    customer_id = customerId,
+                    amount = amount,
+                    type = (byte)LedgerEntryTypeEnum.Redeem,
+                    reason = reason,
+                    order_id = orderId,
+                    created_at = DateTime.Now
                 });
                 await _unitOfWork.CommitAsync();
             }

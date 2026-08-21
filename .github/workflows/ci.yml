@@ -191,6 +191,22 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Format dogrulama
-        run: dotnet format Divisima-Backend.sln --verify-no-changes --verbosity diagnostic
-        continue-on-error: true   # ilk asamada uyari; ekip duzelttikce zorunlu yapilabilir
+      # KAPI SERTLESTIRILDI (format dalgasi). Eskiden tek adim + continue-on-error: true idi;
+      # adim uzun suredir DUSUYORDU (exit 2) ama job YESIL gorunuyordu ve tek sinyal
+      # annotation'daki "Process completed with exit code 2." satiriydi. Kok neden bulundu ve
+      # duzeltildi: .editorconfig "crlf" ilan ediyordu, deponun icerigi ise LF idi
+      # (olculdu: 650 dosyanin yalniz ~20'sinde CR). Politika LF'e cekildi ve .gitattributes
+      # ile checkout tarafinda da sabitlendi.
+      #
+      # KAPSAM NEDEN "whitespace" + "style", "analyzers" DEGIL (olculdu):
+      #   dotnet format ... whitespace --verify-no-changes -> cikis kodu 0
+      #   dotnet format ... style      --verify-no-changes -> cikis kodu 0
+      #   dotnet format ... analyzers  --verify-no-changes -> cikis kodu 2
+      # analyzers dalindaki 26 dosya CA1848 / CA1310 / CA5350 gibi OTOMATIK DUZELTICISI OLMAYAN
+      # analiz uyarilari tasiyor; "dotnet format" onlari duzeltemiyor, yalniz "degisecek" diye
+      # sayiyor. Bu dali kapiya koymak, gecmesi imkansiz bir kapi kurmak olurdu. O uyarilar
+      # zaten "Derle (Release, uyarilar gorunur)" adiminda GORUNUYOR.
+      - name: Bicimlendirme dogrulama - whitespace (ZORUNLU)
+        run: dotnet format Divisima-Backend.sln whitespace --verify-no-changes --verbosity diagnostic
+      - name: Bicimlendirme dogrulama - style (ZORUNLU)
+        run: dotnet format Divisima-Backend.sln style --verify-no-changes --verbosity diagnostic

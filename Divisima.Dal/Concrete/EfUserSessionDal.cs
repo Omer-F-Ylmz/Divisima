@@ -19,7 +19,7 @@ namespace Divisima.DataAccess.Concrete.EntityFramework
             return await Context.Set<UserSession>()
                 .FirstOrDefaultAsync(s => s.refresh_token == refreshToken && s.is_active);
         }
-    
+
         // Aciklayici yorum: TEK atomik UPDATE - tum aktif oturumlari kapatir (foreach yerine).
         public async Task<int> InvalidateAllForCustomerAsync(int customerId)
         {
@@ -27,5 +27,5 @@ namespace Divisima.DataAccess.Concrete.EntityFramework
                 .Where(us => us.customer_id == customerId && us.is_active)
                 .ExecuteUpdateAsync(setters => setters.SetProperty(us => us.is_active, false));
         }
-}
+    }
 }

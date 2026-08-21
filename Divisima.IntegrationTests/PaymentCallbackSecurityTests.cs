@@ -4,14 +4,13 @@ using System.Text;
 using Autofac;
 using Divisima.Bussiness.Abstract;
 using Divisima.Bussiness.Concrete;
-using Divisima.DataAccess.Abstract;
-using Divisima.DataAccess.Concrete.EntityFramework;
-using Microsoft.Extensions.Hosting;
 using Divisima.Core.DataAccess;
 using Divisima.Core.Integrations.Iyzico;
 using Divisima.Core.Utilities.Enums;
 using Divisima.Core.Utilities.Results;
+using Divisima.DataAccess.Abstract;
 using Divisima.DataAccess.Concrete.Context;
+using Divisima.DataAccess.Concrete.EntityFramework;
 using Divisima.Entity.Dtos.Dashboard;
 using Divisima.Entity.Dtos.Order;
 using Divisima.Entity.Dtos.Payment;
@@ -23,6 +22,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -220,32 +220,50 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             var c = new Customer
             {
-                name = "Odeme Testi", email = $"pay-{Guid.NewGuid():N}@divisima.test", phone = "5550000000",
-                password_hash = new byte[] { 1 }, password_salt = new byte[] { 2 },
-                is_active = true, email_verified = true, created_at = DateTime.Now
+                name = "Odeme Testi",
+                email = $"pay-{Guid.NewGuid():N}@divisima.test",
+                phone = "5550000000",
+                password_hash = new byte[] { 1 },
+                password_salt = new byte[] { 2 },
+                is_active = true,
+                email_verified = true,
+                created_at = DateTime.Now
             };
             ctx.Set<Customer>().Add(c);
             var cat = new Category
             {
-                name = "Odeme Kategori", slug = $"pay-{Guid.NewGuid():N}",
-                vat_rate = 0.10m, is_active = true, created_at = DateTime.Now
+                name = "Odeme Kategori",
+                slug = $"pay-{Guid.NewGuid():N}",
+                vat_rate = 0.10m,
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Set<Category>().Add(cat);
             await ctx.SaveChangesAsync();
 
             var p = new Product
             {
-                name = "Odeme Urun", brand = "T", category_id = cat.id, price = 500m,
-                description = "odeme testi urunu", color_hex = "#121212",
-                product_type = 0, is_active = true, created_at = DateTime.Now
+                name = "Odeme Urun",
+                brand = "T",
+                category_id = cat.id,
+                price = 500m,
+                description = "odeme testi urunu",
+                color_hex = "#121212",
+                product_type = 0,
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Products.Add(p);
             await ctx.SaveChangesAsync();
 
             ctx.ProductStocks.Add(new ProductStock
             {
-                product_id = p.id, size = "M", stock_quantity = stock, reserved_quantity = 0,
-                is_active = true, created_at = DateTime.Now
+                product_id = p.id,
+                size = "M",
+                stock_quantity = stock,
+                reserved_quantity = 0,
+                is_active = true,
+                created_at = DateTime.Now
             });
             await ctx.SaveChangesAsync();
             return (c.id, p.id);
@@ -259,7 +277,9 @@ namespace Divisima.IntegrationTests
             var place = await WithScopeAsync(sp => sp.GetRequiredService<IOrderService>().PlaceOrder(
                 new OrderCreateRequestDto
                 {
-                    customer_id = customerId, coupon_code = "", use_store_credit = 0m,
+                    customer_id = customerId,
+                    coupon_code = "",
+                    use_store_credit = 0m,
                     payment_method = 0,   // 0 = Online (Iyzico)
                     items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = qty } }
                 }));
@@ -417,8 +437,14 @@ namespace Divisima.IntegrationTests
             ControllableIyzicoClient.RetrieveCallCount = 0;
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-RACE", ItemTransactionId = "ITX-RACE", ItemTransactionCount = 1, PaidPrice = amount,
-                Currency = "TRY", FraudStatus = "1", Installment = 1
+                Success = true,
+                PaymentId = "PAY-RACE",
+                ItemTransactionId = "ITX-RACE",
+                ItemTransactionCount = 1,
+                PaidPrice = amount,
+                Currency = "TRY",
+                FraudStatus = "1",
+                Installment = 1
             };
 
             var sonuclar = await Task.WhenAll(Enumerable.Range(0, callers)
@@ -496,8 +522,14 @@ namespace Divisima.IntegrationTests
             ControllableIyzicoClient.RetrieveCallCount = 0;
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-SIRA", ItemTransactionId = "ITX-SIRA", ItemTransactionCount = 1, PaidPrice = amount,
-                Currency = "TRY", FraudStatus = "1", Installment = 1
+                Success = true,
+                PaymentId = "PAY-SIRA",
+                ItemTransactionId = "ITX-SIRA",
+                ItemTransactionCount = 1,
+                PaidPrice = amount,
+                Currency = "TRY",
+                FraudStatus = "1",
+                Installment = 1
             };
 
             var ilk = await CallbackAsync(token, Sign(token));
@@ -528,8 +560,14 @@ namespace Divisima.IntegrationTests
 
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-EKSIK", ItemTransactionId = "ITX-EKSIK", ItemTransactionCount = 1, PaidPrice = amount - 1m,   // 1 TL eksik
-                Currency = "TRY", FraudStatus = "1", Installment = 1
+                Success = true,
+                PaymentId = "PAY-EKSIK",
+                ItemTransactionId = "ITX-EKSIK",
+                ItemTransactionCount = 1,
+                PaidPrice = amount - 1m,   // 1 TL eksik
+                Currency = "TRY",
+                FraudStatus = "1",
+                Installment = 1
             };
 
             var r = await CallbackAsync(token, Sign(token));
@@ -552,8 +590,14 @@ namespace Divisima.IntegrationTests
             var komisyonlu = amount * 1.1m;   // %10 taksit komisyonu - 2x ust sinirinin altinda
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-TAKSIT", ItemTransactionId = "ITX-TAKSIT", ItemTransactionCount = 1, PaidPrice = komisyonlu,
-                Currency = "TRY", FraudStatus = "1", Installment = 3
+                Success = true,
+                PaymentId = "PAY-TAKSIT",
+                ItemTransactionId = "ITX-TAKSIT",
+                ItemTransactionCount = 1,
+                PaidPrice = komisyonlu,
+                Currency = "TRY",
+                FraudStatus = "1",
+                Installment = 3
             };
 
             var r = await CallbackAsync(token, Sign(token));
@@ -576,8 +620,14 @@ namespace Divisima.IntegrationTests
 
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-FRAUD", ItemTransactionId = "ITX-FRAUD", ItemTransactionCount = 1, PaidPrice = amount,
-                Currency = "TRY", FraudStatus = "-1", Installment = 1   // fraud RED
+                Success = true,
+                PaymentId = "PAY-FRAUD",
+                ItemTransactionId = "ITX-FRAUD",
+                ItemTransactionCount = 1,
+                PaidPrice = amount,
+                Currency = "TRY",
+                FraudStatus = "-1",
+                Installment = 1   // fraud RED
             };
 
             var r = await CallbackAsync(token, Sign(token));
@@ -603,8 +653,14 @@ namespace Divisima.IntegrationTests
 
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-IADE-1", ItemTransactionId = "ITX-IADE-1", ItemTransactionCount = 1, PaidPrice = amount,
-                Currency = "TRY", FraudStatus = "1", Installment = 1
+                Success = true,
+                PaymentId = "PAY-IADE-1",
+                ItemTransactionId = "ITX-IADE-1",
+                ItemTransactionCount = 1,
+                PaidPrice = amount,
+                Currency = "TRY",
+                FraudStatus = "1",
+                Installment = 1
             };
             (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue("odeme basarili olmali");
 
@@ -637,8 +693,14 @@ namespace Divisima.IntegrationTests
 
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-IADE-2", ItemTransactionId = "ITX-IADE-2", ItemTransactionCount = 1, PaidPrice = amount,
-                Currency = "TRY", FraudStatus = "1", Installment = 1
+                Success = true,
+                PaymentId = "PAY-IADE-2",
+                ItemTransactionId = "ITX-IADE-2",
+                ItemTransactionCount = 1,
+                PaidPrice = amount,
+                Currency = "TRY",
+                FraudStatus = "1",
+                Installment = 1
             };
             (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue();
 
@@ -682,8 +744,14 @@ namespace Divisima.IntegrationTests
             var (orderId, token, amount) = await NewPendingPaymentAsync(qty: 2, stock: 10);
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-IADE-3", ItemTransactionId = "ITX-IADE-3", ItemTransactionCount = 1, PaidPrice = amount,
-                Currency = "TRY", FraudStatus = "1", Installment = 1
+                Success = true,
+                PaymentId = "PAY-IADE-3",
+                ItemTransactionId = "ITX-IADE-3",
+                ItemTransactionCount = 1,
+                PaidPrice = amount,
+                Currency = "TRY",
+                FraudStatus = "1",
+                Installment = 1
             };
             (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue();
 
@@ -724,8 +792,14 @@ namespace Divisima.IntegrationTests
             var (orderId, token, amount) = await NewPendingPaymentAsync(qty: 2, stock: 10);
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-IADE-4", ItemTransactionId = "ITX-IADE-4", ItemTransactionCount = 1, PaidPrice = amount,
-                Currency = "TRY", FraudStatus = "1", Installment = 1
+                Success = true,
+                PaymentId = "PAY-IADE-4",
+                ItemTransactionId = "ITX-IADE-4",
+                ItemTransactionCount = 1,
+                PaidPrice = amount,
+                Currency = "TRY",
+                FraudStatus = "1",
+                Installment = 1
             };
             (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue();
 
@@ -767,8 +841,14 @@ namespace Divisima.IntegrationTests
             var (orderId, token, amount) = await NewPendingPaymentAsync(qty: 2, stock: 10);
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-IADE-5", ItemTransactionId = "ITX-IADE-5", ItemTransactionCount = 1, PaidPrice = amount,
-                Currency = "TRY", FraudStatus = "1", Installment = 1
+                Success = true,
+                PaymentId = "PAY-IADE-5",
+                ItemTransactionId = "ITX-IADE-5",
+                ItemTransactionCount = 1,
+                PaidPrice = amount,
+                Currency = "TRY",
+                FraudStatus = "1",
+                Installment = 1
             };
             (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue();
 
@@ -804,8 +884,14 @@ namespace Divisima.IntegrationTests
             var (orderId, token, amount) = await NewPendingPaymentAsync();
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-FRAUD-FATURA", ItemTransactionId = "ITX-FRAUD-FATURA", ItemTransactionCount = 1, PaidPrice = amount,
-                Currency = "TRY", FraudStatus = "0", Installment = 1
+                Success = true,
+                PaymentId = "PAY-FRAUD-FATURA",
+                ItemTransactionId = "ITX-FRAUD-FATURA",
+                ItemTransactionCount = 1,
+                PaidPrice = amount,
+                Currency = "TRY",
+                FraudStatus = "0",
+                Installment = 1
             };
 
             var r = await CallbackAsync(token, Sign(token));
@@ -843,8 +929,14 @@ namespace Divisima.IntegrationTests
             var (orderId, token, amount) = await NewPendingPaymentAsync();
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-FATURA-OK", ItemTransactionId = "ITX-FATURA-OK", ItemTransactionCount = 1, PaidPrice = amount,
-                Currency = "TRY", FraudStatus = "1", Installment = 1
+                Success = true,
+                PaymentId = "PAY-FATURA-OK",
+                ItemTransactionId = "ITX-FATURA-OK",
+                ItemTransactionCount = 1,
+                PaidPrice = amount,
+                Currency = "TRY",
+                FraudStatus = "1",
+                Installment = 1
             };
 
             (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue("odeme basarili olmali");
@@ -875,8 +967,14 @@ namespace Divisima.IntegrationTests
 
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-USD", ItemTransactionId = "ITX-USD", ItemTransactionCount = 1, PaidPrice = amount,
-                Currency = "USD", FraudStatus = "1", Installment = 1
+                Success = true,
+                PaymentId = "PAY-USD",
+                ItemTransactionId = "ITX-USD",
+                ItemTransactionCount = 1,
+                PaidPrice = amount,
+                Currency = "USD",
+                FraudStatus = "1",
+                Installment = 1
             };
 
             var r = await CallbackAsync(token, Sign(token));
@@ -957,7 +1055,9 @@ namespace Divisima.IntegrationTests
             var place = await WithScopeAsync(sp => sp.GetRequiredService<IOrderService>().PlaceOrder(
                 new OrderCreateRequestDto
                 {
-                    customer_id = customerId, coupon_code = "", use_store_credit = storeCredit,
+                    customer_id = customerId,
+                    coupon_code = "",
+                    use_store_credit = storeCredit,
                     payment_method = 0,
                     items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = qty } }
                 }));
@@ -1009,8 +1109,14 @@ namespace Divisima.IntegrationTests
             ControllableIyzicoClient.RetrieveCallCount = 0;
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-TX-1", ItemTransactionId = "ITX-TX-1", ItemTransactionCount = 1, PaidPrice = amount,
-                Currency = "TRY", FraudStatus = "1", Installment = 1
+                Success = true,
+                PaymentId = "PAY-TX-1",
+                ItemTransactionId = "ITX-TX-1",
+                ItemTransactionCount = 1,
+                PaidPrice = amount,
+                Currency = "TRY",
+                FraudStatus = "1",
+                Installment = 1
             };
 
             KontrolluStatusHistory.RecordPatlasin = true;
@@ -1071,8 +1177,14 @@ namespace Divisima.IntegrationTests
 
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-TX-2", ItemTransactionId = "ITX-TX-2", ItemTransactionCount = 1, PaidPrice = amount,
-                Currency = "TRY", FraudStatus = "1", Installment = 1
+                Success = true,
+                PaymentId = "PAY-TX-2",
+                ItemTransactionId = "ITX-TX-2",
+                ItemTransactionCount = 1,
+                PaidPrice = amount,
+                Currency = "TRY",
+                FraudStatus = "1",
+                Installment = 1
             };
 
             KontrolluLoyalty.EarnPatlasin = true;
@@ -1116,8 +1228,14 @@ namespace Divisima.IntegrationTests
 
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-TX-3", ItemTransactionId = "ITX-TX-3", ItemTransactionCount = 1, PaidPrice = amount,
-                Currency = "TRY", FraudStatus = "0", Installment = 1   // fraud RED -> basarisiz dal
+                Success = true,
+                PaymentId = "PAY-TX-3",
+                ItemTransactionId = "ITX-TX-3",
+                ItemTransactionCount = 1,
+                PaidPrice = amount,
+                Currency = "TRY",
+                FraudStatus = "0",
+                Installment = 1   // fraud RED -> basarisiz dal
             };
 
             // 1) Defter kaydi PATLIYOR -> bakiye artisi da geri alinmali.
@@ -1167,9 +1285,14 @@ namespace Divisima.IntegrationTests
 
             ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
             {
-                Success = true, PaymentId = "PAY-KIMLIK", ItemTransactionId = "ITX-KIMLIK",
-                ItemTransactionCount = 1, PaidPrice = amount, Currency = "TRY",
-                FraudStatus = "1", Installment = 1
+                Success = true,
+                PaymentId = "PAY-KIMLIK",
+                ItemTransactionId = "ITX-KIMLIK",
+                ItemTransactionCount = 1,
+                PaidPrice = amount,
+                Currency = "TRY",
+                FraudStatus = "1",
+                Installment = 1
             };
             (await CallbackAsync(token, Sign(token))).result.Success.Should().BeTrue("odeme basarili olmali");
 

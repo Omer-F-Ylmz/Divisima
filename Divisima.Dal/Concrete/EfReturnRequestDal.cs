@@ -1,8 +1,8 @@
-using Microsoft.EntityFrameworkCore;
 using Divisima.Core.DataAccess.EntityFramework;
 using Divisima.DataAccess.Abstract;
 using Divisima.DataAccess.Concrete.Context;
 using Divisima.Entity.Entities;
+using Microsoft.EntityFrameworkCore;
 namespace Divisima.DataAccess.Concrete.EntityFramework
 {
     public class EfReturnRequestDal : EfEntityRepositoryBase<ReturnRequest, DivisimaDbContext>, IReturnRequestDal

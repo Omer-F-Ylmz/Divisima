@@ -4,9 +4,9 @@ using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Enums;
 using Divisima.Core.Utilities.Results;
 using Divisima.DataAccess.Abstract;
-using Microsoft.EntityFrameworkCore;
 using Divisima.Entity.Dtos.Stock;
 using Divisima.Entity.Entities;
+using Microsoft.EntityFrameworkCore;
 
 // BEDEN NORMALIZASYONU (H48): tum stok islemleri ayni normalize edilmis bedeni kullanir.
 namespace Divisima.Bussiness.Concrete
@@ -200,9 +200,11 @@ namespace Divisima.Bussiness.Concrete
                         var deducted = await _productStockDal.TryDirectDeductAsync(res.product_id, res.size, res.quantity);
                         await _stockMovementDal.AddAsync(new StockMovement
                         {
-                            product_id = res.product_id, size = res.size,
+                            product_id = res.product_id,
+                            size = res.size,
                             movement_type = (byte)StockMovementType.Out,
-                            quantity = res.quantity, reference_id = orderId,
+                            quantity = res.quantity,
+                            reference_id = orderId,
                             note = deducted > 0
                                 ? "Ödeme onaylı - rezervasyon expire olmuştu, stok yeniden güvenceye alındı"
                                 : "UYARI: ödeme alındı fakat stok yok (rezervasyon expire + tükendi) - manuel iade/tedarik gerekli",

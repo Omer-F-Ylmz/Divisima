@@ -1,10 +1,10 @@
-using Xunit;
 using Divisima.DataAccess.Concrete.Context;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Testcontainers.MsSql;
+using Xunit;
 
 namespace Divisima.IntegrationTests
 {
@@ -19,7 +19,7 @@ namespace Divisima.IntegrationTests
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-                TestHostConfig.Apply(builder);
+            TestHostConfig.Apply(builder);
             // AUTH RATE LIMIT - test host'unda yukseltilir.
             // Sebep: bu siniftaki eszamanlilik testi KASITLI olarak 8 AYRI musteri yaratiyor
             // (gercek oversell senaryosu farkli alicilarin yarismasidir). TestAuthHelper musteri

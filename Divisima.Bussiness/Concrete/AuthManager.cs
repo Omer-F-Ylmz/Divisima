@@ -1,14 +1,14 @@
 using System.Net;
-using Divisima.Core.Utilities.Enums;
-using Divisima.Core.Utilities.Sanitization;
 using Divisima.Bussiness.Abstract;
 using Divisima.Core.Security.Hashing;
-using Divisima.Core.Security.Tokens;
 using Divisima.Core.Security.JWT;
-using Divisima.Core.Utilities.Constants;
+using Divisima.Core.Security.Tokens;
 using Divisima.Core.Utilities.Caching;
-using Divisima.Core.Utilities.Results;
+using Divisima.Core.Utilities.Constants;
+using Divisima.Core.Utilities.Enums;
 using Divisima.Core.Utilities.Mail;
+using Divisima.Core.Utilities.Results;
+using Divisima.Core.Utilities.Sanitization;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Auth;
 using Divisima.Entity.Entities;
@@ -352,7 +352,7 @@ namespace Divisima.Bussiness.Concrete
 
             // Açıklayıcı yorum: Şifre değişince mevcut tüm oturumları geçersiz kıl (çalınan token'ı öldür)
             // Tum aktif oturumlari TEK atomik sorgu ile kapat (foreach N+1 yerine - DRY + performans)
-                await _userSessionDal.InvalidateAllForCustomerAsync(customer.id);
+            await _userSessionDal.InvalidateAllForCustomerAsync(customer.id);
 
             return (HttpStatusCode.OK, new SuccessResult(Messages.PasswordResetSuccess));
         }

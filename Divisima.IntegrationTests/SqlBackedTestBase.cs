@@ -149,8 +149,12 @@ namespace Divisima.IntegrationTests
             {
                 ctx.ProductStocks.Add(new ProductStock
                 {
-                    product_id = p.id, size = s, stock_quantity = stockQuantity, reserved_quantity = 0,
-                    is_active = true, created_at = DateTime.Now
+                    product_id = p.id,
+                    size = s,
+                    stock_quantity = stockQuantity,
+                    reserved_quantity = 0,
+                    is_active = true,
+                    created_at = DateTime.Now
                 });
             }
             await ctx.SaveChangesAsync();

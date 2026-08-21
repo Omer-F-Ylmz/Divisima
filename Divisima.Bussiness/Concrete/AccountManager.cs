@@ -2,10 +2,10 @@ using System;
 using System.Linq;
 using System.Net;
 using Divisima.Bussiness.Abstract;
+using Divisima.Core.Security.Hashing;
 using Divisima.Core.Utilities.Caching;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Results;
-using Divisima.Core.Security.Hashing;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Account;
 
@@ -35,12 +35,19 @@ namespace Divisima.Bussiness.Concrete
 
             var dto = new AccountSummaryDto
             {
-                id = c.id, name = c.name, email = c.email, phone = c.phone,
-                birthdate = c.birthdate, email_verified = c.email_verified,
+                id = c.id,
+                name = c.name,
+                email = c.email,
+                phone = c.phone,
+                birthdate = c.birthdate,
+                email_verified = c.email_verified,
                 two_factor_enabled = c.two_factor_enabled,
-                loyalty_points = c.loyalty_points, store_credit = c.store_credit,
+                loyalty_points = c.loyalty_points,
+                store_credit = c.store_credit,
                 referral_code = c.referral_code,
-                notify_email = c.notify_email, notify_sms = c.notify_sms, notify_push = c.notify_push
+                notify_email = c.notify_email,
+                notify_sms = c.notify_sms,
+                notify_push = c.notify_push
             };
             return (HttpStatusCode.OK, new SuccessDataResult<AccountSummaryDto>(dto));
         }
@@ -81,7 +88,7 @@ namespace Divisima.Bussiness.Concrete
 
             // Açıklayıcı yorum: Şifre değişince diğer oturumları geçersiz kıl (çalınan token'ı öldür)
             // Tum aktif oturumlari TEK atomik sorgu ile kapat (foreach N+1 yerine - DRY + performans)
-                await _userSessionDal.InvalidateAllForCustomerAsync(customerId);
+            await _userSessionDal.InvalidateAllForCustomerAsync(customerId);
 
             return (HttpStatusCode.OK, new SuccessResult(Messages.PasswordChanged));
         }
@@ -146,7 +153,7 @@ namespace Divisima.Bussiness.Concrete
 
             // Açıklayıcı yorum: Tüm oturumları kapat
             // Tum aktif oturumlari TEK atomik sorgu ile kapat (foreach N+1 yerine - DRY + performans)
-                await _userSessionDal.InvalidateAllForCustomerAsync(customerId);
+            await _userSessionDal.InvalidateAllForCustomerAsync(customerId);
 
             // Hesap durumu cache'ini düşür - silinen hesabın token'ı bir sonraki istekte
             // TokenBlacklistMiddleware tarafından reddedilsin (TTL beklenmesin).

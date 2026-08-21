@@ -227,17 +227,25 @@ namespace Divisima.IntegrationTests
             {
                 var cat = new Category
                 {
-                    name = "Mail Kategori", slug = $"mail-{Guid.NewGuid():N}",
-                    is_active = true, created_at = DateTime.Now
+                    name = "Mail Kategori",
+                    slug = $"mail-{Guid.NewGuid():N}",
+                    is_active = true,
+                    created_at = DateTime.Now
                 };
                 ctx.Set<Category>().Add(cat);
                 await ctx.SaveChangesAsync();
 
                 var p = new Product
                 {
-                    name = "Mail Urun", brand = "T", category_id = cat.id, price = 80m,
-                    description = "mail testi urunu", color_hex = "#0D0D0D",
-                    product_type = 0, is_active = true, created_at = DateTime.Now
+                    name = "Mail Urun",
+                    brand = "T",
+                    category_id = cat.id,
+                    price = 80m,
+                    description = "mail testi urunu",
+                    color_hex = "#0D0D0D",
+                    product_type = 0,
+                    is_active = true,
+                    created_at = DateTime.Now
                 };
                 ctx.Products.Add(p);
                 await ctx.SaveChangesAsync();
@@ -245,9 +253,11 @@ namespace Divisima.IntegrationTests
 
                 ctx.Set<StockNotificationRequest>().Add(new StockNotificationRequest
                 {
-                    product_id = productId, size = "M",
+                    product_id = productId,
+                    size = "M",
                     email = $"abone-{Guid.NewGuid():N}@divisima.test",
-                    is_notified = false, created_at = DateTime.Now
+                    is_notified = false,
+                    created_at = DateTime.Now
                 });
                 await ctx.SaveChangesAsync();
             }

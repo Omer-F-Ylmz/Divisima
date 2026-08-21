@@ -101,24 +101,37 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             var c = new Customer
             {
-                name = "Yorum Testi", email = $"review-{Guid.NewGuid():N}@divisima.test", phone = "5550000000",
-                password_hash = new byte[] { 1 }, password_salt = new byte[] { 2 },
-                is_active = true, email_verified = true, created_at = DateTime.Now
+                name = "Yorum Testi",
+                email = $"review-{Guid.NewGuid():N}@divisima.test",
+                phone = "5550000000",
+                password_hash = new byte[] { 1 },
+                password_salt = new byte[] { 2 },
+                is_active = true,
+                email_verified = true,
+                created_at = DateTime.Now
             };
             ctx.Set<Customer>().Add(c);
             var cat = new Category
             {
-                name = "Yorum Kategori", slug = $"yorum-{Guid.NewGuid():N}",
-                is_active = true, created_at = DateTime.Now
+                name = "Yorum Kategori",
+                slug = $"yorum-{Guid.NewGuid():N}",
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Set<Category>().Add(cat);
             await ctx.SaveChangesAsync();
 
             var p = new Product
             {
-                name = "Yorum Urun", brand = "T", category_id = cat.id, price = 100m,
-                description = "yorum testi urunu", color_hex = "#0A0A0A",
-                product_type = 0, is_active = true, created_at = DateTime.Now
+                name = "Yorum Urun",
+                brand = "T",
+                category_id = cat.id,
+                price = 100m,
+                description = "yorum testi urunu",
+                color_hex = "#0A0A0A",
+                product_type = 0,
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Products.Add(p);
             await ctx.SaveChangesAsync();
@@ -191,9 +204,15 @@ namespace Divisima.IntegrationTests
 
             static ProductReview Yorum(int customerId, int productId, string comment, bool aktif) => new()
             {
-                customer_id = customerId, product_id = productId, rating = 5, comment = comment,
-                is_verified_purchase = false, helpful_count = 0, review_status = 0,
-                is_active = aktif, created_at = DateTime.Now
+                customer_id = customerId,
+                product_id = productId,
+                rating = 5,
+                comment = comment,
+                is_verified_purchase = false,
+                helpful_count = 0,
+                review_status = 0,
+                is_active = aktif,
+                created_at = DateTime.Now
             };
 
             // POZITIF OLAY: ilk aktif yorum sorunsuz yaziliyor.

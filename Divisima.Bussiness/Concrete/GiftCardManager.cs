@@ -1,7 +1,7 @@
-using Divisima.Core.DataAccess;
 using System;
 using System.Net;
 using Divisima.Bussiness.Abstract;
+using Divisima.Core.DataAccess;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Enums;
 using Divisima.Core.Utilities.Results;
@@ -34,7 +34,11 @@ namespace Divisima.Bussiness.Concrete
             var code = Guid.NewGuid().ToString("N").Substring(0, 16).ToUpper();
             await _giftCardDal.AddAsync(new GiftCard
             {
-                code = code, initial_amount = amount, balance = amount, is_active = true, created_at = DateTime.Now
+                code = code,
+                initial_amount = amount,
+                balance = amount,
+                is_active = true,
+                created_at = DateTime.Now
             });
             return (HttpStatusCode.Created, new SuccessDataResult<string>(code, Messages.GiftCardCreated));
         }
@@ -79,8 +83,12 @@ namespace Divisima.Bussiness.Concrete
 
                 await _creditTxDal.AddAsync(new StoreCreditTransaction
                 {
-                    customer_id = customerId, amount = amount, type = (byte)LedgerEntryTypeEnum.Earn,
-                    reason = "Hediye kartı bozdurma", order_id = null, created_at = DateTime.Now
+                    customer_id = customerId,
+                    amount = amount,
+                    type = (byte)LedgerEntryTypeEnum.Earn,
+                    reason = "Hediye kartı bozdurma",
+                    order_id = null,
+                    created_at = DateTime.Now
                 });
                 await _unitOfWork.CommitAsync();
             }

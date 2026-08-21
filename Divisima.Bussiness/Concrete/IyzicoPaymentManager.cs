@@ -2,11 +2,11 @@ using System.Net;
 using Divisima.Bussiness.Abstract;
 using Divisima.Core.DataAccess;
 using Divisima.Core.Integrations.Iyzico;
-using Divisima.Core.Utilities.Locking;
 using Divisima.Core.Utilities.Constants;
-using Divisima.Core.Utilities.Sanitization;
 using Divisima.Core.Utilities.Enums;
+using Divisima.Core.Utilities.Locking;
 using Divisima.Core.Utilities.Results;
+using Divisima.Core.Utilities.Sanitization;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Payment;
 using Divisima.Entity.Entities;
@@ -344,9 +344,12 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
                             await _customerDal.IncrementStoreCreditAsync(order.customer_id, order.store_credit_used);
                             await _creditTxDal.AddAsync(new StoreCreditTransaction
                             {
-                                customer_id = order.customer_id, amount = order.store_credit_used,
-                                type = (byte)LedgerEntryTypeEnum.Earn, reason = "Ödeme başarısız - kredi iadesi",
-                                order_id = order.id, created_at = DateTime.Now
+                                customer_id = order.customer_id,
+                                amount = order.store_credit_used,
+                                type = (byte)LedgerEntryTypeEnum.Earn,
+                                reason = "Ödeme başarısız - kredi iadesi",
+                                order_id = order.id,
+                                created_at = DateTime.Now
                             });
                         }
                     }

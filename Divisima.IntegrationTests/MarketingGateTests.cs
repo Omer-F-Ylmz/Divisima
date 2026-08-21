@@ -90,9 +90,14 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             var c = new Customer
             {
-                name = "IYS Testi", email = $"iys-{Guid.NewGuid():N}@divisima.test", phone = "5550000000",
-                password_hash = new byte[] { 1 }, password_salt = new byte[] { 2 },
-                is_active = true, email_verified = true, notify_email = notifyEmail,
+                name = "IYS Testi",
+                email = $"iys-{Guid.NewGuid():N}@divisima.test",
+                phone = "5550000000",
+                password_hash = new byte[] { 1 },
+                password_salt = new byte[] { 2 },
+                is_active = true,
+                email_verified = true,
+                notify_email = notifyEmail,
                 created_at = DateTime.Now
             };
             ctx.Set<Customer>().Add(c);
@@ -102,8 +107,11 @@ namespace Divisima.IntegrationTests
             {
                 ctx.Set<ConsentRecord>().Add(new ConsentRecord
                 {
-                    customer_id = c.id, consent_type = "marketing", document_version = "1.0",
-                    granted = marketingGranted.Value, created_at = DateTime.Now.AddDays(-2)
+                    customer_id = c.id,
+                    consent_type = "marketing",
+                    document_version = "1.0",
+                    granted = marketingGranted.Value,
+                    created_at = DateTime.Now.AddDays(-2)
                 });
                 await ctx.SaveChangesAsync();
             }
@@ -112,25 +120,36 @@ namespace Divisima.IntegrationTests
                 // SONRADAN RET: en guncel kayit belirleyici olmali.
                 ctx.Set<ConsentRecord>().Add(new ConsentRecord
                 {
-                    customer_id = c.id, consent_type = "marketing", document_version = "1.0",
-                    granted = false, created_at = DateTime.Now.AddDays(-1)
+                    customer_id = c.id,
+                    consent_type = "marketing",
+                    document_version = "1.0",
+                    granted = false,
+                    created_at = DateTime.Now.AddDays(-1)
                 });
                 await ctx.SaveChangesAsync();
             }
 
             var cat = new Category
             {
-                name = "IYS Kategori", slug = $"iys-{Guid.NewGuid():N}",
-                is_active = true, created_at = DateTime.Now
+                name = "IYS Kategori",
+                slug = $"iys-{Guid.NewGuid():N}",
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Set<Category>().Add(cat);
             await ctx.SaveChangesAsync();
 
             var p = new Product
             {
-                name = "IYS Urun", brand = "T", category_id = cat.id, price = 100m,
-                description = "iys testi urunu", color_hex = "#0E0E0E",
-                product_type = 0, is_active = true, created_at = DateTime.Now
+                name = "IYS Urun",
+                brand = "T",
+                category_id = cat.id,
+                price = 100m,
+                description = "iys testi urunu",
+                color_hex = "#0E0E0E",
+                product_type = 0,
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Products.Add(p);
             await ctx.SaveChangesAsync();
@@ -138,8 +157,10 @@ namespace Divisima.IntegrationTests
             // Atil sepet: son hareket 48 saat once (esik 24 saat), hatirlatma gonderilmemis.
             var cart = new Cart
             {
-                customer_id = c.id, is_active = true,
-                created_at = DateTime.Now.AddDays(-3), updated_at = DateTime.Now.AddHours(-48),
+                customer_id = c.id,
+                is_active = true,
+                created_at = DateTime.Now.AddDays(-3),
+                updated_at = DateTime.Now.AddHours(-48),
                 reminder_sent_at = null
             };
             ctx.Set<Cart>().Add(cart);
@@ -147,8 +168,12 @@ namespace Divisima.IntegrationTests
 
             ctx.Set<CartItem>().Add(new CartItem
             {
-                cart_id = cart.id, product_id = p.id, size = "M", quantity = 1,
-                is_active = true, created_at = DateTime.Now.AddHours(-48)
+                cart_id = cart.id,
+                product_id = p.id,
+                size = "M",
+                quantity = 1,
+                is_active = true,
+                created_at = DateTime.Now.AddHours(-48)
             });
             await ctx.SaveChangesAsync();
             return c.id;
@@ -194,17 +219,25 @@ namespace Divisima.IntegrationTests
             {
                 var cat = new Category
                 {
-                    name = "Islemsel Kategori", slug = $"islemsel-{Guid.NewGuid():N}",
-                    is_active = true, created_at = DateTime.Now
+                    name = "Islemsel Kategori",
+                    slug = $"islemsel-{Guid.NewGuid():N}",
+                    is_active = true,
+                    created_at = DateTime.Now
                 };
                 ctx.Set<Category>().Add(cat);
                 await ctx.SaveChangesAsync();
 
                 var p = new Product
                 {
-                    name = "Islemsel Urun", brand = "T", category_id = cat.id, price = 90m,
-                    description = "islemsel test", color_hex = "#0F0F0F",
-                    product_type = 0, is_active = true, created_at = DateTime.Now
+                    name = "Islemsel Urun",
+                    brand = "T",
+                    category_id = cat.id,
+                    price = 90m,
+                    description = "islemsel test",
+                    color_hex = "#0F0F0F",
+                    product_type = 0,
+                    is_active = true,
+                    created_at = DateTime.Now
                 };
                 ctx.Products.Add(p);
                 await ctx.SaveChangesAsync();
@@ -212,9 +245,11 @@ namespace Divisima.IntegrationTests
 
                 ctx.Set<StockNotificationRequest>().Add(new StockNotificationRequest
                 {
-                    product_id = productId, size = "M",
+                    product_id = productId,
+                    size = "M",
                     email = $"stok-{Guid.NewGuid():N}@divisima.test",
-                    is_notified = false, created_at = DateTime.Now
+                    is_notified = false,
+                    created_at = DateTime.Now
                 });
                 await ctx.SaveChangesAsync();
             }

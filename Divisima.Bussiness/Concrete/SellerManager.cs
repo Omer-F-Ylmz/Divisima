@@ -2,8 +2,8 @@ using System.Net;
 using Divisima.Bussiness.Abstract;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Enums;
-using Divisima.Core.Utilities.Results;
 using Divisima.Core.Utilities.Orders;
+using Divisima.Core.Utilities.Results;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Seller;
 
@@ -19,7 +19,7 @@ namespace Divisima.Bussiness.Concrete
     {
         // Ödenmiş/gerçekleşmiş sayılan sipariş durumları (gelir bunlardan hesaplanır)
         // H47: yerel kopya KALDIRILDI - kural artik tek yerde: PaidOrderSpec (Core/Utilities/Orders).
-private readonly ISellerDal _sellerDal;
+        private readonly ISellerDal _sellerDal;
         private readonly IProductDal _productDal;
         private readonly IOrderItemDal _orderItemDal;
         private readonly IOrderDal _orderDal;

@@ -3,10 +3,10 @@ using Divisima.Bussiness.Abstract;
 using Divisima.Core.Utilities.Caching;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Dtos;
+using Divisima.Core.Utilities.Enums;
 using Divisima.Core.Utilities.Results;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Admin;
-using Divisima.Core.Utilities.Enums;
 
 namespace Divisima.Bussiness.Concrete
 {

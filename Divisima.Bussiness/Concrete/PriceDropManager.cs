@@ -48,8 +48,11 @@ namespace Divisima.Bussiness.Concrete
 
             await _subDal.AddAsync(new PriceDropSubscription
             {
-                product_id = dto.product_id, email = dto.email, subscribed_price = product.price,
-                is_notified = false, created_at = DateTime.Now
+                product_id = dto.product_id,
+                email = dto.email,
+                subscribed_price = product.price,
+                is_notified = false,
+                created_at = DateTime.Now
             });
             return (HttpStatusCode.OK, new SuccessResult(Messages.PriceDropSubscribed));
         }

@@ -1,10 +1,10 @@
 using System.Net;
-using Divisima.Entity.Dtos.Cart;
 using AutoMapper;
 using Divisima.Bussiness.Abstract;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Results;
 using Divisima.DataAccess.Abstract;
+using Divisima.Entity.Dtos.Cart;
 using Divisima.Entity.Dtos.Product;
 using Divisima.Entity.Entities;
 
@@ -50,7 +50,9 @@ namespace Divisima.Bussiness.Concrete
             // Sepete ekle (stok/miktar doğrulaması CartManager.AddItem'da)
             var addResult = await _cartService.AddItem(new CartItemRequestDto
             {
-                customer_id = customerId, product_id = productId, size = size,
+                customer_id = customerId,
+                product_id = productId,
+                size = size,
                 quantity = quantity < 1 ? 1 : quantity
             });
             if (addResult.Item1 != HttpStatusCode.OK && addResult.Item1 != HttpStatusCode.Created)

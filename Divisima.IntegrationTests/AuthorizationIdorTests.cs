@@ -120,17 +120,27 @@ namespace Divisima.IntegrationTests
 
             var p = new Product
             {
-                name = "IDOR Urun", brand = "T", category_id = cat.id, price = price,
-                description = "idor testi urunu", color_hex = "#101010",
-                product_type = 0, is_active = true, created_at = DateTime.Now
+                name = "IDOR Urun",
+                brand = "T",
+                category_id = cat.id,
+                price = price,
+                description = "idor testi urunu",
+                color_hex = "#101010",
+                product_type = 0,
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Products.Add(p);
             await ctx.SaveChangesAsync();
 
             ctx.ProductStocks.Add(new ProductStock
             {
-                product_id = p.id, size = "M", stock_quantity = stock, reserved_quantity = 0,
-                is_active = true, created_at = DateTime.Now
+                product_id = p.id,
+                size = "M",
+                stock_quantity = stock,
+                reserved_quantity = 0,
+                is_active = true,
+                created_at = DateTime.Now
             });
             await ctx.SaveChangesAsync();
             return p.id;
@@ -287,8 +297,14 @@ namespace Divisima.IntegrationTests
 
             var upsert = await A.Client.PostAsJsonAsync("/api/Address/upsert", new AddressRequestDto
             {
-                customer_id = A.CustomerId, title = "Ev", full_name = "A Musteri", phone = "5551112233",
-                city = "Istanbul", district = "Kadikoy", full_address = "IDOR test adresi", is_default = true
+                customer_id = A.CustomerId,
+                title = "Ev",
+                full_name = "A Musteri",
+                phone = "5551112233",
+                city = "Istanbul",
+                district = "Kadikoy",
+                full_address = "IDOR test adresi",
+                is_default = true
             });
             upsert.IsSuccessStatusCode.Should().BeTrue(
                 $"A adres ekleyebilmeli: {await upsert.Content.ReadAsStringAsync()}");
@@ -391,8 +407,14 @@ namespace Divisima.IntegrationTests
 
             var upsert = await A.Client.PostAsJsonAsync("/api/Address/upsert", new AddressRequestDto
             {
-                customer_id = A.CustomerId, title = "Ev", full_name = "A Musteri", phone = "5551112233",
-                city = "Istanbul", district = "Kadikoy", full_address = "Sozlesme testi adresi", is_default = true
+                customer_id = A.CustomerId,
+                title = "Ev",
+                full_name = "A Musteri",
+                phone = "5551112233",
+                city = "Istanbul",
+                district = "Kadikoy",
+                full_address = "Sozlesme testi adresi",
+                is_default = true
             });
             upsert.IsSuccessStatusCode.Should().BeTrue("adres eklenebilmeli");
             int addressId;
@@ -546,8 +568,14 @@ namespace Divisima.IntegrationTests
 
             var upsert = await A.Client.PostAsJsonAsync("/api/Address/upsert", new AddressRequestDto
             {
-                customer_id = B.CustomerId, title = "Sahte", full_name = "Baskasi Adina", phone = "5559998877",
-                city = "Ankara", district = "Cankaya", full_address = "Token ezme testi", is_default = false
+                customer_id = B.CustomerId,
+                title = "Sahte",
+                full_name = "Baskasi Adina",
+                phone = "5559998877",
+                city = "Ankara",
+                district = "Cankaya",
+                full_address = "Token ezme testi",
+                is_default = false
             });
             upsert.IsSuccessStatusCode.Should().BeTrue(
                 $"istek reddedilmemeli, govde SESSIZCE yok sayilmali: {await upsert.Content.ReadAsStringAsync()}");
@@ -576,8 +604,14 @@ namespace Divisima.IntegrationTests
             // Silinecek hesabin adres defteri OLSUN - kaskad gercekten calisiyor mu gorelim.
             var upsert = await A.Client.PostAsJsonAsync("/api/Address/upsert", new AddressRequestDto
             {
-                customer_id = A.CustomerId, title = "Ev", full_name = "A Musteri", phone = "5551112233",
-                city = "Istanbul", district = "Kadikoy", full_address = "Silme testi adresi", is_default = true
+                customer_id = A.CustomerId,
+                title = "Ev",
+                full_name = "A Musteri",
+                phone = "5551112233",
+                city = "Istanbul",
+                district = "Kadikoy",
+                full_address = "Silme testi adresi",
+                is_default = true
             });
             upsert.IsSuccessStatusCode.Should().BeTrue($"adres eklenebilmeli: {await upsert.Content.ReadAsStringAsync()}");
 

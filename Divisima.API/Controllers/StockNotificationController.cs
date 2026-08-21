@@ -23,10 +23,10 @@ namespace Divisima.API.Controllers
         // Açıklayıcı yorum: Stoksuz ürün+beden için e-posta bırak
         [HttpPost("subscribe")]
         [AllowAnonymous]
-    // DoS/SPAM FIX (H44): anonim + DB'ye kayit yazan uc -> limitsizdi. stok bildirimi aboneliği (e-posta ile kayıt yaratır).
-    // Sinirsiz sahte istek: DB sismesi, stok rezervasyon kilidi ve site uzerinden rastgele adreslere
-    // e-posta gonderimi (spam rolesi) mumkundu. Zaten TANIMLI "auth" politikasi (5/dk/IP) uygulandi.
-    [EnableRateLimiting("auth")]
+        // DoS/SPAM FIX (H44): anonim + DB'ye kayit yazan uc -> limitsizdi. stok bildirimi aboneliği (e-posta ile kayıt yaratır).
+        // Sinirsiz sahte istek: DB sismesi, stok rezervasyon kilidi ve site uzerinden rastgele adreslere
+        // e-posta gonderimi (spam rolesi) mumkundu. Zaten TANIMLI "auth" politikasi (5/dk/IP) uygulandi.
+        [EnableRateLimiting("auth")]
         [SwaggerOperation(Summary = "Stok bildirimi aboneliği", Description = "Ürün+beden tekrar stoğa girince e-posta ile haber verilir.")]
         public async Task<IActionResult> Subscribe([FromBody] StockNotificationSubscribeRequestDto dto)
         {

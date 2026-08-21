@@ -96,8 +96,11 @@ namespace Divisima.IntegrationTests
             await using var ctx = NewContext();
             var cat = new Category
             {
-                name = "Vitrin Kategori", slug = $"vitrin-{Guid.NewGuid():N}",
-                vat_rate = 0.10m, is_active = true, created_at = DateTime.Now
+                name = "Vitrin Kategori",
+                slug = $"vitrin-{Guid.NewGuid():N}",
+                vat_rate = 0.10m,
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Set<Category>().Add(cat);
             await ctx.SaveChangesAsync();
@@ -105,9 +108,15 @@ namespace Divisima.IntegrationTests
 
             var p = new Product
             {
-                name = "Vitrin Urun", brand = "Divisima", category_id = cat.id, price = 250m,
-                description = "vitrin sozlesme testi", color_hex = "#101010",
-                product_type = 0, is_active = true, created_at = DateTime.Now
+                name = "Vitrin Urun",
+                brand = "Divisima",
+                category_id = cat.id,
+                price = 250m,
+                description = "vitrin sozlesme testi",
+                color_hex = "#101010",
+                product_type = 0,
+                is_active = true,
+                created_at = DateTime.Now
             };
             ctx.Products.Add(p);
             await ctx.SaveChangesAsync();
@@ -115,8 +124,12 @@ namespace Divisima.IntegrationTests
 
             ctx.ProductStocks.Add(new ProductStock
             {
-                product_id = p.id, size = "M", stock_quantity = 7, reserved_quantity = 0,
-                is_active = true, created_at = DateTime.Now
+                product_id = p.id,
+                size = "M",
+                stock_quantity = 7,
+                reserved_quantity = 0,
+                is_active = true,
+                created_at = DateTime.Now
             });
             await ctx.SaveChangesAsync();
         }

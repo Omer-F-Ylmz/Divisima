@@ -1,6 +1,6 @@
+using Divisima.Core.Security.Encryption;
 using Divisima.Entity.Entities;
 using Microsoft.EntityFrameworkCore;
-using Divisima.Core.Security.Encryption;
 
 namespace Divisima.DataAccess.Concrete.Context
 {

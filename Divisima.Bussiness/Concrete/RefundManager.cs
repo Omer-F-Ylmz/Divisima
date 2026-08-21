@@ -126,8 +126,12 @@ namespace Divisima.Bussiness.Concrete
                 }
                 await _creditTxDal.AddAsync(new StoreCreditTransaction
                 {
-                    customer_id = order.customer_id, amount = creditRefund, type = (byte)LedgerEntryTypeEnum.Earn,
-                    reason = reason, order_id = order.id, created_at = DateTime.Now
+                    customer_id = order.customer_id,
+                    amount = creditRefund,
+                    type = (byte)LedgerEntryTypeEnum.Earn,
+                    reason = reason,
+                    order_id = order.id,
+                    created_at = DateTime.Now
                 });
             }
 

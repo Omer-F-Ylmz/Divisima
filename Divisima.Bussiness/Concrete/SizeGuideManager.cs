@@ -36,9 +36,15 @@ namespace Divisima.Bussiness.Concrete
             {
                 await _dal.AddAsync(new SizeGuideEntry
                 {
-                    category_id = dto.category_id, size_label = dto.size_label,
-                    bust_cm = dto.bust_cm, waist_cm = dto.waist_cm, hip_cm = dto.hip_cm, length_cm = dto.length_cm,
-                    sort_order = dto.sort_order, is_active = true, created_at = DateTime.Now
+                    category_id = dto.category_id,
+                    size_label = dto.size_label,
+                    bust_cm = dto.bust_cm,
+                    waist_cm = dto.waist_cm,
+                    hip_cm = dto.hip_cm,
+                    length_cm = dto.length_cm,
+                    sort_order = dto.sort_order,
+                    is_active = true,
+                    created_at = DateTime.Now
                 });
             }
             return (HttpStatusCode.OK, new SuccessResult(Messages.SizeGuideUpdated));

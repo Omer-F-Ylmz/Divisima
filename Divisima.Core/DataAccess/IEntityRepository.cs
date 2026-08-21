@@ -1,4 +1,4 @@
-﻿using System.Linq.Expressions;
+using System.Linq.Expressions;
 using Divisima.Core.Entities.Abstract;
 using Divisima.Core.Utilities.Dtos;
 

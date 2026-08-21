@@ -144,25 +144,38 @@ namespace Divisima.IntegrationTests
             {
                 var cat = new Category
                 {
-                    name = "Stok Kategori", slug = $"stok-{Guid.NewGuid():N}",
-                    vat_rate = 0.10m, is_active = true, created_at = DateTime.Now
+                    name = "Stok Kategori",
+                    slug = $"stok-{Guid.NewGuid():N}",
+                    vat_rate = 0.10m,
+                    is_active = true,
+                    created_at = DateTime.Now
                 };
                 ctx.Set<Category>().Add(cat);
                 await ctx.SaveChangesAsync();
 
                 var p = new Product
                 {
-                    name = "Stok Urun", brand = "T", category_id = cat.id, price = 100m,
-                    description = "stok testi urunu", color_hex = "#334455",
-                    product_type = 0, is_active = true, created_at = DateTime.Now
+                    name = "Stok Urun",
+                    brand = "T",
+                    category_id = cat.id,
+                    price = 100m,
+                    description = "stok testi urunu",
+                    color_hex = "#334455",
+                    product_type = 0,
+                    is_active = true,
+                    created_at = DateTime.Now
                 };
                 ctx.Products.Add(p);
                 await ctx.SaveChangesAsync();
 
                 ctx.ProductStocks.Add(new ProductStock
                 {
-                    product_id = p.id, size = "M", stock_quantity = stock, reserved_quantity = 0,
-                    is_active = true, created_at = DateTime.Now
+                    product_id = p.id,
+                    size = "M",
+                    stock_quantity = stock,
+                    reserved_quantity = 0,
+                    is_active = true,
+                    created_at = DateTime.Now
                 });
                 await ctx.SaveChangesAsync();
                 productId = p.id;
@@ -240,7 +253,10 @@ namespace Divisima.IntegrationTests
             // Panel FARK aliyor, uc MUTLAK deger istiyor: 10 + 15 = 25.
             var resp = await admin.PostAsJsonAsync("/api/Stock/adjust", new
             {
-                product_id = productId, size = "M", new_quantity = 25, note = "Yeni sevkiyat"
+                product_id = productId,
+                size = "M",
+                new_quantity = 25,
+                note = "Yeni sevkiyat"
             });
             resp.StatusCode.Should().Be(HttpStatusCode.OK,
                 $"admin duzeltmesi kabul edilmeli: {await resp.Content.ReadAsStringAsync()}");
@@ -277,7 +293,10 @@ namespace Divisima.IntegrationTests
 
             var resp = await musteri.Client.PostAsJsonAsync("/api/Stock/adjust", new
             {
-                product_id = productId, size = "M", new_quantity = 999, note = "yetkisiz deneme"
+                product_id = productId,
+                size = "M",
+                new_quantity = 999,
+                note = "yetkisiz deneme"
             });
             resp.StatusCode.Should().Be(HttpStatusCode.Forbidden, "stok yazma admin isi");
 

@@ -1,12 +1,12 @@
 using Autofac;
 using Divisima.Bussiness.Abstract;
 using Divisima.Bussiness.Concrete;
-using Divisima.DataAccess.Abstract;
-using Divisima.DataAccess.Concrete.EntityFramework;
-using Divisima.DataAccess.Concrete;
-using Divisima.Core.DataAccess;
 using Divisima.Bussiness.Events;
 using Divisima.Bussiness.Outbox;
+using Divisima.Core.DataAccess;
+using Divisima.DataAccess.Abstract;
+using Divisima.DataAccess.Concrete;
+using Divisima.DataAccess.Concrete.EntityFramework;
 
 namespace Divisima.Bussiness.DependencyResolvers.Autofac
 {

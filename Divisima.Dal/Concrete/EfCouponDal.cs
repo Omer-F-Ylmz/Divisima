@@ -20,5 +20,5 @@ namespace Divisima.DataAccess.Concrete.EntityFramework
             return await Context.Set<Coupon>()
                 .FirstOrDefaultAsync(c => c.code.ToUpper() == normalized && c.is_active);
         }
-}
+    }
 }

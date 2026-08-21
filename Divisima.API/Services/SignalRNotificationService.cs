@@ -1,5 +1,5 @@
-using Divisima.Core.Utilities.Notifications;
 using Divisima.API.Hubs;
+using Divisima.Core.Utilities.Notifications;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Divisima.API.Services
