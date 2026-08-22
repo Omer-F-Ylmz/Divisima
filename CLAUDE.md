@@ -269,6 +269,16 @@ Bu bolum, yeni bir oturumun tek basina devam edebilmesi icin yazildi.
   **SUCCESS**, dort job'da da failure seviyeli annotation YOK. Bu kosum `--log-opts` ALMADIGI
   icin **TUM GIT GECMISINI** taradi - yani jetonlarin durdugu `19d101f` commit'i DAHIL.
   Fingerprint'ler (kural-id `generic-api-key`, satir 1137/1277) TUTTU. Dogrulama boslugu KAPANDI.
+- **Mini dalga 2 push `d4b4d01` - HER IKI WORKFLOW TAMAMEN YESIL** (adim bazinda + annotation
+  duzeyinde dogrulandi). `SQL gerektiren testler` / `Testler + coverage` / `Coverage raporunu
+  yukle` / iki ZORUNLU format adimi / `Entegrasyon testleri` / `Gitleaks (secret taramasi)` /
+  `Acik bagimlilik KAPISI` / CodeQL hepsi SUCCESS; TESHIS adimlari skipped; **alti job'in
+  hicbirinde failure seviyeli annotation YOK**. Yerelde bir kez gorulen ISIMSIZ 4. kirmizi
+  CI'da TEKRAR ETMEDI.
+- **SIPARIS #33'UN ENVANTER SAPMASI GIDERILDI** (kullanici karari: secenek B). Duzeltilmis
+  uretim yolu bir kez kosturuldu: stok 10 -> 8, rezervasyon Expired -> Confirmed, denetim izli
+  TEK hareket satiri. Ikinci cagri NO-OP (canli teyit). Elle SQL YOK. Ayrinti MINI DALGA 2
+  bolumunun sonunda.
 - **MINI DALGA 2 TAMAMLANDI** - SUPHELI #18 duzeltildi (ayrinti MINI DALGA 2 bolumunde).
   **Yerel: 204/204 `Category=Sql`, tam suitte 328 basarili / 331** (kirilan 3'un UCU DE
   Docker'li `OrderEndpointTests`; UC ARDISIK kosumda ayni sonuc). Release 0 hata, format TEMIZ.
@@ -895,7 +905,7 @@ kullanicinin GERCEK e-postasi, `subscribed_price=499.90`).
 SW surumu `2026-08-21-e3`'e cekildi (kod tasiyan dosyalar zaten network-first; surum bumpi
 eski onbellegi temizlemek icin).
 
-## SPRINT 8 - LAUNCH ONCESI ZORUNLU DALGA (11/13 TAMAM, 2 KALEM KULLANICIDA)
+## SPRINT 8 - LAUNCH ONCESI ZORUNLU DALGA (13/13 TAMAM - KAPANDI)
 
 Kalem sirasi ve UC COMMIT bolunmesi kullanici karari (bkz. Sprint 8 defteri basligi).
 **KOD YAZILDI, COMMIT ATILMADI**: guvenlik commit'i madde 9'a, dogruluk commit'i madde 3
@@ -1323,8 +1333,10 @@ DOKUNULMADI.
 Kurtarma plani (ayni token'la webhook'u tekrar tetiklemek) **OLCULDU VE CALISMIYOR**:
 `payments.id=20` `created_at = 2026-08-22 00:23:00`, olcum ani `01:21:29` -> **58 dakika**.
 `HandleCallback`'in 30 dk token zaman asimi guard'i devreye girer ve odemeyi **Failed**
-yapardi - yani kurtarmak yerine kanit da bozulurdu. Tekrar TETIKLENMEDI. Karar kullanicida
-(bkz. SUPHELI #15 - bu guard'in webhook kurtarma yolunu da sinirlamasi AYRI bir bulgudur).
+yapardi - yani kurtarmak yerine kanit da bozulurdu. O AN tekrar TETIKLENMEDI.
+**SONRADAN COZULDU:** guard'in webhook yolunda gevsetilmesi (SUPHELI #15) mini dalgada
+yapildi ve siparis #33 o duzeltmeden sonra GERCEKTEN kurtarildi - odeme/siparis/fatura/puan
+tarafi mini dalgada, envanter tarafi mini dalga 2'de. Ayrinti ilgili bolumlerde.
 
 #### 2. TUR - TAMAMLANDI, TAM YESIL (siparis #34)
 
@@ -1401,13 +1413,11 @@ Hepsi geri alindi. Ayrica madde 13 icin AYRI bir 5. kontrol (uretim mutasyonu) y
 
 ## SIRA
 
-0. **KARAR BEKLEYEN - SIPARIS #33'UN ENVANTER SAPMASI.** Olculdu: urun 2 / M icin 2 adet
-   DUSULMEMIS (deger 10, dogrusu 8). GELISTIRME veritabani + sandbox siparisi - pratik etkisi
-   sifir. Secenekler ve ONERI (B: duzeltilmis uretim yolunu bir kez kostur, denetim izi birakir)
-   **MINI DALGA 2** bolumunun sonunda. KENDILIGINDEN DOKUNULMADI.
-1. **KARAR BEKLEYEN - SUPHELI #14** (surum okuyucusu kirilganligi, genel). Launch sonrasi
-   deftere alindi. #15, #17 ve **#18** KAPANDI; #16 BILINCLI olarak bos birakildi.
-   Yani acik kalan TEK supheli #14 ve o da launch-sonrasi.
+0. **TEKNIK DEFTERDE ACIK KALEM KALMADI - TEK ISTISNA SUPHELI #14** (surum okuyucusu
+   kirilganligi, genel) ve o da **LAUNCH SONRASI**. #15, #17 ve **#18** KAPANDI; #16 BILINCLI
+   olarak bos birakildi; siparis #33 hem odeme hem envanter tarafinda TEMIZLENDI.
+   **ISIMSIZ FLAKE (kullanici karari):** yerelde bir kez gorulen ve adi yakalanamayan 4.
+   kirmizi icin simdilik KAYIT YETERLI. CI'da adiyla yakalanirsa SUPHELI olarak ACILIR.
 3. **Sema kapanis dalgasi** - kalan tek aday: **gift-card expiry**
    (`refunded_amount` Sprint 6'da kapandi; seller migration DEGIL - `sellers` ve
    `seller_id` zaten `InitialCreate`'te)
@@ -1570,6 +1580,9 @@ mu" sorusunu bir PUSH kosumu ASLA yanitlayamaz. Tetik olmadan tek kanit haftalik
 **ELLE TETIKLEME KULLANICIDA:** `POST .../workflows/{id}/dispatches` KIMLIK ISTER; anonim
 API ile tetiklenemez ve PAT ISTENMEZ (ev kurali). Tetik main'e dustukten sonra GitHub
 arayuzunde "Run workflow" gorunur.
+**SONUC:** kullanici tetikledi - **run 32540908505 SUCCESS**, `Gitleaks (secret taramasi)`
+SUCCESS. O kosum TUM GECMISI taradi (jetonlarin durdugu `19d101f` DAHIL); `.gitleaksignore`
+fingerprint'leri TUTTU. Dogrulama boslugu KAPANDI.
 
 ### (b) SUPHELI #15 KAPANDI - WEBHOOK'TA TOKEN YASI SINIRI GEVSEDI
 
@@ -1739,18 +1752,51 @@ product_stocks  urun 2 / M  ->  stock_quantity 10   reserved_quantity 0
 ```
 Yani #34'un 3 adedi dusuldu, **#33'un 2 adedi DUSULMEDI**. Dogru deger 8 olmaliydi.
 **Bu GELISTIRME veritabani (`DivisimaDb`) ve sandbox siparisi** - fiziksel mal yok.
-SECENEKLER (karar kullanicinin, KENDILIGINDEN DOKUNULMADI):
-- **(A) Hicbir sey yapma.** Dev veritabani, test verisi; pratik etkisi sifir.
-- **(B) Duzeltilmis uretim yolunu #33 icin bir kez kostur** (`ConfirmReservation(33)`).
-  Artik Expired rezervasyonu buluyor, `Expired->Confirmed` atomik gecisini yapiyor, 2 adedi
-  dusuyor (10 -> 8) ve DENETIM IZI birakan bir `stock_movements` satiri yaziyor. KENDINI
-  SINIRLAR: ikinci cagri rezervasyonu Confirmed bulur ve hicbir sey yapmaz.
-  **ONERILEN** - bedava, denetlenebilir ve duzeltmeyi hatayi ortaya cikaran kaydin
-  UZERINDE gosterir.
-- (C) Elle SQL - denetim izi birakmaz (ya da elle hareket satiri yazmak gerekir ki bu tam da
-  defterin var olma sebebine aykiri). ONERILMEZ.
+Secenekler sunuldu: (A) hicbir sey yapma, (B) duzeltilmis uretim yolunu bir kez kostur,
+(C) elle SQL. **KULLANICI KARARI: B.** Gerekcesi: "bulguyu doguran canli artigin, bulgunun
+duzeltmesiyle temizlenmesi en durust kapanis"; (C) denetim izi birakmaz, (A) yarim kapanis olur.
 
-## SUPHELI DAVRANISLAR - KARAR BEKLEYENLER
+### #33 ENVANTER SAPMASI GIDERILDI - CANLI OLCUM (secenek B)
+
+`StockManager.ConfirmReservation(33)` **URETIM KODU** tek seferlik bir kosucuyla cagrildi.
+Kosucu DEPO DISINDA (scratchpad) tutuldu ve is bitince SILINDI - commit'e girmesi mumkun
+degildi. **ELLE SQL YAZILMADI**: hem stok dusumu hem denetim izi uretim yolunun kendisi
+tarafindan uretildi.
+
+```
+ONCE
+  urun 2 / M   siparis adedi = 2
+  stock_quantity = 10   reserved_quantity = 0
+  rezervasyon status = 3 (Expired)
+  stock_movements(reference_id=33) = 0 satir
+
+BIRINCI CAGRI -> 200 / success=True / "Rezervasyon onaylandı (stok düşüldü)."
+  stock_quantity = 8    reserved_quantity = 0      <- 2 adet DUSTU, reserved EKSIYE GITMEDI
+  rezervasyon status = 1 (Confirmed)               <- Expired -> Confirmed ATOMIK GECIS
+  stock_movements = 1 satir
+     tip=2 (Out) adet=2
+     not="Ödeme onaylı - rezervasyon expire olmuştu, stok yeniden güvenceye alındı"
+
+IKINCI CAGRI -> 200 / success=True / (ayni mesaj)
+  stock_quantity = 8    reserved_quantity = 0      <- DEGISMEDI
+  rezervasyon status = 1 (Confirmed)               <- DEGISMEDI
+  stock_movements = 1 satir                        <- IKINCI SATIR YAZILMADI
+```
+
+**KENDINI SINIRLAMA CANLI TEYIT EDILDI:** ikinci cagri hicbir yan etki uretmedi - rezervasyon
+artik `Confirmed` oldugu icin sorgunun (`Active` VEYA `Expired`) disinda kaliyor. Bu, madde
+(1)'in "Confirmed DOKUNULMAZ" sinirinin ve yan bulgunun (telafi dalinin atomik gecise
+baglanmasi) canlida calistiginin kanitidir.
+Not: ikinci cagri da 200/success donuyor - "yapacak is yok" ile "basarili" ayni yaniti veriyor.
+Bu idempotent bir onay ucu icin DOGRU davranis (cagiran tekrar denedi diye hata almamali) ve
+etkisizligin kaniti YANIT DEGIL, yukaridaki sayaclardir.
+
+## SUPHELI DAVRANISLAR
+
+**DURUM (teknik defter kapanisi): ACIK KALEM YALNIZ #14, o da LAUNCH SONRASI.**
+Kapananlar: #1..#13 ilgili sprintlerde · **#15, #17, #18 mini dalgalarda** ·
+**#16 BILINCLI olarak bos birakildi (verilmis karar, erteleme degil)**.
+Asagidaki maddeler kayit olarak duruyor; her birinin basinda guncel durumu yazili.
 
 Sprint 5'in iki maddesi (kilit/sadakat ciftlenmesi + kumulatif iade siniri) **S6'da**,
 Sprint 6'nin iki maddesi (basarisiz odemede fatura + transaction'siz callback) **S7'de**
@@ -1965,7 +2011,10 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    eseri - guard tetiklenseydi Failed olurdu. Aday cozumler: (i) webhook yolunda zaman asimini
    uygulamamak (otorite zaten retrieve - saglayici odemenin gercek durumunu soyluyor),
    (ii) zaman asimini gecen ama retrieve'i SUCCESS donen odemeler icin "elle mutabakat"
-   kuyrugu acmak. Duzeltme YAPILMADI, karar kullanicinin.
+   kuyrugu acmak.
+   **[KAPANDI - MINI DALGA] (i) SECILDI.** Kanal ayrimi bir enum'a tasindi
+   (`PaymentNotificationChannel`); yas siniri YALNIZ `ProviderWebhook`'ta gevsedi, tarayici
+   yolunda AYNEN duruyor. Ayrinti ve pinler: MINI DALGA bolumu (b).
 
 16. **`Webhook:AllowedIps` ALLOWLIST'I VAR AMA BOS - VE PROXY ARKASINDA CALISMAZ.**
    (Sprint 8 madde 9'da bulundu) `WebhookIpAllowlistMiddleware` `/api/payment/webhook` yolunu
@@ -1979,7 +2028,11 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    `RemoteIpAddress` okuyor - ters proxy/LB arkasinda `ForwardedHeaders:KnownProxies`
    DOLDURULMAZSA bu deger proxy'nin IP'sidir ve allowlist ya herkesi gecirir ya herkesi
    reddeder. Iki ayar birlikte anlamlidir (ayni not rate limit bolumunde de var).
-   Duzeltme YAPILMADI, karar kullanicinin.
+   **[KARAR VERILDI - MINI DALGA] BILINCLI OLARAK BOS BIRAKILDI.** Gerekce: bu uc, kaybolan
+   callback'in TEK kurtarma yoludur; liste BAYATLARSA gercek bildirimler 403 yer ve kurtarma
+   yolu SESSIZCE OLUR - yanlis doldurulmus bir allowlist bos birakmaktan DAHA TEHLIKELIDIR.
+   Doldurma kosullari `appsettings.Development.example.json`'daki `//Webhook3` / `//Webhook4`
+   aciklamalarina yazildi. Bu bir ERTELEME DEGIL, VERILMIS bir karardir.
 
 17. **`/api/payment/callback` RATE LIMIT POLICY'SI DISINDA.** (Sprint 8 madde 9'da olculdu)
    `[EnableRateLimiting("payment")]` yalniz `Initialize` uzerindeydi; madde 9'da `Webhook`'a da
@@ -1987,7 +2040,10 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    path eslesmesiyle (`/payment/`) onu da 10/dk'ya bagliyor - yani IKI YAPILANDIRMA HALA
    AYRISIYOR, sadece webhook icin hizalandi. Callback bir TARAYICI ucu oldugu icin farkli
    degerlendirilebilir (musteri basina dogal olarak seyrek), ama ayrisma bilincli bir karar
-   degil, sadece kapsam disinda kalmis bir bosluk. Duzeltme YAPILMADI, karar kullanicinin.
+   degil, sadece kapsam disinda kalmis bir bosluk.
+   **[KAPANDI - MINI DALGA (d)]** `Callback` action'ina `[EnableRateLimiting("payment")]`
+   eklendi; iki yapilandirma artik ayni davraniyor. Pin:
+   `Callback_PAYMENT_KOVASINDA_OnBirinci_Istek_429`.
 
 18. **[KAPANDI - MINI DALGA 2] `ConfirmReservation` EXPIRE OLMUS REZERVASYONU HIC GORMUYOR:
    ONAY STOGU DUSURMUYOR VE UYARI DA YAZMIYOR.**
