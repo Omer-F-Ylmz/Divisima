@@ -40,7 +40,11 @@ namespace Divisima.Core.Integrations.Notifications
                 using var res = await client.GetAsync(url);
                 var body = await res.Content.ReadAsStringAsync();
                 // Açıklayıcı yorum: Netgsm başarı kodu "00" veya "01/02" ile başlar
-                var success = res.IsSuccessStatusCode && (body.StartsWith("00") || body.StartsWith("01") || body.StartsWith("02"));
+                // KALITE SUPURMESI: saglayici durum kodu MAKINE dizgesidir - Ordinal eslesir.
+                var success = res.IsSuccessStatusCode
+                    && (body.StartsWith("00", StringComparison.Ordinal)
+                        || body.StartsWith("01", StringComparison.Ordinal)
+                        || body.StartsWith("02", StringComparison.Ordinal));
                 if (!success) _logger.LogWarning("SMS gönderilemedi: {Body}", body);
                 return success;
             }

@@ -194,6 +194,10 @@ jobs:
           # yok olan, sadece runner'a açık ephemeral container'ın parolası.
           MSSQL_SA_PASSWORD: "Divisima_CI_Str0ng!Pass"
           MSSQL_PID: Developer
+          # Gerekce ci.yml'daki ayni ayarin yaninda ayrintili yazili (collation hizalamasi).
+          # Iki workflow AYNI kurulumu kullanir; biri degisip digeri kalirsa testler iki farkli
+          # collation'da kosar ve fark SESSIZ olur - META-PIN bunu da yakalar.
+          MSSQL_COLLATION: Turkish_CI_AS
         ports:
           - 1433:1433
         options: >-

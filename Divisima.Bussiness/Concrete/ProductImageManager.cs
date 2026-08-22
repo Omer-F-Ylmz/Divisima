@@ -35,7 +35,7 @@ namespace Divisima.Bussiness.Concrete
                 return (HttpStatusCode.NotFound, new ErrorResult(Messages.ProductNotFound));
 
             // Açıklayıcı yorum: Tür doğrulama (MIME + uzantı)
-            if (!AllowedTypes.Contains(contentType?.ToLower() ?? ""))
+            if (!AllowedTypes.Contains(contentType?.ToLowerInvariant() ?? ""))   // MIME: makine dizgesi
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.ImageTypeInvalid));
             if (content == null || content.Length == 0)
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.ImageEmpty));

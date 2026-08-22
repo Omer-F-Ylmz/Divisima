@@ -33,6 +33,15 @@ jobs:
           # runner'a acik ephemeral container'in parolasi. SQL Server karmasiklik kuralini karsilar.
           MSSQL_SA_PASSWORD: "Divisima_CI_Str0ng!Pass"
           MSSQL_PID: Developer
+          # KALITE SUPURMESI DALGA 1 - COLLATION HIZALAMASI (OLCUMLE GEREKLI CIKTI).
+          # Container varsayilani SQL_Latin1_General_CP1_CI_AS; yerel gelistirme sunucusu ve
+          # hedef uretim ise Turkish_CI_AS. Turkce collation'da 'i' ile 'I' AYNI HARF DEGIL
+          # (olculdu: 'irem' = 'IREM' -> FARKLI; cift'ler I<->ı ve İ<->i). Yani casing/kimlik
+          # hatalari Latin1 bir CI veritabaninda GORUNMEZ, uretimde patlar. Bu satir olmadan
+          # B1 sinifi bir regresyonun pini CI'da YALANCI YESIL verirdi.
+          # META-PIN: CollationMetaPinTests bagli oldugu DB'nin collation'ini ASSERT eder -
+          # bu ayar kaybolursa test GURULTULU kirilir, sessiz kalmaz.
+          MSSQL_COLLATION: Turkish_CI_AS
         ports:
           - 1433:1433
         options: >-

@@ -116,7 +116,13 @@ namespace Divisima.Bussiness.Concrete
                 if (!string.IsNullOrWhiteSpace(cols[4]) && decimal.TryParse(cols[4].Trim(), NumberStyles.Any, ci, out var sp)) salePrice = sp;
                 // sahte indirim engeli: indirimli fiyat 0 < sale < price olmali
                 if (salePrice.HasValue && (salePrice.Value <= 0 || salePrice.Value >= price)) { errors.Add($"Satir {i + 1}: gecersiz indirimli fiyat"); continue; }
-                byte productType = 0; byte.TryParse(cols[7].Trim(), out productType);
+                // KALITE SUPURMESI B4: donus degeri YOK SAYILIYORDU - bozuk bir deger SESSIZCE 0
+                // ("giyim") oluyordu. Ayni dongudeki diger DOKUZ kolonun hepsi dogrulanip hata
+                // listesine yaziliyor; tek istisna buydu. Bos birakilmasi mesru (varsayilan 0),
+                // ama DOLU ve BOZUK bir deger artik sessizce yutulmaz.
+                byte productType = 0;
+                if (!string.IsNullOrWhiteSpace(cols[7]) && !byte.TryParse(cols[7].Trim(), out productType))
+                { errors.Add($"Satir {i + 1}: gecersiz product_type"); continue; }
                 var size = cols[8].Trim();
                 if (!int.TryParse(cols[9].Trim(), out var qty) || qty < 0) { errors.Add($"Satir {i + 1}: gecersiz stok"); continue; }
 

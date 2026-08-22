@@ -40,7 +40,7 @@ namespace Divisima.Bussiness.Concrete
             var seller = new Seller
             {
                 business_name = dto.business_name,
-                email = (dto.email ?? "").Trim().ToLower(),
+                email = (dto.email ?? "").Trim().ToLowerInvariant(),   // B1: KIMLIK dizgesi - kultursuz (bkz. EfCustomerDal)
                 phone = dto.phone,
                 tax_number = dto.tax_number,
                 user_type = (byte)UserTypeEnum.Seller,

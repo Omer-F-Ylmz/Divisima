@@ -14,11 +14,15 @@ namespace Divisima.DataAccess.Concrete.EntityFramework
         }
 
         // Açıklayıcı yorum: E-posta ile satıcı (login + kayıt duplikat kontrolü). Case-insensitive.
+        // KALITE SUPURMESI B1: e-posta KIMLIK dizgesidir - kultursuz normalize edilir.
+        // Gerekcenin tamami EfCustomerDal.GetByEmailAsync uzerinde (ayni hata sinifi).
+        // Seller modulu bugun veri duzeyinde KAPALI (0 satir) ama ayni kok ilkeye tabi:
+        // yarin acilirsa ayni tuzaga dusmesin.
         public async Task<Seller> GetByEmailAsync(string email)
         {
-            var normalized = (email ?? "").Trim().ToLower();
+            var normalized = (email ?? "").Trim().ToLowerInvariant();
             return await Context.Set<Seller>()
-                .FirstOrDefaultAsync(s => s.email.ToLower() == normalized);
+                .FirstOrDefaultAsync(s => s.email == normalized);
         }
 
         // Açıklayıcı yorum: ATOMİK başarısız-login artışı - tek UPDATE, YENİ değeri döner.

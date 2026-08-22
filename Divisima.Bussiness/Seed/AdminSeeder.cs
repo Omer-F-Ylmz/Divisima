@@ -29,7 +29,7 @@ namespace Divisima.Bussiness.Seed
             var enabled = bool.TryParse(_config["AdminSeed:Enabled"], out var e) && e;
             if (!enabled) return;
 
-            var email = (_config["AdminSeed:Email"] ?? "").Trim().ToLower();
+            var email = (_config["AdminSeed:Email"] ?? "").Trim().ToLowerInvariant();   // B1: KIMLIK dizgesi
             var password = _config["AdminSeed:Password"] ?? "";
             var name = string.IsNullOrWhiteSpace(_config["AdminSeed:Name"]) ? "Yönetici" : _config["AdminSeed:Name"];
 

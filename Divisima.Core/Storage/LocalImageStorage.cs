@@ -50,7 +50,7 @@ namespace Divisima.Core.Storage
             // GÜVENLİK: uzantıyı DOĞRULANMIŞ content-type'tan türet, client dosya-adından DEĞİL.
             // Önceden Path.GetExtension(fileName) ile client uzantısı ("x.html"/"x.aspx") kaydediliyordu ->
             // statik sunumda text/html servis edilip stored-XSS olabilirdi. Artık her zaman güvenli görsel uzantısı.
-            var ext = (contentType?.ToLower()) switch
+            var ext = (contentType?.ToLowerInvariant()) switch   // MIME: makine dizgesi
             {
                 "image/jpeg" => ".jpg",
                 "image/png" => ".png",

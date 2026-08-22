@@ -429,7 +429,7 @@ namespace Divisima.Bussiness.Concrete
 
         private string GenerateOrderNumber()
         {
-            return "DVS" + DateTime.Now.ToString("yyyyMMdd") + "-" + Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper();
+            return "DVS" + DateTime.Now.ToString("yyyyMMdd") + "-" + Guid.NewGuid().ToString("N").Substring(0, 10).ToUpperInvariant();
         }
 
 

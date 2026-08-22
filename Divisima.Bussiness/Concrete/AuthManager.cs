@@ -55,7 +55,7 @@ namespace Divisima.Bussiness.Concrete
             {
                 name = InputSanitizer.Sanitize(dto.name ?? ""),  // stored XSS savunması (admin panelinde render)
                 user_type = (byte)UserTypeEnum.Customer,   // yeni kayıt her zaman Customer (admin DB'den atanır)
-                email = (dto.email ?? "").Trim().ToLower(),
+                email = (dto.email ?? "").Trim().ToLowerInvariant(),   // B1: KIMLIK dizgesi - kultursuz (bkz. EfCustomerDal)
                 phone = dto.phone,
                 password_hash = passwordHash,
                 password_salt = passwordSalt,

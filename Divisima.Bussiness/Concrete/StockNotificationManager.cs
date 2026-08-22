@@ -38,10 +38,18 @@ namespace Divisima.Bussiness.Concrete
             if (product == null)
                 return (HttpStatusCode.NotFound, new ErrorResult(Messages.ProductNotFound));
 
+            // KALITE SUPURMESI B1: e-posta KIMLIK dizgesidir - HAM saklanmaz, kanonik saklanir.
+            // ONCEKI HALI ham `dto.email` idi. Sahiplik kontrolu (GetMine/RemoveMine) JWT'deki
+            // e-postayla esitlik ariyor; JWT'deki deger musteri kaydindan gelir ve B1'den sonra
+            // invariant kucuk harftir. Abonelik farkli bir yazimla saklandiysa Turkish_CI_AS
+            // altinda ESLESMEZ ('Irem@x.com' vs 'irem@x.com' -> FARKLI) ve kullanici KENDI
+            // aboneligini ne gorebilir ne kaldirabilirdi.
+            var eposta = dto.email.Trim().ToLowerInvariant();
+
             // Açıklayıcı yorum: Aynı e-posta + ürün + beden için zaten bekleyen talep varsa tekrar oluşturma (idempotent)
             var size = dto.size ?? "";
             var existing = await _notificationDal.GetAsync(n =>
-                n.product_id == dto.product_id && n.size == size && n.email == dto.email && !n.is_notified);
+                n.product_id == dto.product_id && n.size == size && n.email == eposta && !n.is_notified);
             if (existing != null)
                 return (HttpStatusCode.OK, new SuccessResult(Messages.StockNotificationAlreadySubscribed));
 
@@ -49,7 +57,7 @@ namespace Divisima.Bussiness.Concrete
             {
                 product_id = dto.product_id,
                 size = size,
-                email = dto.email,
+                email = eposta,
                 is_notified = false,
                 created_at = DateTime.Now,
                 unsubscribe_token = Divisima.Core.Utilities.Security.UnsubscribeToken.Yeni()
@@ -109,6 +117,9 @@ namespace Divisima.Bussiness.Concrete
             if (string.IsNullOrWhiteSpace(email))
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.InvalidEmail));
 
+            // B1: sahiplik KIMLIK esitligidir - terim de kanonik bicime cevrilir.
+            email = email.Trim().ToLowerInvariant();
+
             // Salt-okuma: izlemeye almaya gerek yok (EfEntityRepositoryBase.GetAsync TRACKED'dir).
             var rows = await _notificationDal.GetListNoTrackingAsync(n => n.email == email);
             if (rows == null || rows.Count == 0)
@@ -139,6 +150,7 @@ namespace Divisima.Bussiness.Concrete
 
         public async Task<(HttpStatusCode, Result)> RemoveMine(int id, string email)
         {
+            email = (email ?? "").Trim().ToLowerInvariant();   // B1: kanonik sahiplik anahtari
             // SAHIPLIK: yalniz id ile silmek IDOR olurdu. E-posta esleşmezse "bulunamadi" doner -
             // "var ama senin degil" demek, baskasinin aboneliginin VARLIGINI sizdirirdi.
             var row = await _notificationDal.GetAsync(n => n.id == id && n.email == email);

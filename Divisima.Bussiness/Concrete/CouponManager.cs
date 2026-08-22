@@ -38,8 +38,8 @@ namespace Divisima.Bussiness.Concrete
             if (dto.discount_type == DiscountTypeEnum.Percentage && dto.value > 100)
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.CouponInvalidValue));
 
-            var normalized = (dto.code ?? "").Trim().ToUpper();
-            var exists = await _couponDal.GetAsync(c => c.code.ToUpper() == normalized && c.is_active);
+            var normalized = Divisima.Core.Utilities.Text.KimlikDizgesi.KanonikKod(dto.code);   // B2: KANONIK kupon kodu
+            var exists = await _couponDal.GetAsync(c => c.code == normalized && c.is_active);
             if (exists != null)
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.CouponAlreadyExists));
 
@@ -68,7 +68,7 @@ namespace Divisima.Bussiness.Concrete
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.CouponInvalidValue));
 
             _mapper.Map(dto, coupon);
-            coupon.code = (dto.code ?? "").Trim().ToUpper();
+            coupon.code = Divisima.Core.Utilities.Text.KimlikDizgesi.KanonikKod(dto.code);   // B2: KANONIK kupon kodu
             coupon.discount_type = (byte)dto.discount_type;
             coupon.updated_at = DateTime.Now;
             await _couponDal.UpdateAsync(coupon);

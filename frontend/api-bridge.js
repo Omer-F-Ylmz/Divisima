@@ -1613,6 +1613,14 @@
         _setDocTitle.apply(this, arguments);
         var m = location.hash.match(/^#\/urun\/(\d+)/);
         if (m) urunBasligiDuzelt(+m[1]);
+        // KALITE SUPURMESI B9: odeme SONUC sayfasinin kendi basligi yoktu - "Ödeme · Divisima"
+        // kaliyordu. Kullanici geri donup sekmelerine baktiginda odeme formu ile sonuc sayfasi
+        // AYNI gorunuyor; ustelik sonuc sayfasi paylasilan/yer imlerine eklenen bir adres.
+        // Basarili/basarisiz ayrimi da baslikta gorunsun (status parametresi zaten adreste).
+        if (location.hash.indexOf("#/odeme/sonuc") === 0) {
+          var basarili = location.hash.indexOf("status=success") >= 0;
+          document.title = (basarili ? "Siparişin Alındı" : "Ödeme Tamamlanamadı") + " · Divisima";
+        }
       };
     }
     // Ilk yukleme + katalog sonrasi tazeleme init() icinde yapiliyor.

@@ -49,7 +49,7 @@ namespace Divisima.Bussiness.Concrete
             {
                 // Açıklayıcı yorum: Benzersiz kısa kod üret (çakışma olasılığı düşük - kontrol edilir)
                 string code;
-                do { code = "REF" + Guid.NewGuid().ToString("N").Substring(0, 6).ToUpper(); }
+                do { code = "REF" + Guid.NewGuid().ToString("N").Substring(0, 6).ToUpperInvariant(); }
                 while (await _customerDal.GetAsync(x => x.referral_code == code) != null);
                 c.referral_code = code;
                 await _customerDal.UpdateAsync(c);

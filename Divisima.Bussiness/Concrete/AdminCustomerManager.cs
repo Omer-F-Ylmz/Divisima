@@ -32,7 +32,17 @@ namespace Divisima.Bussiness.Concrete
         {
             var page = filter.page < 1 ? 1 : filter.page;
             var size = filter.page_size is < 1 or > 100 ? 20 : filter.page_size;
-            var search = (filter.search ?? "").Trim().ToLower();
+            // ══ KALITE SUPURMESI - KIMLIK vs GORUNTU AYRIMI TEK ARAMA KUTUSUNDA ════════════
+            // Ayni arama terimi IKI FARKLI TURDEN alanda kullaniliyor:
+            //  - e-posta: KIMLIK dizgesi. B1'den sonra depoda HER ZAMAN invariant kucuk harf
+            //    duruyor; terim de invariant kucultulur ve SQL LOWER'siz esletilir (SQL LOWER
+            //    veritabani collation'ini - Turkish - kullanir, yeniden ayrisirdi).
+            //  - ad/soyad: INSAN metni. Turkce kucultme burada DOGRU olandir ("İREM" -> "irem").
+            //    Bu yari BILEREK kultur duyarli birakildi; iki tarafi da (C# terim + SQL LOWER)
+            //    Turkish collation kullandigi icin kendi icinde TUTARLI.
+            var searchAd = (filter.search ?? "").Trim().ToLower();
+            var searchEposta = (filter.search ?? "").Trim().ToLowerInvariant();
+            var search = searchAd;   // "bos mu" kontrolu icin (iki terim ayni anda bosalir)
 
             // GUVENLIK SINIRI: IgnoreQueryFilters YALNIZ bu admin listelemesinde. Global is_active
             // filtresi yuzunden "is_active = false" filtresi HER ZAMAN bos liste donuyordu - admin
@@ -40,7 +50,7 @@ namespace Divisima.Bussiness.Concrete
             // NoTracking'dir; yalniz okuma/projeksiyon icin kullanilir.
             var all = await _customerDal.GetListIgnoringFiltersAsync(c =>
                 (filter.is_active == null || c.is_active == filter.is_active.Value) &&
-                (search == "" || c.name.ToLower().Contains(search) || c.email.ToLower().Contains(search)));
+                (search == "" || c.name.ToLower().Contains(searchAd) || c.email.Contains(searchEposta)));
 
             var total = all.Count;
 

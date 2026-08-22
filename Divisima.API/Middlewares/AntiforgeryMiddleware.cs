@@ -15,7 +15,13 @@ namespace Divisima.API.Middlewares
             // Açıklayıcı yorum: Yalnız durum değiştiren + cookie taşıyan istekleri denetle
             var method = context.Request.Method;
             var hasAuthCookie = context.Request.Cookies.ContainsKey("refresh_token");
-            var hasBearer = context.Request.Headers.Authorization.ToString().StartsWith("Bearer ");
+            // KALITE SUPURMESI: HTTP baslik seması bir MAKINE dizgesidir - Ordinal eslesir.
+            // Kultur duyarli StartsWith bazi gorunmez/yok sayilabilir karakterleri ATLAR
+            // (or. yumusak tire); "­Bearer ..." gibi bir deger TRUE dondurebilir ve
+            // CSRF denetimini ATLATIRDI. Pratik risk dusuktu (saldirgan CSRF'te ozel baslik
+            // set edemez) ama karsilastirmanin dogrusu Ordinal.
+            var hasBearer = context.Request.Headers.Authorization.ToString()
+                .StartsWith("Bearer ", StringComparison.Ordinal);
 
             if (!SafeMethods.Contains(method) && hasAuthCookie && !hasBearer)
             {

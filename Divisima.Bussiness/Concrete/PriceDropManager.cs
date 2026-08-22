@@ -41,8 +41,11 @@ namespace Divisima.Bussiness.Concrete
             var product = await _productDal.GetAsync(p => p.id == dto.product_id && p.is_active);
             if (product == null) return (HttpStatusCode.NotFound, new ErrorResult(Messages.ProductNotFound));
 
+            // B1: e-posta KIMLIK dizgesidir - kanonik saklanir (gerekce StockNotificationManager).
+            var eposta = dto.email.Trim().ToLowerInvariant();
+
             // Açıklayıcı yorum: Aynı e-posta+ürün için bekleyen abonelik varsa fiyatı güncelle (idempotent)
-            var existing = await _subDal.GetAsync(s => s.product_id == dto.product_id && s.email == dto.email && !s.is_notified);
+            var existing = await _subDal.GetAsync(s => s.product_id == dto.product_id && s.email == eposta && !s.is_notified);
             if (existing != null)
             {
                 existing.subscribed_price = product.price;
@@ -53,7 +56,7 @@ namespace Divisima.Bussiness.Concrete
             await _subDal.AddAsync(new PriceDropSubscription
             {
                 product_id = dto.product_id,
-                email = dto.email,
+                email = eposta,
                 subscribed_price = product.price,
                 is_notified = false,
                 created_at = DateTime.Now,
@@ -111,6 +114,9 @@ namespace Divisima.Bussiness.Concrete
             if (string.IsNullOrWhiteSpace(email))
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.InvalidEmail));
 
+            // B1: sahiplik KIMLIK esitligidir - terim de kanonik bicime cevrilir.
+            email = email.Trim().ToLowerInvariant();
+
             // Salt-okuma: izlemeye almaya gerek yok (EfEntityRepositoryBase.GetAsync TRACKED'dir).
             var rows = await _subDal.GetListNoTrackingAsync(n => n.email == email);
             if (rows == null || rows.Count == 0)
@@ -141,6 +147,7 @@ namespace Divisima.Bussiness.Concrete
 
         public async Task<(HttpStatusCode, Result)> RemoveMine(int id, string email)
         {
+            email = (email ?? "").Trim().ToLowerInvariant();   // B1: kanonik sahiplik anahtari
             // SAHIPLIK: yalniz id ile silmek IDOR olurdu. E-posta esleşmezse "bulunamadi" doner -
             // "var ama senin degil" demek, baskasinin aboneliginin VARLIGINI sizdirirdi.
             var row = await _subDal.GetAsync(n => n.id == id && n.email == email);

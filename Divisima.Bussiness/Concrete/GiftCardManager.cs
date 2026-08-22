@@ -31,7 +31,7 @@ namespace Divisima.Bussiness.Concrete
             if (amount <= 0) return (HttpStatusCode.BadRequest, new ErrorResult(Messages.GiftCardInvalidAmount));
 
             // Açıklayıcı yorum: Benzersiz kod üret (çakışma olasılığı ihmal edilebilir - 16 hex)
-            var code = Guid.NewGuid().ToString("N").Substring(0, 16).ToUpper();
+            var code = Guid.NewGuid().ToString("N").Substring(0, 16).ToUpperInvariant();
             await _giftCardDal.AddAsync(new GiftCard
             {
                 code = code,
