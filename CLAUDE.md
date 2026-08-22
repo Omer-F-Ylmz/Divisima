@@ -1896,6 +1896,72 @@ Diger 17 pin YESIL kaldi (mutasyon lokalize). Geri alindi.
 252/252 `Category=Sql` · tam suitte 382 basarili / 385 (kirilan 3'un UCU DE Docker'li
 `OrderEndpointTests`) · Release 0 hata · whitespace + style TEMIZ (exit 0).
 
+
+## GUVENLIK-FIX + GUVENLIK-FIX-2 PUSH RAPORU (147a95d)
+
+**Push `b7e9279..147a95d` - IKI COMMIT, TEK PUSH** (Sprint 8 kalibi):
+`a8fb34b` GUVENLIK-FIX (G1..G9) + `147a95d` GUVENLIK-FIX-2 (SUPHELI #19).
+
+### ADIM BAZINDA SONUC
+
+- **CI - Build & Test (run 32593535275) - TAMAMEN YESIL.**
+- **Security CI (run 32593535166) - KIRMIZI, TEK JOB.** Adim bazinda okundu:
+  `codeql` SUCCESS · `dependency-scan` (3 adim: RAPOR / KAPI / kullanimdan kalkmis paket)
+  SUCCESS · `tests` -> `Is mantigi guvenlik simulasyonu` SUCCESS, `SQL Server hazir mi`
+  SUCCESS, **`Entegrasyon testleri` SUCCESS**, TESHIS adimi skipped.
+  **`secret-scan` -> `Gitleaks (secret taramasi)` FAILURE.**
+
+### KOK SEBEP - KANIT KANALINDAN DEGIL DEPO TARAMASIYLA (bolum 7 kurali dogrulandi)
+
+Annotation ANONIM okundu: yalniz iki WARNING var - Node 20 deprecation ve
+"Leaks detected, see job summary for details". **Dosya/satir/kural TASIMIYOR.**
+Yani kural bir kez daha dogrulandi: `secret-scan` annotation'dan degil ADIM SONUCUNDAN
+okunur, kok sebep DEPO TARAMASIYLA bulunur.
+
+Push run'i `--log-opts=-1` ile YALNIZ SON COMMIT'i (`147a95d`) tarar. O commit'in eklenen
+satirlari tarandi; sifre/anahtar bicimli TAM DORT satir bulundu, hepsi yeni test dosyasinda.
+Hangisinin tetikledigi ENTROPIYLE ayrildi (`generic-api-key`: anahtar kelime + entropi >= 3.5;
+esik degeri deponun kendi `.gitleaksignore` notunda zaten yaziliydi):
+
+```
+Shannon entropisi (karakter basina)
+  satir 731 / 806 degerleri (16 krkt, tireli)  -> 3.750   ESIGIN USTUNDE  <- BULGU
+  ucuncu deger (15 krkt, tireli)               -> 3.374   esigin ALTINDA
+  TestAuthHelper.TestPassword                  -> 3.027   esigin ALTINDA
+  AuthRateLimitPinTests'teki yanlis parola     -> 3.457   esigin ALTINDA
+```
+
+**MODEL BILINEN-YESIL BIR KOSUMLA DOGRULANDI:** son iki deger depoda ZATEN VAR ve TUM
+GECMISI tarayan `workflow_dispatch` kosumu (run 32540908505) SUCCESS'ti. Yani 3.5 esigi
+teoriden degil, gecmiste yesil kalmis gercek bir tam-gecmis taramasindan dogrulandi.
+`a8fb34b` (birinci commit) ayni taramadan gecti: **sifre/anahtar literal'i SIFIR**.
+
+### DUZELTME (yerelde hazir)
+
+1. **Ileriye donuk:** dort literal de TEK bir DUSUK ENTROPILI sabite (`YanlisSifre`, 3.096)
+   cevrildi. Uc bagimsiz sebeple guvenli: deger esigin altinda · kullanim satirinda TIRNAKLI
+   deger yok (sadece tanimlayici) · tanim satirinda anahtar kelime GECMIYOR.
+   Yorumdaki ornek degerler de CLAUDE.md bolum 1 kuralina uyarak KIRPILDI - kanit degeri
+   entropi sayisinda, dizgenin kendisinde degil.
+2. **Gecmis icin:** `.gitleaksignore`'a DAR KAPSAMLI iki fingerprint + gerekcesi
+   (`147a95d:...SecurityHardeningTests.cs:generic-api-key:731` ve `:806`).
+   Force-push YASAK oldugu icin `147a95d`'nin gecmisteki hali ancak boyle susturulur.
+   Susturulan sey KIMLIK BILGISI DEGIL: bir testin BILEREK YANLIS yazdigi, hicbir hesaba
+   ait olmayan sifre denemeleri.
+
+**DOGRULAMA BOSLUGU (Sprint 8'dekiyle AYNI, durust kayit):** fingerprint'lerin tuttugu bir
+sonraki PUSH run'inda GORULEMEZ (push yalniz son commit'i tarar, orada bulgu zaten olmayacak).
+Kanit ancak TUM GECMISI tarayan bir kosumdan gelir - Pazartesi cron'u ya da ELLE
+`workflow_dispatch` (tetik depoda VAR, mini dalgada eklendi). Kural-id ya da satir numarasi
+tutmazsa satirlar sadece ETKISIZ kalir, zarar vermez.
+
+### YEREL DOGRULAMA (duzeltme sonrasi)
+
+252/252 `Category=Sql` · tam suitte 382 basarili / 385 (kirilan 3'un UCU DE Docker'li
+`OrderEndpointTests`) · Release 0 hata · whitespace + style TEMIZ (exit 0).
+Dis kontrolu ve 5. kontrol YENIDEN KOSULMADI - degisiklik yalnizca sabit degeri (literal ->
+`YanlisSifre`); pinlerin OLCTUGU sey ve assert'ler DEGISMEDI.
+
 ## SIRA
 
 0. **KALITE SUPURMESI.** Dalga 1 + FIX, Dalga 2 + FIX, veri temizligi, Dalga 3 + FIX ve

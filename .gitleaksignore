@@ -44,3 +44,38 @@
 # eslesip eslesmedigi belirsiz; eslesmiyorsa bu satir sadece etkisiz kalir.
 19d101f5b8e2df55ee1fc0bdd940a0a5bc43c149:CLAUDE.md:generic-api-key:1137
 19d101f5b8e2df55ee1fc0bdd940a0a5bc43c149:CLAUDE.md:generic-api-key:1277
+
+# ── IKINCI KALEM: GUVENLIK-FIX-2 (147a95d) - TEST DOSYASINDAKI KASITLI YANLIS SIFRELER ──
+#
+# NE OLDU: GUVENLIK-FIX-2 push'unda (run 32593535166) `secret-scan` KIRMIZI dustu.
+# Kok sebep KANIT KANALINDAN DEGIL DEPO TARAMASIYLA bulundu (CLAUDE.md bolum 7 kurali:
+# gitleaks bulgusunu yalnizca WARNING seviyeli bir annotation olarak basiyor; annotation
+# okundu ve gercekten "Leaks detected, see job summary for details"tan ibaretti - dosya,
+# satir ve kural adi TASIMIYOR. Summary imza istiyor, SARIF artefakti anonim 401).
+#
+# BULUNAN: SecurityHardeningTests.cs'te iki satir, sifre alanina TIRNAKLI ve YUKSEK
+# ENTROPILI bir deger yaziyordu. `generic-api-key` kurali anahtar kelime (password) +
+# entropi >= 3.5 arar. OLCULDU (Shannon, karakter basina):
+#     satir 731 / 806 degerleri  -> 3.750   ESIGIN USTUNDE (bulgu bunlar)
+#     ayni dosyadaki ucuncu deger -> 3.374   esigin ALTINDA
+#     TestAuthHelper.TestPassword -> 3.027   esigin ALTINDA
+#     AuthRateLimitPinTests'teki  -> 3.457   esigin ALTINDA
+# SON IKISI MODELI DOGRULUYOR: ikisi de depoda ZATEN VAR ve TUM GECMISI tarayan
+# workflow_dispatch kosumu (run 32540908505) SUCCESS'ti. Yani 3.5 esigi teoriyle degil
+# BILINEN-YESIL bir tam-gecmis taramasiyla dogrulandi.
+#
+# ILERIYE DONUK DUZELTME AYNI PUSH'TA: iki literal de tek bir DUSUK ENTROPILI sabite
+# (`YanlisSifre`, 3.096) cevrildi; sabitin tanim satirinda anahtar kelime YOK. Yani yeni
+# commit'lerde bulgu URETILMEZ. Bu fingerprint'ler YALNIZ 147a95d'nin GECMISTE kalan
+# halini susturur (force-push YASAK - gerekce yukarida).
+#
+# SUSTURULAN SEY BIR KIMLIK BILGISI DEGIL: ikisi de bir testin BILEREK YANLIS yazdigi,
+# hicbir hesaba ait olmayan, hicbir yerde gecerli olmayan sifre denemeleridir.
+#
+# DOGRULAMA BOSLUGU (DURUST KAYIT - Sprint 8'dekiyle AYNI): bu iki satirin ise yaradigi
+# bir sonraki PUSH run'inda GORULEMEZ (push yalniz son commit'i tarar, orada bulgu yok).
+# Kanit ancak TUM GECMISI tarayan bir kosumdan gelir: Pazartesi cron'u ya da ELLE
+# workflow_dispatch. Kural-id ("generic-api-key") ve satir numaralari (147a95d'deki
+# dosyadan okundu) tutmazsa bu satirlar sadece ETKISIZ kalir, zarar vermez.
+147a95db903c03cd6ebd644c59373d1d54997f78:Divisima.IntegrationTests/SecurityHardeningTests.cs:generic-api-key:731
+147a95db903c03cd6ebd644c59373d1d54997f78:Divisima.IntegrationTests/SecurityHardeningTests.cs:generic-api-key:806
