@@ -233,8 +233,11 @@ namespace Divisima.IntegrationTests
             var mv = await MovementsAsync(pid);
             mv.Should().ContainSingle(m => m.movement_type == (byte)StockMovementType.Adjustment,
                 "ayarlama Adjustment tipinde TEK hareket yazmali");
+            // DALGA-2-FIX (B11): gerekce metni DUZELTILDI. Beklenen DEGER degismedi (bu senaryo bir
+            // ARTIS: 10 -> 25), ama "mutlak fark" ifadesi artik YANLIS olurdu - defter azalisi
+            // NEGATIF yaziyor. Isaretli davranisin kendisi LedgerAndRevenueSpecTests'te pinli.
             mv.Single(m => m.movement_type == (byte)StockMovementType.Adjustment).quantity
-                .Should().Be(15, "hareket miktari mutlak fark olmali (25 - 10)");
+                .Should().Be(15, "hareket miktari ISARETLI fark olmali (25 - 10 = +15)");
         }
 
         [Fact]

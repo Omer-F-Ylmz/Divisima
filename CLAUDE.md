@@ -1443,13 +1443,126 @@ Hepsi geri alindi. Ayrica madde 13 icin AYRI bir 5. kontrol (uretim mutasyonu) y
   elle eklenen `using` satirlari siralamayi bozabiliyor. **Migration uretildikten sonra
   `dotnet format whitespace --include <migration dosyalari>` kosulur.**
 
+## KALITE SUPURMESI - DALGA 2 (MANTIK/INVARIANT DENETIMI) ve DALGA-2-FIX
+
+Dalga 2 YALNIZ olcumdu: gercek dev veritabaninda 32 kimlik sorgusu (34 siparis, 21 odeme,
+15 fatura, 29 stok hareketi, 35 rezervasyon). Duzeltmeler ayri commit'te geldi.
+
+### DALGA 2 BULGULARI
+
+| # | Sinif | Bulgu | Durum |
+|---|---|---|---|
+| B10 | VERI-BOZAN | Kart DISI onay yollarinda dort yan etkiden UCU hic calismiyor | **KAPANDI** |
+| B11 | VERI-BOZAN | `stock_movements` Adjustment satirlari ISARETI kaybediyor | **KAPANDI** |
+| B12 | ISLEV-KIRAN | Tam iptalde `shipping_cost` sifirlanmiyor - muhasebe kimligi kirik | **KAPANDI** |
+| B13 | UX | Terk edilmis Pending siparisler hic kapatilmiyor (17 adet, >24 saat) | ERTELENDI (launch sonrasi defteri) |
+| B14 | KOZMETIK/gizli | `DashboardManager` `PaidOrderSpec`i kullanmiyor, kurali kopyaliyor | **KAPANDI** |
+
+**TEMIZ CIKANLAR (0 ihlal):** siparis toplami = kalemler · kargo kurali · `payments.amount` =
+toplam - magaza kredisi · sadakat defteri = bakiye · magaza kredisi defteri = bakiye ·
+rezervasyon <-> hareket <-> siparis (dort yon) · `reserved_quantity` = aktif rezervasyonlar ·
+fatura 1:1 · KDV kimligi (15/15) · fatura kalem toplami · mukerrer basarili odeme · yetim
+satirlar (4 tablo) · negatif degerler · mukerrer siparis/fatura no · zaman cizelgesi kapsamasi ·
+`paid_price` = `amount` · `is_online_payment_done` · kazanim orani `floor(total/10)` ·
+#33/#34 outbox dort yan etki.
+
+**OLCUM HATASI (kayit):** ilk KDV sorgum `invoices.tax_rate`i YUZDE sandi; alan KESIR (0.2000)
+sakliyor ve 15 faturanin TAMAMI ihlal gorundu. Duzeltilmis formulle 0 ihlal. Fatura HTML'i
+"KDV (%20)" bastigi icin (goruntu carpiyor) ayni yanilgi tekrarlanabilir.
+
+### DALGA-2-FIX - YAPILANLAR
+
+**B10 - ONAY YAN ETKILERININ TEK GIRIS NOKTASI.**
+Kok sebep: `ApplyConfirmedSideEffectsAsync` YALNIZ faturayi kesiyor; sadakat + referans odulu +
+kupon defteri `PaymentConfirmedSideEffects`te ve oraya tek giris `IyzicoPaymentManager`in
+yazdigi outbox mesaji. Kart disi UC onay yolu (`OrderManager` 363 kapida odeme / 515 havale /
+568 admin durum) o mesaji HIC yazmiyordu.
+- Uc yolun ucu de olayi KENDI TRANSACTION'I ICINDE yaziyor (madde 3 kalibi). `ChangeOrderStatus`
+  yolunda transaction HIC YOKTU - durum yazimi + zaman cizelgesi + olay icin DAR bir transaction
+  eklendi; iptal dalinin isleri `HandleStatusSideEffects` icinde, commit sonrasinda, AYNEN kaldi.
+- **KUPON KULLANIM SATIRI isleyiciye tasindi** (TEK YAZICI). Onceden satiri odeme transaction'i
+  yaziyordu, sayac ondan turetiliyordu; kart disi yollarda satir olusmadigi icin sayac kalici 0
+  kaliyordu. Olay `discount_amount` tasiyor (snapshot semantigi).
+- **FATURA SENKRON KALDI - OLCUME DAYALI GERI ADIM.** Ilk denemede faturayi da outbox'a
+  birakmistim; `AuthorizationIdorTests`in IKI fatura pini bunu YAKALADI ("Sequence contains no
+  elements") - kart disi yollarda fatura BUGUNE KADAR ANINDA kesiliyordu ve onu ~1 dakikaya
+  yaymak ISTENMEYEN bir davranis degisikligiydi. B10'un kusuru fatura DEGIL, eksik olan diger
+  uc yan etkiydi. Cakisma yok: isleyicinin 1. adimi NO-OP doner (olculdu, pinli).
+  **YAN KAZANC:** fatura artik kart disi yollarda da YENIDEN DENENEBILIR.
+- **"Confirmed" DOGRU TETIK NOKTASI (sart iii):** kapida odemede `Confirmed` magazanin kabulu;
+  fatura zaten TAM O NOKTADA kesiliyordu, diger ucunu ayni noktaya baglamak yeni kapi acmiyor.
+  Havalede `is_online_payment_done = true` orada yaziliyor. Iptalde puan ZATEN geri aliniyor.
+- OLU METOT `IyzicoPaymentManager.SyncCouponUsageCountAsync` kaldirildi: hicbir cagrisi yoktu
+  (Sprint 8 madde 3'ten kalma) ve yorumu bu degisiklikle YANLIS hale gelecekti.
+
+**B11 - STOK HAREKET DEFTERINDE ISARET.**
+`quantity = Math.Abs(delta)` -> `quantity = delta`. Yon YALNIZ Adjustment'ta isaretle yasar;
+In/Out'un yonu `movement_type`tan gelir (onlari da isaretlemek iki mevcut pini gerekcesiz
+kirardi). **Tuketici riski olculdu: `stock_movements` tablosunu OKUYAN uretim kodu YOK** -
+salt-yazilir denetim izi.
+MUTABAKAT FORMULU: `SUM(CASE movement_type WHEN 2 THEN -quantity ELSE quantity END)`.
+Migration `20260822134317_StokHareketiIsaretliDuzeltme` (Sprint 6 kalibi): isaret YALNIZ notun
+URETILMIS bicimi ("... (-N)" / "(+N)") uzerinden okunur; desene uymayan bir satir varsa
+**HICBIR SATIR YAZILMADAN** RAISERROR - tahminle onarim YOK. Desen eslesmesi
+`COLLATE Latin1_General_BIN2` ile (bolum 6c kurali). `01_schema.sql`e isaret sozlesmesi yazildi.
+CANLI ONARIM (dev): satir 20 `5` -> `-5`; urun2/M `10 + (-2) = 8 = tablo`; bes urun-bedenin
+tamami mutabik.
+
+**B12 - TAM IPTALDE KARGO.** `order.shipping_cost = 0m`, `order.total_price = 0m` ile ayni
+yerde. **SIRA KRITIK:** `leftoverRefund` HESAPLANDIKTAN SONRA - iade tutari `total_price`ten
+turer ve kargoyu ICERIR; once sifirlamak musteriye kargo bedelini VERMEMEK olurdu. Para yolu
+ayrica pinlendi.
+
+**B14 - CIRO KURALI MERKEZDEN.** `IsRevenueOrder` (DISLAMA ile yazilmis kopya) kaldirildi,
+`PaidOrderSpec.IsPaidStatus` kullaniliyor. Ayni sinifin diger UC sorgusu zaten spec kullaniyordu.
+
+**VERI ARTIGI INVARIANTI.** Iptal edilmis 7 siparisin faturasi hala `Sent` (22-23 Temmuz
+artiklari; bugunku kod uc iptal yolunda da faturayi iptal ediyor). GERCEK BOSLUK:
+`ApplyCancelledSideEffectsAsync` BEST-EFFORT - `CancelForOrder` basarisiz donerse (saglayici GIB
+iptalini reddederse) fatura Sent kalir ve bunu goren TEK sey bir LOG SATIRI. Artik siparis ZAMAN
+CIZELGESINE de "KRITIK" notu dusuluyor (H53 kalibi). **Veri temizligi AYRI is - karar bekliyor.**
+
+### PINLER
+
+`SideEffectSingleEntryTests` (7): kapida odeme / havale / admin durum -> dort yan etki de
+uygulanir · ayni siparis iki kez islenirse yan etki BIRER kalir · fatura onay aninda kesilir ve
+outbox IKINCI fatura URETMEZ · onay TEK mesaj yazar, sonraki durum gecisleri MUKERRER mesaj
+uretmez · iptal edilen siparisin faturasi Sent KALAMAZ (iki yol, Theory).
+`LedgerAndRevenueSpecTests` (4): azalis NEGATIF yazilir · defter mutabakati = tablo · artis
+POZITIF kalir (cift-anlam kirici) · ciro TANIMLI HER durum icin `PaidOrderSpec`i izler.
+`OrderCancellationMoneyTests` (+2): tam iptalde kargo sifirlanir + muhasebe kimligi korunur ·
+odenmis sipariste KARGO IADESI DEGISMEDI (para yolu pini).
+`InvoiceCancellationTests` (+2): fatura iptali basarisizsa zaman cizelgesine KRITIK notu duser ·
+basariliysa DUSMEZ (vakum kirici).
+
+**KIRILAN PIN YOK.** Iki pin metni DUZELTILDI (assert degerleri AYNEN):
+`StockReservationTests.AdjustStock_...` gerekcesindeki "mutlak fark" ifadesi "ISARETLI fark"
+oldu; `PaymentConfirmedOutboxTests` KURGUSUNDAN elle eklenen `CouponUsage` satiri KALDIRILDI -
+o satir birakilsaydi isleyicinin yazma adimi HIC KOSMAZ ve pin olcmesi gereken seyi olcmezdi.
+
+### DIS KONTROLU + 5. KONTROL
+
+5 assert ters, BES AYRI test, UC ayri sinif -> **5 AYRI ISIMLI KIRMIZI** (geri alindi).
+5. kontrol, iki uretim mutasyonu (farkli testleri vurduklari icin ayristirilabilir):
+- COD yolundaki onay olayi yazimi kaldirildi -> `KapidaOdemeOnayi_...` **SadakatKazanim = 0**
+  buldu: Dalga 2'de olculen CANLI TABLONUN BIREBIR AYNISI. Havale ve admin-durum pinleri YESIL
+  kaldi (mutasyon lokalize).
+- `quantity = Math.Abs(delta)` geri getirildi -> `AzalisYonundekiDuzeltme` 5 buldu ve
+  `DefterMutabakati` **28 vs 18** verdi: **tam 10 birimlik hayali fark** - urun2/M'de olculen
+  sapmanin (18 vs 8) BIREBIR aynisi.
+Ikisi de geri alindi.
+
+### YEREL DOGRULAMA
+
+227/227 `Category=Sql` · tam suitte 357 basarili / 360 (kirilan 3'un UCU DE Docker'li
+`OrderEndpointTests`) · Release 0 hata · whitespace + style TEMIZ.
+
 ## SIRA
 
-0. **YENI FAZ: KALITE SUPURMESI.** Dalga 1 (envanter+tarama) ve DALGA-1-FIX KAPANDI.
-   SIRADA: **Dalga 2** (mantik/invariant denetimi - SQL ile muhasebe kimlikleri),
-   sonra Dalga 3 (performans - B6/B7 girdi), Dalga 4 (mobil + capraz cihaz).
-   Dalga 1'den ERTELENENLER: **B5** (100 ucun HTTP testi yok - ayri kapsam dalgasi,
-   Dalga 2'den sonra karar), **B6/B7** (Dalga 3), **B8** (launch sonrasi).
+0. **KALITE SUPURMESI.** Dalga 1 + DALGA-1-FIX ve Dalga 2 + DALGA-2-FIX KAPANDI.
+   SIRADA: **Dalga 3** (performans - B6/B7 girdi), sonra Dalga 4 (mobil + capraz cihaz).
+   ERTELENENLER: **B5** (100 ucun HTTP testi yok - ayri kapsam dalgasi), **B6/B7** (Dalga 3),
+   **B8** ve **B13** (launch sonrasi defteri).
 1. **TEKNIK DEFTERDE ACIK KALEM KALMADI - TEK ISTISNA SUPHELI #14** (surum okuyucusu
    kirilganligi, genel) ve o da **LAUNCH SONRASI**. #15, #17 ve **#18** KAPANDI; #16 BILINCLI
    olarak bos birakildi; siparis #33 hem odeme hem envanter tarafinda TEMIZLENDI.
@@ -1473,6 +1586,17 @@ Hepsi geri alindi. Ayrica madde 13 icin AYRI bir 5. kontrol (uretim mutasyonu) y
   step-up `auth_time` refresh'te sifirlanmasi, loyalty oransal geri alma + referral
   clawback, Dashboard tam-tablo agregalari. **Dusen kalem:** Http.Abstractions 2.2.0
   (hicbir csproj'de referans yok).
+  **YENI KALEM (Dalga 2 / B13 - kullanici karari): TERK EDILMIS PENDING SIPARISLERE TTL.**
+  Olculdu: 17 Pending siparis, HEPSI 24 saatten eski (en eski 20 Agustos). Rezervasyonlar
+  serbest (5 dk'lik `reservation-cleanup` calisiyor - suresi gecmis Active rezervasyon 0), stok
+  ve kupon limitleri guvende; ama bu siparisler musterinin "Siparislerim" ekraninda SONSUZA
+  KADAR "Onay bekliyor" duruyor ve onlari iptale ceken bir arka plan isi YOK. Aday: 24-48 saat
+  sonra otomatik iptal + bildirim. **POLITIKA URUN KARARIDIR, kullanici sonra verecek.**
+  **YENI KALEM (dalga-1-fix eki - kullanici karari): TURKCE KLAVYEDE YAZILAN E-POSTA.**
+  `KimlikDizgesi.KanonikKod` (Turkce harf katlamasi) BILEREK e-postaya UYGULANMIYOR - e-posta
+  kullanicinin KENDI kimligidir, oradaki karakteri sessizce degistirmek kimlik verisini yeniden
+  yazmak olur. Sonuc: adresini Turkce klavyede `İ`/`ı` ile yazan kullanici, kayitta yazdigi
+  harfle giris yapmak zorunda. Invariant casing bu ikisini katlamaz. Karar kullanicinin.
   **YENI KALEM (Sprint 8 madde 8 eki - kullanici karari): RFC 2606 ust alan adlarini KAYITTA
   reddetme.** Kayit validatoru FluentValidation'in permisif `.EmailAddress()` kuralini kullaniyor
   ve `.test` / `.example` / `.invalid` / `.localhost` adreslerini KABUL EDIYOR; gercek Iyzico

@@ -32,16 +32,24 @@ namespace Divisima.Bussiness.Concrete
             _categoryDal = categoryDal;
         }
 
-        // Açıklayıcı yorum: İptal edilmemiş (ciroya sayılan) siparişler
-        // Açıklayıcı yorum: CİRO = iptal EDİLMEMİŞ + ödemesi TAMAMLANMIŞ (Pending=ödeme bekliyor, henüz gelir DEĞİL).
-        // Pending siparişler ödeme tamamlanmadan ciroya girerse ciro abartılır (ödeme hiç gelmeyebilir).
-        private static bool IsRevenueOrder(byte status) =>
-            status != (byte)OrderStatusEnum.Cancelled && status != (byte)OrderStatusEnum.Pending;
-
+        // ══ DALGA-2-FIX (B14) - CIRO KURALI ARTIK KOPYALANMIYOR, MERKEZDEN GELIYOR ═══════════
+        //
+        // ONCEKI HALI: `private static bool IsRevenueOrder(byte status) =>
+        //                  status != Cancelled && status != Pending;`
+        // Bu, `PaidOrderSpec`in ("TEK DOGRULUK KAYNAGI" - kendi dokumaninda boyle taniyor)
+        // KOPYASIYDI ve DISLAMA ile yaziliyordu. OLCULDU: bugun IKISI DE AYNI kumeyi veriyor
+        // (Confirmed/Preparing/Shipped/Delivered) - yani BUGUN zarar YOK.
+        //
+        // GIZLI RISK: kural DISLAMA ile yazildigi icin enum'a eklenecek HER YENI durum ciroya
+        // OTOMATIK GIRER. Ornegin bir `Refunded` durumu eklendiginde `PaidOrderSpec` onu dislar
+        // (o liste EKLEME ile yazilmis), bu satir ise iceri alirdi - ciro sessizce sisiyordu.
+        // Ayni sinifin diger UC sorgusu (69/90/175. satirlar) zaten `PaidOrderSpec` kullaniyordu;
+        // yalniz OZET sorgusu ayrisiyordu. Ayrisma bilincli bir karar degil, kapsam disi kalmis
+        // bir bosluktu.
         public async Task<(HttpStatusCode, Result)> GetSummary()
         {
             var orders = await _orderDal.GetListAsync(o => true);
-            var revenueOrders = orders.Where(o => IsRevenueOrder(o.status)).ToList();
+            var revenueOrders = orders.Where(o => PaidOrderSpec.IsPaidStatus(o.status)).ToList();
 
             var totalRevenue = revenueOrders.Sum(o => o.total_price);
             var totalOrders = orders.Count;

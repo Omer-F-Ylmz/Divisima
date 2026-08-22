@@ -248,15 +248,12 @@ namespace Divisima.IntegrationTests
                 is_cancelled = false,
                 created_at = DateTime.Now
             });
-            // Kupon kullanim satiri A bolgesinde yaziliyor - sayac BUNDAN turetiliyor.
-            ctx.Set<CouponUsage>().Add(new CouponUsage
-            {
-                coupon_id = kupon.id,
-                customer_id = davetEdilen.id,
-                order_id = siparis.id,
-                discount_applied = 10m,
-                created_at = DateTime.Now
-            });
+            // DALGA-2-FIX (B10) - KURGU DUZELTILDI, ASSERT'LER AYNEN KALDI.
+            // Burada ONCEDEN bir `CouponUsage` satiri ELLE ekleniyordu ve yorumu "kupon kullanim
+            // satiri A bolgesinde yaziliyor - sayac BUNDAN turetiliyor" diyordu. O cumle artik
+            // YANLIS: satiri ISLEYICININ KENDISI yaziyor (tek yazici - dort onay yolu icin ayni).
+            // Elle eklenmis satir birakilsaydi isleyicinin "zaten var mi" kontrolu onu bulur,
+            // yazma adimi HIC KOSMAZ ve pin, olcmesi gereken seyi olcmemis olurdu.
             await ctx.SaveChangesAsync();
 
             return new Senaryo(siparis.id, davetEdilen.id, davetEden.id, kupon.id, kupon.code);
@@ -273,7 +270,8 @@ namespace Divisima.IntegrationTests
                     order_id = s.OrderId,
                     customer_id = s.RefereeId,
                     total_price = 100m,
-                    coupon_code = s.CouponCode
+                    coupon_code = s.CouponCode,
+                    discount_amount = 10m   // DALGA-2-FIX (B10): kullanim satirini isleyici yaziyor
                 }),
                 status = 0,
                 retry_count = 0,

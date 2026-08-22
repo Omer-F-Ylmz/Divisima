@@ -521,6 +521,17 @@ CREATE TABLE size_guide_entries (
     created_at DATETIME2 NOT NULL
 );
 
+-- DALGA-2-FIX (B11) - QUANTITY ISARET SOZLESMESI (denetim defteri):
+--   movement_type = 1 (In)         -> quantity POZITIF, stoga GIRIS
+--   movement_type = 2 (Out)        -> quantity POZITIF, stoktan CIKIS
+--   movement_type = 3 (Adjustment) -> quantity ISARETLI FARK (azalista NEGATIF)
+-- Yon, In/Out icin tipin kendisinden bellidir; Adjustment icin turetilemez, bu yuzden isaret
+-- ORADA yasar. Onceden `ABS(delta)` yaziliyordu ve yon yalniz `note` metnindeydi - defter
+-- sayisal olarak mutabakat EDILEMIYORDU (olculdu: bir urun-beden icin 18 vs gercek 8).
+-- MUTABAKAT FORMULU:
+--   SUM(CASE movement_type WHEN 2 THEN -quantity ELSE quantity END)
+-- CHECK kisiti BILEREK KONULMADI: negatif deger Adjustment icin GECERLIDIR ve tip-bazli bir
+-- CHECK, ileride eklenecek bir hareket turunde sessizce yanlis yasak uretebilirdi.
 CREATE TABLE stock_movements (
     id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
     product_id INT NOT NULL,

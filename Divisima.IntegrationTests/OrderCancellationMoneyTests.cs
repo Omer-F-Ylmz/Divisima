@@ -230,5 +230,102 @@ namespace Divisima.IntegrationTests
             after.credit.Should().BeLessThanOrEqualTo(200m, "iade odenen tutari ASAMAZ");
             (after.physical - after.reserved).Should().Be(10, "tek kalem iptal edilince stok tamamen geri donmeli");
         }
+
+        // ══ DALGA-2-FIX (B12) - TAM IPTALDE MUHASEBE KIMLIGI KORUNUR ═════════════════════════
+        //
+        // OLCULEN DURUM (Dalga 2, gercek dev veritabani): tam iptal edilmis YEDI siparis
+        //     subtotal=0.00  discount=0.00  shipping=49.90  total=0.00
+        // tasiyordu. Kalem iptalleri subtotal'i ve indirimi dusuruyor, tam iptal total'i
+        // sifirliyor, ama KARGO kolonu ilk degerinde kaliyordu; yani
+        //     total_price = subtotal - discount_amount + shipping_cost
+        // kimligi KIRILIYORDU. Musterinin siparis detayi ve fatura govdesi 0,00 TL'lik iptal
+        // sipariste "Kargo: 49,90 TL" yaziyordu.
+        [Fact]
+        public async Task TamIptal_KARGO_BEDELI_de_SIFIRLANIR_MuhasebeKimligi_KORUNUR()
+        {
+            if (Skipped()) return;
+            // 1 x 50 = 50 subtotal -> 2000 esiginin ALTINDA, yani kargo 49.90 UYGULANIR.
+            var (customerId, productId) = await SeedAsync(credit: 500m, stock: 10, price: 50m);
+
+            var place = await WithScopeAsync(sp => sp.GetRequiredService<IOrderService>().PlaceOrder(new OrderCreateRequestDto
+            {
+                customer_id = customerId,
+                coupon_code = "",
+                use_store_credit = 0m,
+                payment_method = 1,
+                items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = 1 } }
+            }));
+            place.Item2.Success.Should().BeTrue($"siparis olusmali: {place.Item2.Message}");
+
+            int orderId, itemId;
+            await using (var ctx = NewContext())
+            {
+                var o = await ctx.Set<Order>().AsNoTracking().SingleAsync(x => x.customer_id == customerId);
+                orderId = o.id;
+                // VAKUM KIRICI: kargo GERCEKTEN uygulanmis olmali - yoksa "iptalden sonra kargo 0"
+                // iddiasi bombos kalirdi (hic kargo yoksa zaten 0'dir).
+                o.shipping_cost.Should().Be(49.90m, "2000 esiginin altindaki sipariste kargo UYGULANIR");
+                o.total_price.Should().Be(99.90m, "50 + 49.90");
+                itemId = (await ctx.Set<OrderItem>().AsNoTracking().FirstAsync(i => i.order_id == orderId)).id;
+            }
+
+            var cancelItem = await WithScopeAsync(sp => sp.GetRequiredService<IOrderService>()
+                .CancelItem(orderId, itemId, customerId));
+            cancelItem.Item2.Success.Should().BeTrue($"kalem iptali basarili olmali: {cancelItem.Item2.Message}");
+
+            await using (var ctx = NewContext())
+            {
+                var o = await ctx.Set<Order>().AsNoTracking().SingleAsync(x => x.id == orderId);
+                o.status.Should().Be((byte)OrderStatusEnum.Cancelled, "son kalem iptal edilince siparis tumuyle iptal olur");
+                o.shipping_cost.Should().Be(0m,
+                    "TAM IPTALDE kargo bedeli de sifirlanmali - aksi halde 0,00 TL'lik iptal sipariste " +
+                    "musteriye 'Kargo: 49,90 TL' gosterilir");
+                (o.subtotal - o.discount_amount + o.shipping_cost).Should().Be(o.total_price,
+                    "MUHASEBE KIMLIGI: total_price = subtotal - indirim + kargo. Yedi canli satirda " +
+                    "bu kimlik KIRIKTI (0 <> 0 - 0 + 49.90)");
+            }
+        }
+
+        // ── PARA YOLU DEGISMEDI (B12'nin cift-anlam kiricisi) ────────────────────────────────
+        //
+        // B12 yalniz DEFTERLENEN kolonu duzeltir. Kargonun MUSTERIYE IADESI (H44'te eklenen
+        // "Tam iptal - kalan (kargo) iadesi") aynen surmeli. Bu pin olmadan, "kargoyu sifirla"
+        // duzeltmesi yanlislikla iade tutarinin ONUNE gecse (kargo iade edilmese) fark edilmezdi.
+        [Fact]
+        public async Task TamIptal_ODENMIS_SIPARISTE_KARGO_IADESI_DEGISMEDI()
+        {
+            if (Skipped()) return;
+            var (customerId, productId) = await SeedAsync(credit: 500m, stock: 10, price: 50m);
+
+            // Cuzdanla TAM odeme: 50 + 49.90 = 99.90 -> odenmis siparis; iptalde TAMAMI geri gelmeli.
+            var place = await WithScopeAsync(sp => sp.GetRequiredService<IOrderService>().PlaceOrder(new OrderCreateRequestDto
+            {
+                customer_id = customerId,
+                coupon_code = "",
+                use_store_credit = 99.90m,
+                payment_method = 1,
+                items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = 1 } }
+            }));
+            place.Item2.Success.Should().BeTrue($"siparis olusmali: {place.Item2.Message}");
+
+            (await ReadStateAsync(customerId, productId)).credit.Should().Be(400.10m,
+                "500 - 99.90 (kargo DAHIL tam odeme cuzdandan dusmeli)");
+
+            int orderId, itemId;
+            await using (var ctx = NewContext())
+            {
+                var o = await ctx.Set<Order>().AsNoTracking().SingleAsync(x => x.customer_id == customerId);
+                orderId = o.id;
+                itemId = (await ctx.Set<OrderItem>().AsNoTracking().FirstAsync(i => i.order_id == orderId)).id;
+            }
+
+            var cancelItem = await WithScopeAsync(sp => sp.GetRequiredService<IOrderService>()
+                .CancelItem(orderId, itemId, customerId));
+            cancelItem.Item2.Success.Should().BeTrue($"kalem iptali basarili olmali: {cancelItem.Item2.Message}");
+
+            (await ReadStateAsync(customerId, productId)).credit.Should().Be(500m,
+                "KARGO DAHIL odenen TUM tutar iade edilmeli - B12 yalnizca defterlenen kargo " +
+                "kolonunu sifirlar, PARA YOLUNA DOKUNMAZ (kargo sifirlamasi iade hesabindan SONRA yapilir)");
+        }
     }
 }

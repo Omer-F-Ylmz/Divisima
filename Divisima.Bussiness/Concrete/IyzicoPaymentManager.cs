@@ -31,7 +31,6 @@ namespace Divisima.Bussiness.Concrete
         private readonly IFraudCheckService _fraudCheck;
         private readonly IDistributedLock _distributedLock;
         private readonly ICouponDal _couponDal;
-        private readonly ICouponUsageDal _couponUsageDal;
         private readonly IOrderStatusHistoryService _statusHistory;
         private readonly ILoyaltyService _loyaltyService;
         private readonly IReferralService _referralService;
@@ -48,7 +47,7 @@ namespace Divisima.Bussiness.Concrete
         public IyzicoPaymentManager(IPaymentDal paymentDal, IOrderDal orderDal,
             IIyzicoClient iyzico, IStockService stockService, ICustomerDal customerDal,
             IFraudCheckService fraudCheck, IDistributedLock distributedLock,
-            ICouponDal couponDal, ICouponUsageDal couponUsageDal,
+            ICouponDal couponDal,
 IOrderStatusHistoryService statusHistory,
 ILoyaltyService loyaltyService,
 IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitOfWork unitOfWork,
@@ -64,7 +63,6 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
             _fraudCheck = fraudCheck;
             _distributedLock = distributedLock;
             _couponDal = couponDal;
-            _couponUsageDal = couponUsageDal;
             _statusHistory = statusHistory;
             _loyaltyService = loyaltyService;
             _referralService = referralService;
@@ -363,25 +361,11 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
                         order.payment_id = result.PaymentId;
                         await _orderDal.UpdateAsync(order);
 
-                        // Açıklayıcı yorum: Kupon kullanımını KAYDET - ödeme başarılı olduğunda (kupon gerçekten tüketildi).
-                        // used_count artırılır (limit denetimi anlamlı olur) + CouponUsage kaydı (kim/hangi sipariş).
-                        if (!string.IsNullOrWhiteSpace(order.coupon_code))
-                        {
-                            var coupon = await _couponDal.GetByCodeAsync(order.coupon_code);
-                            if (coupon != null)
-                            {
-                                // Açıklayıcı yorum: CouponUsage kaydı transaction içinde (insert - çakışma yok, denetim izi).
-                                // used_count artışı post-commit retry ile yapılır (ödemeyi concurrency çakışması bozmasın).
-                                await _couponUsageDal.AddAsync(new CouponUsage
-                                {
-                                    coupon_id = coupon.id,
-                                    customer_id = order.customer_id,
-                                    order_id = order.id,
-                                    discount_applied = order.discount_amount,
-                                    created_at = DateTime.Now
-                                });
-                            }
-                        }
+                        // DALGA-2-FIX (B10): KUPON KULLANIM SATIRI BURADAN KALDIRILDI.
+                        // Satiri yazan tek yer artik PaymentConfirmedSideEffects'in 4. adimi - yani
+                        // TUM onay yollari icin AYNI yazici. Burada birakilsaydi kart yolu satiri
+                        // yazar, kart disi yollar yazmazdi; bu dalganin duzeltmeye calistigi kusur
+                        // tam olarak buydu. Gerekce ve bedeli o adimin basinda yazili.
 
                         // Açıklayıcı yorum: Zaman çizelgesine "Onaylandı" kaydı (ödeme başarılı - transaction içinde)
                         await _statusHistory.RecordAsync(order.id, (byte)OrderStatusEnum.Confirmed, "Ödeme onaylandı");
@@ -399,7 +383,8 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
                             order_id = order.id,
                             customer_id = order.customer_id,
                             total_price = order.total_price,
-                            coupon_code = order.coupon_code
+                            coupon_code = order.coupon_code,
+                            discount_amount = order.discount_amount
                         });
                     }
                     else
@@ -508,32 +493,12 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
                 }
             }
         }
-        // SPRINT 8 MADDE 1 - KUPON SAYACI ARTIK IDEMPOTENT.
-        //
-        // ONCEKI HALI: `IncrementCouponUsageWithRetry` - kuponu oku, `used_count += 1`, yaz;
-        // `DbUpdateConcurrencyException` gelirse 5 kez yeniden dene.
-        // ESZAMANLILIK YONU DOGRUYDU (olculdu): `coupons.row_version` DbContext'te
-        // `IsRowVersion()` ile yapilandirilmis gercek bir concurrency token; kayip guncelleme
-        // istisnaya donusuyor ve retry onu yakaliyordu. SORUN ORADA DEGILDI.
-        // GERCEK SORUN: IDEMPOTENT DEGILDI. Callback bugun tam bir kez kostugu icin zararsizdi,
-        // ama B bolgesi at-least-once bir mekanizmaya (outbox - madde 3) tasindiginda AYNI
-        // siparis icin sayac birden fazla artardi; kupon limiti gercekte dolmadan "dolmus"
-        // gorunur ve gecerli musteriler reddedilirdi. Yeniden deneme bunu KURTARAMAZ - cunku
-        // ikinci artis bir HATA degil, basarili bir yazma olarak gorunur.
-        //
-        // YENI HALI: sayac `coupon_usages` satirlarindan TURETILIR (tek SQL ifadesi).
-        // Turetme TANIMI GEREGI idempotenttir - kac kez cagrilirsa cagrilsin ayni sonucu verir.
-        // Yan fayda: oku-degistir-yaz dongusu tamamen kalktigi icin retry/istisna yolu da
-        // gereksizlesti. Kullanim satirinin kendisi A bolgesindeki transaction icinde yazildigi
-        // ve `(coupon_id, order_id)` UNIQUE indeksi ile korundugu icin ayni siparis iki kez
-        // sayilamaz - sayac yanlis bir kaynaktan turetilemez.
-        private async Task SyncCouponUsageCountAsync(string couponCode)
-        {
-            var coupon = await _couponDal.GetByCodeAsync(couponCode);
-            if (coupon == null) return;
-            await _couponDal.SyncUsedCountAsync(coupon.id);
-        }
-
+        // DALGA-2-FIX (B10): buradaki `SyncCouponUsageCountAsync` OLU METOTTU - Sprint 8 madde 3'te
+        // sayac outbox isleyicisine tasinmis ama metot ve yorumu geride kalmisti (tarandi: hicbir
+        // cagrisi yoktu). Ustelik yorumu "kullanim satiri A bolgesindeki transaction icinde
+        // yazilir" diyordu; bu dalga satiri isleyiciye tasidigi icin o cumle ARTIK YANLIS olacakti
+        // ve yalan soyleyen bir yorum olu koddan daha zararlidir. Sprint 8 madde 1'in gerekcesi
+        // ZATEN yasadigi yerde duruyor: EfCouponDal.SyncUsedCountAsync uzerindeki blok.
 
         // SPRINT 8 MADDE 8 - TESLIM EDILEMEZ UST ALAN ADLARI.
         // RFC 2606 / RFC 6761 bu adlari TEST ve OZEL kullanim icin AYIRMISTIR; internette

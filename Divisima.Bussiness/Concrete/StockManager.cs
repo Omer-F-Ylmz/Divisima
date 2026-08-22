@@ -378,13 +378,36 @@ namespace Divisima.Bussiness.Concrete
             stock.updated_at = DateTime.Now;
             await _productStockDal.UpdateAsync(stock);
 
-            // Açıklayıcı yorum: Fark hareketi (denetim + geçmiş)
+            // ══ DALGA-2-FIX (B11) - YON BILGISI SERBEST METINDE YASAYAMAZ ═════════════════════
+            //
+            // ONCEKI HALI: `quantity = Math.Abs(delta)`. Yon YALNIZCA `note` icindeki
+            // "Admin duzeltme (-5)" metninde duruyordu; sayisal defterde artis ile azalis
+            // AYIRT EDILEMIYORDU.
+            //
+            // OLCULEN ZARAR (Dalga 2, dev veritabani, urun 2 / M):
+            //     isaretsiz defter:  10 + 20 + 2 - 14 = 18      product_stocks: 8   FARK 10
+            //     isaretli defter :  10 + 15 - 5 + 2 - 14 = 8   product_stocks: 8   TUTAR
+            // `stock_movements` bir DENETIM defteridir; mutabakat yapan biri sessizce YANLIS
+            // sayiya ulasiyordu.
+            //
+            // NEDEN YALNIZ ADJUSTMENT ISARETLENIYOR (olcume dayali karar):
+            //   - In(1) ve Out(2) satirlarinin yonu ZATEN `movement_type` ile belirli; onlari da
+            //     isaretlemek hicbir bilgi eklemez ve iki mevcut pini (Out quantity==3,
+            //     In quantity==4) gerekcesiz sekilde kirardi.
+            //   - Adjustment, yonu tipinden TURETILEMEYEN TEK tur - isaret tam oraya ait.
+            //   - Sema degisikligi GEREKMEDI (yeni yon kolonu redundant olurdu).
+            // MUTABAKAT FORMULU (tek ve uniform):
+            //     SUM(CASE movement_type WHEN 2 THEN -quantity ELSE quantity END)
+            //
+            // TUKETICI RISKI OLCULDU: depoda `stock_movements` tablosunu OKUYAN uretim kodu YOK
+            // (yalniz AddAsync cagrilari var; DTO/uc/rapor yok) - defter salt-yazilir bir denetim
+            // izidir. Bu yuzden isaretleme hicbir okuyucuyu bozmuyor.
             await _stockMovementDal.AddAsync(new StockMovement
             {
                 product_id = productId,
                 size = size,
                 movement_type = (byte)StockMovementType.Adjustment,
-                quantity = Math.Abs(delta),
+                quantity = delta,   // ISARETLI FARK - azalista NEGATIF
                 reference_id = null,
                 note = $"Admin düzeltme ({(delta >= 0 ? "+" : "")}{delta}): {note}",
                 created_at = DateTime.Now

@@ -48,6 +48,13 @@ namespace Divisima.Bussiness.Concrete
         private readonly IDistributedLock _distributedLock;
         private readonly IOrderConfirmationService _orderConfirmation;
 
+        // DALGA-2-FIX (B10): siparis onaylandiginda yan etki olayi OUTBOX'a yazilir.
+        // Onceden bu manager onay yollarinda dogrudan `ApplyConfirmedSideEffectsAsync` cagiriyordu
+        // ve o metot YALNIZ faturayi kesiyordu; sadakat / referans odulu / kupon defteri kart
+        // yolundaki outbox mesajina bagliydi. Sonuc: kapida odeme, havale ve admin onayinda
+        // musteri puan KAZANMIYOR, davet eden referans kredisini ALAMIYOR, kupon defteri BOS
+        // kaliyordu (olculdu - Dalga 2 raporu B10).
+        private readonly Divisima.Bussiness.Outbox.IOutboxService _outboxService;
 
         // Açıklayıcı yorum: Frontend sabitleri (FREE_SHIP=2000, kargo 49.9)
         private const decimal FreeShipThreshold = 2000m;
@@ -65,8 +72,10 @@ namespace Divisima.Bussiness.Concrete
             IStoreCreditTransactionDal creditTxDal, IAddressDal addressDal,
             IPaymentDal paymentDal, IIyzicoClient iyzico, IRefundService refundService, ILoyaltyService loyaltyService,
             IDistributedLock distributedLock, IOrderPlacedEventPublisher eventPublisher,
-            IOrderConfirmationService orderConfirmation)
+            IOrderConfirmationService orderConfirmation,
+            Divisima.Bussiness.Outbox.IOutboxService outboxService)
         {
+            _outboxService = outboxService;
             _eventPublisher = eventPublisher;
             _creditTxDal = creditTxDal;
             _addressDal = addressDal;
@@ -358,7 +367,27 @@ namespace Divisima.Bussiness.Concrete
                     await _statusHistory.RecordAsync(order.id, (byte)OrderStatusEnum.Confirmed, "Kapıda ödeme - sipariş onaylandı");
                 }
 
+                // DALGA-2-FIX (B10): iki dal da (magaza kredisiyle tam odeme + kapida odeme) siparisi
+                // Confirmed yapiyor. Olay COMMIT'TEN ONCE, AYNI TRANSACTION ICINDE yaziliyor -
+                // Sprint 8 madde 3'un kaliginin aynisi: "siparis onaylandi ama olay kaybedildi"
+                // durumu OLUSAMAZ.
+                if (order.status == (byte)OrderStatusEnum.Confirmed)
+                    await SiparisOnaylandiOlayiYazAsync(order);
+
                 await _unitOfWork.CommitAsync();
+
+                // FATURA SENKRON KALIR - bu cagri KALDIRILMADI, gerekcesi OLCUMDUR.
+                // Ilk denemede kaldirilmisti (fatura da outbox'a birakilmisti) ve IKI mevcut pin
+                // bunu YAKALADI: AuthorizationIdorTests'in fatura testleri siparisin hemen
+                // ardindan faturayi okuyor ve "Sequence contains no elements" ile kirildi.
+                // Yani kart DISI yollarda fatura BUGUNE KADAR ANINDA kesiliyordu; onu ~1 dakikaya
+                // yaymak ISTENMEYEN bir davranis degisikligi olurdu (B10'un kusuru fatura DEGIL,
+                // eksik olan diger uc yan etkiydi).
+                // CAKISMA YOK: isleyicinin 1. adimi ayni faturayi kesmeye calisinca
+                // InvoiceManager'in "bu siparis icin fatura zaten var" kontrolu NO-OP dondurur
+                // (olculdu ve pinlendi). YAN KAZANC: fatura artik kart disi yollarda da
+                // YENIDEN DENENEBILIR - bu cagri patlarsa outbox onu tamamlar; onceden bu yolda
+                // fatura best-effort'tu ve HIC yeniden denenmiyordu.
                 if (order.status == (byte)OrderStatusEnum.Confirmed)
                     await _orderConfirmation.ApplyConfirmedSideEffectsAsync(order.id);
             }
@@ -511,7 +540,11 @@ Tarih: {order.created_at:dd.MM.yyyy}</p>
                 await _orderDal.UpdateAsync(order);
                 await _stockService.ConfirmReservation(order.id);
                 await _statusHistory.RecordAsync(order.id, (byte)OrderStatusEnum.Confirmed, "Havale/EFT ödemesi onaylandı");
+                // DALGA-2-FIX (B10): olay TRANSACTION ICINDE - havale onayi da dort yan etkinin
+                // TAMAMINI tetikler. Onceden commit sonrasi YALNIZ fatura kesiliyordu.
+                await SiparisOnaylandiOlayiYazAsync(order);
                 await _unitOfWork.CommitAsync();
+                // Fatura SENKRON kalir (gerekcesi PlaceOrder'daki ayni cagrida yazili - olculdu).
                 await _orderConfirmation.ApplyConfirmedSideEffectsAsync(order.id);
                 return (HttpStatusCode.OK, new SuccessResult(Messages.ManualPaymentConfirmed));
             }
@@ -538,21 +571,71 @@ Tarih: {order.created_at:dd.MM.yyyy}</p>
             if (!OrderStatusMachine.IsValidTransition((OrderStatusEnum)previousStatus, (OrderStatusEnum)dto.order_status))
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.OrderInvalidStatusTransition));
 
-            order.status = (byte)dto.order_status;
-            // Açıklayıcı yorum: Teslim edildiğinde teslim zamanını kaydet (iade penceresi buradan sayılır, sipariş tarihinden değil).
-            if (order.status == (byte)OrderStatusEnum.Delivered && !order.delivered_at.HasValue)
-                order.delivered_at = DateTime.Now;
-            await _orderDal.UpdateAsync(order);
+            // DALGA-2-FIX (B10): DURUM YAZIMI + ZAMAN CIZELGESI + ONAY OLAYI ARTIK ATOMIK.
+            // Onceden bu yolda HIC transaction yoktu: `UpdateAsync` aninda SaveChanges yapiyor,
+            // zaman cizelgesi AYRI bir yazma oluyordu. Onay olayini "aynen madde 3'un kalibi"
+            // ile yazmak icin bir transaction sinirina ihtiyac var - yoksa "durum Confirmed
+            // yazildi ama olay yazilamadi" penceresi acik kalirdi ve dort yan etki yine
+            // sessizce kaybolabilirdi (bu dalganin duzelttigi kusurun yeni bir bicimi).
+            // KAPSAM BILEREK DAR: transaction YALNIZ bu uc yazmayi sariyor. Iptal dalinin
+            // stok/iade/fatura isleri `HandleStatusSideEffects` icinde, COMMIT SONRASINDA ve
+            // eskisi gibi best-effort kaliyor - o davranisa DOKUNULMADI.
+            await _unitOfWork.BeginTransactionAsync();
+            try
+            {
+                order.status = (byte)dto.order_status;
+                // Açıklayıcı yorum: Teslim edildiğinde teslim zamanını kaydet (iade penceresi buradan sayılır, sipariş tarihinden değil).
+                if (order.status == (byte)OrderStatusEnum.Delivered && !order.delivered_at.HasValue)
+                    order.delivered_at = DateTime.Now;
+                await _orderDal.UpdateAsync(order);
 
-            // Açıklayıcı yorum: Durum değişimini zaman çizelgesine kaydet (yalnızca gerçek değişimde)
-            if (order.status != previousStatus)
-                await _statusHistory.RecordAsync(order.id, order.status, $"Durum güncellendi: {((OrderStatusEnum)order.status)}");
+                // Açıklayıcı yorum: Durum değişimini zaman çizelgesine kaydet (yalnızca gerçek değişimde)
+                if (order.status != previousStatus)
+                    await _statusHistory.RecordAsync(order.id, order.status, $"Durum güncellendi: {((OrderStatusEnum)order.status)}");
+
+                // DALGA-2-FIX (B10): admin bir siparisi Confirmed'a tasidiginda da dort yan etki
+                // uygulanir. `!= previousStatus` sarti MUKERRER mesaji engeller: zaten Confirmed
+                // olan bir siparise ayni durum tekrar yazilirsa olay URETILMEZ.
+                if (order.status == (byte)OrderStatusEnum.Confirmed && previousStatus != (byte)OrderStatusEnum.Confirmed)
+                    await SiparisOnaylandiOlayiYazAsync(order);
+
+                await _unitOfWork.CommitAsync();
+            }
+            catch
+            {
+                await _unitOfWork.RollbackAsync();
+                throw;
+            }
 
             // Açıklayıcı yorum: Durum değimine göre yan etkiler (fatura + bildirim). Best-effort - başarısızlık
             // sipariş güncellemesini geri almaz (bildirim/fatura ikincil). Hata loglanır, akış devam eder.
             await HandleStatusSideEffects(order, previousStatus);
 
             return (HttpStatusCode.OK, new SuccessResult(Messages.OrderStatusChanged));
+        }
+
+        // ══ DALGA-2-FIX (B10) - SIPARIS ONAY OLAYININ TEK YAZICISI ═════════════════════════════
+        //
+        // Dort yan etki (fatura, sadakat, referans odulu, kupon defteri+sayaci) TEK uygulayicida
+        // yasar: PaymentConfirmedSideEffects. Oraya tek giris outbox mesajidir. Bu yardimci, bu
+        // manager'daki UC onay yolunun (kapida odeme / magaza-kredisiyle tam odeme, havale admin
+        // onayi, admin durum degisikligi) hepsinin AYNI mesaji AYNI bicimde yazmasini saglar.
+        //
+        // NEDEN TEK SATIRLIK BIR YARDIMCI: uc cagri yerine olay govdesini KOPYALAMAK, bu dalganin
+        // duzelttigi kusurun (ayni mantigin yollara dagilmasi) yeni bir ornegi olurdu. Bir alan
+        // eklendiginde (or. discount_amount) tek yerde eklenir.
+        //
+        // CAGRI KURALI: HER ZAMAN acik bir transaction ICINDE ve commit'ten ONCE cagrilir.
+        private async Task SiparisOnaylandiOlayiYazAsync(Order order)
+        {
+            await _outboxService.WriteAsync("PaymentConfirmed", new Divisima.Bussiness.Events.PaymentConfirmedEvent
+            {
+                order_id = order.id,
+                customer_id = order.customer_id,
+                total_price = order.total_price,
+                coupon_code = order.coupon_code,
+                discount_amount = order.discount_amount
+            });
         }
 
         // Açıklayıcı yorum: Sipariş durumu değişince tetiklenen yan etkiler - fatura üretimi + müşteri bildirimi.
@@ -564,6 +647,11 @@ Tarih: {order.created_at:dd.MM.yyyy}</p>
             try
             {
                 // Açıklayıcı yorum: Onaylanınca fatura üret (idempotent - InvoiceManager tekrar üretmez)
+                // DALGA-2-FIX (B10): bu cagri KALIR ve fatura SENKRON kesilmeye devam eder; diger
+                // uc yan etki (sadakat, referans odulu, kupon defteri) icin ONAY OLAYI yukarida,
+                // durum yazimiyla AYNI transaction'da uretiliyor. Gerekce PlaceOrder'daki ayni
+                // cagrinin uzerinde: faturayi asenkrona tasimak ISTENMEYEN bir davranis degisikligi
+                // olurdu ve iki mevcut pin bunu olcerek yakaladi.
                 if (newStatus == (byte)OrderStatusEnum.Confirmed)
                     await _orderConfirmation.ApplyConfirmedSideEffectsAsync(order.id);
 
@@ -840,6 +928,20 @@ Tarih: {order.created_at:dd.MM.yyyy}</p>
                         refundedTotal += leftoverRefund;
                     }
                     order.total_price = 0m;
+                    // ══ DALGA-2-FIX (B12) - KARGO BEDELI DE SIFIRLANIR ═════════════════════════
+                    // OLCULEN DURUM (Dalga 2, dev veritabani): tam iptal edilmis YEDI siparis
+                    // `subtotal=0, discount=0, shipping=49.90, total=0` tasiyordu. Yani muhasebe
+                    // kimligi `total = subtotal - indirim + kargo` KIRILIYORDU: kalem iptalleri
+                    // subtotal'i ve indirimi dusuruyor, tam iptal total'i sifirliyor, ama kargo
+                    // kolonu ILK DEGERINDE kaliyordu.
+                    // GORUNEN ZARAR: musterinin siparis detayi ve fatura govdesi 0,00 TL'lik iptal
+                    // sipariste "Kargo: 49,90 TL" yaziyordu - odenmeyecek bir kalem gibi.
+                    //
+                    // SIRA KRITIK: bu satir `leftoverRefund` HESAPLANDIKTAN SONRA. Iade tutari
+                    // `order.total_price` uzerinden turetiliyor ve o deger kargoyu ICERIYOR;
+                    // kargoyu once sifirlamak musteriye kargo bedelini IADE ETMEMEK olurdu.
+                    // PARA YOLU DEGISMEDI - yalnizca defterlenen kolon duzeltildi (pin bunu da korur).
+                    order.shipping_cost = 0m;
                     // FARMING ENGELİ: son kalem de iptal edilip sipariş tümüyle iptale döndüyse kazanılan loyalty puanını GERİ AL.
                     await _loyaltyService.ReverseForOrder(order.customer_id, order.id);
                 }

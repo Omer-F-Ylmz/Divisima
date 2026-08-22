@@ -329,5 +329,72 @@ namespace Divisima.IntegrationTests
             provider.CancelCallCount.Should().Be(0, "saglayiciya hic gitmemis fatura icin iptal cagrisi YAPILMAMALI");
             (await ReadInvoiceStatusAsync(invoiceId)).Should().Be((byte)InvoiceStatusEnum.Cancelled);
         }
+
+        // ══ DALGA-2-FIX - IPTAL YAN ETKISI SESSIZ DUSEMEZ ════════════════════════════════════
+        //
+        // OLCULEN ARTIK (Dalga 2): dev veritabaninda iptal edilmis YEDI siparisin faturasi hala
+        // `Sent`. Bugunku kod uc iptal yolunun ucunde de `CancelForOrder` cagiriyor, yani o
+        // satirlar tarihsel artik. AMA yol BEST-EFFORT: yukaridaki
+        // `CancelForOrder_SaglayiciREDDEDERSE_...` pininin olctugu durumda (saglayici GIB iptalini
+        // reddediyor) siparis Cancelled olur, fatura Sent KALIR ve bunu goren TEK sey bir LOG
+        // SATIRIDIR. Yani ayni tablo URETIMDE yeniden olusabilir ve kimse fark etmez.
+        //
+        // GUARD: hata artik siparis ZAMAN CIZELGESINE de "KRITIK" notu olarak duser (H53'teki
+        // "para iadesi BASARISIZ" kalibinin aynisi) - operasyonun gorebilecegi bir kanal.
+        private OrderConfirmationManager NewConfirmationManager(DivisimaDbContext ctx, FakeEInvoiceProvider provider) =>
+            new OrderConfirmationManager(
+                NewManager(ctx, provider),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<OrderConfirmationManager>.Instance,
+                new OrderStatusHistoryManager(new EfOrderStatusHistoryDal(ctx), new EfOrderDal(ctx)));
+
+        [Fact]
+        public async Task IptalYanEtkisi_FATURA_IPTALI_BASARISIZSA_ZamanCizelgesine_KRITIK_Notu_Duser()
+        {
+            if (Skipped()) return;
+            var (orderId, invoiceId) = await SeedAsync(
+                (byte)OrderStatusEnum.Cancelled, (byte)InvoiceStatusEnum.Sent, "GIB-REF-77777");
+
+            await using (var ctx = NewContext())
+                await NewConfirmationManager(ctx, new FakeEInvoiceProvider { CancelSucceeds = false })
+                    .ApplyCancelledSideEffectsAsync(orderId);
+
+            // Fatura yine Sent KALIR (yarim iptal olmaz) - ama artik SESSIZ degil.
+            (await ReadInvoiceStatusAsync(invoiceId)).Should().Be((byte)InvoiceStatusEnum.Sent);
+
+            await using (var ctx = NewContext())
+            {
+                var notlar = await ctx.Set<OrderStatusHistory>().AsNoTracking()
+                    .Where(h => h.order_id == orderId).Select(h => h.note).ToListAsync();
+                notlar.Should().Contain(n => n != null && n.Contains("KRİTİK") && n.Contains("FATURASI İPTAL EDİLEMEDİ"),
+                    "iptal edilmis ama faturasi acikta kalmis siparis OPERATORE GORUNUR olmali - " +
+                    "tek kanal log satiri olsaydi bu durum aylarca fark edilmezdi (Dalga 2'de bulunan " +
+                    "yedi artik satirin uretimdeki karsiligi tam olarak budur)");
+            }
+        }
+
+        // VAKUM KIRICI: basarili iptalde KRITIK notu DUSMEZ. Bu olmadan "her cagride not yazan"
+        // bir uygulama da ustteki testi gecerdi ve zaman cizelgesi gurultuye bogulurdu.
+        [Fact]
+        public async Task IptalYanEtkisi_BASARILIYSA_KRITIK_Notu_DUSMEZ_FaturaIptalEdilir()
+        {
+            if (Skipped()) return;
+            var (orderId, invoiceId) = await SeedAsync(
+                (byte)OrderStatusEnum.Cancelled, (byte)InvoiceStatusEnum.Sent, "GIB-REF-88888");
+
+            await using (var ctx = NewContext())
+                await NewConfirmationManager(ctx, new FakeEInvoiceProvider { CancelSucceeds = true })
+                    .ApplyCancelledSideEffectsAsync(orderId);
+
+            (await ReadInvoiceStatusAsync(invoiceId)).Should().Be((byte)InvoiceStatusEnum.Cancelled,
+                "saglayici kabul edince fatura GERCEKTEN iptal edilmeli");
+
+            await using (var ctx = NewContext())
+            {
+                var notlar = await ctx.Set<OrderStatusHistory>().AsNoTracking()
+                    .Where(h => h.order_id == orderId).Select(h => h.note).ToListAsync();
+                notlar.Should().NotContain(n => n != null && n.Contains("KRİTİK"),
+                    "basarili iptalde KRITIK notu YAZILMAMALI");
+            }
+        }
     }
 }
