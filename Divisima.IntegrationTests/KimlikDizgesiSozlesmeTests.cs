@@ -133,13 +133,23 @@ namespace Divisima.IntegrationTests
             (await _factory!.CreateClient().PostAsJsonAsync("/api/auth/login",
                 new { email, password = TestAuthHelper.TestPassword })).StatusCode;
 
-        // ── B1-a) AYNI ADRESIN FARKLI YAZIMIYLA IKINCI KAYIT REDDEDILIR ────────────────────
+        // ── B1-a) AYNI ADRESIN FARKLI YAZIMI IKINCI BIR HESAP ACMAZ ───────────────────────
         //
         // CANLI ZARAR (Dalga 1'de olculdu): 'Iris.Kalite@example.com' ve 'iris.kalite@example.com'
         // ARDI ARDINA 201 dondu ve customers'ta IKI SATIR olustu (id 14 'ırıs...', id 15 'iris...').
         // Tekillik kontrolu kulturlu kucultme yaptigi icin iki yazim FARKLI ANAHTAR uretiyordu.
+        //
+        // ══ BILINCLI DEGISTIRILDI - GUVENLIK-FIX (G2) ═══════════════════════════════════════
+        // Testin ADI ve DURUM KODU ASSERT'I degisti; OLCTUGU INVARIANT AYNEN DURUYOR.
+        // Eskiden `ikinci.StatusCode.Should().NotBe(Created)` yaziyordu. O assert, B1'in gercek
+        // invariantini ("tek adres -> TEK hesap") DEGIL, o gunku YAN ETKISINI (400 donmesi)
+        // sabitliyordu. G2 ile kayit ucu artik var olan adres icin de AYNI 201'i donuyor
+        // (enumeration engeli), yani eski assert dogru davranisi KIRMIS olurdu.
+        // Invarianti koruyan asil assert asagida ve DEGISMEDI: satir sayisi 1, deger kanonik.
+        // Enumeration esitliginin KENDISI ayrica pinli: SecurityHardeningTests ->
+        // `Kayit_VAR_OLAN_ve_YENI_ADRES_AYNI_YANITI_Doner`.
         [Fact]
-        public async Task AyniAdresinFarkliCasingi_IKINCI_KAYITTA_REDDEDILIR()
+        public async Task AyniAdresinFarkliCasingi_IKINCI_HESAP_ACMAZ()
         {
             if (Skipped()) return;
             var yerel = "iris-" + Guid.NewGuid().ToString("N").Substring(0, 8);
@@ -149,8 +159,10 @@ namespace Divisima.IntegrationTests
             (await KayitAsync(buyuk)).StatusCode.Should().Be(HttpStatusCode.Created, "ilk kayit gecmeli");
             var ikinci = await KayitAsync(kucuk);
 
-            ikinci.StatusCode.Should().NotBe(HttpStatusCode.Created,
-                "ayni adresin farkli yazimi IKINCI BIR HESAP acmamali - canli zarar tam buydu");
+            // G2: yanit ARTIK ayirt edilemez (201). Onemli olan yanit degil, DB'deki sonuc.
+            ikinci.StatusCode.Should().Be(HttpStatusCode.Created,
+                "G2 sonrasi kayit ucu var olan adresi de AYNI yanitla karsilar - 'zaten kayitli' " +
+                "diyen bir yanit enumeration'dir");
 
             await using var ctx = NewContext();
             var satirlar = await ctx.Set<Customer>().AsNoTracking()

@@ -13,11 +13,22 @@ namespace Divisima.DataAccess.Concrete.EntityFramework
         {
         }
 
-        // Açıklayıcı yorum: Refresh token ile aktif oturum
+        // Açıklayıcı yorum: Refresh token ile AKTIF oturum
         public async Task<UserSession> GetByRefreshTokenAsync(string refreshToken)
         {
             return await Context.Set<UserSession>()
                 .FirstOrDefaultAsync(s => s.refresh_token == refreshToken && s.is_active);
+        }
+
+        // ══ GUVENLIK-FIX (G1) - DURUM FILTRESIZ ARAMA ═══════════════════════════════════════
+        // Yukaridaki metot `is_active` filtreledigi icin DONDURULMUS bir jeton da "bulunamadi"
+        // olarak donuyordu; yani yeniden kullanim sinyali DAL'da kayboluyordu. Bu metot satiri
+        // durumundan BAGIMSIZ getirir - karar (401 mi, zincir iptali mi) is katmaninindir.
+        // NoTracking DEGIL: cagiran ayni context icinde InvalidateAllForCustomerAsync cagiriyor.
+        public async Task<UserSession> GetByRefreshTokenAnyStateAsync(string refreshToken)
+        {
+            return await Context.Set<UserSession>()
+                .FirstOrDefaultAsync(s => s.refresh_token == refreshToken);
         }
 
         // Aciklayici yorum: TEK atomik UPDATE - tum aktif oturumlari kapatir (foreach yerine).

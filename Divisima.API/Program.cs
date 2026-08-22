@@ -414,7 +414,15 @@ builder.Services.AddResponseCompression(options =>
 });
 
 // Açıklayıcı yorum: D3 - İstek gövdesi + koleksiyon bağlama limiti (devasa items[] dizisi kötüye kullanımını önle)
-builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 5 * 1024 * 1024); // 5 MB
+builder.WebHost.ConfigureKestrel(o =>
+{
+    o.Limits.MaxRequestBodySize = 5 * 1024 * 1024; // 5 MB
+    // GUVENLIK-FIX (G8): "Server: Kestrel" parmak izi basligi KAPATILDI. Surum bilgisi
+    // vermiyordu, yani tek basina bir acik degil; ama sunucu yiginini gereksiz yere
+    // beyan ediyor ve toplu tarama araclarina bedava bir siniflandirma ipucu veriyor.
+    // Kapatmanin islevsel bedeli YOK (basligi okuyan bir istemci/ara katman depoda yok).
+    o.AddServerHeader = false;
+});
 builder.Services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o => o.MaxModelBindingCollectionSize = 500);
 
 builder.Services.AddControllers()
@@ -493,18 +501,53 @@ app.UseAuthentication();
 app.UseMiddleware<TokenBlacklistMiddleware>();     // iptal edilen token kontrolü
 app.UseAuthorization();
 
-app.MapControllers();
+// ══ GUVENLIK-FIX (G5) - KIMLIK DOGRULAMA ARTIK VARSAYILAN ════════════════════════════════
+//
+// ONCEKI DURUM: AddAuthorization YALNIZ tip politikalarini kaydediyordu; ne FallbackPolicy
+// ne de MapControllers().RequireAuthorization() vardi. Yani yetki ozniteligi OLMAYAN bir
+// controller ucu VARSAYILAN OLARAK HERKESE ACIK oluyordu.
+//
+// BUGUN BIR BOSLUK YOK - OLCULDU: 150 action'in TAMAMI etkili bir oznitelik tasiyor (action
+// ya da sinif duzeyinde; iki gecisli tarama ile dogrulandi. Ilk taramam YANLISTI - oznitelik
+// satirlari ARASINDAKI yorum satirlarinda tamponu sifirliyor ve iki [AllowAnonymous] ucunu
+// "yetkisiz" gosteriyordu; tarayici duzeltildi). Bu degisiklik BUGUNU degil YARINI kapatir:
+// oznitelik koymayi unutan yeni bir uc, sessizce acilmak yerine 401 verir.
+//
+// [AllowAnonymous] KAZANIR: yetkilendirme ara katmani, endpoint metadata'sinda IAllowAnonymous
+// gorurse politikayi HIC degerlendirmez. Yani mevcut anonim uclar (katalog, arama, kayit,
+// giris, webhook, abonelik...) AYNEN calisir - olculdu.
+//
+// ══ NEDEN FallbackPolicy DEGIL - OLCUMLE ALINAN KARAR ═══════════════════════════════════
+// Ilk uygulama `options.FallbackPolicy = RequireAuthenticatedUser()` idi ve MEVCUT BIR PINI
+// KIRDI: `WebhookContractTests.AyniV1Basligi_BASKA_BIR_UCTA_HALA_400_KAPSAM_DAR_KALDI`
+// beklenen 400 yerine 401 buldu. Sebep OLCULDU: `X-Api-Version` ayristirilamayinca
+// Asp.Versioning gercek endpoint'i secmeyip YERINE metadata'siz bir HATA endpoint'i koyuyor;
+// FallbackPolicy o endpoint'i de kapsadigi icin 400'u yazan kod HIC CALISMIYOR, istek 401'e
+// donusuyor. Bu, SUPHELI #14'te belgelenen "bozuk surum basligi tum API'yi 400'e dusuruyor"
+// sorununu DAHA KOTU hale getirirdi: entegratore 401 demek, onu kimlik hatasi aramaya
+// yonlendirir. Kapsami controller'lara daraltmak ayni guvenceyi bu yan etki OLMADAN veriyor.
+//
+// KALAN BOSLUK (durust kayit): bu satir YALNIZ controller uclarini kapsar. Ileride eklenecek
+// bir minimal-API endpoint'i (app.MapGet/MapPost) ya da yeni bir hub yine varsayilan olarak
+// acik olurdu. O bosluk RUNTIME'da degil TEST'te kapatildi: SecurityHardeningTests ->
+// `FallbackPolicy_ACIK_Uclari_KIRMAZ_ve_URETIM_UCLARI_ISARETLIDIR` her uretim ucunun ACIKCA
+// isaretli oldugunu tarar. Sessiz bir 401 yerine kirmizi bir test tercih edildi.
+app.MapControllers().RequireAuthorization();
 app.MapHub<NotificationHub>("/hubs/notification"); // B7
-app.MapHealthChecks("/health");                    // B9 - genel (tüm kontroller)
+// GUVENLIK-FIX (G5): health uclari ACIKCA anonim olarak isaretlendi. Bugun ZORUNLU DEGIL
+// (varsayilan-kapali kural MapControllers ile SINIRLI, health uclari onun disinda) - isaret
+// NIYET beyani ve ileriye donuk emniyet: kapsam bir gun FallbackPolicy ile genisletilirse
+// probe.lar 401 alip orkestratörün pod.u saglıksiz saymasina yol acmaz.
+app.MapHealthChecks("/health").AllowAnonymous();    // B9 - genel (tüm kontroller)
 // Açıklayıcı yorum: K8s/orkestratör probe'ları - liveness (süreç) vs readiness (bağımlılıklar)
 app.MapHealthChecks("/health/live", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     Predicate = check => check.Tags.Contains("live")
-});
+}).AllowAnonymous();
 app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     Predicate = check => check.Tags.Contains("ready")
-});
+}).AllowAnonymous();
 app.UseHangfireDashboard("/hangfire", new Hangfire.DashboardOptions
 {
     Authorization = new[] { new Divisima.API.Services.HangfireAuthorizationFilter() }

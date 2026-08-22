@@ -77,7 +77,11 @@ namespace Divisima.Core.Utilities.Constants
         public static string StockConcurrencyConflict = "Stok güncelleme çakışması, lütfen tekrar deneyin.";
 
         // ── Kimlik doğrulama ──
-        public static string RegisterSuccess = "Kaydınız başarıyla oluşturuldu.";
+        // GUVENLIK-FIX (G2): kayit ucunun TEK yaniti. Adres bos da olsa, zaten kayitli da olsa
+        // AYNI metin doner - "bu adres kayitli mi" sorusu artik yanit govdesinden okunamaz.
+        // Metin BILEREK notr: dort durumun DORDUNDE de bir e-posta gonderildigi icin DOGRUDUR
+        // ("Kaydiniz olusturuldu" var olan hesapta YALAN olurdu).
+        public static string RegisterSubmitted = "Bu adrese bir e-posta gönderdik. Devam etmek için gelen kutunuzu kontrol edin.";
         public static string LoginSuccess = "Giriş başarılı.";
         public static string LoginFailed = "E-posta veya şifre hatalı.";
         public static string EmailAlreadyExists = "Bu e-posta adresi zaten kayıtlı.";
@@ -158,6 +162,9 @@ namespace Divisima.Core.Utilities.Constants
         public static string EmailAlreadyVerified = "E-posta zaten doğrulanmış.";
         public static string EmailVerificationInvalid = "Geçersiz doğrulama bağlantısı.";
         public static string EmailVerificationSent = "Doğrulama e-postası gönderildi.";
+        // GUVENLIK-FIX (G2b): resend-verification'in TEK yaniti (PasswordResetMailSent kalibi).
+        // Onceden UC ayri yanit vardi ve hem VARLIK hem DOGRULANMA DURUMU sizdiriyordu.
+        public static string EmailVerificationRequested = "Bu adres kayıtlıysa doğrulama e-postası gönderildi.";
         public static string EmailNotVerified = "Giriş için e-posta adresinizi doğrulamanız gerekiyor. Gelen kutunuzu kontrol edin.";
 
         public static string SearchCompleted = "Arama tamamlandı.";
@@ -238,7 +245,6 @@ namespace Divisima.Core.Utilities.Constants
         public static string ShipmentAlreadyExists = "Bu sipariş için zaten kargo kaydı var.";
         public static string ShipmentCreated = "Kargo oluşturuldu.";
         public static string ShipmentNotFound = "Kargo kaydı bulunamadı.";
-        public static string ShipmentNotYours = "Bu kargo size ait değil.";
 
         // ── Stok rezervasyon ──
         public static string StockReserved = "Stok rezerve edildi.";

@@ -41,12 +41,41 @@ namespace Divisima.Bussiness.Concrete
             _securityEvents = securityEvents;
         }
 
-        // Açıklayıcı yorum: Kayıt. E-posta benzersiz + şifre hash+salt (düz metin değil). Customer.name tek alan.
+        // ══ GUVENLIK-FIX (G2) - KAYIT YANITI ARTIK "BU ADRES KAYITLI MI" SORUSUNU YANITLAMIYOR ══
+        //
+        // OLCULEN ONCE-DURUM:
+        //   var olan adres -> HTTP 400 "Bu e-posta adresi zaten kayitli."
+        //   yeni adres     -> HTTP 201 "Kaydiniz basariyla olusturuldu."
+        // Yani anonim bir caginan, hangi e-postanin kayitli oldugunu TEK istekte ogreniyordu
+        // (kimlik avi hedefleme, kredi-doldurma listesi dogrulama). Ayni depoda DOGRU desen
+        // zaten vardi: ForgotPassword her iki durumda da AYNI 200'u ve ayni mesaji doner.
+        //
+        // UYGULANAN DESEN (forgot-password ile birebir): YANIT HER ZAMAN AYNI; gercek kullanici
+        // ne oldugunu E-POSTADAN ogrenir. Dort durum, dort FARKLI e-posta, TEK yanit:
+        //   1) adres bos                -> hesap acilir + dogrulama jetonu maili (bugunku davranis)
+        //   2) hesap var, DOGRULANMIS   -> "zaten hesabin var, giris yap / sifreni sifirla"
+        //   3) hesap var, DOGRULANMAMIS -> YENI dogrulama jetonu + mail. Bu bugunkunden IYI UX:
+        //      onceden bu kullanici 400 yiyip sikisiyordu - jetonu kaybettiyse yolu KAPALIYDI.
+        //   4) hesap var, ASKIYA ALINMIS -> "hesabin askida, destek ile iletisime gec"
+        //
+        // (3) BILINCLI: jeton yenilemek bekleyen bir dogrulamayi gecersiz kilar. Yeni jeton
+        // HESAP SAHIBININ gelen kutusuna gider, yani saldirgan bundan bir sey KAZANMAZ; en fazla
+        // kurbanin en yeni maili kullanmasi gerekir. Kazanc: sikisan gercek kullanici kurtulur.
+        //
+        // DURUST SINIR: bu yanit-esitligi ZAMANLAMAYI esitlemez. Yeni kayit yolu hash+INSERT
+        // yapar, var olan yol yapmaz. Olculdu: 400 yolu 9 ms, 201 yolu 14 ms. Sabit-zamanli
+        // kayit AYRI bir istir; bu duzeltme YANIT sizintisini kapatir, zamanlama kanalini degil.
         public async Task<(HttpStatusCode, Result)> Register(CustomerRegisterRequestDto dto)
         {
-            var existing = await _customerDal.GetByEmailAsync(dto.email);
-            if (existing != null)
-                return (HttpStatusCode.BadRequest, new ErrorResult(Messages.EmailAlreadyExists));
+            // GLOBAL FILTREYI ATLAYAN arama: askiya alinmis hesabin adresi GetByEmailAsync'e
+            // NULL gorunuyordu ve INSERT unique indekse takilip HTTP 500 donuyordu (olculdu).
+            // O 500, yanit esitlendikten SONRA da (201 vs 500) sizintiyi acik birakirdi.
+            var mevcut = await _customerDal.GetByEmailIgnoringFiltersAsync(dto.email);
+            if (mevcut != null)
+            {
+                await VarOlanHesabaKayitBildirimiAsync(mevcut);
+                return (HttpStatusCode.Created, new SuccessResult(Messages.RegisterSubmitted));
+            }
 
             // Açıklayıcı yorum: HMAC-SHA512 ile şifre hash + salt (Cafixo HashingHelper)
             HashingHelper.CreatePasswordHash(dto.password, out byte[] passwordHash, out byte[] passwordSalt);
@@ -93,7 +122,43 @@ namespace Divisima.Bussiness.Concrete
                 Body = $"Hesabınızı doğrulamak için token: {customer.email_verification_token}"
             });
 
-            return (HttpStatusCode.Created, new SuccessResult(Messages.RegisterSuccess));
+            return (HttpStatusCode.Created, new SuccessResult(Messages.RegisterSubmitted));
+        }
+
+        // ══ GUVENLIK-FIX (G2) - VAR OLAN HESABA BILGI E-POSTASI ═══════════════════════════════
+        // "Ayni yanit" tek basina UX'i bozardi: gercek kullanici hicbir sey ogrenemezdi.
+        // Bilgi E-POSTAYA tasiniyor - alicisi HER ZAMAN adresin sahibi oldugu icin saldirgana
+        // hicbir sey sizmaz. Hesap durumuna gore UC ayri metin.
+        private async Task VarOlanHesabaKayitBildirimiAsync(Customer mevcut)
+        {
+            string konu;
+            string govde;
+
+            if (!mevcut.is_active)
+            {
+                konu = "Divisima - Hesabınız hakkında";
+                govde = "Bu adrese kayıt denemesi yapıldı. Hesabınız şu anda askıya alınmış durumda; "
+                      + "yeni bir hesap açılmadı. Devam etmek için destek ekibimizle iletişime geçin.";
+            }
+            else if (mevcut.email_verified)
+            {
+                konu = "Divisima - Bu adresle zaten bir hesabınız var";
+                govde = "Bu adrese kayıt denemesi yapıldı. Zaten bir hesabınız olduğu için yeni hesap "
+                      + "açılmadı. Giriş yapabilir, şifrenizi hatırlamıyorsanız Şifremi Unuttum "
+                      + "adımıyla yenileyebilirsiniz.";
+            }
+            else
+            {
+                // Dogrulanmamis hesap: YENI jeton uretilir - kullanici eski jetonu kaybetmis olabilir
+                // ve bugune kadar 400 yiyip sikisiyordu.
+                mevcut.email_verification_token = SecureTokenGenerator.Generate();
+                mevcut.email_verification_sent_at = DateTime.Now;
+                await _customerDal.UpdateAsync(mevcut);
+                konu = "Divisima - E-posta adresinizi doğrulayın";
+                govde = $"Hesabınızı doğrulamak için token: {mevcut.email_verification_token}";
+            }
+
+            await _mailService.SendAsync(new MailMessageDto { To = mevcut.email, Subject = konu, Body = govde });
         }
 
         // Açıklayıcı yorum: Giriş. E-posta bul -> şifre doğrula -> JWT üret -> oturum kaydet.
@@ -235,11 +300,58 @@ namespace Divisima.Bussiness.Concrete
             return Convert.ToHexString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(input)));
         }
 
+        // ══ GUVENLIK-FIX (G1) - REFRESH TOKEN YENIDEN KULLANIM TESPITI ═══════════════════════
+        //
+        // OLCULEN ONCE-DURUM: rotasyon CALISIYORDU (her yenilemede yeni jeton) ve dondurulmus
+        // jeton 401 aliyordu - ama HIRSIZLIK SINYALI degerlendirilmiyordu. Olculdu:
+        //   1. yenileme (gecerli jeton)                  -> 200, rotasyon VAR
+        //   2. yenileme (ESKI/dondurulmus jeton)         -> 401
+        //   3. yenileme (YENI jeton, sinyalden SONRA)    -> 200   <-- ZINCIR AYAKTA
+        // Yani refresh cerezini calan saldirgan rotasyona devam eder; kurbanin gordugu TEK sey
+        // bir 401'dir ve ona gore HICBIR SEY yapilmaz.
+        //
+        // KOK SEBEP DAL'DAYDI: GetByRefreshTokenAsync sorgusu `&& s.is_active` tasiyor, yani
+        // dondurulmus jeton NULL doner. "Bilinmeyen jeton" ile "zaten kullanilmis jeton" ayrimi
+        // manager'a HIC ULASMIYORDU - asagidaki `|| !session.is_active` dali OLU koddu.
+        //
+        // SONRA: ayrim DAL'da geri kazanildi (GetByRefreshTokenAnyStateAsync) ve dondurulmus
+        // jeton sunuldugunda O MUSTERININ TUM AKTIF OTURUMLARI kapatilir + Critical guvenlik
+        // olayi yazilir (SecurityEventManager: DB + LogWarning + admin bildirimi).
+        //
+        // KAPSAM KARARI - "zincir" = MUSTERININ TUM AKTIF OTURUMLARI:
+        // user_sessions'ta jeton AILESI (parent/family) kolonu YOK. Aile izlemek migration +
+        // yeni kolon demek; onun yerine OAuth BCP'nin muhafazakar tavsiyesi uygulandi: sinyal
+        // geldiginde HEPSINI kapat. BEDELI ACIK: kullanicinin DIGER cihazlari da cikis yapar.
+        // Hirsizlik sinyalinde bu DOGRU taraftir - saldirganin elindeki zinciri ayakta birakmak
+        // yerine kullaniciyi bir kez yeniden giris yapmaya zorlar.
         public async Task<(HttpStatusCode, Result)> RefreshToken(RefreshTokenRequestDto dto)
         {
-            var session = await _userSessionDal.GetByRefreshTokenAsync(dto.refresh_token);
-            if (session == null || !session.is_active)
+            // DIKKAT: bu cagri `is_active` FILTRESIZ - "kullanilmis jeton" sinyali burada dogar.
+            var session = await _userSessionDal.GetByRefreshTokenAnyStateAsync(dto.refresh_token);
+            if (session == null)
                 return (HttpStatusCode.Unauthorized, new ErrorResult(Messages.RefreshTokenInvalid));
+
+            if (!session.is_active)
+            {
+                // YENIDEN KULLANIM: bu jeton daha once dondurulmus (ya da cikis yapilmis).
+                // Mesru istemci dondurulmus bir jetonu ASLA ikinci kez sunmaz - bu bir sizma isaretidir.
+                var kapatilan = await _userSessionDal.InvalidateAllForCustomerAsync(session.customer_id);
+
+                // ALARM YALNIZ GERCEKTEN IPTAL VARSA - OLCUMLE EKLENDI.
+                // Ilk yazimda kosulsuz Critical yaziliyordu; pin "2 olay" buldu. Sebep: zincir
+                // iptal edildikten SONRA ayni musterinin HERHANGI bir jetonu artik pasif oldugu
+                // icin her yeni deneme "yeniden kullanim" gibi gorunuyor. Kosulsuz alarm, tekrar
+                // deneyen bir istemcide admin bildirimini SPAM'a cevirirdi ve gercek sinyal
+                // gurultuye gomulurdu. `kapatilan == 0` demek "zincir zaten olu" demektir: 401
+                // yine doner, ama YENI bir alarm URETILMEZ. Musteri tekrar giris yapip yeni bir
+                // aktif oturum acarsa, sonraki bir sizma yine ALARM URETIR.
+                if (kapatilan > 0)
+                {
+                    await _securityEvents.LogAsync("RefreshTokenReuse", "Critical", session.customer_id, null, null,
+                        $"Dondurulmus refresh token yeniden sunuldu - oturum zinciri iptal edildi (kapatilan oturum: {kapatilan})");
+                }
+                return (HttpStatusCode.Unauthorized, new ErrorResult(Messages.RefreshTokenInvalid));
+            }
 
             // Açıklayıcı yorum: Refresh token süresi dolmuş mu
             if (session.expires_at < DateTime.Now)
@@ -250,7 +362,7 @@ namespace Divisima.Bussiness.Concrete
                 return (HttpStatusCode.Unauthorized, new ErrorResult(Messages.RefreshTokenInvalid));
 
             // Açıklayıcı yorum: ROTATION - eski oturumu kapat, yeni oturum+JWT+refresh token üret (merkezi helper).
-            // Eski refresh token artık geçersiz (replay engeli); istemci yeni refresh_token'ı response'tan alır.
+            // Eski refresh token artık geçersiz (replay engeli); istemci yeni refresh_token'ı cookie'den alır.
             session.is_active = false;
             await _userSessionDal.UpdateAsync(session);
             var response = await IssueSessionAndTokenAsync(customer);
@@ -280,25 +392,52 @@ namespace Divisima.Bussiness.Concrete
             return (HttpStatusCode.OK, new SuccessResult(Messages.EmailVerified));
         }
 
-        // Açıklayıcı yorum: Doğrulama mailini yeniden gönder (token yenilenir)
+        // ══ GUVENLIK-FIX (G2b) - RESEND-VERIFICATION DE ENUMERATION KAPISIYDI ════════════════
+        //
+        // KAPSAM NOTU (durustluk): bu uc (C) dalgasinda OLCULMEMISTI; G2 duzeltilirken yanindaki
+        // ayni kapinin acik oldugu gorulup olculdu. Kayit yolunu kapatip burayi acik birakmak
+        // G2'yi ANLAMSIZ kilardi - saldirgan ayni soruyu bir uc oteden sorardi.
+        //
+        // OLCULEN ONCE-DURUM - UC AYRI YANIT (kayit ucundan DAHA cok sizdiriyordu):
+        //   olmayan adres          -> HTTP 404 "E-posta veya sifre hatali."
+        //   var + DOGRULANMIS      -> HTTP 200 "E-posta zaten dogrulanmis."
+        //   var + DOGRULANMAMIS    -> HTTP 200 "Dogrulama e-postasi gonderildi."
+        // Yani hem VARLIK hem DOGRULANMA DURUMU sizdiriliyordu.
+        //
+        // SONRA: TEK yanit (200 + ayni metin, forgot-password kalibi). Ayrim E-POSTADA:
+        //   olmayan adres       -> hicbir sey gonderilmez
+        //   var + dogrulanmamis -> YENI jeton (bugunku davranis, aynen)
+        //   var + dogrulanmis   -> "hesabin zaten dogrulanmis, giris yapabilirsin" bilgisi
+        //   var + askida        -> hicbir sey gonderilmez (dogrulama zaten ise yaramaz)
         public async Task<(HttpStatusCode, Result)> ResendVerification(string email)
         {
             var customer = await _customerDal.GetByEmailAsync(email);
-            if (customer == null)
-                return (HttpStatusCode.NotFound, new ErrorResult(Messages.LoginFailed));
-            if (customer.email_verified)
-                return (HttpStatusCode.OK, new SuccessResult(Messages.EmailAlreadyVerified));
 
-            customer.email_verification_token = SecureTokenGenerator.Generate();
-            customer.email_verification_sent_at = DateTime.Now;
-            await _customerDal.UpdateAsync(customer);
-            await _mailService.SendAsync(new MailMessageDto
+            if (customer != null && customer.email_verified)
             {
-                To = customer.email,
-                Subject = "Divisima - E-posta doğrulama (yeniden)",
-                Body = $"Doğrulama token: {customer.email_verification_token}"
-            });
-            return (HttpStatusCode.OK, new SuccessResult(Messages.EmailVerificationSent));
+                await _mailService.SendAsync(new MailMessageDto
+                {
+                    To = customer.email,
+                    Subject = "Divisima - Hesabınız zaten doğrulanmış",
+                    Body = "Bu adres için yeniden doğrulama isteği alındı. Hesabınız zaten doğrulanmış "
+                         + "durumda; doğrudan giriş yapabilirsiniz."
+                });
+            }
+            else if (customer != null)
+            {
+                customer.email_verification_token = SecureTokenGenerator.Generate();
+                customer.email_verification_sent_at = DateTime.Now;
+                await _customerDal.UpdateAsync(customer);
+                await _mailService.SendAsync(new MailMessageDto
+                {
+                    To = customer.email,
+                    Subject = "Divisima - E-posta doğrulama (yeniden)",
+                    Body = $"Doğrulama token: {customer.email_verification_token}"
+                });
+            }
+
+            // Adres kayitli OLMASA da AYNI yanit - varlik sizdirilmaz.
+            return (HttpStatusCode.OK, new SuccessResult(Messages.EmailVerificationRequested));
         }
 
 

@@ -78,9 +78,15 @@ namespace Divisima.Bussiness.Concrete
             var order = await _orderDal.GetAsync(o => o.id == orderId);
             if (order == null)
                 return (HttpStatusCode.NotFound, new ErrorResult(Messages.OrderNotFound));
-            // Açıklayıcı yorum: SAHİPLİK - yalnız kendi siparişinin kargosu (IDOR engeli)
+            // ══ GUVENLIK-FIX (G6) - SAHIPLIK IHLALI DE "BULUNAMADI" ═══════════════════════
+            // OLCULEN ONCE-DURUM: baskasinin siparisinin kargosu -> 403 "Bu kargo size ait degil."
+            // ama OLMAYAN bir siparisin kargosu -> 404. Iki farkli yanit, kaydin VAR oldugunu
+            // dogruluyordu (siparis id'leri ardisik oldugu icin taranabilir de).
+            // Deponun KENDI yazili sozlesmesi bunun tersi (OrderManager: "sahiplik ihlali de
+            // 'bulunamadi' - varlik sizdirilmaz") ve bu uc o sozlesmenin DISINDA kalmis tek yerdi.
+            // Artik iki dal AYNI yaniti veriyor: 404 + Messages.OrderNotFound.
             if (order.customer_id != customerId)
-                return (HttpStatusCode.Forbidden, new ErrorDataResult<ShipmentResponseDto>(Messages.ShipmentNotYours));
+                return (HttpStatusCode.NotFound, new ErrorResult(Messages.OrderNotFound));
 
             var shipment = await _shipmentDal.GetAsync(s => s.order_id == orderId);
             if (shipment == null)

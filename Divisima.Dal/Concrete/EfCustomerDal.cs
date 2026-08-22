@@ -40,6 +40,23 @@ namespace Divisima.DataAccess.Concrete.EntityFramework
                 .FirstOrDefaultAsync(c => c.email == normalized);
         }
 
+        // ══ GUVENLIK-FIX (G2) - GLOBAL FILTREYI ATLAYAN E-POSTA ARAMASI ══════════════════
+        // GetByEmailAsync (yukarida) Customer'in GLOBAL `is_active` query filter'ina tabidir:
+        // ASKIYA ALINMIS bir hesap ona NULL gorunur. Kayit yolu bunu "adres bos" diye okuyup
+        // INSERT deniyordu ve IX_customers_email UNIQUE indeksine takilip HTTP 500 donuyordu.
+        // OLCULDU: A (id=22) `is_active=0` yapildi -> ayni adresle kayit -> 500, tabloda satir
+        // sayisi 1'de kaldi. Ustelik bu 500, G2 enumeration duzeltmesinden SONRA da ayirt
+        // edilebilir bir yanit olurdu (201 vs 500) - yani sizintiyi acik birakirdi.
+        // Normalizasyon BILEREK burada tekrarlaniyor: B1 kurali "kimlik dizgesi kultursuz
+        // kucultulur" ve o kural DAL'in sorumlulugunda (cagri yerine dagitilmaz).
+        public async Task<Customer> GetByEmailIgnoringFiltersAsync(string email)
+        {
+            var normalized = (email ?? "").Trim().ToLowerInvariant();
+            return await Context.Set<Customer>()
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(c => c.email == normalized);
+        }
+
         // Açıklayıcı yorum: ATOMİK düşüm - WHERE guard'ı DB'de değerlendirilir, iki eşzamanlı istek asla aynı bakiyeyi
         // iki kez harcayamaz (biri koşulu geçemez, 0 döner). row_version gerektirmez, diğer Customer yazma yollarını etkilemez.
         public async Task<int> TryDecrementStoreCreditAsync(int customerId, decimal amount)

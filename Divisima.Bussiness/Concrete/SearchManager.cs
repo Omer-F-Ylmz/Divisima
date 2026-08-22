@@ -29,6 +29,9 @@ namespace Divisima.Bussiness.Concrete
             _mapper = mapper;
         }
 
+        // GUVENLIK-FIX (G3): `query` UZUNLUGU giriste dogrulanir (ProductSearchRequestValidator, 200 krkt).
+        // Burada SESSIZ bir kirpma YAPILMAZ - kirpma, kullanicinin yazdigi terimden baska bir sey
+        // aratmak olurdu. Sinir kalkarsa 4000+ karakterlik terim SQL 8152 ile 500 dondurur (olculdu).
         public async Task<(HttpStatusCode, Result)> SearchProducts(ProductSearchRequestDto dto)
         {
             var q = dto.query?.Trim().ToLower() ?? "";

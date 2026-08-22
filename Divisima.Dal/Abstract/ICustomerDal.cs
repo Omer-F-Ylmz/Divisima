@@ -8,6 +8,14 @@ namespace Divisima.DataAccess.Abstract
     {
         Task<Customer> GetByEmailAsync(string email);
 
+        // ══ GUVENLIK-FIX (G2) ════════════════════════════════════════════════════════
+        // GetByEmailAsync GLOBAL `is_active` filtresine tabidir; askiya alinmis bir hesap
+        // ona GORUNMEZ. Kayit yolu bu yuzden "adres bos" sanip INSERT deniyor ve
+        // IX_customers_email UNIQUE indeksine takilip HTTP 500 donuyordu (olculdu).
+        // Bu metot filtreyi ATLAR - normalizasyon (B1: kultursuz kucultme) TEK YERDE kalsin
+        // diye ayri bir DAL metodu, cagri yerinde elle normalize etmek DEGIL.
+        Task<Customer> GetByEmailIgnoringFiltersAsync(string email);
+
         // Açıklayıcı yorum: ATOMİK mağaza kredisi düşümü - tek UPDATE ... WHERE store_credit >= amount.
         // Dönen değer 1 ise başarılı, 0 ise yetersiz bakiye/bulunamadı. Read-modify-write race'i tamamen ortadan kaldırır.
         Task<int> TryDecrementStoreCreditAsync(int customerId, decimal amount);

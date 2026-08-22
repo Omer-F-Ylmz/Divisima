@@ -1677,13 +1677,169 @@ mutasyonun lokalize oldugunun kaniti. Ikisi de geri alindi.
 234/234 `Category=Sql` · tam suitte 364 basarili / 367 (kirilan 3'un UCU DE Docker'li
 `OrderEndpointTests`) · Release 0 hata · whitespace + style TEMIZ.
 
+
+## (C) GUVENLIK DALGASI (OLCUM) ve GUVENLIK-FIX
+
+Dalga YALNIZ olcumdu: iki gercek musteri (A=22, B=23) + admin (24), hepsi GERCEK
+register/verify/login zincirinden. Uydurma JWT yok, yikici deneme yok, gercek Iyzico'ya
+HIC gidilmedi. **KRITIK ve YUKSEK sinifta bulgu YOK.**
+
+### OLCUM SONUCU - DENENIP TUTMAYANLAR (sonuc olarak kayda gecer)
+
+- **S1 IDOR:** B'nin A'ya 10 capraz denemesi -> hepsi 404/403; 9 yetki yukseltme -> 403;
+  4 anonim -> 401. **Tek IDOR yok.**
+- **S2 TUTAR:** `unit_price/subtotal/total_price/discount_amount` enjekte edildi -> YOK
+  SAYILDI (DB: `899.90|0.00|49.90|949.80`, sunucu hesabi). `customer_id=A` gonderildi ->
+  siparis **B'ye** yazildi. Baskasinin adresi 403, baskasinin siparisine odeme init 403.
+  Adet -5/0/101/100000 -> 400. `PaymentInitRequestDto` YALNIZ `order_id` tasiyor - tutar
+  istemciden HIC gelmiyor.
+- **S4 MASS ASSIGNMENT:** kayitta `user_type=1/is_admin/loyalty_points=999999/
+  store_credit=999999/email_verified` -> DB'de `2|0|0.00|0`. Hepsi yok sayildi.
+- **S6 ENJEKSIYON:** uretimde **ham SQL SIFIR**; yuklemede magic-byte dogrulamasi;
+  `callback_url` SSRF guard'i; kullanici kontrollu dis cagri yok.
+- **S7 SIZINTI:** yanit DTO'larinda hash/salt/secret yok; giris govdesindeki `refresh_token`
+  alani NULL (Sprint 8 cerez sozlesmesi tutuyor); 500 govdesi RFC 7807, **yigin izi yok**.
+- **S8 BASLIK:** HSTS non-Development dalinda bagli; nosniff / Referrer-Policy / CSP /
+  `X-Frame-Options: DENY` / Permissions-Policy var; cerezler httpOnly+Secure+SameSite=Strict;
+  **CORS echo-origin riski YOK** (bilinmeyen origin -> Allow-Origin hic yok).
+- **S9 YARIS:** 8 eszamanli kredi harcamasi -> 500.00 -> 100.00 = 4 x 100, defter mutabik,
+  negatif bakiye yok. Cift harcama yok.
+
+### BULGULAR (G1..G9) ve DUZELTMELERI
+
+| # | Onem | Bulgu | ONCE (olculdu) | SONRA (olculdu) |
+|---|---|---|---|---|
+| G1 | ORTA | Refresh token yeniden kullanimi tespit edilmiyor | dondurulmus jeton 401, ama YENI jeton **200**; aktif oturum 11 | YENI jeton **401**; aktif oturum **0**; `RefreshTokenReuse` Critical olayi 1 |
+| G2 | ORTA | Kayit ucunda e-posta enumeration | var olan 400 "zaten kayitli" / yeni 201 | ikisi de **201 + AYNI govde** |
+| G2b | ORTA | `resend-verification` UC ayri yanit veriyordu | 404 / 200 "zaten dogrulanmis" / 200 "gonderildi" | **TEK** yanit |
+| G3 | ORTA | Anonim uctan >=4000 karakterlik arama -> 500 | 3998 -> 200, 4000/5000 -> **500**; 9 istek: 6 ERROR satiri, 66 SQL yigin satiri, 17.655 bayt log | 201+ -> **400**; 9 istek: **0 ERROR, 0 yigin, 855 bayt** |
+| G3b | DUSUK | Ayni hata admin musteri aramasinda da vardi | 4000 karakter -> **500** | **400** |
+| G4 | ORTA (bugun ERISILEMEZ) | Satici girisi refresh token'i GOVDEDE donuyor | `SellerAuthManager:101`; kayit kapali (403), `sellers` 0 satir | **DOKUNULMADI** - satici modulu on kosulu (KARARLAR) |
+| G5 | DUSUK | Yetki varsayilani ACIK | oznitelik olmayan uc herkese acik | oznitelisiz uc **401**; acik uclar aynen 200 |
+| G6 | DUSUK | Kargo ucu varlik sizdiriyor | baskasinin siparisi **403** "Bu kargo size ait degil", olmayan 404 | ikisi de **404 + ayni govde** |
+| G7 | DUSUK | Satici kaydinda dogrulama kapidan ONCE | eksik govde **400** "The email field is required." | **403** |
+| G8 | DUSUK | `Server: Kestrel` | var | **yok** |
+| G9 | DUSUK | Negatif `use_store_credit` sessizce kabul | **201** (bakiye degismedi) | **400**, siparis olusmaz |
+
+**LAUNCH'I BLOKE EDEN BULGU YOKTU.**
+
+### KAPSAM EKLERI (rapor edildi, gerekcesiyle)
+
+- **G2b ve askiya-alinmis-hesap 500'u (C) dalgasinda OLCULMEMISTI**, G2 duzeltilirken bulundu.
+  Ikisi de G2'nin AYNI kapisidir: `resend-verification` acik kalsaydi saldirgan ayni soruyu
+  bir uc oteden sorardi; askidaki hesabin 500'u ise 201-vs-500 farkiyla sizintiyi surdururdu.
+  Bu yuzden G2 ile birlikte kapatildilar.
+- **G3b (admin arama)** ayni hata sinifinin ikinci ve son yuzeyi (depoda serbest metinli LIKE
+  aramasi TAM IKI yerde). Sinir "sema kaynakli" gerekceyle konuldugu icin birini birakmak
+  gerekceyle celisirdi.
+
+### G2 TASARIMI (UX etkisi tasidigi icin ayrica yazildi)
+
+**Yanit HER ZAMAN ayni (201 + notr metin); ne oldugunu gercek kullanici E-POSTADAN ogrenir -
+dort durum, dort farkli e-posta, tek yanit.**
+
+| Durum | E-posta | Not |
+|---|---|---|
+| adres bos | dogrulama jetonu | bugunku davranis |
+| hesap var, DOGRULANMIS | "zaten hesabin var, giris yap / sifreni sifirla" | |
+| hesap var, DOGRULANMAMIS | **YENI** dogrulama jetonu | bugunkunden IYI: onceden 400 yiyip sikisiyordu |
+| hesap var, ASKIDA | "hesabin askida, destek ile iletisim" | 500 yerine |
+
+`resend-verification` ayni kalibi izler (`PasswordResetMailSent` deseni).
+Mesaj sabiti `RegisterSuccess` -> `RegisterSubmitted` olarak DEGISTI: "Kaydiniz olusturuldu"
+var olan hesapta YALAN olurdu; yeni metin dort durumda da DOGRU.
+
+**DURUST SINIR:** yanit esitligi ZAMANLAMAYI esitlemez (400 yolu 9 ms, 201 yolu 14 ms olculdu).
+Sabit-zamanli kayit ayri bir istir. Ayrica KILITLENME kanali aciktir: 5 basarisiz giristen
+sonra kayitli adres 403 "hesap kilitlendi", kayitsiz adres 401 doner - kapatmak "gercek
+kullaniciya hesabinin kilitli oldugunu soyleme" ile celisir; **karar kullanicinin**.
+
+### G5 - FallbackPolicy YERINE `MapControllers().RequireAuthorization()` (OLCUMLE SAPMA)
+
+Istenen `options.FallbackPolicy` idi; once o uygulandi ve **MEVCUT BIR PINI KIRDI**:
+`WebhookContractTests.AyniV1Basligi_BASKA_BIR_UCTA_HALA_400_KAPSAM_DAR_KALDI` 400 yerine
+**401** buldu. Sebep olculdu: `X-Api-Version` ayristirilamayinca Asp.Versioning gercek
+endpoint yerine **metadata'siz bir HATA endpoint'i** koyuyor; FallbackPolicy onu da kapsayinca
+400'u yazan kod HIC calismiyor. Bu, SUPHELI #14'te belgelenen sorunu DAHA KOTU yapardi -
+entegratore 401 demek onu kimlik hatasi aramaya yonlendirir.
+Kapsam controller'lara daraltilinca ayni guvence yan etkisiz saglandi (olculdu: oznitelisiz
+uc 401, `X-Api-Version` pini yesil).
+**KALAN BOSLUK (durust kayit):** ileride eklenecek bir minimal-API ucu ya da yeni bir hub
+yine varsayilan acik olur. O bosluk RUNTIME'da degil TEST'te kapatildi - pin her uretim
+ucunun ACIKCA isaretli oldugunu tarar (oznitelikler yansimayla okunur; `EndpointMetadata`
+okunsaydi konvansiyonun ekledigi `AuthorizeAttribute` yuzunden tarama VAKUM olurdu).
+
+### PINLER (`SecurityHardeningTests`, 15)
+
+G3: uzun terim 400 + **hata seviyeli log SIFIR** · sinir icinde 200 ve GERCEKTEN eslesir
+(+ tam sinir 200) · admin aramasi da 400 (once normal aramanin 200 oldugu dogrulanir).
+G2: var olan ve yeni adres AYNI kod + AYNI govde (+ yeni adres icin hesap GERCEKTEN acilir,
++ ayni adres IKINCI satir uretmez) · askidaki adres 500 URETMEZ ve ayirt edilemez.
+G2b: uc durumda tek imza (+ dogrulanmamis hesaba jeton GERCEKTEN uretilir).
+G1: dondurulmus jeton sunulunca YENI jeton da 401, aktif oturum 0, guvenlik defterinde TAM 1
+kayit, **tekrar denemeler YENI alarm URETMEZ** · sinyal YOKKEN 3 ardisik yenileme calisir ve
+alarm 0 (vakum + cift-anlam kirici).
+G6: baskasinin kargosu 404 ve olmayanla AYNI (+ sahibi FARKLI cevap alir).
+G5: oznitelisiz sonda ucu 401, kardes `[AllowAnonymous]` uc 200 · health uclari 200, anonim
+katalog/arama 200, korumali uc 401, her uretim ucu acikca isaretli (+ sonda ucunun
+ISARETSIZ gorulmesi cift-anlam kiricisi).
+G9: negatif kredi 400 + siparis olusmaz. G8: Server yok + diger guvenlik basliklari var.
+G7: kapali kapida eksik govde 403 ve "required" SIZMAZ · **kapi acikken 400** (cift-anlam kirici).
+
+**BILINCLI DEGISTIRILEN PIN (1):**
+`KimlikDizgesiSozlesmeTests.AyniAdresinFarkliCasingi_IKINCI_KAYITTA_REDDEDILIR`
+-> `..._IKINCI_HESAP_ACMAZ`. Eski assert (`NotBe(Created)`) B1'in gercek invariantini degil,
+o gunku YAN ETKISINI (400) sabitliyordu; G2'den sonra DOGRU davranisi kirardi. Asil assert
+(satir sayisi 1 + kanonik deger) **DEGISMEDI**.
+
+**OLU HALE GELEN IKI SABIT KALDIRILDI** (Sprint 8 madde 11 kalibi - build kanit):
+`Messages.RegisterSuccess`, `Messages.ShipmentNotYours`. Derleme 0 hata -> gercekten oluydular.
+
+### DIS KONTROLU + 5. KONTROL
+
+5 assert ters (BES ayri test) -> **5 AYRI ISIMLI KIRMIZI** (geri alindi).
+5. kontrol, IKI uretim mutasyonu:
+- **M1** (`ProductSearchRequestValidator`'daki uzunluk kurali kaldirildi) -> pin 201'de kirildi;
+  ayrica canli sunucuda **olculen once-durum BIREBIR uretildi**: 3998 -> 200, 4000 -> **500**,
+  5000 -> **500** ve sunucu logunda 12 satir `truncated`/`8152`.
+- **M2** (`GetByRefreshTokenAnyStateAsync` -> `GetByRefreshTokenAsync`, yani `is_active`
+  filtreli hale dondu) -> `DondurulmusRefreshToken_...` **200 buldu** - olculen once-durumun
+  ta kendisi. Diger 13 pin YESIL kaldi (mutasyonlar lokalize).
+Ikisi de geri alindi.
+
+### ELLE DOGRULAMA (tarayici)
+
+Storefront :5173 (minik HttpListener sunucusu, depo disinda), API :5000.
+Ayni adresle IKI kez kayit -> **iki istek de 201**, ekranda IKI durumda da ayni notr metin
+("... adresine bir e-posta gonderdik. Yeni hesap acildiysa ..."), **hata alani BOS**
+(onceden ikinci denemede "Bu e-posta adresi zaten kayitli." hatasi cikiyordu).
+DB: **1 satir**, `email_verified=0`, dogrulama jetonu 43 karakter (yani ikinci kayit gercekten
+YENI jeton uretti). Konsolda uygulama hatasi yok; iki hata satiri **service worker kaydi**
+(tarayici sanal alani SW'yi engelliyor - Dalga 3'te de olculdu, urun kusuru degil).
+YAN GOZLEM: iki POST icin **1 OPTIONS** - Dalga-3'un preflight onbellegi calisiyor.
+
+### YEREL DOGRULAMA
+
+249/249 `Category=Sql` · tam suitte 379 basarili / 382 (kirilan 3'un UCU DE Docker'li
+`OrderEndpointTests`) · Release 0 hata · whitespace + style TEMIZ (exit 0).
+
+**DURUST KAYIT - ADI OLAN FLAKE:** tam suit DORT kez kosuldu. Bir kosumda DORDUNCU bir
+kirmizi gorundu: `RefreshCookieContractTests.Cerez_Secure_HER_ORTAMDA_ISARETLI_OrtamGuardi_YOK`.
+Sonraki UC tam suit kosumunda ve sinif TEK BASINA kosuldugunda (4/4 yesil) TEKRAR ETMEDI.
+**Hata mesaji YAKALANAMADI** - o kosumda ciktiyi suzen grep deseni mesaji disarida birakti;
+uydurma bir aciklama yazilmiyor. Bu test PRODUCTION ortamli IKINCI bir host aciyor (sinifin
+kendi host'u zaten ayakta), yani en olasi sinif ana-host ile ikinci host arasindaki bir yaris -
+ama bu OLCULMEDI, tahmindir. Onceki dalgalardaki ISIMSIZ flake'ten farki: bu sefer AD BELLI.
+CI'da tekrar ederse SUPHELI olarak ACILIR.
+
 ## SIRA
 
-0. **KALITE SUPURMESI.** Dalga 1 + FIX, Dalga 2 + FIX, veri temizligi ve Dalga 3 + FIX KAPANDI.
-   SIRADA: **(C) GUVENLIK DALGASI** (S1..S10 - yalniz olcum ve bulgu listesi), sonra
-   Dalga 4 (mobil + capraz cihaz).
+0. **KALITE SUPURMESI.** Dalga 1 + FIX, Dalga 2 + FIX, veri temizligi, Dalga 3 + FIX ve
+   **(C) GUVENLIK DALGASI + GUVENLIK-FIX** KAPANDI. SIRADA: **Dalga 4 (mobil + capraz cihaz)**.
    ERTELENENLER: **B5** (100 ucun HTTP testi yok - ayri kapsam dalgasi),
    **B8**, **B13**, **P4** ve **P2-inline-bolme** (launch sonrasi defteri).
+   **GUVENLIK DALGASINDAN ACIK KALAN TEK KALEM: G4** (satici refresh token'i govdede) -
+   bugun ERISILEMEZ, satici modulu acilmadan once ZORUNLU (bkz. KARARLAR).
 1. **TEKNIK DEFTERDE ACIK KALEM KALMADI - TEK ISTISNA SUPHELI #14** (surum okuyucusu
    kirilganligi, genel) ve o da **LAUNCH SONRASI**. #15, #17 ve **#18** KAPANDI; #16 BILINCLI
    olarak bos birakildi; siparis #33 hem odeme hem envanter tarafinda TEMIZLENDI.
@@ -1702,6 +1858,14 @@ mutasyonun lokalize oldugunun kaniti. Ikisi de geri alindi.
   16.1.1'dir ve AutoMapper 15+ **RPL-1.5 veya ticari lisansa** gecmistir; 12/13/14
   MIT ama ucu de ayni advisory kapsamindadir (olculdu). "MIT kalarak yamalanmak" mumkun degil.
 - **Seller modulu**: dokunma, veri duzeyinde kapali, migrate/seed yok.
+  **ZORUNLU ON KOSUL (GUVENLIK DALGASI / G4): modul acilmadan ONCE satici refresh token'i
+  httpOnly cereze tasinmali.** Olculdu: `SellerAuthManager.cs:101` refresh token'i YANIT
+  GOVDESINDE donuyor - Sprint 8 madde 6 bunu YALNIZ musteri yolunda duzeltmisti. Bugun
+  ERISILEMEZ (`Seller:RegistrationEnabled=false` -> gecerli govdeyle kayit 403, `sellers`
+  tablosu 0 satir), bu yuzden GUVENLIK-FIX dalgasinda DOKUNULMADI ve pin de YAZILMADI
+  (var olmayan bir yuzeyi pinlemek yanlis guvence olurdu). Modul acilirken musteri
+  tarafindaki cerez sozlesmesi (`OturumCerezleriniYaz` + CSRF double-submit) satici
+  tarafina da tasinir ve `RefreshCookieContractTests` kalibinda pinlenir.
 - **invoice_number**: entegrator (Nilvera) numarasi esas, bizimki ic referans - degisiklik yok.
 - **Launch sonrasi defteri** (simdi is yok): gift-card expiry, 2FA enrollment ucu,
   step-up `auth_time` refresh'te sifirlanmasi, loyalty oransal geri alma + referral
@@ -1727,6 +1891,14 @@ mutasyonun lokalize oldugunun kaniti. Ikisi de geri alindi.
   kullanicinin KENDI kimligidir, oradaki karakteri sessizce degistirmek kimlik verisini yeniden
   yazmak olur. Sonuc: adresini Turkce klavyede `İ`/`ı` ile yazan kullanici, kayitta yazdigi
   harfle giris yapmak zorunda. Invariant casing bu ikisini katlamaz. Karar kullanicinin.
+  **YENI KALEM (GUVENLIK-FIX / G2 eki - kullanici karari): SABIT-ZAMANLI KAYIT.**
+  G2 kayit ucunun YANIT sizintisini kapatti (var olan ve yeni adres birebir ayni 201 + ayni
+  govde) ama ZAMANLAMA kanalini kapatmaz: yeni kayit yolu hash + INSERT + riza satirlari
+  yazar, var olan yol yalniz bir e-posta gonderir. OLCULDU: 400 yolu 9 ms, 201 yolu 14 ms
+  (duzeltme sonrasi 49 ms / 56 ms). Fark kucuk ve aglar uzerinden gurultuye gomulur, ama
+  yerel/hizli bir ag uzerinde istatistiksel olarak ayrilabilir. Sabit-zamanli kayit AYRI bir
+  istir (her iki yolda da ayni is birimini harcamak ya da yaniti sabit bir sureye yaymak).
+  **Kullanici karari: launch-sonrasi deftere.**
   **YENI KALEM (Sprint 8 madde 8 eki - kullanici karari): RFC 2606 ust alan adlarini KAYITTA
   reddetme.** Kayit validatoru FluentValidation'in permisif `.EmailAddress()` kuralini kullaniyor
   ve `.test` / `.example` / `.invalid` / `.localhost` adreslerini KABUL EDIYOR; gercek Iyzico
@@ -2168,7 +2340,8 @@ canli tablonun BIREBIR aynisi.** Diger uc test yesil kaldi (mutasyon lokalize). 
 
 ## SUPHELI DAVRANISLAR
 
-**DURUM (teknik defter kapanisi): ACIK KALEM YALNIZ #14, o da LAUNCH SONRASI.**
+**DURUM: ACIK KALEM YALNIZ #20 (bugun BOSLUK YOK, testte kapatildi) ve #14 (LAUNCH SONRASI).**
+**#19 KARAR VERILDI (kullanici: secenek iii) - GUVENLIK-FIX-2 commit'inde kapatiliyor.**
 Kapananlar: #1..#13 ilgili sprintlerde · **#15, #17, #18 mini dalgalarda** ·
 **#16 BILINCLI olarak bos birakildi (verilmis karar, erteleme degil)**.
 Asagidaki maddeler kayit olarak duruyor; her birinin basinda guncel durumu yazili.
@@ -2454,6 +2627,41 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    kuruyor - sahte kurgu degil. Aday duzeltme: `ConfirmReservation`'in sorgusunu Active +
    Expired'i kapsayacak sekilde genisletmek (mevcut telafi dali zaten yazili, yalnizca
    ULASILAMIYOR). **Duzeltme karari kullanicinin.**
+
+
+19. **HESAP KILITLENMESI ARTIK BIR ENUMERATION KANALI (G2'nin KALAN yuzeyi).**
+   (GUVENLIK-FIX dalgasinda olculdu) `AuthManager.Login` kilit kontrolunu SIFRE
+   DOGRULAMASINDAN ONCE yapiyor: 5 basarisiz denemeden sonra KAYITLI bir adres
+   **403 "Cok fazla basarisiz deneme..."**, kayitsiz bir adres **401 "E-posta veya sifre
+   hatali."** doner. Yani saldirgan 5 istek harcayarak adresin kayitli olup olmadigini
+   ogrenebilir. G2/G2b kayit ve dogrulama uclarindaki kanallari KAPATTI; bu kanal ACIK KALDI.
+   **BILEREK DOKUNULMADI - CUNKU KAPATMAK BEDELLI:** kilidi gizlemek, gercek kullaniciya
+   "hesabin 15 dakika kilitli" diyememek demektir; kullanici sifresini dogru yazdigi halde
+   401 alir ve neden giremedigini anlayamaz. Auth kovasi (10/dk/IP) hizi kisitliyor.
+   Aday cozumler: (i) aynen birak (bugunku), (ii) kilit bilgisini de E-POSTAYA tasi ve
+   yanitta 401 don (G2 kalibi), (iii) kilidi sifre DOGRUYSA bildir (o zaman kanal kapanir
+   ama kilitli hesaba dogru sifreyle gelen kullanici yine bilgilenir). **Karar kullanicinin.**
+
+
+20. **VARSAYILAN-KAPALI KURAL CONTROLLER'LARLA SINIRLI - MINIMAL-API UCU EKLENIRSE
+   VARSAYILAN ACIK OLUR.** (GUVENLIK-FIX / G5'te olculdu, kullanici karariyla deftere alindi)
+   `app.MapControllers().RequireAuthorization()` YALNIZ controller uclarini kapsar.
+   Istenen `options.FallbackPolicy` idi ve HER endpoint'i kapsardi, ama OLCULDU ki mevcut bir
+   pini kiriyor: `X-Api-Version` ayristirilamayinca Asp.Versioning gercek endpoint yerine
+   METADATA'SIZ bir HATA endpoint'i koyuyor; FallbackPolicy onu da kapsayinca 400'u yazan kod
+   HIC calismiyor ve istek 401'e donusuyor. Bu, SUPHELI #14'u DAHA KOTU yapardi (entegratore
+   401 demek onu kimlik hatasi aramaya yonlendirir), bu yuzden kapsam controller'lara
+   daraltildi - gerekce `Program.cs`'te.
+   **BUGUN BOSLUK YOK** (olculdu: 150 action'in tamami acikca isaretli, uygulamada minimal-API
+   ucu ve [Authorize]'siz hub YOK). **RISK GELECEKTE:** ileride eklenecek bir `app.MapGet` /
+   `app.MapPost` ucu ya da yeni bir hub, isaretlenmezse VARSAYILAN OLARAK ACIK olur.
+   Bu bosluk RUNTIME'da degil TEST'te kapatildi:
+   `SecurityHardeningTests.VarsayilanKapali_ACIK_Uclari_KIRMAZ_ve_HER_UC_ACIKCA_ISARETLIDIR`
+   her uretim ucunun acikca isaretli oldugunu tarar (oznitelikler YANSIMAYLA okunur;
+   `EndpointMetadata` okunsaydi konvansiyonun ekledigi `AuthorizeAttribute` yuzunden tarama
+   VAKUM olurdu). Sessiz bir 401 yerine KIRMIZI BIR TEST secildi.
+   Aday kalici cozum: Asp.Versioning'in hata endpoint'ine anonim metadata iliskilendirilebilir
+   hale gelirse (ya da SUPHELI #14 genel olarak cozulurse) FallbackPolicy'ye gecilebilir.
 
 ## SUREC (degismez)
 

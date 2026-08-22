@@ -428,8 +428,13 @@
       '<button id="dvsVerifyResend" style="padding:9px 16px;border:1px solid #e8e4de;border-radius:8px;background:#fff;cursor:pointer">Tekrar gönder</button>' +
       "</div>" +
       '<div id="dvsVerifyErr" style="color:#a32d2d;font-size:12px;margin-top:8px"></div>';
+    // GÜVENLİK-FIX (G2): kayıt ucu artık "bu adres kayıtlı mı" sorusunu YANITLAMIYOR - var olan
+    // adres de yeni adres de AYNI 201'i alıyor. Bu yüzden buradaki metin de bir şey VARSAYAMAZ:
+    // eskiden "doğrulama kodu gönderildi" diyordu ve zaten hesabı olan kullanıcıya YALAN olurdu.
+    // Ne olduğunu kullanıcı e-postadan öğrenir (yeni hesap -> kod; var olan hesap -> "giriş yap").
     document.getElementById("dvsVerifyMsg").textContent =
-      email + " adresine doğrulama kodu gönderildi. Kodu girip hesabını etkinleştir.";
+      email + " adresine bir e-posta gönderdik. Yeni hesap açıldıysa içindeki doğrulama kodunu " +
+      "aşağıya gir; bu adresle zaten bir hesabın varsa e-posta ne yapman gerektiğini anlatıyor.";
 
     document.getElementById("dvsVerifyGo").onclick = async function () {
       var errEl = document.getElementById("dvsVerifyErr");
@@ -445,7 +450,9 @@
     document.getElementById("dvsVerifyResend").onclick = async function () {
       var errEl = document.getElementById("dvsVerifyErr");
       errEl.textContent = "";
-      try { await api.auth.resendVerification(email); notify("Kod tekrar gönderildi."); }
+      // GÜVENLİK-FIX (G2b): uç artık üç ayrı yanıt değil TEK yanıt dönüyor (varlık sızdırmıyor),
+      // bu yüzden istemci de "gönderildi" diye kesin konuşamaz - adres kayıtlı olmayabilir.
+      try { await api.auth.resendVerification(email); notify("Bu adres kayıtlıysa kod tekrar gönderildi."); }
       catch (e) { errEl.textContent = e.message || "Gönderilemedi"; }
     };
   }
