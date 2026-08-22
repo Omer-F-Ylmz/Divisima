@@ -257,6 +257,25 @@ Bu bolum, yeni bir oturumun tek basina devam edebilmesi icin yazildi.
 - **MINI DALGA TAMAMLANDI** (workflow_dispatch + SUPHELI #15 duzeltmesi + siparis #33
   kurtarmasi + SUPHELI #17 duzeltmesi + #16 bilincli bos). Ayrinti asagidaki MINI DALGA
   bolumunde. **YENI BULGU: SUPHELI #18** - canli kurtarmada olculdu, envanter sessiz sapmasi.
+- **Mini dalga push `98bbe3e` - HER IKI WORKFLOW TAMAMEN YESIL** (run 32540574944 CI +
+  32540574929 Security; adim bazinda + annotation duzeyinde dogrulandi). `SQL gerektiren
+  testler` / `Testler + coverage` / `Coverage raporunu yukle` / iki ZORUNLU format adimi /
+  `Entegrasyon testleri` / `Gitleaks (secret taramasi)` hepsi SUCCESS, TESHIS adimlari
+  skipped, **yedi job'in hicbirinde failure seviyeli annotation YOK**.
+  NOT: ayni SHA'da UCUNCU bir run daha gorunuyor (`event=dynamic`, Dependabot guncelleme
+  run'i) - o da success, ama izleyici kurali geregi asil iki workflow yeterlidir.
+- **`.gitleaksignore` KESIN OLARAK KANITLANDI.** Kullanici `workflow_dispatch`'i elle tetikledi:
+  **run 32540908505, conclusion SUCCESS**; `secret-scan` -> `Gitleaks (secret taramasi)`
+  **SUCCESS**, dort job'da da failure seviyeli annotation YOK. Bu kosum `--log-opts` ALMADIGI
+  icin **TUM GIT GECMISINI** taradi - yani jetonlarin durdugu `19d101f` commit'i DAHIL.
+  Fingerprint'ler (kural-id `generic-api-key`, satir 1137/1277) TUTTU. Dogrulama boslugu KAPANDI.
+- **MINI DALGA 2 TAMAMLANDI** - SUPHELI #18 duzeltildi (ayrinti MINI DALGA 2 bolumunde).
+  **Yerel: 204/204 `Category=Sql`, tam suitte 328 basarili / 331** (kirilan 3'un UCU DE
+  Docker'li `OrderEndpointTests`; UC ARDISIK kosumda ayni sonuc). Release 0 hata, format TEMIZ.
+  **DURUST KAYIT - ISIMSIZ FLAKE:** bicim duzeltmesinden hemen sonraki TEK bir kosumda 4
+  kirmizi gorundu; adlari YAKALANMADI. Ardindan UC kosum ust uste 3 kirmizi (yalnizca Docker)
+  verdi. Dorduncusunun ne oldugu BILINMIYOR - uydurma bir aciklama yazilmiyor. CI'da tekrar
+  ederse adiyla yakalanacak.
 - **Yerel (mini dalga sonrasi): 203/203 `Category=Sql`, tam suitte 327 basarili / 330
   toplam** - kirilan 3'un UCU DE `OrderEndpointTests` (Testcontainers; yerelde Docker kapali,
   CI'da yesil kosuyor). Release 0 hata, format kapilari TEMIZ.
@@ -1382,19 +1401,13 @@ Hepsi geri alindi. Ayrica madde 13 icin AYRI bir 5. kontrol (uretim mutasyonu) y
 
 ## SIRA
 
-0. **KULLANICIDA - `workflow_dispatch` ELLE TETIKLENECEK** (`Security CI`). Tetik artik
-   main'de; GitHub > Actions > Security CI > "Run workflow". TUM GECMISI tarayan TEK kosum
-   budur ve `.gitleaksignore` fingerprint'lerinin gercekten tuttugunu ancak o gosterir.
-   Anonim API ile tetiklenemez (kimlik ister) ve **PAT ISTENMEZ**.
-   `secret-scan` orada YESILSE is kapanir. KIRMIZI kalirsa fingerprint'in kural-id'si
-   (`generic-api-key`) ya da satir numarasi (1137/1277) tutmamistir; o noktada gitleaks
-   yerele indirilip bulgu birebir yeniden uretilir ve fingerprint duzeltilir.
-1. **KARAR BEKLEYEN - SUPHELI #18** (envanter sessiz sapmasi). Mini dalgada CANLI bulundu;
-   ulasma olasiligi (b) ile ARTTI. Aday duzeltme kucuk: `ConfirmReservation` sorgusunu
-   Expired'i de kapsayacak sekilde genisletmek - telafi dali ZATEN YAZILI, yalnizca
-   ULASILAMIYOR. **Launch oncesi degerlendirilmeli.**
-2. **KARAR BEKLEYEN - SUPHELI #14** (surum okuyucusu kirilganligi, genel). Launch sonrasi
-   deftere alindi. #15 ve #17 mini dalgada KAPANDI; #16 BILINCLI olarak bos birakildi.
+0. **KARAR BEKLEYEN - SIPARIS #33'UN ENVANTER SAPMASI.** Olculdu: urun 2 / M icin 2 adet
+   DUSULMEMIS (deger 10, dogrusu 8). GELISTIRME veritabani + sandbox siparisi - pratik etkisi
+   sifir. Secenekler ve ONERI (B: duzeltilmis uretim yolunu bir kez kostur, denetim izi birakir)
+   **MINI DALGA 2** bolumunun sonunda. KENDILIGINDEN DOKUNULMADI.
+1. **KARAR BEKLEYEN - SUPHELI #14** (surum okuyucusu kirilganligi, genel). Launch sonrasi
+   deftere alindi. #15, #17 ve **#18** KAPANDI; #16 BILINCLI olarak bos birakildi.
+   Yani acik kalan TEK supheli #14 ve o da launch-sonrasi.
 3. **Sema kapanis dalgasi** - kalan tek aday: **gift-card expiry**
    (`refunded_amount` Sprint 6'da kapandi; seller migration DEGIL - `sellers` ve
    `seller_id` zaten `InitialCreate`'te)
@@ -1644,6 +1657,99 @@ gercek bildirim imza TASIMIYOR.
   buldu; olculen boslugun aynisi.
 Ikisi de geri alindi.
 
+## MINI DALGA 2 - SUPHELI #18 DUZELTMESI (TAMAMLANDI)
+
+Kullanici karari: #18 launch ONCESI duzeltilir, kapsam sinirli.
+
+### SINIR OLCEREK CIZILDI - HANGI DURUMLAR ONAYA DAHIL?
+
+Rezervasyon durum gecisleri okundu (`TryReserveAsync` / `ConfirmReservation` /
+`ReleaseReservation` / `ReleaseExpiredReservations`) ve her durum icin FIZIKSEL stok hali
+cikarildi:
+
+| Durum | `reserved_quantity` | `stock_quantity` | Onayda dogru islem |
+|---|---|---|---|
+| `Active` (0) | TUTULUYOR | dusmemis | atomik gecis + `ConfirmStockAsync` |
+| `Confirmed` (1) | serbest | **ZATEN DUSMUS** | DOKUNULMAZ (cift dusum olurdu) |
+| `Expired` (3) | serbest (cleanup birakti) | dusmemis | **DAHIL** - dogrudan dusum |
+| `Released` (2) | serbest | dusmemis | **DAHIL EDILMEDI** |
+
+**`Released` NEDEN DISARIDA - gerekce FIZIKSEL DEGIL ANLAMSAL (durust duzeltme):**
+Fiziksel olarak `Released` ile `Expired` AYNIDIR - `ReleaseReservedAsync` yalniz
+`reserved_quantity`'yi azaltir, fiziksel stogu GERI EKLEMEZ (kodda da "fiziksel degismez"
+yaziyor). Yani buradaki risk **"cift dusum" DEGIL**. Gercek gerekce su: `Released`i YALNIZCA
+`ReleaseReservation` yaziyor ve o da yalniz iki yerden cagriliyor - `IyzicoPaymentManager`in
+odeme BASARISIZ dali ve `OrderManager`in siparis IPTAL yolu. Yani `Released` = **"bu siparis
+iptal edildi" karari**. Boyle bir rezervasyonun onaya gelmesi bir stok kurtarma senaryosu
+degil, bir **DURUM MAKINESI IHLALIDIR**. Stogu orada dusmek (a) kimsenin sevk etmeyecegi bir
+siparis icin hayalet kayip yazar, (b) asil hatayi - iptal edilmis siparisin yeniden
+onaylanmasini - SESSIZCE ortbas eder.
+
+### YAN BULGU: TELAFI DALI ATOMIK DEGILDI
+
+Eski telafi dali `TryDirectDeductAsync` yapip rezervasyonu **Expired BIRAKIYORDU**. Sorgu
+Expired'i hic getirmedigi icin bu gorunmuyordu; ama Expired ARTIK normal bir yol oldugu icin
+ikinci bir `ConfirmReservation` cagrisi ayni satiri TEKRAR dusurebilirdi. Bu yuzden her iki
+yol da `Active->Confirmed` / `Expired->Confirmed` gecisini KAZANMAK zorunda birakildi.
+Yani duzeltme, kendi actigi kapiyi da kapatiyor.
+
+### SESSIZ HICBIR YOL KALMADI - IKI KANAL
+
+`ExpireSonrasiTelafiAsync`: stok varsa dogrudan dusulur; **yoksa**
+1. `stock_movements` notu (envanter defteri) - **MEVCUT DAVRANIS AYNEN KORUNDU**,
+2. **siparis zaman cizelgesi** (H53 "KRITIK/UYARI" kalibi) - YENI kanal.
+Ikincisi eklendi cunku hareket kaydini kimse duzenli okumuyor; #33'te zaten HICBIR satir
+yazilmamisti ve sapma aylarca gorunmeyebilirdi. Zaman cizelgesi yazimi BEST-EFFORT
+(try/catch + `LogError`): not yazilamazsa onay akisi KIRILMAZ, birinci kanal zaten yazildi.
+`StockManager` iki yeni bagimlilik aldi (`IOrderStatusHistoryService`, `ILogger`); dongusel
+bagimlilik YOK - `OrderStatusHistoryManager` yalniz DAL'lara bagli (kontrol edildi).
+
+### BILINCLI KIRILAN PIN
+
+`SUPHELI_RezervasyonEXPIRE_Olduysa_Onay_STOK_DUSURMUYOR_ve_UYARI_YAZMIYOR_PINLENIR` ->
+`RezervasyonEXPIRE_Olsa_da_Onay_STOK_DUSURUR_ve_HAREKET_YAZAR`.
+Eski pin OLCULEN supheli davranisi (stok DUSMEZ + hareket YOK) sabitliyordu; #18 duzelince
+envanter sapmasini SAVUNUR hale gelirdi.
+
+YENI PINLER (`WebhookContractTests`):
+- `RezervasyonEXPIRE_Olsa_da_Onay_STOK_DUSURUR_ve_HAREKET_YAZAR` - stok duser, `reserved`
+  EKSIYE gitmez, TEK hareket satiri yazilir, notu "expire" iceri (cift-anlam kirici: normal
+  onay notuyla karismaz) ve rezervasyon **Confirmed**'a gecer (ikinci dusumu engelleyen sey).
+- `RezervasyonEXPIRE_ve_STOK_TUKENMISSE_UYARI_ZAMAN_CIZELGESINE_Duser` - stok EKSIYE
+  cekilmez, hareket notunda "UYARI" var VE zaman cizelgesinde uyari notu var. Ikinci assert
+  olmadan "sessiz hicbir yol kalmaz" iddiasi kanitlanmis olmazdi.
+Ikisi de on kosulu GERCEK temizlik yoluyla kuruyor (`ReleaseExpiredReservations`) - sahte
+kurgu degil.
+
+### DIS KONTROLU + 5. KONTROL
+
+3 assert ters (uc AYRI test: iki yeni pin + `StockReservationTests.Confirm_IkiKezCagrilinca_CiftDusumYok`)
+-> **3 AYRI ISIMLI KIRMIZI** (geri alindi).
+5. kontrol: `ConfirmReservation` sorgusu `Active`-only haline dondurulda ->
+`RezervasyonEXPIRE_Olsa_da_...` **stok 10 buldu (dusmedi)** ve uyari pini de kirildi -
+**siparis #33'te olculen tablonun BIREBIR aynisi**. Diger 21 test YESIL kaldi (mutasyon
+kesin olarak lokalize). Geri alindi.
+
+### SIPARIS #33'UN KENDI ENVANTER SAPMASI - OLCULDU, DOKUNULMADI
+
+```
+siparis 33  urun 2 / M  quantity 2   rezervasyon status=3 (Expired)  hareket kaydi YOK
+siparis 34  urun 2 / M  quantity 3   rezervasyon status=1 (Confirmed) hareket kaydi VAR
+product_stocks  urun 2 / M  ->  stock_quantity 10   reserved_quantity 0
+```
+Yani #34'un 3 adedi dusuldu, **#33'un 2 adedi DUSULMEDI**. Dogru deger 8 olmaliydi.
+**Bu GELISTIRME veritabani (`DivisimaDb`) ve sandbox siparisi** - fiziksel mal yok.
+SECENEKLER (karar kullanicinin, KENDILIGINDEN DOKUNULMADI):
+- **(A) Hicbir sey yapma.** Dev veritabani, test verisi; pratik etkisi sifir.
+- **(B) Duzeltilmis uretim yolunu #33 icin bir kez kostur** (`ConfirmReservation(33)`).
+  Artik Expired rezervasyonu buluyor, `Expired->Confirmed` atomik gecisini yapiyor, 2 adedi
+  dusuyor (10 -> 8) ve DENETIM IZI birakan bir `stock_movements` satiri yaziyor. KENDINI
+  SINIRLAR: ikinci cagri rezervasyonu Confirmed bulur ve hicbir sey yapmaz.
+  **ONERILEN** - bedava, denetlenebilir ve duzeltmeyi hatayi ortaya cikaran kaydin
+  UZERINDE gosterir.
+- (C) Elle SQL - denetim izi birakmaz (ya da elle hareket satiri yazmak gerekir ki bu tam da
+  defterin var olma sebebine aykiri). ONERILMEZ.
+
 ## SUPHELI DAVRANISLAR - KARAR BEKLEYENLER
 
 Sprint 5'in iki maddesi (kilit/sadakat ciftlenmesi + kumulatif iade siniri) **S6'da**,
@@ -1883,8 +1989,13 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    degerlendirilebilir (musteri basina dogal olarak seyrek), ama ayrisma bilincli bir karar
    degil, sadece kapsam disinda kalmis bir bosluk. Duzeltme YAPILMADI, karar kullanicinin.
 
-18. **[YENI - CANLI KURTARMADA BULUNDU] `ConfirmReservation` EXPIRE OLMUS REZERVASYONU HIC
-   GORMUYOR: ONAY STOGU DUSURMUYOR VE UYARI DA YAZMIYOR.**
+18. **[KAPANDI - MINI DALGA 2] `ConfirmReservation` EXPIRE OLMUS REZERVASYONU HIC GORMUYOR:
+   ONAY STOGU DUSURMUYOR VE UYARI DA YAZMIYOR.**
+   **KAPANIS:** sorgu `Active` VEYA `Expired`'i kapsayacak sekilde genisletildi; `Released`
+   ANLAMSAL gerekceyle DISARIDA birakildi; telafi dali ATOMIK gecise baglandi (kendi actigi
+   ikinci-dusum kapisini kapatir); "stok yok" uyarisi hareket kaydinin YANINDA siparis zaman
+   cizelgesine de dusuluyor. Ayrinti, sinirin gerekcesi ve pinler: **MINI DALGA 2** bolumu.
+   Asagidaki metin bulgunun kaydidir.
    Siparis #33'un kurtarmasinda OLCULDU. Kurtarma odeme tarafinda kusursuz calisti (Success,
    Confirmed, fatura DIV-2026-000033, 104 puan) ama:
    ```

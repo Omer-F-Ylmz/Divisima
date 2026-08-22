@@ -7,6 +7,7 @@ using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Stock;
 using Divisima.Entity.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 // BEDEN NORMALIZASYONU (H48): tum stok islemleri ayni normalize edilmis bedeni kullanir.
 namespace Divisima.Bussiness.Concrete
@@ -19,17 +20,23 @@ namespace Divisima.Bussiness.Concrete
         private readonly IStockMovementDal _stockMovementDal;
         private readonly IStockReservationDal _stockReservationDal;
         private readonly IStockNotificationService _stockNotificationService;
+        // SUPHELI #18: "odeme alindi ama stok yok" uyarisi hareket kaydinin YANINDA siparis zaman
+        // cizelgesine de dusulur - operatorun panelde GORDUGU yer orasi (H53 kalibi).
+        private readonly IOrderStatusHistoryService _statusHistory;
+        private readonly ILogger<StockManager> _logger;
 
         // Açıklayıcı yorum: Rezervasyon süresi - sipariş verilip ödeme yapılmazsa bu süre sonunda stok serbest kalır
         private const int ReservationMinutes = 20;
 
         public StockManager(IProductStockDal productStockDal, IStockMovementDal stockMovementDal, IStockReservationDal stockReservationDal,
-            IStockNotificationService stockNotificationService)
+            IStockNotificationService stockNotificationService, IOrderStatusHistoryService statusHistory, ILogger<StockManager> logger)
         {
             _productStockDal = productStockDal;
             _stockMovementDal = stockMovementDal;
             _stockReservationDal = stockReservationDal;
             _stockNotificationService = stockNotificationService;
+            _statusHistory = statusHistory;
+            _logger = logger;
         }
 
         // Açıklayıcı yorum: Yeterli stok kontrolü (frontend addToCart stok guard)
@@ -178,40 +185,82 @@ namespace Divisima.Bussiness.Concrete
         }
 
         // Açıklayıcı yorum: ONAYLA - ödeme başarılı; rezervasyonu gerçek stok düşümüne çevir (fiziksel -= , rezerve -=).
+        //
+        // ══ SUPHELI #18 DUZELTMESI - MINI DALGA 2 ═══════════════════════════════════════════
+        //
+        // ONCEKI HALI: sorgu YALNIZ `status == Active` rezervasyonlari getiriyordu. Asagidaki
+        // "expire olmustu, stogu yeniden guvenceye al" telafi dali ise YALNIZ TryTransitionAsync
+        // 0 dondugunde - yani expire islemi sorgu ILE gecis ARASINDA olustugunda - calisiyordu.
+        // Rezervasyon sorgu anINDA ZATEN Expired ise dongu HIC donmuyor, telafi dali OLU kaliyordu.
+        // CANLI OLCUM (siparis #33 kurtarmasi): odeme Success, siparis Confirmed, fatura kesildi,
+        // puan yazildi - ama product_stocks DEGISMEDI ve stock_movements'a TEK SATIR bile
+        // yazilmadi. Yani envanter SESSIZCE sisti; kimsenin gorebilecegi bir iz yoktu.
+        //
+        // ── SINIR OLCEREK CIZILDI: hangi durumlar DAHIL, hangileri DEGIL ────────────────────
+        // Rezervasyon durum gecisleri okundu (TryReserve / ConfirmReservation / ReleaseReservation
+        // / ReleaseExpiredReservations) ve her durum icin FIZIKSEL stok hali cikarildi:
+        //
+        //   Active(0)    reserved TUTULUYOR, stock_quantity DUSMEMIS
+        //                -> onayda: atomik gecis + ConfirmStockAsync (reserved -= , stock -=)
+        //   Confirmed(1) reserved SERBEST, stock_quantity ZATEN DUSMUS
+        //                -> DOKUNULMAZ. Tekrar dusmek CIFT DUSUM olurdu.
+        //   Expired(3)   reserved SERBEST (cleanup job birakti), stock_quantity DUSMEMIS
+        //                -> DAHIL. Siparis hala mesru sekilde onaylanabilir (terk edilmis sepet
+        //                   degil, gecikmis bildirim). Dogru islem: DOGRUDAN dusum.
+        //   Released(2)  reserved SERBEST, stock_quantity DUSMEMIS  ── FIZIKSEL OLARAK Expired ILE AYNI
+        //                -> **DAHIL EDILMEDI.** Gerekce FIZIKSEL DEGIL ANLAMSAL:
+        //                   `Released`i YALNIZCA ReleaseReservation yaziyor ve o da yalniz iki
+        //                   yerden cagriliyor - IyzicoPaymentManager'in odeme BASARISIZ dali ve
+        //                   OrderManager'in siparis IPTAL yolu. Yani `Released` = "bu siparis
+        //                   IPTAL EDILDI" karari. Boyle bir rezervasyonun onaya gelmesi bir stok
+        //                   kurtarma senaryosu DEGIL, bir DURUM MAKINESI IHLALIDIR. Stogu orada
+        //                   dusmek (a) kimsenin sevk etmeyecegi bir siparis icin hayalet kayip
+        //                   yazar, (b) asil hatayi - iptal edilmis siparisin yeniden onaylanmasini -
+        //                   SESSIZCE ortbas eder. Bu yuzden Released onaya DAHIL EDILMEZ.
+        //                   NOT: burada risk "cift dusum" DEGIL - ReleaseReservedAsync yalniz
+        //                   reserved_quantity'yi azaltir, fiziksel stogu GERI EKLEMEZ (kodda da
+        //                   "fiziksel degismez" diye yaziyor). Sinirin gerekcesi anlamsal.
+        //
+        // ── ATOMIKLIK: telafi dali da artik gecis KAZANMAYA bagli ──────────────────────────
+        // Eski telafi dali `TryDirectDeductAsync` yapip rezervasyonu Expired BIRAKIYORDU. Sorgu
+        // Expired'i hic getirmedigi icin bu gorunmuyordu; ama Expired ARTIK normal bir yol oldugu
+        // icin ikinci bir ConfirmReservation cagrisi ayni satiri TEKRAR dusurebilirdi. Bu yuzden
+        // her iki yol da Expired->Confirmed / Active->Confirmed ATOMIK gecisini KAZANMAK zorunda.
         public async Task<(HttpStatusCode, Result)> ConfirmReservation(int orderId)
         {
-            var reservations = await _stockReservationDal.GetListAsync(r => r.order_id == orderId && r.status == (byte)ReservationStatusEnum.Active);
+            var reservations = await _stockReservationDal.GetListAsync(r => r.order_id == orderId &&
+                (r.status == (byte)ReservationStatusEnum.Active || r.status == (byte)ReservationStatusEnum.Expired));
             foreach (var res in reservations)
             {
-                // Concurrency DUZELTMESI: rezervasyonu ATOMIK olarak Active->Confirmed gecir; YALNIZCA bu cagri
-                // gecisi kazanirsa stok duser. Iki eszamanlı onay (iki admin / callback+havale) ayni rezervasyonu
-                // CIFT DUSEMEZ (online yolda distributed lock vardi; bu koruma artik release/expire dahil her yerde).
+                // Concurrency: rezervasyonu OKUNAN durumdan ATOMIK olarak Confirmed'a gecir;
+                // YALNIZCA gecisi kazanan cagri stok islemini yapar. Iki eszamanli onay
+                // (iki admin / callback+webhook) ayni rezervasyonu CIFT DUSEMEZ.
+                var okunanDurum = res.status;
                 var won = await _stockReservationDal.TryTransitionAsync(res.id,
-                    (byte)ReservationStatusEnum.Active, (byte)ReservationStatusEnum.Confirmed);
+                    okunanDurum, (byte)ReservationStatusEnum.Confirmed);
                 if (won == 0)
                 {
-                    // Rezervasyon Active DEGIL. Iki olasilik:
+                    // Durum okuma ILE gecis ARASINDA degisti. Iki olasilik:
                     //  (a) Baska bir cagri zaten Confirmed yapti -> stok dusuldu, DOKUNMA.
-                    //  (b) Expiry job (ReservationCleanupJob) rezervasyonu Expired yapip stogu SERBEST birakti.
-                    //      Ama ODEME BASARILI -> stok GEREKLI. Mevcutsa dogrudan dus (reserved zaten serbest).
+                    //  (b) Expiry job araya girip Active->Expired yapti. Odeme BASARILI oldugu
+                    //      icin stok hala GEREKLI: Expired'dan Confirmed'a gecisi dene.
                     var current = await _stockReservationDal.GetAsync(r => r.id == res.id);
                     if (current != null && current.status == (byte)ReservationStatusEnum.Expired)
                     {
-                        var deducted = await _productStockDal.TryDirectDeductAsync(res.product_id, res.size, res.quantity);
-                        await _stockMovementDal.AddAsync(new StockMovement
-                        {
-                            product_id = res.product_id,
-                            size = res.size,
-                            movement_type = (byte)StockMovementType.Out,
-                            quantity = res.quantity,
-                            reference_id = orderId,
-                            note = deducted > 0
-                                ? "Ödeme onaylı - rezervasyon expire olmuştu, stok yeniden güvenceye alındı"
-                                : "UYARI: ödeme alındı fakat stok yok (rezervasyon expire + tükendi) - manuel iade/tedarik gerekli",
-                            created_at = DateTime.Now
-                        });
+                        var wonExpired = await _stockReservationDal.TryTransitionAsync(res.id,
+                            (byte)ReservationStatusEnum.Expired, (byte)ReservationStatusEnum.Confirmed);
+                        if (wonExpired == 0) continue;   // baska cagri kaptı
+                        await ExpireSonrasiTelafiAsync(res, orderId);
                     }
-                    continue;   // (a) durumu veya expire islendi
+                    continue;
+                }
+
+                if (okunanDurum == (byte)ReservationStatusEnum.Expired)
+                {
+                    // Rezerve ZATEN serbest birakilmisti; ConfirmStockAsync reserved'i de dusurur
+                    // ve sayaci EKSIYE cekerdi. Dogru islem DOGRUDAN dusumdur.
+                    await ExpireSonrasiTelafiAsync(res, orderId);
+                    continue;
                 }
 
                 await _productStockDal.ConfirmStockAsync(res.product_id, res.size, res.quantity);
@@ -227,6 +276,49 @@ namespace Divisima.Bussiness.Concrete
                 });
             }
             return (HttpStatusCode.OK, new SuccessResult(Messages.StockReservationConfirmed));
+        }
+
+        // SUPHELI #18 - EXPIRE OLMUS REZERVASYONUN TELAFISI.
+        // Rezerve zaten serbest birakilmis, fiziksel stok DUSMEMIS. Odeme basarili oldugu icin
+        // stok gereklidir: mevcutsa DOGRUDAN dusulur. Yetmiyorsa SESSIZ KALINMAZ - iki kanal:
+        //   1) stock_movements notu (envanter defteri; MEVCUT DAVRANIS AYNEN KORUNDU)
+        //   2) siparis zaman cizelgesi (operatorun panelde GORDUGU yer; H53 "KRITIK:" kalibi)
+        // Ikinci kanal eklendi cunku hareket kaydini kimse duzenli okumuyor; #33'te zaten hicbir
+        // satir yazilmamisti ve sapma aylarca gorunmeyebilirdi.
+        private async Task ExpireSonrasiTelafiAsync(StockReservation res, int orderId)
+        {
+            var deducted = await _productStockDal.TryDirectDeductAsync(res.product_id, res.size, res.quantity);
+            await _stockMovementDal.AddAsync(new StockMovement
+            {
+                product_id = res.product_id,
+                size = res.size,
+                movement_type = (byte)StockMovementType.Out,
+                quantity = res.quantity,
+                reference_id = orderId,
+                note = deducted > 0
+                    ? "Ödeme onaylı - rezervasyon expire olmuştu, stok yeniden güvenceye alındı"
+                    : "UYARI: ödeme alındı fakat stok yok (rezervasyon expire + tükendi) - manuel iade/tedarik gerekli",
+                created_at = DateTime.Now
+            });
+
+            if (deducted > 0) return;
+
+            // Zaman cizelgesi BEST-EFFORT: not yazilamazsa onay akisi KIRILMAZ (hareket kaydi
+            // birinci kanal olarak zaten yazildi). Durum olarak Confirmed veriliyor - bu metot
+            // yalnizca onay yolundan cagriliyor (OutboxProcessor'daki ayni kalip).
+            try
+            {
+                await _statusHistory.RecordAsync(orderId, (byte)OrderStatusEnum.Confirmed,
+                    $"UYARI: ödeme alındı fakat stok yok (ürün {res.product_id}, beden {res.size}, " +
+                    $"{res.quantity} adet) - rezervasyon süresi dolmuştu ve stok tükendi. " +
+                    "Manuel iade veya tedarik gerekli.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "STOK UYARISI zaman cizelgesine yazilamadi. siparis={OrderId} urun={ProductId} beden={Size}",
+                    orderId, res.product_id, res.size);
+            }
         }
 
         // Açıklayıcı yorum: SERBEST BIRAK - ödeme başarısız/iptal; rezerveyi geri ver (fiziksel değişmez).

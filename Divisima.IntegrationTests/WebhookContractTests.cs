@@ -600,78 +600,122 @@ namespace Divisima.IntegrationTests
             (await DurumAsync(orderId)).payment.Should().Be((byte)PaymentStatusEnum.Failed);
         }
 
-        // ── 12) SUPHELI PIN: EXPIRE OLMUS REZERVASYONDA STOK DUSMUYOR ─────────────────────
-        //
-        // ██ BU PIN ISTENEN DAVRANISI DEGIL, OLCULEN SUPHELI DAVRANISI SABITLER. ██
-        // Ev kurali: supheli uretim davranisi DUZELTILMEZ, pinlenir; duzeltme karari kullanicinin.
-        //
-        // SIPARIS #33'UN CANLI KURTARMASINDA BULUNDU. Kurtarma calisti (odeme Success, siparis
-        // Confirmed, fatura kesildi, puan yazildi) AMA stok DUSMEDI ve hicbir uyari yazilmadi.
-        // OLCULEN (canli): stock_reservations id=34 status=3 (Expired), product_stocks 2/M
-        // stock_quantity=10 reserved_quantity=0, stock_movements(reference_id=33) = 0 SATIR.
-        //
-        // KOK SEBEP (kaynak okundu, StockManager.ConfirmReservation ilk satiri):
-        //     GetListAsync(r => r.order_id == orderId && r.status == Active)
-        // Sorgu YALNIZ Active rezervasyonlari getiriyor. Icerideki "expire olmustu, stogu
-        // yeniden guvenceye al / yoksa UYARI yaz" dali yalniz TryTransitionAsync 0 dondugunde -
-        // yani expire islemi sorgu ILE gecis ARASINDA olustugunda - calisiyor. Rezervasyon
-        // sorgu anINDA ZATEN Expired ise dongu HIC donmuyor ve o telafi dali OLU kaliyor.
-        //
-        // NEDEN SIMDI ONEMLI: bu bosluk ONCEDEN DE VARDI (COD/havale onayi ayni yoldan geciyor),
-        // ama webhook'ta token yasi siniri gevsedigi icin "uzun sure Pending kalmis siparisi
-        // onayla" artik NORMAL bir yol. Yani bosluga ulasma olasiligi ARTTI.
-        // URETIMDEKI ANLAMI: para alinir, siparis Confirmed olur, fatura kesilir - ama fiziksel
-        // stok dusmez ve kimse bunu GORMEZ (hareket kaydi bile yok). Envanter sessizce sisirilir.
-        [Fact]
-        public async Task SUPHELI_RezervasyonEXPIRE_Olduysa_Onay_STOK_DUSURMUYOR_ve_UYARI_YAZMIYOR_PINLENIR()
+        // Rezervasyonu GERCEK temizlik yolundan gecirerek Expired'a dusurur.
+        // Sahte kurgu DEGIL: uretimdeki Hangfire job'inin cagirdigi metodun KENDISI kosuyor.
+        private async Task<(int productId, string size, int stokOnce)> RezervasyonuEXPIREEtAsync(int orderId)
         {
-            if (Skipped()) return;
-            SayanIyzicoClient.Sifirla();
-            var (orderId, token) = await NewPendingPaymentAsync(_factory!);
-
-            int productId; string size; int stokOnce;
+            int productId; string size;
             await using (var ctx = NewContext())
             {
                 var kalem = await ctx.Set<OrderItem>().AsNoTracking().FirstAsync(i => i.order_id == orderId);
                 productId = kalem.product_id; size = kalem.size;
-                // Rezervasyonu GERCEKTEN yaslandir, sonra GERCEK temizlik yolunu kostur.
                 var rez = await ctx.Set<StockReservation>().SingleAsync(r => r.order_id == orderId);
                 rez.expires_at = DateTime.Now.AddMinutes(-1);
                 await ctx.SaveChangesAsync();
             }
 
-            // Sahte kurgu DEGIL: uretimdeki job'in cagirdigi metodun KENDISI kosuyor.
             await WithScopeAsync(_factory!, sp => sp.GetRequiredService<IStockService>().ReleaseExpiredReservations());
 
-            await using (var ctx = NewContext())
-            {
-                (await ctx.Set<StockReservation>().AsNoTracking().SingleAsync(r => r.order_id == orderId))
-                    .status.Should().Be((byte)ReservationStatusEnum.Expired, "on kosul: rezervasyon expire olmali");
-                var stok = await ctx.Set<ProductStock>().AsNoTracking()
-                    .SingleAsync(s => s.product_id == productId && s.size == size);
-                stok.reserved_quantity.Should().Be(0, "temizlik rezerveyi serbest birakmali");
-                stokOnce = stok.stock_quantity;
-            }
+            await using var son = NewContext();
+            (await son.Set<StockReservation>().AsNoTracking().SingleAsync(r => r.order_id == orderId))
+                .status.Should().Be((byte)ReservationStatusEnum.Expired, "on kosul: rezervasyon expire olmali");
+            var stok = await son.Set<ProductStock>().AsNoTracking()
+                .SingleAsync(s => s.product_id == productId && s.size == size);
+            stok.reserved_quantity.Should().Be(0, "on kosul: temizlik rezerveyi serbest birakmali");
+            return (productId, size, stok.stock_quantity);
+        }
+
+        // ── 12) SUPHELI #18 DUZELTILDI: EXPIRE OLMUS REZERVASYONDA STOK DUSER ─────────────
+        //
+        // ══ BILINCLI KIRILAN PIN - KAYIT ══════════════════════════════════════════════════
+        // Bu testin adi eskiden
+        // SUPHELI_RezervasyonEXPIRE_Olduysa_Onay_STOK_DUSURMUYOR_ve_UYARI_YAZMIYOR_PINLENIR
+        // idi ve OLCULEN SUPHELI davranisi sabitliyordu (stok DUSMEZ + hareket kaydi YOK).
+        // Kullanici karariyla #18 duzeltildi; eski pin artik envanter sapmasini SAVUNUR hale
+        // gelirdi, bu yuzden KIRILDI ve yerini duzeltilmis-davranis pinleri aldi.
+        //
+        // Senaryo siparis #33'un CANLI kurtarmasindan birebir aliniyor: rezervasyon expire
+        // olmus, odeme gecikmis bir webhook bildirimiyle onaylaniyor.
+        [Fact]
+        public async Task RezervasyonEXPIRE_Olsa_da_Onay_STOK_DUSURUR_ve_HAREKET_YAZAR()
+        {
+            if (Skipped()) return;
+            SayanIyzicoClient.Sifirla();
+            var (orderId, token) = await NewPendingPaymentAsync(_factory!);
+            var (productId, size, stokOnce) = await RezervasyonuEXPIREEtAsync(orderId);
 
             await GeriTarihliYapAsync(orderId, TimeSpan.FromHours(2));
             var resp = await _factory!.CreateClient().SendAsync(WebhookIstegi(token));
 
-            // Odeme tarafi DOGRU calisiyor - vakum kirici: bu test "hicbir sey olmadi" ile yesil kalmaz.
+            // Odeme tarafi (vakum kirici): bu test "hicbir sey olmadi" ile yesil kalmaz.
             resp.StatusCode.Should().Be(HttpStatusCode.OK);
             var (odeme, siparis) = await DurumAsync(orderId);
             odeme.Should().Be((byte)PaymentStatusEnum.Success);
             siparis.Should().Be((byte)OrderStatusEnum.Confirmed);
 
-            // ██ SUPHELI DAVRANIS - OLCULEN HALIYLE SABITLENIYOR ██
+            await using var son = NewContext();
+            var stokSonra = await son.Set<ProductStock>().AsNoTracking()
+                .SingleAsync(s => s.product_id == productId && s.size == size);
+            stokSonra.stock_quantity.Should().Be(stokOnce - 1,
+                "expire olmus rezervasyonda da stok DUSMELI - siparis #33'te dusmuyordu");
+            stokSonra.reserved_quantity.Should().Be(0,
+                "rezerve ZATEN serbestti; dogrudan dusum onu EKSIYE cekmemeli");
+
+            var hareketler = await son.Set<StockMovement>().AsNoTracking()
+                .Where(m => m.reference_id == orderId).ToListAsync();
+            hareketler.Should().HaveCount(1, "envanter defterine TEK satir yazilmali");
+            hareketler[0].quantity.Should().Be(1);
+            hareketler[0].note.Should().Contain("expire",
+                "not, stogun NEDEN dogrudan dusuldugunu soylemeli (cift-anlam kirici: normal " +
+                "onay notu 'Sipariş - ödeme onaylı stok düşümü' ile karismasin)");
+
+            // Rezervasyon Confirmed'a gecmeli: aksi halde ikinci bir onay cagrisi AYNI satiri
+            // TEKRAR dusurebilirdi (Expired artik normal bir yol oldugu icin bu risk gercek).
+            (await son.Set<StockReservation>().AsNoTracking().SingleAsync(r => r.order_id == orderId))
+                .status.Should().Be((byte)ReservationStatusEnum.Confirmed);
+        }
+
+        // ── 13) STOK YETMIYORSA UYARI ZAMAN CIZELGESINE DUSER ────────────────────────────
+        //
+        // Duzeltmenin ikinci yarisi: SESSIZ HICBIR YOL KALMAZ. Rezervasyon expire olmus VE bu
+        // arada stok tukenmisse odeme yine alinmistir - operator bunu GORMELIDIR.
+        // Iki kanal: envanter defteri (stock_movements notu) + siparis zaman cizelgesi.
+        [Fact]
+        public async Task RezervasyonEXPIRE_ve_STOK_TUKENMISSE_UYARI_ZAMAN_CIZELGESINE_Duser()
+        {
+            if (Skipped()) return;
+            SayanIyzicoClient.Sifirla();
+            var (orderId, token) = await NewPendingPaymentAsync(_factory!);
+            var (productId, size, _) = await RezervasyonuEXPIREEtAsync(orderId);
+
+            // Rezerve serbest kaldiktan SONRA stok baskasina gitti - fiziksel stok 0.
+            await using (var ctx = NewContext())
+            {
+                var stok = await ctx.Set<ProductStock>().SingleAsync(s => s.product_id == productId && s.size == size);
+                stok.stock_quantity = 0;
+                await ctx.SaveChangesAsync();
+            }
+
+            await GeriTarihliYapAsync(orderId, TimeSpan.FromHours(2));
+            var resp = await _factory!.CreateClient().SendAsync(WebhookIstegi(token));
+
+            resp.StatusCode.Should().Be(HttpStatusCode.OK, "odeme ALINDI - bildirim reddedilmez");
+            (await DurumAsync(orderId)).payment.Should().Be((byte)PaymentStatusEnum.Success);
+
             await using var son = NewContext();
             (await son.Set<ProductStock>().AsNoTracking()
                 .SingleAsync(s => s.product_id == productId && s.size == size))
-                .stock_quantity.Should().Be(stokOnce,
-                    "OLCULEN: onay stogu DUSURMUYOR - expire olmus rezervasyon ConfirmReservation'in " +
-                    "Active filtresine takilmiyor. Bu ISTENEN davranis DEGIL, pinlenen davranis.");
-            (await son.Set<StockMovement>().CountAsync(m => m.reference_id == orderId)).Should().Be(0,
-                "OLCULEN: uyari hareketi bile YAZILMIYOR - envanter sapmasi SESSIZ. " +
-                "Duzeltme karari kullanicinin.");
+                .stock_quantity.Should().Be(0, "olmayan stok EKSIYE cekilmemeli");
+
+            var hareket = await son.Set<StockMovement>().AsNoTracking()
+                .SingleAsync(m => m.reference_id == orderId);
+            hareket.note.Should().Contain("UYARI", "birinci kanal: envanter defteri");
+
+            var notlar = await son.Set<OrderStatusHistory>().AsNoTracking()
+                .Where(h => h.order_id == orderId).Select(h => h.note!).ToListAsync();
+            notlar.Should().Contain(n => n.Contains("UYARI") && n.Contains("stok yok"),
+                "ikinci kanal: siparis zaman cizelgesi - operatorun panelde GORDUGU yer. " +
+                "Bu assert olmadan 'sessiz hicbir yol kalmaz' iddiasi kanitlanmis olmaz.");
         }
     }
 }

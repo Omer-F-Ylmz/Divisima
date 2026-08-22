@@ -9,6 +9,7 @@ using Divisima.Entity.Dtos.StockNotification;
 using Divisima.Entity.Entities;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Divisima.IntegrationTests
@@ -42,7 +43,12 @@ namespace Divisima.IntegrationTests
         {
             var ctx = NewContext();
             var mgr = new StockManager(new EfProductStockDal(ctx), new EfStockMovementDal(ctx),
-                new EfStockReservationDal(ctx), new FakeStockNotification());
+                new EfStockReservationDal(ctx), new FakeStockNotification(),
+                // SUPHELI #18: StockManager artik "odeme alindi ama stok yok" uyarisini zaman
+                // cizelgesine de dusuyor. SAHTE degil GERCEK manager veriliyor - uyari yolunun
+                // gercekten yazilabildigi bu siniflarda da surulsun.
+                new OrderStatusHistoryManager(new EfOrderStatusHistoryDal(ctx), new EfOrderDal(ctx)),
+                NullLogger<StockManager>.Instance);
             return (mgr, ctx);
         }
 
