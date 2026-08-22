@@ -20,9 +20,9 @@ jobs:
   zap-baseline:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: ZAP Baseline Scan (pasif - güvenli)
-        uses: zaproxy/action-baseline@v0.12.0
+        uses: zaproxy/action-baseline@v0.15.0
         with:
           target: ${{ github.event.inputs.target_url || 'https://staging-api.divisima.com' }}
           rules_file_name: '.zap/rules.tsv'

@@ -11,7 +11,7 @@ on:
     - cron: '0 6 * * 1'   # her Pazartesi 06:00 - yeni açıklar için düzenli tarama
   # ELLE TETIKLEME - SPRINT 8 SONRASI MINI DALGA.
   #
-  # GEREKCESI OLCUMDUR, kolaylik degil: gitleaks/gitleaks-action@v2 kaynagi (src/gitleaks.js,
+  # GEREKCESI OLCUMDUR, kolaylik degil: gitleaks/gitleaks-action@v3 kaynagi (src/gitleaks.js,
   # Scan) okundu ve tarama kapsami olaya gore DEGISIYOR:
   #   push (ayni dal)  -> --log-opts=-1                      = YALNIZ SON COMMIT
   #   pull_request     -> --log-opts=... base^..head         = PR araligi
@@ -47,8 +47,8 @@ jobs:
       # Runner locale'i değişirse grep sessizce eşleşmez -> locale SABİTLENDİ.
       DOTNET_CLI_UI_LANGUAGE: en
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
       - name: Restore
@@ -150,12 +150,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: github/codeql-action/init@v3
         with:
           languages: csharp
           queries: security-extended
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
       - name: Build
@@ -167,11 +167,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Gitleaks (secret taraması)
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -231,10 +231,10 @@ jobs:
       ConnectionStrings__DivisimaDb: "Server=localhost,1433;Database=master;User Id=sa;Password=Divisima_CI_Str0ng!Pass;TrustServerCertificate=True;Encrypt=False;"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: İş mantığı güvenlik simülasyonu
         run: python3 tests/business_logic_sim.py
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
 
