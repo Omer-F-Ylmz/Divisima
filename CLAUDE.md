@@ -1832,6 +1832,70 @@ kendi host'u zaten ayakta), yani en olasi sinif ana-host ile ikinci host arasind
 ama bu OLCULMEDI, tahmindir. Onceki dalgalardaki ISIMSIZ flake'ten farki: bu sefer AD BELLI.
 CI'da tekrar ederse SUPHELI olarak ACILIR.
 
+
+## GUVENLIK-FIX-2 - SUPHELI #19 (KILIT ENUMERATION) KAPANDI
+
+Kullanici karari: **secenek (iii)** - kilit bilgisi YALNIZ SIFRE DOGRUYSA bildirilir.
+AYRI commit (bu is GUVENLIK-FIX commit'ine BINMEDI), ayni push.
+
+### KOK SEBEP: SIRA (kod degil)
+
+`AuthManager.Login` kilit kontrolunu SIFRE DOGRULAMASINDAN ONCE yapiyordu. Bes basarisiz
+denemeden sonra:
+
+```
+ONCE   kayitli adres  + yanlis sifre -> 403 "Cok fazla basarisiz deneme. Hesabiniz ... kilitlendi"
+       kayitsiz adres + yanlis sifre -> 401 "E-posta veya sifre hatali."
+SONRA  kayitli adres  + yanlis sifre -> 401  (kayitsiz adresle BIREBIR AYNI govde)
+       kayitli adres  + DOGRU  sifre -> 403  kilit mesaji (kullanici NEDEN giremedigini ogrenir)
+```
+
+Kaybeden yalniz oracle: gercek kullanici sifresini dogru yazdiginda kilit bilgisini
+ALMAYA DEVAM EDIYOR.
+
+### KILIT UZATMA (DoS) GUARD'I - SIRA DEGISIKLIGININ ACTIGI KAPI KAPATILDI
+
+Eski kodda kilitliyken `VerifyPasswordHash` HIC calismiyordu, dolayisiyla basarisiz sayaci
+da artmiyordu. Yeni sirada dogrulama HER ZAMAN kosuyor; sayac kosulsuz artsaydi saldirgan
+kilitli bir hesabi surekli yanlis sifreyle doverek kilidi SONSUZA KADAR uzatabilirdi
+(`LockAccountAsync` sayaci sifirliyor - sayac yeniden 5'e ulasir ve YENI bir 15 dakika yazilir).
+Bu yuzden: **kilitliyken yanlis sifre sayaci ARTIRMAZ, olay YAZMAZ, kilidi UZATMAZ.**
+Eski davranisin bu ozelligi KORUNDU; pin `lockout_end`'in DEGISMEDIGINI de assert ediyor.
+
+**TIMING:** degisiklik zamanlamayi KOTULESTIRMIYOR, iyilestiriyor - kilitli ve kilitsiz
+yollar artik AYNI isi yapiyor (ikisi de bir hash dogrulamasi kosuyor).
+
+### SATICI TARAFI (dokunulmadi, kayit)
+
+`SellerAuthManager.Login` AYNI siraya sahip (kilit kontrolu dogrulamadan once). Bugun
+ORACLE OLUSTURAMAZ: `sellers` tablosu 0 satir ve kayit kapali (403), yani her giris
+`seller == null` dalina duser. Satici modulu acilirken bu sira da musteri tarafiyla
+hizalanmali - **G4 ile ayni on kosul listesinde** (bkz. KARARLAR).
+
+### PINLER (`SecurityHardeningTests`, +3 -> toplam 18)
+
+- `KilitliHesap_YANLIS_SIFREYLE_KAYITSIZ_ADRESLE_AYNI_YANITI_Doner` - ayni kod + ayni govde,
+  "kilit" kelimesi yanitta GECMEZ, ve `lockout_end` DEGISMEZ (DoS guard'i).
+- `KilitliHesap_DOGRU_SIFREYLE_403_KILIT_MESAJI_Alir` - vakum kirici: esitlik "her seye 401
+  don" ile saglanmadi, gercek kullanici bilgiyi ALIYOR.
+- `KILITSIZ_Hesapta_Giris_AYNEN_Calisir` - vakum kirici: yanlis sifre 401, DOGRU sifre **200**
+  (giris tumden bozulmadi) + basarili giris sayaci sifirliyor.
+
+ON KOSUL GERCEK YOLDAN: hesap DB'ye elle `lockout_end` yazilarak degil, GERCEK uctan bes
+yanlis giris yapilarak kilitleniyor.
+
+### DIS KONTROLU + 5. KONTROL
+
+3 assert ters (UC ayri test) -> **3 AYRI ISIMLI KIRMIZI** (geri alindi).
+5. kontrol: kilit kontrolu SIFRE DOGRULAMASINDAN ONCEYE geri alindi ->
+`KilitliHesap_YANLIS_SIFREYLE_...` **403 buldu** - olculen once-durumun (oracle) ta kendisi.
+Diger 17 pin YESIL kaldi (mutasyon lokalize). Geri alindi.
+
+### YEREL DOGRULAMA (iki commit birlikte)
+
+252/252 `Category=Sql` · tam suitte 382 basarili / 385 (kirilan 3'un UCU DE Docker'li
+`OrderEndpointTests`) · Release 0 hata · whitespace + style TEMIZ (exit 0).
+
 ## SIRA
 
 0. **KALITE SUPURMESI.** Dalga 1 + FIX, Dalga 2 + FIX, veri temizligi, Dalga 3 + FIX ve
@@ -1839,7 +1903,8 @@ CI'da tekrar ederse SUPHELI olarak ACILIR.
    ERTELENENLER: **B5** (100 ucun HTTP testi yok - ayri kapsam dalgasi),
    **B8**, **B13**, **P4** ve **P2-inline-bolme** (launch sonrasi defteri).
    **GUVENLIK DALGASINDAN ACIK KALAN TEK KALEM: G4** (satici refresh token'i govdede) -
-   bugun ERISILEMEZ, satici modulu acilmadan once ZORUNLU (bkz. KARARLAR).
+   bugun ERISILEMEZ, satici modulu acilmadan once ZORUNLU (bkz. KARARLAR). SUPHELI #19
+   (kilit enumeration) **GUVENLIK-FIX-2**'de KAPANDI.
 1. **TEKNIK DEFTERDE ACIK KALEM KALMADI - TEK ISTISNA SUPHELI #14** (surum okuyucusu
    kirilganligi, genel) ve o da **LAUNCH SONRASI**. #15, #17 ve **#18** KAPANDI; #16 BILINCLI
    olarak bos birakildi; siparis #33 hem odeme hem envanter tarafinda TEMIZLENDI.
@@ -1866,6 +1931,11 @@ CI'da tekrar ederse SUPHELI olarak ACILIR.
   (var olmayan bir yuzeyi pinlemek yanlis guvence olurdu). Modul acilirken musteri
   tarafindaki cerez sozlesmesi (`OturumCerezleriniYaz` + CSRF double-submit) satici
   tarafina da tasinir ve `RefreshCookieContractTests` kalibinda pinlenir.
+  **IKINCI ON KOSUL (GUVENLIK-FIX-2 eki): `SellerAuthManager.Login` kilit kontrolunu SIFRE
+  DOGRULAMASINDAN ONCE yapiyor** - musteri tarafinda SUPHELI #19 olarak kapatilan oracle'in
+  aynisi. Bugun uretemez (`sellers` 0 satir -> her giris `seller == null` dalina duser), ama
+  modul acilir acilmaz uretir. Musteri tarafindaki sira (dogrula -> kilitliyse ve sifre DOGRU
+  ise 403, degilse 401 + sayac artirma YOK) satici tarafina da tasinir ve pinlenir.
 - **invoice_number**: entegrator (Nilvera) numarasi esas, bizimki ic referans - degisiklik yok.
 - **Launch sonrasi defteri** (simdi is yok): gift-card expiry, 2FA enrollment ucu,
   step-up `auth_time` refresh'te sifirlanmasi, loyalty oransal geri alma + referral
@@ -2341,7 +2411,7 @@ canli tablonun BIREBIR aynisi.** Diger uc test yesil kaldi (mutasyon lokalize). 
 ## SUPHELI DAVRANISLAR
 
 **DURUM: ACIK KALEM YALNIZ #20 (bugun BOSLUK YOK, testte kapatildi) ve #14 (LAUNCH SONRASI).**
-**#19 KARAR VERILDI (kullanici: secenek iii) - GUVENLIK-FIX-2 commit'inde kapatiliyor.**
+**#19 KAPANDI - GUVENLIK-FIX-2 (kullanici karari: secenek iii).**
 Kapananlar: #1..#13 ilgili sprintlerde · **#15, #17, #18 mini dalgalarda** ·
 **#16 BILINCLI olarak bos birakildi (verilmis karar, erteleme degil)**.
 Asagidaki maddeler kayit olarak duruyor; her birinin basinda guncel durumu yazili.
@@ -2629,7 +2699,12 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    ULASILAMIYOR). **Duzeltme karari kullanicinin.**
 
 
-19. **HESAP KILITLENMESI ARTIK BIR ENUMERATION KANALI (G2'nin KALAN yuzeyi).**
+19. **[KAPANDI - GUVENLIK-FIX-2] HESAP KILITLENMESI BIR ENUMERATION KANALIYDI (G2'nin KALAN yuzeyi).**
+   **KAPANIS:** kullanici karari secenek (iii) - kilit bilgisi YALNIZ SIFRE DOGRUYSA bildirilir.
+   Yanlis sifre + kilitli hesap artik kayitsiz adresle BIREBIR ayni 401'i doner; dogru sifre +
+   kilitli hesap 403 kilit mesajini alir. Sira degisikliginin actigi KILIT UZATMA kapisi da
+   kapatildi (kilitliyken yanlis sifre sayaci artirmaz, kilidi uzatmaz). Ayrinti ve pinler:
+   **GUVENLIK-FIX-2** bolumu. Asagidaki metin bulgunun kaydidir.
    (GUVENLIK-FIX dalgasinda olculdu) `AuthManager.Login` kilit kontrolunu SIFRE
    DOGRULAMASINDAN ONCE yapiyor: 5 basarisiz denemeden sonra KAYITLI bir adres
    **403 "Cok fazla basarisiz deneme..."**, kayitsiz bir adres **401 "E-posta veya sifre

@@ -174,13 +174,39 @@ namespace Divisima.Bussiness.Concrete
                 return (HttpStatusCode.Unauthorized, new ErrorResult(Messages.LoginFailed));
             }
 
-            // Açıklayıcı yorum: Hesap kilitli mi (kaba kuvvet koruması)
-            if (customer.lockout_end.HasValue && customer.lockout_end.Value > DateTime.Now)
-                return (HttpStatusCode.Forbidden, new ErrorResult(Messages.AccountLocked));
+            // ══ GUVENLIK-FIX-2 (SUPHELI #19) - KILIT BILGISI YALNIZ SIFRE DOGRUYSA ═══════════
+            //
+            // OLCULEN ONCE-DURUM: kilit kontrolu SIFRE DOGRULAMASINDAN ONCE kosuyordu. Bes
+            // basarisiz denemeden sonra KAYITLI bir adres 403 "Cok fazla basarisiz deneme...",
+            // KAYITSIZ bir adres 401 "E-posta veya sifre hatali." doner - yani saldirgan bes
+            // istek harcayarak adresin kayitli olup olmadigini ogrenebiliyordu. G2/G2b kayit ve
+            // dogrulama uclarindaki enumeration kanallarini kapatmisti; bu kanal ACIK KALMISTI.
+            //
+            // SECILEN COZUM (kullanici karari - secenek iii): kilit ANCAK sifre DOGRUYSA
+            // bildirilir. Boylece
+            //   yanlis sifre + kilitli hesap  -> 401, KAYITSIZ adresle BIREBIR AYNI yanit
+            //   dogru sifre  + kilitli hesap  -> 403 "hesabiniz kilitlendi"
+            // Gercek kullanici kaybetmez: sifresini DOGRU yazdiginda kilit mesajini almaya
+            // devam eder. Kaybeden yalniz oracle.
+            //
+            // KILIT UZATMA (DoS) GUARD'I: kilitliyken YANLIS sifre sayaci ARTIRMAZ ve olay
+            // YAZMAZ. Aksi halde saldirgan, kilitli bir hesabi surekli yanlis sifreyle doverek
+            // kilidi SONSUZA KADAR uzatabilirdi (LockAccountAsync sayaci sifirliyor, yani sayac
+            // yeniden 5'e ulasip yeni bir 15 dakika yazardi). Bugunku davranista da kilitliyken
+            // sayac artmiyordu (kontrol dogrulamadan once kesiyordu) - o ozellik KORUNUYOR.
+            bool kilitli = customer.lockout_end.HasValue && customer.lockout_end.Value > DateTime.Now;
+            bool sifreDogru = HashingHelper.VerifyPasswordHash(dto.password, customer.password_hash, customer.password_salt);
 
-            // Açıklayıcı yorum: Şifre doğrulama. Yanlışsa başarısız sayacını artır, 5'te 15 dk kilitle.
-            if (!HashingHelper.VerifyPasswordHash(dto.password, customer.password_hash, customer.password_salt))
+            // Açıklayıcı yorum: Şifre yanlışsa başarısız sayacını artır, 5'te 15 dk kilitle.
+            if (!sifreDogru)
             {
+                if (kilitli)
+                {
+                    // Hesap ZATEN kilitli: sayac artmaz, olay yazilmaz, kilit uzamaz.
+                    // Yanit KAYITSIZ adresin yanitiyla BIREBIR ayni - oracle kapali.
+                    return (HttpStatusCode.Unauthorized, new ErrorResult(Messages.LoginFailed));
+                }
+
                 // GUVENLIK DUZELTMESI: ATOMIK sayac artisi - paralel brute-force denemeleri artisi KAYBETMEZ
                 // (tracked += ile 100 eszamanlı deneme sayaci 1'de tutup kilidi atlardi).
                 int attempts = await _customerDal.IncrementFailedLoginAsync(customer.id);
@@ -193,6 +219,10 @@ namespace Divisima.Bussiness.Concrete
                     nowLocked ? "5 başarısız denemeden sonra hesap kilitlendi" : "Hatalı şifre");
                 return (HttpStatusCode.Unauthorized, new ErrorResult(Messages.LoginFailed));
             }
+
+            // SIFRE DOGRU: kilit bilgisi artik SIZINTI DEGIL, kullanicinin bilmesi gereken sey.
+            if (kilitli)
+                return (HttpStatusCode.Forbidden, new ErrorResult(Messages.AccountLocked));
 
             if (!customer.is_active)
                 return (HttpStatusCode.Unauthorized, new ErrorResult(Messages.AccountInactive));

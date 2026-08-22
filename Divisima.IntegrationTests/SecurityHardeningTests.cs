@@ -711,6 +711,112 @@ namespace Divisima.IntegrationTests
             eksik.StatusCode.Should().Be(HttpStatusCode.BadRequest,
                 "kapi acikken model dogrulamasi NORMAL islemeli - filtre yalniz kapali kapiyi korur");
         }
+
+        // ═══════════════════════════════════════════════════════════════════════════════════
+        // SUPHELI #19 (GUVENLIK-FIX-2) - KILIT BILGISI YALNIZ SIFRE DOGRUYSA
+        // ═══════════════════════════════════════════════════════════════════════════════════
+        //
+        // OLCULEN ONCE-DURUM: kilit kontrolu SIFRE DOGRULAMASINDAN ONCE kosuyordu. Bes basarisiz
+        // denemeden sonra KAYITLI adres 403 "Cok fazla basarisiz deneme...", KAYITSIZ adres 401
+        // doner - yani bes istek harcayan bir saldirgan adresin kayitli olup olmadigini ogrenirdi.
+        // G2/G2b kayit ve dogrulama uclarindaki kanallari kapatmisti; bu kanal ACIK KALMISTI.
+        //
+        // ON KOSUL GERCEK YOLDAN KURULUYOR: hesap DB'ye elle lockout_end yazilarak degil, GERCEK
+        // uctan bes yanlis giris yapilarak kilitleniyor (uretim yolunun kendisi).
+        private async Task<string> KilitliHesapUretAsync(GuvenlikFactory f)
+        {
+            var user = await TestAuthHelper.CreateCustomerClientAsync(f);
+            var anon = f.CreateClient();
+            for (var i = 0; i < 5; i++)
+                await anon.PostAsJsonAsync("/api/auth/login", new { email = user.Email, password = "Yanlis-Sifre-123" });
+
+            await using var ctx = NewContext();
+            var m = await ctx.Set<Customer>().AsNoTracking().FirstAsync(c => c.email == user.Email);
+            m.lockout_end.Should().NotBeNull("on kosul: bes yanlis giris hesabi GERCEKTEN kilitlemeli");
+            m.lockout_end!.Value.Should().BeAfter(DateTime.Now, "kilit HALA yururlukte olmali");
+            return user.Email;
+        }
+
+        [Fact]
+        [Trait("Category", "Sql")]
+        public async Task KilitliHesap_YANLIS_SIFREYLE_KAYITSIZ_ADRESLE_AYNI_YANITI_Doner()
+        {
+            if (Skipped()) return;
+            var kilitliEposta = await KilitliHesapUretAsync(_factory!);
+            var anon = _factory!.CreateClient();
+
+            DateTime KilitBitisi()
+            {
+                using var c = NewContext();
+                return c.Set<Customer>().AsNoTracking().First(x => x.email == kilitliEposta).lockout_end!.Value;
+            }
+            var kilitOnce = KilitBitisi();
+
+            var kilitliYanit = await anon.PostAsJsonAsync("/api/auth/login",
+                new { email = kilitliEposta, password = "Yine-Yanlis-456" });
+            var kayitsizYanit = await anon.PostAsJsonAsync("/api/auth/login",
+                new { email = $"hicyok-{Guid.NewGuid():N}@divisima.test", password = "Yine-Yanlis-456" });
+
+            kilitliYanit.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+                "yanlis sifreyle gelen istek, hesap kilitli olsa bile kilidi ELE VERMEMELI - " +
+                "olculen once-durum burada 403 'Cok fazla basarisiz deneme...' idi");
+            kilitliYanit.StatusCode.Should().Be(kayitsizYanit.StatusCode);
+            (await kilitliYanit.Content.ReadAsStringAsync()).Should()
+                .Be(await kayitsizYanit.Content.ReadAsStringAsync(),
+                    "govdeler de BIREBIR ayni olmali - mesaj farki da oracle'dir");
+            (await kilitliYanit.Content.ReadAsStringAsync()).Should().NotContain("kilit",
+                "cift-anlam kirici: kilit kelimesi yanlis-sifre yanitinda GECMEMELI");
+
+            // KILIT UZATMA (DoS) GUARD'I: kilitliyken yanlis sifre sayaci artirmamali, kilidi
+            // UZATMAMALI. Aksi halde saldirgan hesabi surekli doverek kilidi sonsuza tasirdi.
+            KilitBitisi().Should().Be(kilitOnce,
+                "kilitli hesaba yapilan yanlis-sifre denemesi kilidi UZATMAMALI");
+        }
+
+        // VAKUM/CIFT-ANLAM KIRICI: esitlik "her seye 401 don" ile de saglanabilirdi.
+        // Gercek kullanici sifresini DOGRU yazdiginda kilit bilgisini ALMAYA DEVAM ETMELI.
+        [Fact]
+        [Trait("Category", "Sql")]
+        public async Task KilitliHesap_DOGRU_SIFREYLE_403_KILIT_MESAJI_Alir()
+        {
+            if (Skipped()) return;
+            var kilitliEposta = await KilitliHesapUretAsync(_factory!);
+            var anon = _factory!.CreateClient();
+
+            var yanit = await anon.PostAsJsonAsync("/api/auth/login",
+                new { email = kilitliEposta, password = TestAuthHelper.TestPassword });
+
+            yanit.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+                "sifre DOGRUYSA kilit artik sizinti degil, kullanicinin bilmesi gereken sey");
+            (await yanit.Content.ReadAsStringAsync()).Should().Contain("kilit",
+                "kullanici NEDEN giremedigini ogrenmeli - kaybi olmayan bir duzeltme olmasinin sarti bu");
+        }
+
+        // VAKUM KIRICI: kilit yolu, GIRIS'i tumden bozarak degil yalnizca sirayi degistirerek
+        // duzeltildi. Kilitsiz hesapta yanlis sifre 401, DOGRU sifre 200 vermeye devam etmeli.
+        [Fact]
+        [Trait("Category", "Sql")]
+        public async Task KILITSIZ_Hesapta_Giris_AYNEN_Calisir()
+        {
+            if (Skipped()) return;
+            var user = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+            var anon = _factory!.CreateClient();
+
+            var yanlis = await anon.PostAsJsonAsync("/api/auth/login",
+                new { email = user.Email, password = "Yanlis-Sifre-789" });
+            yanlis.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "kilitsiz hesapta yanlis sifre 401");
+
+            var dogru = await anon.PostAsJsonAsync("/api/auth/login",
+                new { email = user.Email, password = TestAuthHelper.TestPassword });
+            dogru.StatusCode.Should().Be(HttpStatusCode.OK,
+                "POZITIF OLAY: kilitsiz hesapta DOGRU sifre GERCEKTEN giris yaptirmali");
+
+            // Ve basarisiz deneme sayaci sifirlanmali (mevcut davranis - regresyon korumasi)
+            await using var ctx = NewContext();
+            var m = await ctx.Set<Customer>().AsNoTracking().FirstAsync(c => c.email == user.Email);
+            m.failed_login_attempts.Should().Be(0, "basarili giris sayaci sifirlamali");
+            m.lockout_end.Should().BeNull();
+        }
     }
 
     // ══ G5 SONDA CONTROLLER'I - YALNIZ TEST DERLEMESINDE ══════════════════════════════════
