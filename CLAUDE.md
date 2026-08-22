@@ -242,9 +242,26 @@ Bu bolum, yeni bir oturumun tek basina devam edebilmesi icin yazildi.
   run'inda GORULEMEZ (push yalniz son commit'i tarar, orada bulgu zaten yok). Kanit ancak
   TUM GECMISI tarayan bir kosumdan gelir - Pazartesi cron'u ya da elle `workflow_dispatch`
   (bugun workflow'da dispatch tetigi YOK; eklemek ayri bir karar).
+- **Duzeltme push `dd3b6b0` - HER IKI WORKFLOW TAMAMEN YESIL** (run 32538058539 CI +
+  32538058556 Security; adim bazinda + annotation duzeyinde dogrulandi). `secret-scan` ->
+  `Gitleaks (secret taramasi)` **SUCCESS**; CI `build-and-test`in TUM adimlari SUCCESS
+  ("SQL gerektiren testler" + "Testler + coverage" + "Coverage raporunu yukle"),
+  `format-check`in iki ZORUNLU adimi SUCCESS, TESHIS adimlari skipped, **alti job'in
+  hicbirinde failure seviyeli annotation YOK** ve "Leaks detected" satiri KAYBOLDU.
+  **AMA: bu yesil `.gitleaksignore`'u KANITLAMAZ** - push yalniz son commit'i (`dd3b6b0`)
+  tarar ve orada bulgu zaten yoktu. Kanitlanan sey MASKELEME commit'inin kendisinin temiz
+  oldugu. Fingerprint'lerin gercekten tuttugu ancak TUM GECMISI tarayan bir kosumda
+  (Pazartesi cron'u) gorulur - **ilk Pazartesi kosumu IZLENMELI**; kirmizi kalirsa
+  fingerprint'in kural-id'si ya da satir numarasi tutmamis demektir ve o noktada gitleaks
+  yerele indirilip birebir yeniden uretilir.
+- **MINI DALGA TAMAMLANDI** (workflow_dispatch + SUPHELI #15 duzeltmesi + siparis #33
+  kurtarmasi + SUPHELI #17 duzeltmesi + #16 bilincli bos). Ayrinti asagidaki MINI DALGA
+  bolumunde. **YENI BULGU: SUPHELI #18** - canli kurtarmada olculdu, envanter sessiz sapmasi.
+- **Yerel (mini dalga sonrasi): 203/203 `Category=Sql`, tam suitte 327 basarili / 330
+  toplam** - kirilan 3'un UCU DE `OrderEndpointTests` (Testcontainers; yerelde Docker kapali,
+  CI'da yesil kosuyor). Release 0 hata, format kapilari TEMIZ.
 - **Yerel (madde 3 + madde 9 sonrasi): 198/198 `Category=Sql`, tam suitte 322 basarili /
-  325 toplam** - kirilan 3'un UCU DE `OrderEndpointTests` (Testcontainers; yerelde Docker
-  kapali, CI'da yesil kosuyor). Baska kirmizi YOK.
+  325 toplam** - kirilan 3'un UCU DE `OrderEndpointTests`.
 - **Yerel (Sprint 8 madde 3/9 ONCESI): 188/188 `Category=Sql`, 312/312 tam suit, Release 0
   hata, format kapilari TEMIZ.**
 - **Yerel (E3 sonrasi): 168/168 `Category=Sql`, 289/289 tam suit** (Testcontainers'li
@@ -1365,13 +1382,19 @@ Hepsi geri alindi. Ayrica madde 13 icin AYRI bir 5. kontrol (uretim mutasyonu) y
 
 ## SIRA
 
-1. **KARAR BEKLEYEN - SIPARIS #33** (para alindi, Pending). Token 30 dk guard'ini asti;
-   tekrar tetiklemek onu Failed yapardi. Sandbox siparisi oldugu icin aciliyeti yok ama
-   ARDINDAKI BULGU launch'i ilgilendiriyor: **SUPHELI #15**.
-2. **YENI SUPHELILER - KARAR KULLANICIDA:** #14 (surum okuyucusu kirilganligi, genel),
-   #15 (30 dk zaman asimi webhook kurtarma yolunu da siniriyor), #16 (`Webhook:AllowedIps`
-   bos - yalniz yapilandirma isi, imzasiz uctaki en guclu ek katman), #17 (callback rate
-   limit policy'si disinda).
+0. **KULLANICIDA - `workflow_dispatch` ELLE TETIKLENECEK** (`Security CI`). Tetik artik
+   main'de; GitHub > Actions > Security CI > "Run workflow". TUM GECMISI tarayan TEK kosum
+   budur ve `.gitleaksignore` fingerprint'lerinin gercekten tuttugunu ancak o gosterir.
+   Anonim API ile tetiklenemez (kimlik ister) ve **PAT ISTENMEZ**.
+   `secret-scan` orada YESILSE is kapanir. KIRMIZI kalirsa fingerprint'in kural-id'si
+   (`generic-api-key`) ya da satir numarasi (1137/1277) tutmamistir; o noktada gitleaks
+   yerele indirilip bulgu birebir yeniden uretilir ve fingerprint duzeltilir.
+1. **KARAR BEKLEYEN - SUPHELI #18** (envanter sessiz sapmasi). Mini dalgada CANLI bulundu;
+   ulasma olasiligi (b) ile ARTTI. Aday duzeltme kucuk: `ConfirmReservation` sorgusunu
+   Expired'i de kapsayacak sekilde genisletmek - telafi dali ZATEN YAZILI, yalnizca
+   ULASILAMIYOR. **Launch oncesi degerlendirilmeli.**
+2. **KARAR BEKLEYEN - SUPHELI #14** (surum okuyucusu kirilganligi, genel). Launch sonrasi
+   deftere alindi. #15 ve #17 mini dalgada KAPANDI; #16 BILINCLI olarak bos birakildi.
 3. **Sema kapanis dalgasi** - kalan tek aday: **gift-card expiry**
    (`refunded_amount` Sprint 6'da kapandi; seller migration DEGIL - `sellers` ve
    `seller_id` zaten `InitialCreate`'te)
@@ -1520,6 +1543,106 @@ Hepsi geri alindi. Ayrica madde 13 icin AYRI bir 5. kontrol (uretim mutasyonu) y
      test kendi thread kulturunu invariant'a cekip yine `1.049,70` gormeli, yani pin
      CI'da da (invariant kosucuda) gecerli olmali. Dis kontrolu: pinleme kaldirilinca
      pin KIRILMALI.
+
+## MINI DALGA (LAUNCH ONCESI SON ISLER) - TAMAMLANDI
+
+Sprint 8 kapandiktan sonra kullanicinin actigi kapsam-sinirli dalga: bes kalem.
+
+### (a) `workflow_dispatch` TETIGI
+
+`security.yml`'a eklendi. **Gerekcesi OLCUMDUR, kolaylik degil:** `gitleaks-action` kaynagi
+okundu - `push` yalniz SON COMMIT'i tarar (`--log-opts=-1`), `schedule`/`workflow_dispatch`
+ise HICBIR `--log-opts` almaz ve TUM GECMISI tarar. Yani ".gitleaksignore gercekten tutuyor
+mu" sorusunu bir PUSH kosumu ASLA yanitlayamaz. Tetik olmadan tek kanit haftalik cron'du.
+**ELLE TETIKLEME KULLANICIDA:** `POST .../workflows/{id}/dispatches` KIMLIK ISTER; anonim
+API ile tetiklenemez ve PAT ISTENMEZ (ev kurali). Tetik main'e dustukten sonra GitHub
+arayuzunde "Run workflow" gorunur.
+
+### (b) SUPHELI #15 KAPANDI - WEBHOOK'TA TOKEN YASI SINIRI GEVSEDI
+
+**TASARIM OLCEREK KURULDU.** Onceki imza `HandleCallback(dto, bool imzaZorunlu = true)` idi.
+Olculdu: Sprint 8 madde 9'dan sonra **her iki uretim cagri yeri de `false` veriyordu**, yani
+bayrak artik KANALI ayirt etmiyordu. Ikinci bir bool eklemek (`tokenYasiSiniriUygula`)
+gecersiz bilesimlere kapi acardi (`imzaZorunlu: true` + `tokenYasi: false` gibi hicbir kanalin
+karsiligi olmayan bir kombinasyon).
+
+**SECILEN: TEK ENUM** - `PaymentNotificationChannel { Strict = 0, BrowserCallback, ProviderWebhook }`.
+Politika TEK YERDE turer (`HandleCallback` basi), cagri yerleri yalnizca KANALI soyler.
+Varsayilan `Strict` - FAIL-CLOSED. Gerekce enum'un basinda, `SuccessDataResult` belirsizligi
+(madde 11) referansiyla: "bir bayragin sessizce yanlis anlama gelmesi" bedeli bu depoda bir kez
+odendi, ayni tuzak bilerek tekrarlanmiyor.
+
+| Kanal | Imza | Token yasi siniri (30 dk) |
+|---|---|---|
+| `Strict` (varsayilan) | ZORUNLU | UYGULANIR |
+| `BrowserCallback` | gelirse dogrulanir | **UYGULANIR** (tarayici replay'i gercek senaryo) |
+| `ProviderWebhook` | gelirse dogrulanir | **UYGULANMAZ** |
+
+**CF-CALLBACK YOLUNA DOKUNULMADI** (kullanici sarti) - pinli.
+Gevseyen TEK sey yas siniri: yalniz-Pending + retrieve otoritesi + tutar + para birimi + fraud
+AYNEN duruyor.
+
+**STOK TARAFI OLCULDU** (relaxation oncesi zorunlu kontrol): `ConfirmReservation` "rezervasyon
+expire olmustu ama odeme basarili" durumunu ELE ALIYOR - stok varsa dogrudan dusuyor, yoksa
+hareket kaydina GURULTULU uyari yaziyor. Yani sessiz overselling riski YOK **diye dusunuldu** -
+ama (c)'deki canli kurtarma bu telafinin OLU oldugunu gosterdi; bkz. **SUPHELI #18**.
+
+PINLER (`WebhookContractTests`): `GECIKMIS_GercekBildirim_WEBHOOKTA_FAILEDLANMAZ_Confirmeda_Tasir` ·
+`AyniGecikme_TARAYICI_CALLBACKINDE_TokenYasi_Guardina_TAKILIR` (cift-anlam kirici - gevseme
+KANAL BAZLI) · `VARSAYILAN_KANAL_STRICT_GecikmisTokeni_REDDEDER_FailClosed` (gecerli imza
+gonderilir ki red sebebi YAS olsun).
+
+### (c) SIPARIS #33 KURTARILDI - KURTARMA YOLUNUN CANLI KANITI
+
+(b) girdikten sonra gercek webhook govdesi elle tetiklendi (token yasi **173 dakika**).
+
+```
+YANIT : 200 in 1063 ms   ("Ödeme başarılı, siparişiniz onaylandı.")
+        1063 ms = retrieve GERCEKTEN kostu (gercek Iyzico sorgusu)
+orders   #33  status=1 (Confirmed)  is_online_payment_done=1
+payments      payment_status=1  transaction_id=37415135  item_transaction_id=39331730
+              paid_price=1049.70
+outbox        PaymentConfirmed x1 -> status=1 (Processed)  retry_count=0
+invoices      1 satir  DIV-2026-000033  status=1 (Sent)
+loyalty       1 satir  104 puan
+timeline      "Ödeme onaylandı"  UYARI/KRITIK notu: 0
+```
+
+`transaction_id` 1. turdaki gercek bildirimin `iyziPaymentId` degeriyle BIREBIR AYNI - yani
+kurtarilan sey gercekten O odeme.
+
+**AMA STOK DUSMEDI** - bkz. SUPHELI #18. Kurtarma odeme/siparis/fatura/puan tarafinda tamdir,
+envanter tarafinda DEGILDIR.
+
+### (d) SUPHELI #17 KAPANDI - CALLBACK DA "payment" KOVASINDA
+
+`Callback` action'ina `[EnableRateLimiting("payment")]`. Yeni bir sayi degil: Redis yolu
+(`/payment/` -> 10/dk) ile yerlesik yolu ayni davranisa getiriyor.
+PIN (`PaymentCallbackRedirectTests`): `Callback_PAYMENT_KOVASINDA_OnBirinci_Istek_429`
+(AYRI host, uretim varsayilani; ilk on istek **302** aliyor - uygulamaya ULASIYORLAR).
+Sinifin diger pinleri icin ana fabrikada limit yukseltildi (iki-host deseni).
+
+### (e) SUPHELI #16 BILINCLI BOS BIRAKILDI (kullanici karari)
+
+`Webhook:AllowedIps` DOLDURULMUYOR. Gerekce deftere ve `appsettings.Development.example.json`
+aciklamasina yazildi: bu uc, kaybolan callback'in TEK kurtarma yoludur; liste BAYATLARSA
+gercek bildirimler 403 yer ve kurtarma yolu SESSIZCE OLUR - **yanlis doldurulmus bir allowlist
+bos birakmaktan DAHA TEHLIKELIDIR**. Doldurulacaksa: yalniz resmi Iyzico IP listesinden,
+bayatlama riski bilinerek ve `ForwardedHeaders:KnownProxies` ile BIRLIKTE.
+Ayrica example.json'daki eski "yalniz imza kalir" ifadesi DUZELTILDI - madde 9'da olculdu ki
+gercek bildirim imza TASIMIYOR.
+**SUPHELI #14 launch-sonrasi deftere alindi.**
+
+### DIS KONTROLU + 5. KONTROL
+
+5 assert ters -> **5 AYRI ISIMLI KIRMIZI** (geri alindi).
+5. kontrol, iki uretim mutasyonu TEK dalgada (farkli testleri vurduklari icin ayristirilabilir):
+- `tokenYasiSiniriUygula = true` (kanal gevsemesi geri alindi) -> `GECIKMIS_GercekBildirim_...`
+  **400** dondu; siparis #33'un kurtarma ONCESI zarari BIREBIR. `AyniGecikme_TARAYICI_...` ve
+  `VARSAYILAN_KANAL_STRICT_...` dogru sekilde YESIL kaldi (mutasyon KATI davranisi bozmuyor).
+- `[EnableRateLimiting("payment")]` kaldirildi -> `Callback_..._429` on birinci istekte **302**
+  buldu; olculen boslugun aynisi.
+Ikisi de geri alindi.
 
 ## SUPHELI DAVRANISLAR - KARAR BEKLEYENLER
 
@@ -1760,6 +1883,36 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    degerlendirilebilir (musteri basina dogal olarak seyrek), ama ayrisma bilincli bir karar
    degil, sadece kapsam disinda kalmis bir bosluk. Duzeltme YAPILMADI, karar kullanicinin.
 
+18. **[YENI - CANLI KURTARMADA BULUNDU] `ConfirmReservation` EXPIRE OLMUS REZERVASYONU HIC
+   GORMUYOR: ONAY STOGU DUSURMUYOR VE UYARI DA YAZMIYOR.**
+   Siparis #33'un kurtarmasinda OLCULDU. Kurtarma odeme tarafinda kusursuz calisti (Success,
+   Confirmed, fatura DIV-2026-000033, 104 puan) ama:
+   ```
+   stock_reservations  id=34  order_id=33  status=3 (Expired)
+   product_stocks      urun 2 / M  stock_quantity=10  reserved_quantity=0   (DEGISMEDI)
+   stock_movements     reference_id=33 -> 0 SATIR                            (UYARI BILE YOK)
+   order_items         urun 2 / M  quantity=2                                (2 adet satildi)
+   ```
+   **KOK SEBEP (kaynak okundu):** `StockManager.ConfirmReservation` ilk satiri
+   `GetListAsync(r => r.order_id == orderId && r.status == Active)` - sorgu YALNIZ **Active**
+   rezervasyonlari getiriyor. Icerideki "expire olmustu, stogu yeniden guvenceye al; yoksa
+   `UYARI: odeme alindi fakat stok yok ... manuel iade/tedarik gerekli` yaz" telafi dali
+   yalniz `TryTransitionAsync` **0** dondugunde, yani expire islemi sorgu ILE gecis ARASINDA
+   olustugunda calisiyor. Rezervasyon sorgu anINDA **ZATEN Expired** ise dongu HIC donmuyor ve
+   o telafi dali **OLU** kaliyor. (Madde (b) hazirliginda bu telafiyi okuyup "sessiz overselling
+   riski yok" demistim - **YANLISTI**, telafi yalniz YARIS durumunu kapsiyor. Duzeltiliyor.)
+   **URETIMDEKI ANLAMI:** para alinir, siparis Confirmed olur, fatura kesilir, puan yazilir -
+   fiziksel stok DUSMEZ ve kimse bunu goremez (hareket kaydi bile yok). Envanter SESSIZCE sisirilir.
+   **KAPSAM:** yalniz webhook degil - `ConfirmReservation`'i cagiran HER onay yolu (COD/havale
+   admin onayi dahil) ayni bosluga sahip. Yani bosluk (b) ile OLUSMADI, ama (b) "uzun sure
+   Pending kalmis siparisi onayla" yolunu NORMALLESTIRDIGI icin **ulasma olasiligini artirdi**.
+   **PINLENDI, DUZELTILMEDI** (ev kurali): `WebhookContractTests` ->
+   `SUPHELI_RezervasyonEXPIRE_Olduysa_Onay_STOK_DUSURMUYOR_ve_UYARI_YAZMIYOR_PINLENIR`.
+   Pin, GERCEK temizlik yolunu (`IStockService.ReleaseExpiredReservations`) kosturarak on kosulu
+   kuruyor - sahte kurgu degil. Aday duzeltme: `ConfirmReservation`'in sorgusunu Active +
+   Expired'i kapsayacak sekilde genisletmek (mevcut telafi dali zaten yazili, yalnizca
+   ULASILAMIYOR). **Duzeltme karari kullanicinin.**
+
 ## SUREC (degismez)
 
 - **Tek push -> tek run -> tek rapor.** Commit/push karari HER ZAMAN kullanicidan gelir.
@@ -1795,6 +1948,13 @@ KAPANDI. Acik kalan / yeni bulunanlar:
   planindan baslatilirsa kabuk oturumu kapaninca SESSIZCE olurler (E2b'de ikisi de yasandi;
   API logu hatasiz kesildi, storefront'ta SW eski sayfayi servis edip kesintiyi gizledi).
   Uzun sureli izleyici ikisinin sagligini da yoklamali.
+- **DIS/MUTASYON KONTROLUNDEN ONCE `Divisima.API.exe` DURDURULUR (iki kez bedeli odendi).**
+  API kosarken `dotnet build`, bagimli projelerin (Bussiness/API) ciktilarini yazamaz ve
+  **SESSIZCE ESKI IKILILERLE** devam eder: `dotnet test --no-build` bir ONCEKI kosumun
+  sonucunu birebir tekrarlar. Mini dalgada tam bu yasandi - mutasyon kosumu, diş kontrolu
+  kosumunun ciktisinin AYNISINI verdi ve mutasyon uygulanmamis gibi gorundu.
+  **TESHIS:** build ciktisinda `tail -1` ALDATIR (yalniz "Geçen Süre" satirini gosterir);
+  her zaman `grep " Hata"` ya da `grep "error"` ile bakilir.
 - **`--no-build` ile kosulan test, DEGISTIRILEN kodu DOGRULAMAZ.** Format dalgasinda bir kez
   yasandi: `dotnet format` 116 dosyayi degistirdi, `dotnet build` calisan API yuzunden dosya
   kilidiyle 8 hata verdi, ama `--no-build` testler ESKI ikililerden gecip yesil gorundu.

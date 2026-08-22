@@ -100,6 +100,14 @@ namespace Divisima.IntegrationTests
                 TestHostConfig.Apply(builder);
                 builder.UseSetting("Iyzico:SecretKey", TestSecretKey);
                 builder.UseSetting("Iyzico:UseRealSdk", "false");
+                // Storefront ADRESI ACIKCA BOSALTILIYOR - OLCUME DAYALI.
+                // appsettings.Development.json'da "Storefront:BaseUrl": "http://localhost:5173"
+                // TANIMLI; bosaltilmazsa Callback 302 doner ve HATA SEBEBI GOVDEDE GORUNMEZ
+                // (olculdu: yonlendirmeyi izleyen istemci test sunucusunda /index.html arayip
+                // BOS GOVDELI 404 aliyordu - teshis edilmesi zor bir yanlis kirmizi).
+                // Bu sinif YANIT BICIMINI degil KARAR SEBEBINI olcuyor; JSON dali gerekli.
+                // Yonlendirme bicimi zaten PaymentCallbackRedirectTests'te pinli.
+                builder.UseSetting("Storefront:BaseUrl", "");
                 // SOZLESME pinleri limite TAKILMAMALI: bu sinifta on'dan fazla webhook cagrisi var
                 // ve test sunucusunda RemoteIpAddress null oldugu icin hepsi AYNI kovaya duser.
                 // Limitin KENDISI ayri bir host'ta, URETIM VARSAYILANIYLA pinleniyor (test 8).
@@ -277,6 +285,16 @@ namespace Divisima.IntegrationTests
             var p = await ctx.Set<Payment>().AsNoTracking().SingleAsync(x => x.order_id == orderId);
             var o = await ctx.Set<Order>().AsNoTracking().SingleAsync(x => x.id == orderId);
             return (p.payment_status, o.status);
+        }
+
+        // Odemeyi YASLANDIRIR - 30 dk'lik token yasi guard'ini surmek icin.
+        // Beklemek yerine created_at geri cekiliyor: testin kendisi 30 dk suremez.
+        private static async Task GeriTarihliYapAsync(int orderId, TimeSpan yas)
+        {
+            await using var ctx = NewContext();
+            var p = await ctx.Set<Payment>().SingleAsync(x => x.order_id == orderId);
+            p.created_at = DateTime.Now - yas;
+            await ctx.SaveChangesAsync();
         }
 
         // ── 1) ENGEL 1: "X-Api-Version: V1" ARTIK WEBHOOK'U DUSURMEZ ────────────────────────
@@ -497,6 +515,163 @@ namespace Divisima.IntegrationTests
             var onBirinci = await client.SendAsync(WebhookIstegi($"uydurma-{Guid.NewGuid():N}"));
             ((int)onBirinci.StatusCode).Should().Be(429,
                 "webhook 'payment' kovasinda (10/dk) - Redis yolundaki /payment/ limitiyle ayni");
+        }
+
+        // ── 9) SUPHELI #15: GECIKMIS GERCEK BILDIRIM FAILED'LANMAZ ─────────────────────────
+        //
+        // 30 dk'lik token yasi guard'i TARAYICI replay'i icin dogru bir savunmadir, ama webhook
+        // FARKLI zamanlama karakteristigine sahip bir kanaldir: saglayici bildirimi geciktirebilir
+        // ya da saatler sonra yeniden deneyebilir. Sinir burada da uygulaninca GECIKMIS ama
+        // GERCEK bir bildirim, parasi ALINMIS bir odemeyi "Failed" diye defterliyordu.
+        // CANLI ORNEK: siparis #33 - Iyzico'da SUCCESS, bizde Pending; token 58 dakikalik oldugu
+        // icin tekrar tetiklemek onu Failed yapardi.
+        [Fact]
+        public async Task GECIKMIS_GercekBildirim_WEBHOOKTA_FAILEDLANMAZ_Confirmeda_Tasir()
+        {
+            if (Skipped()) return;
+            SayanIyzicoClient.Sifirla();
+            var (orderId, token) = await NewPendingPaymentAsync(_factory!);
+            await GeriTarihliYapAsync(orderId, TimeSpan.FromHours(2));   // 30 dk siniri ASILDI
+
+            var resp = await _factory!.CreateClient().SendAsync(WebhookIstegi(token));
+
+            resp.StatusCode.Should().Be(HttpStatusCode.OK,
+                "gecikmis ama GERCEK bildirim reddedilmemeli - otorite yas degil retrieve");
+            var (odeme, siparis) = await DurumAsync(orderId);
+            odeme.Should().Be((byte)PaymentStatusEnum.Success,
+                "parasi alinmis odeme 'Failed' diye defterlenmemeli");
+            odeme.Should().NotBe((byte)PaymentStatusEnum.Failed,
+                "SUPHELI #15'in tam zarari buydu - acikca disarida birakiliyor");
+            siparis.Should().Be((byte)OrderStatusEnum.Confirmed);
+            SayanIyzicoClient.RetrieveCallCount.Should().Be(1,
+                "yas guard'i atlandi diye sunucu-sunucu dogrulama atlanmadi");
+        }
+
+        // ── 10) GEVSEME KANALA BAGLI: TARAYICI YOLUNDA GUARD AYNEN DURUYOR ─────────────────
+        //
+        // CIFT-ANLAM KIRICI. Test 9 tek basina "yas guard'i tumden kaldirildi" ile de yesil
+        // kalirdi. Burada AYNI yaslandirma TARAYICI callback'ine gonderiliyor ve orada odeme
+        // hala Failed olmali - yani gevseyen sey KANAL BAZLI.
+        [Fact]
+        public async Task AyniGecikme_TARAYICI_CALLBACKINDE_TokenYasi_Guardina_TAKILIR()
+        {
+            if (Skipped()) return;
+            SayanIyzicoClient.Sifirla();
+            var (orderId, token) = await NewPendingPaymentAsync(_factory!);
+            await GeriTarihliYapAsync(orderId, TimeSpan.FromHours(2));
+
+            var govde = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["token"] = token,
+                ["signature"] = ""
+            });
+            var resp = await _factory!.CreateClient().PostAsync("/api/payment/callback", govde);
+
+            var govdeMetni = await resp.Content.ReadAsStringAsync();
+            ((int)resp.StatusCode).Should().Be(400,
+                $"tarayici yolunda eski token REDDEDILIR - replay savunmasi burada dogru. Govde: {govdeMetni}");
+            govdeMetni.Should().Contain("zaman aşımına",
+                "400 SEBEBI yas olmali - imza ya da baska bir sebep degil (cift-anlam kirici)");
+            var (odeme, siparis) = await DurumAsync(orderId);
+            odeme.Should().Be((byte)PaymentStatusEnum.Failed);
+            siparis.Should().Be((byte)OrderStatusEnum.Pending);
+            SayanIyzicoClient.RetrieveCallCount.Should().Be(0,
+                "yas guard'i retrieve'den ONCE eler - saglayiciya cikilmaz");
+        }
+
+        // ── 11) VARSAYILAN KANAL STRICT: FAIL-CLOSED ──────────────────────────────────────
+        //
+        // Servisi DOGRUDAN, kanal VERMEDEN cagirmak en KATI davranisi almali. Gecerli bir imza
+        // gonderiliyor ki 400'un sebebi imza DEGIL, YAS olsun (cift-anlam kirici).
+        [Fact]
+        public async Task VARSAYILAN_KANAL_STRICT_GecikmisTokeni_REDDEDER_FailClosed()
+        {
+            if (Skipped()) return;
+            SayanIyzicoClient.Sifirla();
+            var (orderId, token) = await NewPendingPaymentAsync(_factory!);
+            await GeriTarihliYapAsync(orderId, TimeSpan.FromHours(2));
+
+            var sonuc = await WithScopeAsync(_factory!, sp => sp.GetRequiredService<IPaymentService>()
+                .HandleCallback(new PaymentCallbackRequestDto { token = token, signature = Sign(token) }));
+
+            ((int)sonuc.Item1).Should().Be(400, "varsayilan kanal Strict - gevseme ACIKCA secilir");
+            sonuc.Item2.Message.Should().Contain("zaman aşımına",
+                "red sebebi YAS olmali; imza GECERLI gonderildi");
+            (await DurumAsync(orderId)).payment.Should().Be((byte)PaymentStatusEnum.Failed);
+        }
+
+        // ── 12) SUPHELI PIN: EXPIRE OLMUS REZERVASYONDA STOK DUSMUYOR ─────────────────────
+        //
+        // ██ BU PIN ISTENEN DAVRANISI DEGIL, OLCULEN SUPHELI DAVRANISI SABITLER. ██
+        // Ev kurali: supheli uretim davranisi DUZELTILMEZ, pinlenir; duzeltme karari kullanicinin.
+        //
+        // SIPARIS #33'UN CANLI KURTARMASINDA BULUNDU. Kurtarma calisti (odeme Success, siparis
+        // Confirmed, fatura kesildi, puan yazildi) AMA stok DUSMEDI ve hicbir uyari yazilmadi.
+        // OLCULEN (canli): stock_reservations id=34 status=3 (Expired), product_stocks 2/M
+        // stock_quantity=10 reserved_quantity=0, stock_movements(reference_id=33) = 0 SATIR.
+        //
+        // KOK SEBEP (kaynak okundu, StockManager.ConfirmReservation ilk satiri):
+        //     GetListAsync(r => r.order_id == orderId && r.status == Active)
+        // Sorgu YALNIZ Active rezervasyonlari getiriyor. Icerideki "expire olmustu, stogu
+        // yeniden guvenceye al / yoksa UYARI yaz" dali yalniz TryTransitionAsync 0 dondugunde -
+        // yani expire islemi sorgu ILE gecis ARASINDA olustugunda - calisiyor. Rezervasyon
+        // sorgu anINDA ZATEN Expired ise dongu HIC donmuyor ve o telafi dali OLU kaliyor.
+        //
+        // NEDEN SIMDI ONEMLI: bu bosluk ONCEDEN DE VARDI (COD/havale onayi ayni yoldan geciyor),
+        // ama webhook'ta token yasi siniri gevsedigi icin "uzun sure Pending kalmis siparisi
+        // onayla" artik NORMAL bir yol. Yani bosluga ulasma olasiligi ARTTI.
+        // URETIMDEKI ANLAMI: para alinir, siparis Confirmed olur, fatura kesilir - ama fiziksel
+        // stok dusmez ve kimse bunu GORMEZ (hareket kaydi bile yok). Envanter sessizce sisirilir.
+        [Fact]
+        public async Task SUPHELI_RezervasyonEXPIRE_Olduysa_Onay_STOK_DUSURMUYOR_ve_UYARI_YAZMIYOR_PINLENIR()
+        {
+            if (Skipped()) return;
+            SayanIyzicoClient.Sifirla();
+            var (orderId, token) = await NewPendingPaymentAsync(_factory!);
+
+            int productId; string size; int stokOnce;
+            await using (var ctx = NewContext())
+            {
+                var kalem = await ctx.Set<OrderItem>().AsNoTracking().FirstAsync(i => i.order_id == orderId);
+                productId = kalem.product_id; size = kalem.size;
+                // Rezervasyonu GERCEKTEN yaslandir, sonra GERCEK temizlik yolunu kostur.
+                var rez = await ctx.Set<StockReservation>().SingleAsync(r => r.order_id == orderId);
+                rez.expires_at = DateTime.Now.AddMinutes(-1);
+                await ctx.SaveChangesAsync();
+            }
+
+            // Sahte kurgu DEGIL: uretimdeki job'in cagirdigi metodun KENDISI kosuyor.
+            await WithScopeAsync(_factory!, sp => sp.GetRequiredService<IStockService>().ReleaseExpiredReservations());
+
+            await using (var ctx = NewContext())
+            {
+                (await ctx.Set<StockReservation>().AsNoTracking().SingleAsync(r => r.order_id == orderId))
+                    .status.Should().Be((byte)ReservationStatusEnum.Expired, "on kosul: rezervasyon expire olmali");
+                var stok = await ctx.Set<ProductStock>().AsNoTracking()
+                    .SingleAsync(s => s.product_id == productId && s.size == size);
+                stok.reserved_quantity.Should().Be(0, "temizlik rezerveyi serbest birakmali");
+                stokOnce = stok.stock_quantity;
+            }
+
+            await GeriTarihliYapAsync(orderId, TimeSpan.FromHours(2));
+            var resp = await _factory!.CreateClient().SendAsync(WebhookIstegi(token));
+
+            // Odeme tarafi DOGRU calisiyor - vakum kirici: bu test "hicbir sey olmadi" ile yesil kalmaz.
+            resp.StatusCode.Should().Be(HttpStatusCode.OK);
+            var (odeme, siparis) = await DurumAsync(orderId);
+            odeme.Should().Be((byte)PaymentStatusEnum.Success);
+            siparis.Should().Be((byte)OrderStatusEnum.Confirmed);
+
+            // ██ SUPHELI DAVRANIS - OLCULEN HALIYLE SABITLENIYOR ██
+            await using var son = NewContext();
+            (await son.Set<ProductStock>().AsNoTracking()
+                .SingleAsync(s => s.product_id == productId && s.size == size))
+                .stock_quantity.Should().Be(stokOnce,
+                    "OLCULEN: onay stogu DUSURMUYOR - expire olmus rezervasyon ConfirmReservation'in " +
+                    "Active filtresine takilmiyor. Bu ISTENEN davranis DEGIL, pinlenen davranis.");
+            (await son.Set<StockMovement>().CountAsync(m => m.reference_id == orderId)).Should().Be(0,
+                "OLCULEN: uyari hareketi bile YAZILMIYOR - envanter sapmasi SESSIZ. " +
+                "Duzeltme karari kullanicinin.");
         }
     }
 }

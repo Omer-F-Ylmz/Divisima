@@ -55,8 +55,14 @@ namespace Divisima.API.Controllers
         //    okumuyor, yonlendirme oraya zarar verirdi.
         //  - Storefront:BaseUrl tanimsizsa ESKI davranis (JSON) korunur; boylece yapilandirma
         //    eksik bir ortamda callback sessizce bozulmaz.
+        // SUPHELI #17 KAPANDI (Sprint 8 sonrasi mini dalga): bu action da "payment" kovasina alindi.
+        // OLCULDU: [EnableRateLimiting("payment")] yalniz Initialize uzerindeydi; Callback yerlesik
+        // limiter yolunda YALNIZ GlobalLimiter'in 100/dk'sindaydi. Redis yolu ise path eslesmesiyle
+        // (/payment/) onu ZATEN 10/dk'ya bagliyordu - yani iki yapilandirma AYRISIYORDU. Bu, bilincli
+        // bir karar degil kapsam disinda kalmis bir bosluktu; iki yol artik ayni davraniyor.
         [HttpPost("callback")]
         [AllowAnonymous]
+        [EnableRateLimiting("payment")]
         [SwaggerOperation(Summary = "Ödeme callback", Description = "Iyzico callback. İmza + sunucu-sunucu doğrulama ile işlenir; tarayıcı storefront sonuç sayfasına yönlendirilir.")]
         public async Task<IActionResult> Callback([FromForm] PaymentCallbackRequestDto dto)
         {
@@ -68,7 +74,11 @@ namespace Divisima.API.Controllers
             // alani HIC yok (olculdu: Network > callback > Payload > Form Data). Bu yuzden burada
             // imza ZORUNLU DEGIL; otorite sunucu-sunucu retrieve + token zaman asimi + tutar/fraud
             // kontrolleridir. Imza yine de gelirse HandleCallback onu DOGRULAR.
-            var r = await _paymentService.HandleCallback(dto, imzaZorunlu: false);
+            //
+            // KANAL: BrowserCallback. Token YASI SINIRI (30 dk) BU YOLDA AYNEN UYGULANIR - bu
+            // istek bir TARAYICIDAN geliyor ve eski bir formun yeniden gonderilmesi gercek bir
+            // senaryodur. Webhook'taki gevseme buraya SIZMAZ; ayrimi enum tasiyor.
+            var r = await _paymentService.HandleCallback(dto, PaymentNotificationChannel.BrowserCallback);
 
             var storefront = (_config["Storefront:BaseUrl"] ?? "").TrimEnd('/');
             if (string.IsNullOrWhiteSpace(storefront))
@@ -148,7 +158,11 @@ namespace Divisima.API.Controllers
                     dto.signature = basliktakiImza.Trim();
             }
 
-            var r = await _paymentService.HandleCallback(dto, imzaZorunlu: false);
+            // KANAL: ProviderWebhook. Imzanin yani sira TOKEN YASI SINIRI da gevser (SUPHELI #15).
+            // Saglayici bildirimi geciktirebilir ya da saatler sonra yeniden deneyebilir; 30 dk
+            // siniri burada uygulaninca GECIKMIS ama GERCEK bir bildirim, parasi ALINMIS bir
+            // odemeyi "Failed" diye defterliyordu. Gerekce ve sinirlar enum'da.
+            var r = await _paymentService.HandleCallback(dto, PaymentNotificationChannel.ProviderWebhook);
             return StatusCode((int)r.Item1, r.Item2);
         }
     }

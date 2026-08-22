@@ -186,8 +186,15 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
             return payment?.order_id ?? 0;
         }
 
-        public async Task<(HttpStatusCode, Result)> HandleCallback(PaymentCallbackRequestDto dto, bool imzaZorunlu = true)
+        public async Task<(HttpStatusCode, Result)> HandleCallback(PaymentCallbackRequestDto dto,
+            PaymentNotificationChannel kanal = PaymentNotificationChannel.Strict)
         {
+            // POLITIKA TEK YERDE TURER. Cagri yerleri yalnizca KANALI soyler; hangi savunmanin
+            // gevsedigine burasi karar verir. Yeni bir politika eklenirse cagri yerleri DEGISMEZ.
+            // Her iki gevseme de gerekcesiyle PaymentNotificationChannel enum'unda yazili.
+            bool imzaZorunlu = kanal == PaymentNotificationChannel.Strict;
+            bool tokenYasiSiniriUygula = kanal != PaymentNotificationChannel.ProviderWebhook;
+
             // 1) IMZA (E2b - OLCULEREK DEGISTI)
             // Iyzico CF callback POST edilen govdesinde YALNIZ "token" gonderiyor. Olculdu:
             // tarayici Network > callback > Payload > Form Data icinde TEK alan var, "signature"
@@ -244,7 +251,20 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
                 return (HttpStatusCode.OK, new SuccessResult(Messages.PaymentAlreadyProcessed));
 
             // Açıklayıcı yorum: 2b) TOKEN ZAMAN AŞIMI - ödeme 30 dk içinde tamamlanmalı (eski token replay engeli)
-            if (payment.created_at.AddMinutes(30) < DateTime.Now)
+            //
+            // KANALA BAGLI (SUPHELI #15 - OLCULEREK DUZELTILDI). Bu guard TARAYICI yolu icin
+            // dogrudur ve orada AYNEN durur: eski bir formun yeniden gonderilmesi gercek bir
+            // senaryodur. WEBHOOK'ta ise UYGULANMAZ - saglayici bildirimi geciktirebilir ya da
+            // saatler sonra yeniden deneyebilir; sinir orada da uygulaninca GECIKMIS ama GERCEK
+            // bir bildirim, parasi ALINMIS bir odemeyi "Failed" diye defterliyordu (canli ornek:
+            // siparis #33). Gevseyen TEK sey bu yas siniri: "yalniz Pending islenir" + retrieve
+            // otoritesi + tutar + para birimi + fraud kontrolleri AYNEN duruyor.
+            //
+            // STOK TARAFI OLCULDU, sessiz bir tehlike YOK: rezervasyon bu arada expire olmus
+            // olabilir, ama StockManager.ConfirmReservation bu durumu ZATEN ele aliyor -
+            // stok varsa dogrudan dusuyor, yoksa hareket kaydina "UYARI: odeme alindi fakat
+            // stok yok ... manuel iade/tedarik gerekli" notunu GURULTULU sekilde yaziyor.
+            if (tokenYasiSiniriUygula && payment.created_at.AddMinutes(30) < DateTime.Now)
             {
                 payment.payment_status = (byte)PaymentStatusEnum.Failed;
                 await _paymentDal.UpdateAsync(payment);

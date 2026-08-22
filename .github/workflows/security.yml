@@ -9,6 +9,19 @@ on:
     branches: [ main ]
   schedule:
     - cron: '0 6 * * 1'   # her Pazartesi 06:00 - yeni açıklar için düzenli tarama
+  # ELLE TETIKLEME - SPRINT 8 SONRASI MINI DALGA.
+  #
+  # GEREKCESI OLCUMDUR, kolaylik degil: gitleaks/gitleaks-action@v2 kaynagi (src/gitleaks.js,
+  # Scan) okundu ve tarama kapsami olaya gore DEGISIYOR:
+  #   push (ayni dal)  -> --log-opts=-1                      = YALNIZ SON COMMIT
+  #   pull_request     -> --log-opts=... base^..head         = PR araligi
+  #   schedule / workflow_dispatch -> HICBIR --log-opts YOK  = TUM GIT GECMISI
+  # Yani ".gitleaksignore gercekten tutuyor mu" sorusunu bir PUSH kosumu ASLA yanitlayamaz;
+  # yalniz TUM GECMISI tarayan bir kosum yanitlar. Bu tetik olmadan tek kanit haftalik cron'du
+  # ve bir duzeltmenin dogrulanmasi icin Pazartesi'yi beklemek gerekiyordu.
+  # Diger job'lar (dependency-scan / codeql / tests) icin de elle kosum zararsiz - hepsi
+  # salt-okur dogrulama.
+  workflow_dispatch:
 
 # ASILAN JOB KORUMASI / KUYRUK: ayni ref icin eszamanli kosulari tekille.
 # cancel-in-progress YALNIZ pull_request'te true - main push'lari birbirini iptal etmesin.

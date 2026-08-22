@@ -51,7 +51,12 @@ namespace Divisima.IntegrationTests
         private sealed class CallbackFactory : WebApplicationFactory<Program>
         {
             private readonly string? _storefront;
-            public CallbackFactory(string? storefront) => _storefront = storefront;
+            private readonly bool _limitiYukselt;
+            public CallbackFactory(string? storefront, bool limitiYukselt = true)
+            {
+                _storefront = storefront;
+                _limitiYukselt = limitiYukselt;
+            }
 
             protected override void ConfigureWebHost(IWebHostBuilder builder)
             {
@@ -59,6 +64,11 @@ namespace Divisima.IntegrationTests
                 builder.UseSetting("Iyzico:SecretKey", TestSecretKey);
                 builder.UseSetting("Iyzico:UseRealSdk", "false");
                 builder.UseSetting("Storefront:BaseUrl", _storefront ?? "");
+                // SUPHELI #17 kapaninca Callback da "payment" kovasina girdi (10/dk). Bu sinifin
+                // SOZLESME pinleri limite takilmamali - test sunucusunda RemoteIpAddress null
+                // oldugu icin hepsi AYNI kovaya duser. Limitin KENDISI ayri bir host'ta, URETIM
+                // VARSAYILANIYLA pinleniyor (Callback_PAYMENT_KOVASINDA_OnBirinci_Istek_429).
+                if (_limitiYukselt) builder.UseSetting("RateLimit:PaymentPermitLimit", "1000");
                 builder.ConfigureServices(services =>
                 {
                     var d = services.SingleOrDefault(x => x.ServiceType == typeof(DbContextOptions<DivisimaDbContext>));
@@ -69,6 +79,10 @@ namespace Divisima.IntegrationTests
         }
 
         private CallbackFactory? _factory;
+        // Yalniz rate limit pini icin AYRI host - URETIM VARSAYILANI (PaymentPermitLimit=10).
+        // Ayri olmasinin sebebi: on bir istek kovayi bitirir; ayni host'ta kosarsa bu sinifin
+        // DIGER pinleri 429 yer (AuthRateLimitPinTests'teki iki-host deseninin ayni gerekcesi).
+        private CallbackFactory? _limitFactory;
         private bool _sqlAvailable;
 
         private static DivisimaDbContext NewContext() =>
@@ -84,6 +98,8 @@ namespace Divisima.IntegrationTests
                     await pre.Database.EnsureCreatedAsync();
                 }
                 _factory = new CallbackFactory(Storefront);
+                _limitFactory = new CallbackFactory(Storefront, limitiYukselt: false);
+                _ = _limitFactory.Services;
                 _ = _factory.Services;
                 _sqlAvailable = true;
             }
@@ -98,6 +114,7 @@ namespace Divisima.IntegrationTests
         public async Task DisposeAsync()
         {
             if (_factory != null) await _factory.DisposeAsync();
+            if (_limitFactory != null) await _limitFactory.DisposeAsync();
             if (!_sqlAvailable) return;
             try { await using var ctx = NewContext(); await ctx.Database.EnsureDeletedAsync(); } catch { }
         }
@@ -364,6 +381,39 @@ namespace Divisima.IntegrationTests
                     "imzasiz gercek bildirim retrieve otoritesiyle islenir (Sprint 8 madde 9)");
             (await ctx.Set<Order>().AsNoTracking().SingleAsync(o => o.id == orderId))
                 .status.Should().Be((byte)OrderStatusEnum.Confirmed);
+        }
+
+        // ── 7) SUPHELI #17: CALLBACK DA "payment" KOVASINDA ────────────────────────────────
+        //
+        // OLCULDU: [EnableRateLimiting("payment")] yalniz Initialize uzerindeydi. Callback
+        // yerlesik limiter yolunda YALNIZ GlobalLimiter'in 100/dk'sindaydi; Redis yolu ise path
+        // eslesmesiyle (/payment/) onu ZATEN 10/dk'ya bagliyordu - iki yapilandirma AYRISIYORDU.
+        // AYRI HOST kullaniliyor (uretim varsayilani PaymentPermitLimit=10). Test sunucusunda
+        // RemoteIpAddress null oldugu icin tum istekler ayni partition'a duser; olculen sey
+        // limitin DEGERI ve ucun kapsama GIRDIGI.
+        // CIFT-ANLAM KIRICI: ilk on istek 302 aliyor - yani UYGULAMAYA ULASIYORLAR; 429 yalniz
+        // on birincide geliyor.
+        [Fact]
+        public async Task Callback_PAYMENT_KOVASINDA_OnBirinci_Istek_429()
+        {
+            if (Skipped()) return;
+            var client = NoRedirect(_limitFactory!);
+
+            var kodlar = new List<int>();
+            for (int i = 0; i < 10; i++)
+            {
+                var r = await client.PostAsync("/api/payment/callback",
+                    Form($"uydurma-{Guid.NewGuid():N}", "00"));
+                kodlar.Add((int)r.StatusCode);
+            }
+
+            kodlar.Should().AllBeEquivalentTo(302,
+                $"ilk on istek uygulamaya ULASMALI (limite takilmadan). Kodlar: {string.Join(",", kodlar)}");
+
+            var onBirinci = await client.PostAsync("/api/payment/callback",
+                Form($"uydurma-{Guid.NewGuid():N}", "00"));
+            ((int)onBirinci.StatusCode).Should().Be(429,
+                "callback 'payment' kovasinda (10/dk) - Redis yolundaki /payment/ limitiyle ayni");
         }
     }
 }
