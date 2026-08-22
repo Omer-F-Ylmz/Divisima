@@ -102,14 +102,17 @@ namespace Divisima.API.Controllers
             return StatusCode((int)result.Item1, result.Item2);
         }
 
-        // Açıklayıcı yorum: Tüm ürünler (admin liste)
+        // Açıklayıcı yorum: Aktif ürünler (admin liste) - DALGA-3-FIX (P3) ile SAYFALI.
+        // Parametreler OPSIYONEL: parametresiz cagri varsayilan sayfayi doner (page=1, size=100).
+        // Yanit storefront yolundaki zarfin AYNISI (items + total_count + page + size + total_pages)
+        // - boylece kirpilma sessiz kalamaz. Gerekcenin tamami ProductManager.GetList uzerinde.
         [HttpGet("getlist")]
         [RequireUserType(UserTypeEnum.Admin)]
-        [SwaggerOperation(Summary = "Ürün listesi", Description = "Tüm aktif ürünleri listeler. Admin yetkisi gerekir.")]
-        [ProducesResponseType(typeof(SuccessDataResult<List<ProductListResponseDto>>), (int)HttpStatusCode.OK)]
-        public async Task<IActionResult> GetList()
+        [SwaggerOperation(Summary = "Ürün listesi (sayfalı)", Description = "Aktif ürünleri sayfalı listeler (varsayılan 100/sayfa, üst sınır 200). Admin yetkisi gerekir.")]
+        [ProducesResponseType(typeof(SuccessDataResult<ProductPagingListResponseDto>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetList([FromQuery] int page = 1, [FromQuery] int size = 100)
         {
-            var result = await _productService.GetList();
+            var result = await _productService.GetList(page, size);
             return StatusCode((int)result.Item1, result.Item2);
         }
 

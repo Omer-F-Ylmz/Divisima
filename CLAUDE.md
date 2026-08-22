@@ -1557,12 +1557,133 @@ Ikisi de geri alindi.
 227/227 `Category=Sql` · tam suitte 357 basarili / 360 (kirilan 3'un UCU DE Docker'li
 `OrderEndpointTests`) · Release 0 hata · whitespace + style TEMIZ.
 
+## VERI TEMIZLIGI - 7 IPTAL FATURASI (TAMAMLANDI)
+
+Dalga 2'nin "VERI ARTIGI" kalemi kullanici karariyla temizlendi. **URETIM YOLUYLA, ELLE SQL YOK:**
+`ApplyCancelledSideEffectsAsync` - uc iptal yolunun cagirdigi metodun ta kendisi. Kosucu DEPO
+DISINDA tutuldu, is bitince SILINDI (`git status` temiz).
+
+SAGLAYICI RISKI ONCE OLCULDU: `EInvoice:Enabled=false` -> `CancelInvoiceAsync` aninda Success
+doner, disariya HIC cikilmaz. Kosucuya ayrica kilit konuldu (HttpClient istenirse gurultulu
+patlar) - hic tetiklenmedi.
+
+SONUC: 7/7 fatura `Sent(1) -> Cancelled(3)`. **IKINCI KOSUM NO-OP:** durum ayni VE satir
+sayilari ayni (timeline 14->14, faturaKalemi 0->0, fatura 7->7) - "ayni son durum" tek basina
+yetmez, hicbir tabloya SATIR YAZILMADIGI da olculdu. KRITIK notu 0 (saglayici reddi yok).
+Iptal siparis + Sent/Approved fatura kalan satir: **0**.
+
+DURUST SINIR: `invoice_items` 0'DA KALDI ve KALAMAZ DA - kalemler fatura URETILIRKEN yazilir;
+yeniden uretmek iptal edilmis siparise fatura kesmek olurdu ve Sprint 8 madde 2 guard'i bunu
+DOGRU sekilde reddediyor.
+
+## KALITE SUPURMESI - DALGA 3 (PERFORMANS) ve DALGA-3-FIX
+
+Dalga 3 YALNIZ olcumdu. Olcum icin veri olceklendi (2 -> 62 urun, 1 -> 41 siparis), olculdu,
+sonra seed TAMAMEN SILINDI.
+
+### DALGA 3 BULGULARI
+
+| # | Onem | Bulgu | Durum |
+|---|---|---|---|
+| P1 | YUKSEK | CORS preflight onbellegi yok - trafigin %44'u OPTIONS | **KAPANDI** |
+| P2 | ORTA | index.html 883 KB, 5 render-bloklayan kaynak | **KISMEN** (a+b yapildi, inline bolme ERTELENDI) |
+| P3 | ORTA | Admin urun listesi sayfalanmiyor | **KAPANDI** |
+| P4 | DUSUK | Istemci tarafi onbellek yok | ERTELENDI (launch sonrasi) |
+| P5 | DUSUK | Her ana sayfa yuklemesinde konsol hatasi (`catGrid` guard'siz) | **KAPANDI** |
+
+**N+1 YOK - YAPISAL KANIT:** sorgu sayisi satir sayisindan BAGIMSIZ.
+`product/filter` size=1/24/60 -> **4/4/4 sorgu**; `my-orders` 1 sipariste de 41 sipariste de
+**1 sorgu**; `order/get` 3 sorgu. Konsol teyidi: "24 urun API'den yuklendi (tek istek)".
+**Eksik indeks onerisi: SIFIR** (sinir: DMV gercek planlardan beslenir, 62 urunluk veride
+SQL Server hicbir indeksi onermeye deger bulmamis olabilir).
+
+**B7 TEKRAR ETMEDI:** yedi akisin hicbirinde cift istek yok (her hesap sekmesi 1 istek,
+siparis detayi 2 = get + timeline).
+**SW ISABET ORANI OLCULEMEDI:** tarayici sanal alani SW kaydini engelledi. Dosya sunucudan
+DOGRU servis ediliyor (200, application/javascript, 6531 bayt) - URUN KUSURU DEGIL, olcum
+ortami siniri.
+
+**KENDI OLCUM HATAM (kayit):** filtre govdesine `page_size` yazip "sayfa boyutu yok sayiliyor"
+sandim. DTO'daki ad `size` ve ISTEMCI ZATEN DOGRUSUNU GONDERIYOR. Hatali olan BENIM GOVDEM'di.
+
+### DALGA-3-FIX - YAPILANLAR (her kalem ONCE sayi -> degisiklik -> SONRA sayi)
+
+**P1 - CORS `SetPreflightMaxAge(10 dk)`.**
+  ONCE : 12 kimlikli istek / 24 sn -> **4 OPTIONS** (Chrome kendi kisa varsayilanina duser)
+  SONRA: ayni akis -> **1 OPTIONS**; preflight yaniti `Access-Control-Max-Age: 600` tasiyor
+  NEDEN 600 sn: tarayicilar bu degeri KENDI TAVANLARINA kirpar ve tavanlar farklidir
+  (WebKit/Safari en dusuk). 600, yaygin tarayicilarin TAM uyguladigi en buyuk ortak deger;
+  daha buyugu Safari'de sessizce kirpilir. Ayrica CORS politikasi degisirse eski izin en fazla
+  10 dk yasar. **TARAYICI TAVANLARI BU DALGADA OLCULMEDI** - olculen sey Chrome'da 4 -> 1.
+
+**P5 - `renderCatGrid` guard'i.** `document.getElementById('catGrid').innerHTML` GUARD'SIZDI;
+  kardes aramalar (`if(lm)`, `if(cc)`) guard'liydi. Ana sayfada `catGrid` yok -> her katalog
+  yuklemesinde TypeError. ONCE: konsolda `renderCatGrid cizilemedi` uyarisi VAR.
+  SONRA: **YOK** (ayni yukleme, ayni akis).
+
+**P3 - Admin listesi sayfali.**
+  ONCE : ciplak DIZI, 62 urunun TAMAMI (17.094 bayt), `?page=1&size=1` YOK SAYILIYOR
+  SONRA: storefront deseniyle AYNI zarf (`items + total_count + page + size + total_pages`);
+         `?size=1` -> 1 kalem/total 2; `?size=9999` -> 200'e kirpilir; `?page=0&size=0` -> 1/100
+  VARSAYILAN 100 = storefront yolunun UST SINIRI (tutarlilik). Ust sinir 200.
+  **GERIYE DONUK UYUM (kullanici sarti) - CANLI DOGRULANDI:** admin paneli (admin.html
+  189/345/440) DEGISTIRILMEDI; uyumu ISTEMCI ADAPTORU sagliyor - `api-client.js`'teki `list()`
+  zarfi acip DIZI donduruyor. Tarayicida olculdu: `list()` -> dizi (2 kalem),
+  `listPaged({size:1})` -> zarf (total_count=2, size=1).
+  **KIRPILMA SESSIZ DEGIL:** `total_count > items.length` ise adaptor KONSOLA UYARI yazar.
+
+**P2 SINIRLI (a+b).**
+  (a) dort harici script'e `defer` - BAGIMLILIK KONTROL EDILDI: index.html'in satir ici kodu
+      `DivisimaAPI`/`divisimaApi`'ye HIC dokunmuyor ve etiketlerden SONRAKI tek satir ici blok
+      (analytics) da onlara bagli degil. `defer` SIRAYI korur.
+  (b) Google Fonts `media="print"` + `onload` ile render-bloklamiyor; `<noscript>` yedegi var.
+      CSP UYUMLU (sayfanin `script-src`'sinde `unsafe-inline` + `unsafe-hashes` var - olculdu:
+      `media` attr calisma aninda `all` oldu, yani onload atesledi). Font UYGULANDI:
+      `"Playfair Display", Georgia, serif`, 14 font yuzu yuklendi.
+  ONCE : RENDER-BLOKLAYAN KAYNAK **5** (4 script + 1 stylesheet)
+  SONRA: RENDER-BLOKLAYAN KAYNAK **0**
+  Zamanlama (sicak, GURULTULU - kayit icin): domInteractive 185 -> 97 ms, load 204 -> 113 ms.
+  Ayni sayfanin SOGUK olcumu 1384/1503 ms cikmisti; bu yuzden SURE PINI KONULMADI.
+  **INLINE 704 KB script / 142 KB style BOLUNMEDI** - ayri bir is, launch sonrasi defterinde.
+
+### PINLER (`PreflightAndAdminPagingTests`, 7)
+
+SURE PINI YOK - YAPI PINI VAR (kullanicinin kurali).
+- `Preflight_Yaniti_ACCESS_CONTROL_MAX_AGE_Tasir` - vakum kirici: once CORS'un preflight'i
+  GERCEKTEN degerlendirdigi (`Allow-Origin`) dogrulanir, yoksa assert yanlis sebepten kirmizi
+  olurdu. Deger sabitlenmez, MAKUL ARALIK pinlenir (60..86400).
+- `AdminListesi_SAYFALI_ZARF_Doner_TOPLAM_SAYIYI_Bildirir`
+- `AdminListesi_SAYFA_PARAMETRELERI_ISLER_ve_TOPLAM_DEGISMEZ` - cift-anlam kirici: farkli
+  sayfalar FARKLI urunler dondurmeli (her sayfa ilk N'i donduren bir uygulama da digerlerini gecerdi)
+- `AdminListesi_SINIR_DEGERLERI_CLAMP_Edilir` (Theory, 3 vaka)
+- `AdminListesi_ZENGINLESTIRME_URUN_SAYISINDAN_BAGIMSIZ_Calisir` - "liste ucu kalem basina ek
+  sorgu atmaz" sozlesmesinin yapi pini: 1 urunle de 30 urunle de AYNI alanlar dolu.
+
+**KIRILAN PIN YOK.**
+
+### DIS KONTROLU + 5. KONTROL
+
+5 assert ters -> **4 AYRI ISIMLI KIRMIZI** (iki flip ayni testte oldugu icin 4; >=3 sarti saglandi).
+5. kontrol, iki uretim mutasyonu:
+- `SetPreflightMaxAge` kaldirildi -> `Access-Control-Max-Age` basligi **YOK** (olculen
+  once-durumun ta kendisi: 12 istek -> 4 OPTIONS).
+- Sayfalama (`Skip/Take`) kaldirildi -> `?size=3` **7 kalem** dondu, yani parametre YOK SAYILDI -
+  Dalga 3'te olculen `?page=1&size=1` davranisinin BIREBIR aynisi.
+`AdminListesi_SAYFALI_ZARF_...` mutasyonda YESIL kaldi (zarf duruyor, yalniz kirpma yok) -
+mutasyonun lokalize oldugunun kaniti. Ikisi de geri alindi.
+
+### YEREL DOGRULAMA
+
+234/234 `Category=Sql` · tam suitte 364 basarili / 367 (kirilan 3'un UCU DE Docker'li
+`OrderEndpointTests`) · Release 0 hata · whitespace + style TEMIZ.
+
 ## SIRA
 
-0. **KALITE SUPURMESI.** Dalga 1 + DALGA-1-FIX ve Dalga 2 + DALGA-2-FIX KAPANDI.
-   SIRADA: **Dalga 3** (performans - B6/B7 girdi), sonra Dalga 4 (mobil + capraz cihaz).
-   ERTELENENLER: **B5** (100 ucun HTTP testi yok - ayri kapsam dalgasi), **B6/B7** (Dalga 3),
-   **B8** ve **B13** (launch sonrasi defteri).
+0. **KALITE SUPURMESI.** Dalga 1 + FIX, Dalga 2 + FIX, veri temizligi ve Dalga 3 + FIX KAPANDI.
+   SIRADA: **(C) GUVENLIK DALGASI** (S1..S10 - yalniz olcum ve bulgu listesi), sonra
+   Dalga 4 (mobil + capraz cihaz).
+   ERTELENENLER: **B5** (100 ucun HTTP testi yok - ayri kapsam dalgasi),
+   **B8**, **B13**, **P4** ve **P2-inline-bolme** (launch sonrasi defteri).
 1. **TEKNIK DEFTERDE ACIK KALEM KALMADI - TEK ISTISNA SUPHELI #14** (surum okuyucusu
    kirilganligi, genel) ve o da **LAUNCH SONRASI**. #15, #17 ve **#18** KAPANDI; #16 BILINCLI
    olarak bos birakildi; siparis #33 hem odeme hem envanter tarafinda TEMIZLENDI.
@@ -1592,6 +1713,15 @@ Ikisi de geri alindi.
   ve kupon limitleri guvende; ama bu siparisler musterinin "Siparislerim" ekraninda SONSUZA
   KADAR "Onay bekliyor" duruyor ve onlari iptale ceken bir arka plan isi YOK. Aday: 24-48 saat
   sonra otomatik iptal + bildirim. **POLITIKA URUN KARARIDIR, kullanici sonra verecek.**
+  **YENI KALEM (Dalga 3 / P4 - kullanici karari): ISTEMCI TARAFI ONBELLEK.**
+  Olculdu: hesap sekmeleri arasi her gecis yeniden cekiyor; AYNI siparis detayini kapatip acmak
+  2 istek daha (order/get + order/timeline). Tazelik acisindan savunulabilir bir tercih, ama
+  olculmus ve ucretsiz bir kazanc kapisi.
+  **YENI KALEM (Dalga 3 / P2 kalani - kullanici karari): index.html'in SATIR ICI 704 KB
+  script + 142 KB style BLOKU BOLUNMESI.** DALGA-3-FIX yalniz (a) harici script'lere `defer`
+  ve (b) fontun render-bloklamamasini yapti; render-bloklayan kaynak 5 -> 0 oldu. Ama belge
+  hala 883 KB ve %95'i satir ici kod. Bolme AYRI bir is: dis dosyalara cikarma + onbelleklenebilir
+  hale getirme + CSP'nin `unsafe-inline` bagimliliginin gozden gecirilmesi birlikte ele alinmali.
   **YENI KALEM (dalga-1-fix eki - kullanici karari): TURKCE KLAVYEDE YAZILAN E-POSTA.**
   `KimlikDizgesi.KanonikKod` (Turkce harf katlamasi) BILEREK e-postaya UYGULANMIYOR - e-posta
   kullanicinin KENDI kimligidir, oradaki karakteri sessizce degistirmek kimlik verisini yeniden

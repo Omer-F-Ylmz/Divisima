@@ -266,7 +266,26 @@
       return {
         // DİKKAT: getlist ADMIN yetkisi ister ([RequireUserType(Admin)]). Storefront bunu
         // ÇAĞIRAMAZ - anonim ziyaretçi 403 alır. Katalog için filter() kullanılır.
-        list() { return api._get("/api/product/getlist"); },
+        // DALGA-3-FIX (P3): uc ARTIK SAYFALI bir zarf donuyor
+        // (items + total_count + page + size + total_pages) - storefront yolundaki desenin aynisi.
+        // GERIYE DONUK UYUM: admin paneli (admin.html 189/345/440) bu yardimciyi cagirip DIZI
+        // bekliyor. Panel DEGISTIRILMEDI; zarfi BURADA aciyoruz ve dizi donuyoruz.
+        // KIRPILMA SESSIZ DEGIL: donen sayfa toplamdan azsa konsola UYARI yazilir - operatorun
+        // "62 urunum vardi, 100 gorunuyor" gibi bir sessiz kayipla karsilasmasi engellenir.
+        // Tam zarfa ihtiyaci olan (ileride sayfalama arayuzu) listPaged() kullanir.
+        async list(opts) {
+          const res = await api._get("/api/product/getlist" + api._qs(opts || {}));
+          const d = res && (res.data !== undefined ? res.data : res);
+          if (d && Array.isArray(d.items)) {
+            if (typeof d.total_count === "number" && d.total_count > d.items.length) {
+              console.warn("Divisima: ürün listesi SAYFALANDI - gösterilen " + d.items.length +
+                           " / toplam " + d.total_count + ". Tamamı için sayfa parametresi gerekir.");
+            }
+            return { data: d.items, success: true, message: res && res.message };
+          }
+          return res;   // beklenmedik bicimde ham yaniti gec - sessizce bos dizi UYDURMA
+        },
+        listPaged(opts) { return api._get("/api/product/getlist" + api._qs(opts || {})); },
         get(id) { return api._get("/api/product/get/" + id); },
         // Anonim katalog yolu. Alan adları ProductFilterRequestDto ile birebir:
         // {category_id, sub_category_id, sizes[], colors[], min_price, max_price,

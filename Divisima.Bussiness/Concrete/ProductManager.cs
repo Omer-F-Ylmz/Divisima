@@ -17,6 +17,12 @@ namespace Divisima.Bussiness.Concrete
     // Cafixo ProductManager/BrandManager kalıbına birebir.
     public class ProductManager : IProductService
     {
+        // DALGA-3-FIX (P3): admin liste sayfa boyutu. Varsayilan, storefront yolunun UST SINIRI
+        // ile ayni deger secildi (tutarlilik); ust sinir tek yanitin buyumesine tavan koyar.
+        // Gerekcenin tamami GetList uzerinde.
+        public const int AdminListeVarsayilanBoyut = 100;
+        public const int AdminListeUstSinir = 200;
+
         private readonly IProductDal _productDal;
         private readonly IProductStockDal _productStockDal;
         private readonly IProductReviewDal _productReviewDal;
@@ -291,17 +297,60 @@ namespace Divisima.Bussiness.Concrete
         }
 
         // Açıklayıcı yorum: Tüm aktif ürünler (admin liste).
-        public async Task<(HttpStatusCode, Result)> GetList()
+        // ══ DALGA-3-FIX (P3) - ADMIN LISTESI ARTIK SAYFALI ════════════════════════════════
+        //
+        // ONCEKI HALI: parametresiz `GetListAsync(p => p.is_active)` - AKTIF TUM URUNLER tek
+        // yanitta. OLCULDU: 62 urunle 17.094 bayt, sayfalama parametresi YOK (`?page=1&size=1`
+        // gonderildi, donen kalem sayisi DEGISMEDI). 10.000 urunte ~2,7 MB yanit ve tum tablo
+        // bellege. Storefront yolu (`GetListSearchAndFilterWithPaging`) ZATEN sayfaliydi;
+        // yalniz admin yolu ayrisiyordu.
+        //
+        // SOZLESME STOREFRONT DESENIYLE AYNI: `ProductPagingListResponseDto`
+        // (items + total_count + page + size + total_pages). Boylece admin de "kac urun var"
+        // bilgisini GORUR - onceden dizinin uzunlugundan baska bir sey yoktu ve kirpilma
+        // sessiz olurdu.
+        //
+        // GERIYE DONUK UYUM (kullanicinin SARTI): mevcut admin paneli `api.products.list()`
+        // cagirip DIZI bekliyor (admin.html 189/345/440 - `unwrap(...) || []`). Panel
+        // DEGISMEDI; uyumu ISTEMCI ADAPTORU sagliyor - `api-client.js` icindeki `list()`
+        // zarfi acip `items` dizisini donduruyor ve `total_count > items.length` ise
+        // KONSOLA UYARI yaziyor. Yani kirpilma HICBIR ZAMAN SESSIZ DEGIL. Tam zarfa ihtiyaci
+        // olan (ileride sayfalama arayuzu) `listPaged()` kullanir.
+        //
+        // VARSAYILAN SAYFA BOYUTU 100: storefront yolunun UST SINIRI ile ayni deger. Bugunku
+        // katalogda (62 urun) panel davranisi AYNEN korunuyor - yani "parametresiz cagri
+        // mevcut paneli kirmaz" sarti bugun fiilen, yarin da uyari kanaliyla saglaniyor.
+        // Ust sinir 200: tek yanitin buyumesine tavan koyar, sayfalama arayuzu gelene kadar
+        // operatorun elini baglamaz.
+        public async Task<(HttpStatusCode, Result)> GetList(int page = 1, int size = AdminListeVarsayilanBoyut)
         {
-            var products = await _productDal.GetListAsync(p => p.is_active);
-            var data = _mapper.Map<List<ProductListResponseDto>>(products);
+            // Storefront yolundaki clamp'in AYNISI (page<=0 -> Skip negatif; size=0 -> sifira
+            // bolme; size cok buyuk -> tum tablo/DoS).
+            page = page < 1 ? 1 : page;
+            size = size < 1 ? AdminListeVarsayilanBoyut : (size > AdminListeUstSinir ? AdminListeUstSinir : size);
+
+            var tumu = await _productDal.GetListAsync(p => p.is_active);
+            var toplam = tumu.Count;
+            var sayfa = tumu.OrderByDescending(p => p.id).Skip((page - 1) * size).Take(size).ToList();
+
+            var data = _mapper.Map<List<ProductListResponseDto>>(sayfa);
 
             // SPRINT 8 MADDE 5: bedenler ARTIK ortak yardimcidan - kategori adi ve toplam stok da
             // burada doluyor. Onceden yalniz "sizes" doldurulurdu ve storefront yolu HICBIRINI
             // doldurmuyordu; iki yol ayrisiyordu. Tek yardimci, bir daha ayrisamazlar.
+            // ZENGINLESTIRME ARTIK YALNIZ SAYFAYA uygulaniyor - tum tabloya degil.
             await ListeyiZenginlestirAsync(data);
 
-            return (HttpStatusCode.OK, new SuccessDataResult<List<ProductListResponseDto>>(data, Messages.ProductListed));
+            var paged = new ProductPagingListResponseDto
+            {
+                items = data,
+                total_count = toplam,
+                page = page,
+                size = size,
+                total_pages = (int)Math.Ceiling(toplam / (double)size)
+            };
+
+            return (HttpStatusCode.OK, new SuccessDataResult<ProductPagingListResponseDto>(paged, Messages.ProductListed));
         }
 
         // Açıklayıcı yorum: Filtre + sıralama + sayfalama (storefront). Filtreleme DataAccess'te (PredicateBuilder).

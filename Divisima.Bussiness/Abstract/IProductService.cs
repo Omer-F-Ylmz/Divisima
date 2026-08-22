@@ -24,7 +24,9 @@ namespace Divisima.Bussiness.Abstract
         Task<(HttpStatusCode, Result)> GetById(int id);
 
         // Açıklayıcı yorum: Tüm aktif ürünleri listele
-        Task<(HttpStatusCode, Result)> GetList();
+        // DALGA-3-FIX (P3): admin listesi sayfali. Parametresiz cagri ESKISI GIBI derlenir
+        // (varsayilanlar); yanit sozlesmesi storefront deseniyle ayni zarfa gecti.
+        Task<(HttpStatusCode, Result)> GetList(int page = 1, int size = 100);
 
         // Açıklayıcı yorum: Filtre + sıralama + sayfalama ile ürün listesi (public storefront)
         Task<(HttpStatusCode, Result)> GetListSearchAndFilterWithPaging(ProductFilterRequestDto dto);

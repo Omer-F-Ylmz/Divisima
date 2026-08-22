@@ -270,7 +270,27 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("DivisimaFrontend", policy =>
         policy.WithOrigins(builder.Configuration.GetSection("AllowedOrigins").Get<string[]>() ?? new[] { "https://divisima.com" })
-              .AllowAnyHeader().AllowAnyMethod().AllowCredentials());
+              .AllowAnyHeader().AllowAnyMethod().AllowCredentials()
+              // ══ DALGA-3-FIX (P1) - PREFLIGHT ONBELLEGI ═══════════════════════════════════
+              //
+              // Storefront ile API AYRI ORIGIN'lerde (divisima.com <-> api.divisima.com) ve her
+              // korumali cagri `Authorization` basligi tasidigi icin BASIT ISTEK degildir:
+              // tarayici once OPTIONS preflight gonderir. `Access-Control-Max-Age` YOKKEN bu
+              // yanit ancak tarayicinin KISA varsayilani kadar onbelleklenir.
+              //
+              // OLCULDU (Chrome, gercek gezinti): Max-Age YOKKEN 24 saniyede 12 kimlikli istek
+              // -> 4 OPTIONS. Bir hesap gezintisinde 34 istegin 15'i preflight'ti (trafigin %44'u).
+              // 100 ms RTT'li mobil baglantida bu, saf ek yuk olarak saniyeler demek.
+              //
+              // NEDEN 10 DAKIKA (600 sn) - daha buyugu DEGIL:
+              // Tarayicilar bu degeri KENDI UST SINIRLARINA kirpar; bilinen tavanlar farkli
+              // (WebKit/Safari en dusuk tavana sahip, ~600 sn; Chromium ve Firefox daha yuksek).
+              // 600 sn, BUTUN yaygin tarayicilarin TAM OLARAK uyguladigi en buyuk ortak degerdir:
+              // daha buyuk bir sayi Safari'de sessizce kirpilir, yani kagit uzerinde kalir.
+              // Ayrica CORS politikasi degistiginde eski izin en fazla 10 dakika yasar - guvenlik
+              // tarafinda makul bir tazelenme penceresi. (Tarayici tavanlari BU DALGADA
+              // OLCULMEDI; olculen sey Chrome'da preflight sayisinin 4 -> 1'e dusmesidir.
+              .SetPreflightMaxAge(TimeSpan.FromMinutes(10)));
 });
 
 // B6: Rate limiting

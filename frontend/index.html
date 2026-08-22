@@ -24,7 +24,16 @@
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0Ij4KICA8cmVjdCB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHJ4PSIxNCIgZmlsbD0iIzJiMjcyNCIvPgogIDx0ZXh0IHg9IjMyIiB5PSIzMyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZG9taW5hbnQtYmFzZWxpbmU9ImNlbnRyYWwiCiAgICAgICAgZm9udC1mYW1pbHk9IkFyaWFsLCBIZWx2ZXRpY2EsIHNhbnMtc2VyaWYiIGZvbnQtd2VpZ2h0PSI4MDAiIGZvbnQtc2l6ZT0iMjMiIGxldHRlci1zcGFjaW5nPSIwLjUiPgogICAgPHRzcGFuIGZpbGw9IiNmNWVkZTMiPkQ8L3RzcGFuPjx0c3BhbiBmaWxsPSIjZTIzNzQ4Ij5WPC90c3Bhbj48dHNwYW4gZmlsbD0iI2Y1ZWRlMyI+UzwvdHNwYW4+CiAgPC90ZXh0Pgo8L3N2Zz4K">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<!-- DALGA-3-FIX (P2b): FONT STYLESHEET'I ARTIK RENDER BLOKLAMIYOR.
+     Onceki hali duz <link rel="stylesheet"> idi: tarayici bu DIS istegi TAMAMLANANA KADAR
+     sayfayi cizmiyordu (olculdu: 661 ms). URL'deki display=swap yalniz FOIT'i cozer, CSS'in
+     KENDISININ bloklamasini DEGIL.
+     DESEN: media="print" ile getir (bloklamaz), yuklenince media'yi "all" yap. <noscript>
+     yedegi JS kapaliyken eski davranisi korur. CSP UYUMLU: sayfanin script-src'sinde
+     'unsafe-inline' + 'unsafe-hashes' var, satir ici onload calisir (olculdu).
+     preconnect satirlari YERINDE KALDI - bagalanti kurulumu yine erken basliyor. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" media="print" onload="this.media='all';this.onload=null">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap"></noscript>
 <style>*{-webkit-tap-highlight-color:transparent!important}html{-webkit-tap-highlight-color:transparent}a,button,.btn,.pill,.card,.chip,.mnav-item,.iconbtn,.lang-opt,.swatch,[role="button"],[onclick]{-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
 a,button,input,select,textarea,label,summary,[role="button"],[onclick],.btn,.pill,.card,.mnav-item,.chip,.qty-btn,.swatch,.thumb{touch-action:manipulation}
 
@@ -1896,7 +1905,12 @@ function renderCatGrid(){
   var list=catBase().filter(passFilters);
   list=sortList(list,catState.sort);
   var shown=Math.min(catState.shown,list.length),page=list.slice(0,shown);
-  document.getElementById('catGrid').innerHTML=list.length?page.map(cardHTML).join(''):'<p style="grid-column:1/-1;text-align:center;color:#8c8178;padding:48px 0">'+t('no_filter')+'</p>';
+  /* DALGA-3-FIX (P5): catGrid GUARD'SIZDI - kardes aramalar (if(lm), if(cc)) guard'liydi, bu degil.
+     Ana sayfada catGrid ELEMANI YOK; katalog yuklendiginde api-bridge renderCatGrid'i cagiriyor ve
+     her ana sayfa yuklemesinde "Cannot set properties of null" atiyordu. Kopru yakaliyordu (gorsel
+     hasar yok) ama konsolu kirletip GERCEK hatalari maskeliyordu. Desen kardesleriyle ayni. */
+  var cg=document.getElementById('catGrid');
+  if(cg)cg.innerHTML=list.length?page.map(cardHTML).join(''):'<p style="grid-column:1/-1;text-align:center;color:#8c8178;padding:48px 0">'+t('no_filter')+'</p>';
   var lm=document.getElementById('loadMoreWrap');
   if(lm){var rem=list.length-shown;lm.innerHTML=rem>0?'<button class="load-more" id="loadMoreBtn">'+t('load_more')+' ('+rem+')</button>':'';var lb=document.getElementById('loadMoreBtn');if(lb)lb.onclick=function(){catState.shown+=12;renderCatGrid();};}
   var cc=document.getElementById('catCount');if(cc)cc.textContent=list.length+' '+t('count_suffix');
@@ -3033,10 +3047,20 @@ if(!lsGet('dvs_nl')){setTimeout(function(){var dm=document.getElementById('modal
 <script>window.DIVISIMA_API_BASE="http://localhost:5000";</script>
 <!-- E3: okuma katmani sanitizasyonu (iki katmanli savunmanin ikinci ayagi). api-bridge.js icindeki
      guvenliHTML() bunu kullandigi icin BRIDGE'TEN ONCE yuklenir. Surum/kaynak/SHA-256: frontend/vendor/README.txt -->
-<script src="/vendor/purify.min.js"></script>
-<script src="/api-client.js"></script>
-<script src="/api-bridge.js"></script>
-<script src="/pwa-register.js"></script>
+<!-- DALGA-3-FIX (P2a): DORT HARICI SCRIPT'E defer.
+     Onceki hali defer/async'siz: parser buraya GELENE KADAR indirilmiyorlar, geldiginde de
+     parser DURUYOR. defer ile (a) belge ayristirilirken PARALEL indiriliyorlar, (b) ayristirma
+     bitince SIRAYLA calisiyorlar - defer sirayi KORUR, bu yuzden api-client -> api-bridge
+     bagimliligi bozulmaz.
+     BAGIMLILIK KONTROL EDILDI: index.html'in satir ici kodu DivisimaAPI/divisimaApi'ye HIC
+     dokunmuyor (tarandi) ve bu etiketlerden SONRAKI tek satir ici blok (analytics) da onlara
+     bagli degil. api-bridge zaten belge hazir olduktan sonra calismayi bekliyordu; defer bunu
+     GARANTI ediyor.
+     INLINE 704 KB script / 142 KB style'a DOKUNULMADI - bolmek AYRI bir is (launch sonrasi defteri). -->
+<script src="/vendor/purify.min.js" defer></script>
+<script src="/api-client.js" defer></script>
+<script src="/api-bridge.js" defer></script>
+<script src="/pwa-register.js" defer></script>
 <!-- divisima-analytics: GA4 + Meta Pixel (ID'leri kendi hesabınla değiştir; boşsa devre dışı) -->
 <script>
 (function(){
