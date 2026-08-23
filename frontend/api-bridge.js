@@ -1286,12 +1286,32 @@
         cizelge = '<p class="muted">Takip bilgisi alınamadı.</p>';
       }
 
+      // ══ DALGA B / B4 - KARGO TAKIP NUMARASI MUSTERIYE GOSTERILIR ═════════════════════
+      // OLCULEN ONCE-DURUM: admin panele kargo firmasi + takip numarasi giriyor, siparis
+      // "Kargoda" oluyor - ama musteri o numarayi HICBIR YERDE goremiyordu. Siparis detay
+      // DTO'sunda kargo alani YOK ve storefront `shipment.track` ucunu HIC cagirmiyordu
+      // (index.html 0, api-bridge 0 referans - tarandi). Kargo firmasi entegrasyonu yok ve
+      // olmayacak (is karari), yani elle girilen bu numara musterinin paketini takip
+      // edebilmesinin TEK yolu.
+      //
+      // AYRI CAGRI, AYRI try: kargo kaydi YOKSA uc 404 doner - bu NORMAL bir durumdur
+      // (henuz kargolanmamis siparis) ve detay ekranini bozmamalidir. Blok o zaman hic cizilmez.
+      var kargoBlok = "";
+      try {
+        var kg = unwrap(await api.shipment.track(orderId));
+        if (kg && kg.tracking_number) {
+          kargoBlok = '<div class="od-row"><div class="od-info"><b>Kargo</b><span>' +
+            esc(kg.carrier_name || "") + " · Takip no: " + esc(kg.tracking_number) +
+            (kg.status_name ? " · " + esc(kg.status_name) : "") + "</span></div></div>";
+        }
+      } catch (_) { kargoBlok = ""; }
+
       var uygun = iadeUygunlugu({ order_status: d.order_status, delivered_at: d.delivered_at, created_at: d.created_at });
       var iadeBlok = uygun.uygun
         ? '<button class="ao-btn primary" data-iade-ac="' + orderId + '">İade talebi oluştur</button>'
         : '<p class="muted" style="margin:8px 0 0">' + esc(uygun.sebep) + "</p>";
 
-      kutu.innerHTML = cizelge + satirlar +
+      kutu.innerHTML = cizelge + kargoBlok + satirlar +
         '<div class="od-sum"><span>Toplam</span><b>' + paraTL(d.total) + "</b></div>" +
         '<div class="ao-actions" style="margin-top:10px">' +
         '<button class="ao-btn" data-fatura="' + orderId + '">Faturayı görüntüle</button>' + iadeBlok + "</div>";

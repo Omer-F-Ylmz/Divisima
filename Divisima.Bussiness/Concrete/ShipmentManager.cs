@@ -68,7 +68,12 @@ namespace Divisima.Bussiness.Concrete
             // Yoksa müşteri sipariş takibinde "Kargoya verildi" adımını göremezdi (timeline eksik kalırdı).
             await _statusHistory.RecordAsync(order.id, (byte)OrderStatusEnum.Shipped, "Kargoya verildi");
             // TUTARLILIK: müşteriye "kargoya verildi" bildirimi (merkezi servis - ChangeOrderStatus ile aynı; onceden ATLANIYORDU).
-            await _orderNotificationService.NotifyStatusChangeAsync(order, OrderStatusEnum.Shipped);
+            // DALGA B / B4: TAKIP NUMARASI DA GECILIYOR. Kargo firmasi entegrasyonu yok (is karari), yani
+            // musterinin paketini takip edebilmesinin TEK yolu adminin elle girdigi bu numaradir; onceden
+            // bildirim mesajlarinin hicbirinde YER ALMIYORDU. Bu numarayi bilen tek yer burasi -
+            // ChangeOrderStatus kargo kaydini gormez, oradan null gecer.
+            await _orderNotificationService.NotifyStatusChangeAsync(order, OrderStatusEnum.Shipped,
+                FirmaAdi(dto.carrier), dto.tracking_number);
 
             return (HttpStatusCode.OK, new SuccessResult(Messages.ShipmentCreated));
         }
@@ -135,15 +140,40 @@ namespace Divisima.Bussiness.Concrete
             return (HttpStatusCode.OK, new SuccessDataResult<ShipmentResponseDto>(Map(shipment)));
         }
 
+        // ══ DALGA B / B4 - GORUNTU ADLARI ══════════════════════════════════════════════════
+        // OLCULEN ONCE-DURUM: carrier_name ve status_name ham ENUM ADI donuyordu. Admin panelinde
+        // kargo sorgusu "Preparing" yaziyordu; e-postaya konsa musteri "Mng"/"Ptt"/"Surat" gorurdu.
+        // Bunlar KIMLIK degil GORUNTU dizgeleridir (CLAUDE.md bolum 6c) - Turkce dogru olandir.
+        // Programatik kullanim icin DTO zaten `carrier` ve `status` byte'larini tasiyor.
+        private static readonly Dictionary<byte, string> KargoFirmaAdi = new()
+        {
+            [(byte)CarrierEnum.Yurtici] = "Yurtiçi Kargo",
+            [(byte)CarrierEnum.Aras] = "Aras Kargo",
+            [(byte)CarrierEnum.Mng] = "MNG Kargo",
+            [(byte)CarrierEnum.Ptt] = "PTT Kargo",
+            [(byte)CarrierEnum.Surat] = "Sürat Kargo"
+        };
+        private static readonly Dictionary<byte, string> KargoDurumAdi = new()
+        {
+            [(byte)ShipmentStatusEnum.Preparing] = "Hazırlanıyor",
+            [(byte)ShipmentStatusEnum.InTransit] = "Yolda",
+            [(byte)ShipmentStatusEnum.OutForDelivery] = "Dağıtımda",
+            [(byte)ShipmentStatusEnum.Delivered] = "Teslim edildi",
+            [(byte)ShipmentStatusEnum.Returned] = "İadede"
+        };
+        // Tanimsiz bir deger gelirse ham enum adina duser - UYDURMA etiket yazilmaz.
+        internal static string FirmaAdi(byte c) => KargoFirmaAdi.TryGetValue(c, out var v) ? v : ((CarrierEnum)c).ToString();
+        private static string DurumAdi(byte s) => KargoDurumAdi.TryGetValue(s, out var v) ? v : ((ShipmentStatusEnum)s).ToString();
+
         private static ShipmentResponseDto Map(Shipment s) => new()
         {
             id = s.id,
             order_id = s.order_id,
             carrier = s.carrier,
-            carrier_name = ((CarrierEnum)s.carrier).ToString(),
+            carrier_name = FirmaAdi(s.carrier),
             tracking_number = s.tracking_number,
             status = s.status,
-            status_name = ((ShipmentStatusEnum)s.status).ToString(),
+            status_name = DurumAdi(s.status),
             last_status_text = s.last_status_text,
             shipped_at = s.shipped_at,
             estimated_delivery = s.estimated_delivery,

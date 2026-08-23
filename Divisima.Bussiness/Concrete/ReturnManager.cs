@@ -33,9 +33,14 @@ namespace Divisima.Bussiness.Concrete
         private readonly IStoreCreditTransactionDal _creditTxDal;
         private readonly IUnitOfWork _unitOfWork;
 
+        // DALGA B / B3: iade sonucunu musteriye bildirmek icin.
+        private readonly Divisima.Bussiness.Outbox.IOutboxService _outboxService;
+        private readonly Divisima.Core.Utilities.Mail.IMailLinkBuilder _links;
+
         public ReturnManager(IReturnRequestDal returnDal, IOrderDal orderDal, IOrderItemDal orderItemDal, IIyzicoClient iyzico, IStockService stockService,
             ICustomerDal customerDal, IStoreCreditTransactionDal creditTxDal, IUnitOfWork unitOfWork, IRefundService refundService,
-            IProductDal productDal)
+            IProductDal productDal, Divisima.Bussiness.Outbox.IOutboxService outboxService,
+            Divisima.Core.Utilities.Mail.IMailLinkBuilder links)
         {
             _productDal = productDal;
             _returnDal = returnDal;
@@ -47,6 +52,8 @@ namespace Divisima.Bussiness.Concrete
             _customerDal = customerDal;
             _creditTxDal = creditTxDal;
             _unitOfWork = unitOfWork;
+            _outboxService = outboxService;
+            _links = links;
         }
 
         public async Task<(HttpStatusCode, Result)> CreateReturn(ReturnCreateRequestDto dto)
@@ -123,6 +130,9 @@ namespace Divisima.Bussiness.Concrete
                 ret.admin_note = InputSanitizer.Sanitize(dto.admin_note ?? "");
                 ret.processed_at = DateTime.Now;
                 await _returnDal.UpdateAsync(ret);
+                // DALGA B / B3: SIRA ONEMLI - once KALICI olsun, sonra bildir. Tersi olsaydi
+                // kaydedilemeyen bir ret icin musteriye "iaden reddedildi" maili gidebilirdi.
+                await IadeSonucuMailiYazAsync(ret, onaylandi: false, sonuc: null);
                 return (HttpStatusCode.OK, new SuccessResult(Messages.ReturnRejected));
             }
 
@@ -169,6 +179,11 @@ namespace Divisima.Bussiness.Concrete
                 ret.processed_at = DateTime.Now;
                 await _returnDal.UpdateAsync(ret);
 
+                // DALGA B / B3: bildirim mesaji TRANSACTION ICINDE yaziliyor (Sprint 8 madde 3 kalibi).
+                // Boylece rollback olursa mail de yazilmamis olur - "iaden onaylandi, para iade edildi"
+                // maili alip iadesi geri alinmis bir musteri OLUSAMAZ.
+                await IadeSonucuMailiYazAsync(ret, onaylandi: true, sonuc: refundOutcome);
+
                 await _unitOfWork.CommitAsync();
                 return (HttpStatusCode.OK, new SuccessResult(Messages.ReturnApproved));
             }
@@ -177,6 +192,63 @@ namespace Divisima.Bussiness.Concrete
                 await _unitOfWork.RollbackAsync();
                 return (HttpStatusCode.InternalServerError, new ErrorResult(Messages.ReturnProcessingError));
             }
+        }
+
+        // ══ DALGA B / B3 - IADE SONUCU MUSTERIYE BILDIRILIR ═══════════════════════════════
+        // OLCULEN ONCE-DURUM: bu dosyada mail / outbox / bildirim SIFIR referanstı (tarandi).
+        // Admin iadeyi onaylayip 499,90 TL magaza kredisi yazsa da, ya da reddetse de musteriye
+        // HICBIR SEY gitmiyordu; ogrenmesinin tek yolu Hesabim > Iadelerim'i acmakti. Iadenin
+        // sonucu, musterinin talebi actiktan sonra BEKLEDIGI tek seydir.
+        //
+        // KANAL: Dalga A'nin kurdugu "EmailNotification" outbox tipi. SMTP patlarsa iade akisi
+        // DUSMEZ (mesaj 5 kez yeniden denenir, sonra Failed olarak GORUNUR).
+        //
+        // TUTAR NEREYE GITTI SORUSU UYDURULMUYOR: RefundOutcome zaten OnlineRefunded /
+        // CreditRefunded ayrimini tasiyor. Kartla odenmis siparisin iadesi karta, kapida
+        // odenmisinki magaza kredisine gider ve musteriye HANGISI oldugu yazilir - "iade edildi"
+        // deyip nereye gittigini soylememek, parasini kartinda arayan musteri uretir.
+        //
+        // TRY/CATCH YOK - BILINCLI: buradaki tek is iki salt-okur sorgu ve bir outbox satiri.
+        // Onay yolunda cagri transaction'in ICINDEDIR; oradaki bir DB hatasi zaten TUM iadeyi
+        // geri almalidir (mevcut catch/rollback dali bunu yapar). Hatayi burada yutmak,
+        // "para iade edildi ama kayit yok" durumunu sessizlestirmek olurdu.
+        private async Task IadeSonucuMailiYazAsync(ReturnRequest ret, bool onaylandi, RefundOutcome? sonuc)
+        {
+            var musteri = await _customerDal.GetAsync(c => c.id == ret.customer_id);
+            if (musteri == null || string.IsNullOrWhiteSpace(musteri.email)) return;   // adres yoksa gonderilecek bir sey de yok
+
+            var urun = await _productDal.GetAsync(p => p.id == ret.product_id);
+            // Urun pasiflenmis/silinmisse UYDURMA ad yazilmaz - kimlikle gosterilir (ZenginlestirAsync ile ayni kural).
+            var urunAdi = string.IsNullOrWhiteSpace(urun?.name) ? $"Ürün #{ret.product_id}" : urun!.name;
+            var kalem = $"{urunAdi} · {ret.size} · {ret.quantity} adet";
+
+            var baglanti = _links.VitrinBaglantisi("#/hesabim/iadelerim");
+            var yonerge = baglanti == null
+                ? "Ayrıntı için Hesabım > İadelerim sayfasına bakabilirsin."      // origin yoksa yarim URL URETILMEZ
+                : $"Ayrıntı için:\n{baglanti}";
+
+            string konu, govde;
+            if (onaylandi)
+            {
+                // Tutarlar kultur PINLI bicimle (Sprint 8 madde 13) - surec zaten tr-TR'ye pinli.
+                var nereye = (sonuc != null && sonuc.OnlineRefunded > 0 && sonuc.CreditRefunded > 0)
+                    ? $"{sonuc.OnlineRefunded:N2} TL ödeme yaptığın karta, {sonuc.CreditRefunded:N2} TL mağaza kredine yatırıldı."
+                    : (sonuc != null && sonuc.OnlineRefunded > 0)
+                        ? $"{sonuc.OnlineRefunded:N2} TL ödeme yaptığın karta iade edildi. Bankana bağlı olarak hesabına geçmesi birkaç iş günü sürebilir."
+                        : $"{(sonuc != null ? sonuc.CreditRefunded : ret.refund_amount):N2} TL mağaza kredine yatırıldı; sonraki siparişinde kullanabilirsin.";
+
+                konu = "Divisima - İade talebin onaylandı";
+                govde = $"Merhaba {musteri.name},\n\nİade talebin onaylandı.\n{kalem}\n\n{nereye}\n\n{yonerge}";
+            }
+            else
+            {
+                var not = string.IsNullOrWhiteSpace(ret.admin_note) ? "" : $"\nDeğerlendirme notu: {ret.admin_note}\n";
+                konu = "Divisima - İade talebin hakkında";
+                govde = $"Merhaba {musteri.name},\n\nİade talebin değerlendirildi ve onaylanmadı.\n{kalem}\n{not}\nBu sonuçla ilgili sorun varsa bize yanıt yazabilirsin.\n\n{yonerge}";
+            }
+
+            await _outboxService.WriteAsync("EmailNotification",
+                new Divisima.Core.Utilities.Mail.MailMessageDto { To = musteri.email, Subject = konu, Body = govde });
         }
 
         public async Task<(HttpStatusCode, Result)> GetMyReturns(int customerId)

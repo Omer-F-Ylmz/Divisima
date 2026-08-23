@@ -187,8 +187,13 @@ async function render(view){
     else if(view==="stock") await renderStock(el);
     else if(view==="images") await renderImages(el);
   }catch(e){
-    el.innerHTML='<div class="panel"><p class="muted">Veri alınamadı: '+(e.message||"hata")+'</p></div>';
-    if(e.status===401){toast("Oturum sona erdi",true);setTimeout(()=>location.reload(),1500);}
+    el.innerHTML='<div class="panel"><p class="muted">Veri alınamadı: '+esc(e.message||"hata")+'</p></div>';
+    // DALGA B / B2: 403 DALI EKLENDI. Once yalniz 401 tanınıyordu; bayat ya da baska bir
+    // hesaba ait bir token localStorage'da kaldiginda uclar 403 doner ve panel "Veri
+    // alinamadi" yazip KILITLI kalirdi - kullanicinin cikis yapmasi gerektigini soyleyen
+    // hicbir sey yoktu (bu oturumda birebir yasandi). Iki durum da ayni sey demek:
+    // elindeki token bu panel icin GECERSIZ.
+    if(e.status===401||e.status===403){toast("Oturum geçersiz - yeniden giriş gerekiyor",true);api.setAccessToken(null);setTimeout(()=>location.reload(),1800);}
   }
 }
 
@@ -235,30 +240,129 @@ async function renderProducts(el){
   el.innerHTML=`
     <div class="topbar"><h2>Ürünler (${products.length})</h2><button class="btn" onclick="productForm()">+ Yeni Ürün</button></div>
     <div class="panel"><table><thead><tr><th>ID</th><th>Ad</th><th>Marka</th><th>Fiyat</th><th></th></tr></thead><tbody>
-      ${products.map(p=>`<tr><td>${p.id}</td><td>${p.name}</td><td class=muted>${p.brand||"-"}</td><td>${money(p.price)}</td>
-        <td class=row-actions><button class="btn ghost sm" onclick='productForm(${JSON.stringify(p).replace(/'/g,"&#39;")})'>Düzenle</button>
+      ${products.map(p=>`<tr><td>${p.id}</td><td>${esc(p.name)}</td><td class=muted>${esc(p.brand||"-")}</td><td>${money(p.price)}</td>
+        <td class=row-actions><button class="btn ghost sm" onclick="productForm({id:${p.id}})">Düzenle</button>
         <button class="btn danger sm" onclick="delProduct(${p.id})">Sil</button></td></tr>`).join("")}
     </tbody></table></div>`;
 }
-function productForm(p){
-  p=p||{};const edit=!!p.id;
+// DALGA B / B2 - URUN FORMU: EKLEME VE GUNCELLEME IKISI DE OLUYDU.
+//
+// OLCULEN ONCE-DURUM (canli, panelden): "Kaydet" -> operatore ham cerceve mesaji
+// "The stocks field is required." dusuyordu ve formda O ALAN YOKTU. Ikinci deneme
+// (stocks:[] ile) "The color_hex field is required." dedi. Yani panelden urun eklemek
+// ya da duzenlemek MUMKUN DEGILDI - zorunlu iki alan (stocks, color_hex) forma hic
+// konmamisti. B1 ile ayni sinif: panelin gonderdigi govde DTO ile ortusmuyor.
+//
+// GUNCELLEMEDE SESSIZ VERI KAYBI - AYRI VE DAHA AGIR BIR TUZAK:
+// ProductManager.Update TAM-VARLIK map yapar (_mapper.Map(dto, product)). Yani
+// ProductUpdateRequestDto'da BULUNAN ama gonderilmeyen her alan varsayilanina (null/0)
+// duser ve MEVCUT DEGERI EZER. Eski form yalniz 5 alan gonderiyordu; calissaydi bile
+// old_price / sale_price / sub_category_id SILINIR, product_type sessizce Clothing'e
+// donerdi. Ustelik Update "if (dto.stocks != null)" ile TUM beden satirlarini pasifleyip
+// gelenleri yeniden yazar - bos bir liste gondermek URUNUN TUM STOGUNU SIFIRLARDI.
+// Bu yuzden DUZENLEME formu artik urunun GERCEK guncel halini detay ucundan yukler ve
+// hepsini geri gonderir; hicbir alan "gonderilmedigi icin" kaybolmaz.
+//
+// URUN TIPI de KUPON TIPIYLE AYNI SINIF: detay ucu ENUM ADI (metin) doner
+// (ProductProfile: ((ProductTypeEnum)src.product_type).ToString()), ekleme/guncelleme ucu
+// SAYI bekler. Iki gosterimi de taniyan tek merkez:
+const URUN_TIPI_KOD={"0":0,"Clothing":0,"1":1,"Accessory":1};
+function urunTipiKodu(t){const k=URUN_TIPI_KOD[String(t)];return k===undefined?0:k;}
+
+let urunStokSatirlari=[];   // [{size, stock_quantity}] - forma ozel gecici durum
+
+function stokSatirlariniCiz(){
+  const kutu=document.getElementById("p_stocks");
+  if(!kutu)return;
+  kutu.innerHTML=urunStokSatirlari.map((s,i)=>`<div class="grid2" style="margin-bottom:8px">
+      <label class="f"><span>Beden</span><input value="${esc(s.size)}" oninput="urunStokSatirlari[${i}].size=this.value"></label>
+      <label class="f"><span>Adet</span><input type="number" step="1" min="0" value="${Number(s.stock_quantity)||0}" oninput="urunStokSatirlari[${i}].stock_quantity=parseInt(this.value)||0"></label>
+    </div>`).join("")
+    +`<button class="btn ghost sm" type="button" onclick="urunStokSatirlari.push({size:'',stock_quantity:0});stokSatirlariniCiz()">+ Beden ekle</button>`
+    +(urunStokSatirlari.length>1?` <button class="btn ghost sm" type="button" onclick="urunStokSatirlari.pop();stokSatirlariniCiz()">− Son bedeni kaldır</button>`:"");
+}
+
+async function productForm(pListe){
   const el=document.getElementById("views");
-  el.innerHTML=`<div class="topbar"><h2>${edit?"Ürün Düzenle":"Yeni Ürün"}</h2><button class="btn ghost sm" onclick="render('products')">← Geri</button></div>
-    <div class="panel" style="max-width:560px">
-      <label class="f"><span>Ürün Adı</span><input id="p_name" value="${p.name||""}"></label>
-      <label class="f"><span>Marka</span><input id="p_brand" value="${p.brand||""}"></label>
+  el.innerHTML='<p class="muted">Yükleniyor…</p>';
+  const duzenle=!!(pListe&&pListe.id);
+  let p={};
+  try{
+    // DUZENLEMEDE GERCEK GUNCEL HALI YUKLE. Liste ogesi yetmez: description, sale_price,
+    // sub_category_id, product_type ve beden/stok LISTE DTO'sunda YOK - eksik gonderilen
+    // her alan Update'te MEVCUT DEGERI EZER (yukaridaki tuzak).
+    p = duzenle ? (unwrap(await api.products.get(pListe.id))||{}) : {};
+  }catch(e){ el.innerHTML='<div class="panel"><p class="muted">Ürün yüklenemedi: '+esc(e.message||"hata")+'</p></div>'; return; }
+
+  let kategoriler=[];
+  try{ kategoriler=unwrap(await api.categories.list())||[]; }catch(_){ kategoriler=[]; }
+
+  urunStokSatirlari = (p.stocks&&p.stocks.length)
+    ? p.stocks.map(s=>({size:s.size,stock_quantity:s.stock_quantity}))
+    : [{size:"S",stock_quantity:0},{size:"M",stock_quantity:0},{size:"L",stock_quantity:0}];
+
+  const tipKod = duzenle ? urunTipiKodu(p.product_type) : 0;
+  el.innerHTML=`<div class="topbar"><h2>${duzenle?"Ürün Düzenle":"Yeni Ürün"}</h2><button class="btn ghost sm" onclick="render('products')">← Geri</button></div>
+    <div class="panel" style="max-width:640px">
+      <label class="f"><span>Ürün Adı</span><input id="p_name" value="${esc(p.name||"")}"></label>
+      <label class="f"><span>Marka</span><input id="p_brand" value="${esc(p.brand||"")}"></label>
       <div class="grid2">
         <label class="f"><span>Fiyat (₺)</span><input id="p_price" type="number" step="0.01" value="${p.price||""}"></label>
-        <label class="f"><span>Kategori ID</span><input id="p_cat" type="number" value="${p.category_id||""}"></label>
+        <label class="f"><span>Kategori</span><select id="p_cat">
+          ${kategoriler.length
+            ? kategoriler.map(k=>`<option value="${k.id}"${Number(p.category_id)===Number(k.id)?" selected":""}>#${k.id} · ${esc(k.name)}</option>`).join("")
+            : `<option value="${p.category_id||""}">Kategori listesi alınamadı — mevcut: ${p.category_id||"yok"}</option>`}
+        </select></label>
       </div>
-      <label class="f"><span>Açıklama</span><textarea id="p_desc" rows="3">${p.description||""}</textarea></label>
-      <button class="btn" onclick="saveProduct(${edit?p.id:"null"})">${edit?"Güncelle":"Kaydet"}</button>
+      <div class="grid2">
+        <label class="f"><span>İndirimli fiyat (₺, boş = indirim yok)</span><input id="p_sale" type="number" step="0.01" value="${p.sale_price!=null?p.sale_price:""}"></label>
+        <label class="f"><span>Üstü çizili fiyat (₺, boş = yok)</span><input id="p_old" type="number" step="0.01" value="${p.old_price!=null?p.old_price:""}"></label>
+      </div>
+      <div class="grid2">
+        <label class="f"><span>Renk (hex)</span><input id="p_color" placeholder="#2244aa" value="${esc(p.color_hex||"#000000")}"></label>
+        <label class="f"><span>Ürün Tipi</span><select id="p_type">
+          <option value="0"${tipKod===0?" selected":""}>Giysi (bedenli)</option>
+          <option value="1"${tipKod===1?" selected":""}>Aksesuar</option>
+        </select></label>
+      </div>
+      <label class="f"><span>Açıklama</span><textarea id="p_desc" rows="3">${esc(p.description||"")}</textarea></label>
+      <h3 style="margin:16px 0 10px">Beden / Stok</h3>
+      <div id="p_stocks"></div>
+      ${duzenle?'<p class="muted" style="margin-top:10px">Kaydedince beden listesi <b>tamamen bu tabloyla değiştirilir</b> — burada olmayan bir beden pasife alınır.</p>':""}
+      <button class="btn" style="margin-top:14px" onclick="saveProduct(${duzenle?p.id:"null"})">${duzenle?"Güncelle":"Kaydet"}</button>
     </div>`;
+  stokSatirlariniCiz();
 }
+
 async function saveProduct(id){
-  const payload={name:document.getElementById("p_name").value.trim(),brand:document.getElementById("p_brand").value.trim(),
-    price:parseFloat(document.getElementById("p_price").value),category_id:parseInt(document.getElementById("p_cat").value)||null,
-    description:document.getElementById("p_desc").value.trim()};
+  const renk=document.getElementById("p_color").value.trim();
+  const fiyat=parseFloat(document.getElementById("p_price").value);
+  const indirim=document.getElementById("p_sale").value.trim();
+  const ustu=document.getElementById("p_old").value.trim();
+  const bedenler=urunStokSatirlari.filter(s=>String(s.size||"").trim()!=="")
+                                  .map(s=>({size:String(s.size).trim(),stock_quantity:parseInt(s.stock_quantity)||0}));
+
+  // GIRIS KAPILARI - sunucu bu uc durumu da reddediyor; hatayi kullaniciya TURKCE ve
+  // duzeltilebilir sekilde burada soyluyoruz (once ham "The X field is required." dusuyordu).
+  if(!document.getElementById("p_name").value.trim()) return toast("Ürün adı girin",true);
+  if(!(fiyat>0)) return toast("Fiyat 0'dan büyük olmalı",true);
+  if(!/^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(renk)) return toast("Renk #RRGGBB biçiminde olmalı",true);
+  // BOS BEDEN LISTESI GONDERILMEZ: Update tum satirlari pasifleyip gelenleri yazar, yani
+  // bos liste URUNUN STOGUNU SIFIRLAR. Ekleme tarafinda da bedensiz urun satin ALINAMAZ.
+  if(!bedenler.length) return toast("En az bir beden/stok satırı gerekli",true);
+
+  const payload={
+    name:document.getElementById("p_name").value.trim(),
+    brand:document.getElementById("p_brand").value.trim(),
+    category_id:parseInt(document.getElementById("p_cat").value)||0,
+    price:fiyat,
+    sale_price:indirim===""?null:parseFloat(indirim),
+    old_price:ustu===""?null:parseFloat(ustu),
+    description:document.getElementById("p_desc").value.trim(),
+    color_hex:renk,
+    product_type:parseInt(document.getElementById("p_type").value)||0,
+    stocks:bedenler
+  };
   try{
     if(id){payload.id=id;await api.admin.updateProduct(payload);toast("Ürün güncellendi");}
     else{await api.admin.addProduct(payload);toast("Ürün eklendi");}
@@ -269,9 +373,18 @@ async function delProduct(id){if(!confirm("Ürün silinsin mi?"))return;try{awai
 
 // ── Siparişler ──
 async function renderOrders(el){
-  const res=unwrap(await api.admin.allOrders({page:1,page_size:50}).catch(()=>({Items:[]})));
-  const orders=(res&&res.Items)||[];
-  el.innerHTML=`<div class="topbar"><h2>Siparişler (${(res&&res.TotalCount)||orders.length})</h2><button class="btn ghost sm" onclick="render('orders')">↻</button></div>
+  // DALGA B / B2 - IKI KUSUR BIRDEN DUZELTILDI:
+  //  (1) ZARF ADLARI: panel "Items"/"TotalCount" okuyordu; uc { items, total_count, ... }
+  //      donuyor. Sonuc CANLI olculdu - veritabaninda 52 siparis varken bu ekran
+  //      "Siparisler (0) / Siparis yok" gosteriyordu, ustelik AYNI oturumda Panel sekmesi
+  //      "SIPARIS 52" diyordu. Operatorun gelen siparisi gorebildigi TEK liste bu.
+  //  (2) SESSIZ CATCH: ".catch(()=>({Items:[]}))" 401/403/500 dahil HER hatayi yutup BOS
+  //      TABLO ciziyordu - yani "hic siparis yok" ile "uc patladi" ayirt EDILEMIYORDU.
+  //      Catch kaldirildi; hata artik render()'in ortak hata daline dusuyor ve GORUNUYOR.
+  const res=unwrap(await api.admin.allOrders({page:1,page_size:50}));
+  const orders=(res&&res.items)||[];
+  const toplam=(res&&res.total_count!=null)?res.total_count:orders.length;
+  el.innerHTML=`<div class="topbar"><h2>Siparişler (${toplam})</h2><button class="btn ghost sm" onclick="render('orders')">↻</button></div>
     <div class="panel"><p class="muted" style="margin-bottom:14px">Sipariş no ile işlem: durum değiştir, fatura oluştur, kargo ekle.</p>
       <div class="grid2">
         <label class="f"><span>Sipariş ID</span><input id="o_id" type="number" placeholder="123"></label>
@@ -335,17 +448,43 @@ async function createShipment(){
 }
 async function queryShipment(){
   const id=parseInt(document.getElementById("s_q").value);if(!id)return;
-  try{const s=unwrap(await api.admin.shipmentByOrder(id));document.getElementById("s_result").innerHTML=`<div class="card"><b>${s.carrier_name}</b> — ${s.tracking_number}<br><span class="badge warn">${s.status_name}</span> ${s.last_status_text||""}</div>`;}
-  catch(e){document.getElementById("s_result").innerHTML='<p class=muted>'+e.message+'</p>';}
+  // DALGA B / B4: takip no ve firma/durum adlari DB'den geliyor - innerHTML'e girmeden once notrle.
+  // Durum adi artik TURKCE geliyor (once ham enum adi "Preparing" yaziyordu).
+  try{const s=unwrap(await api.admin.shipmentByOrder(id));document.getElementById("s_result").innerHTML=`<div class="card"><b>${esc(s.carrier_name)}</b> — ${esc(s.tracking_number)}<br><span class="badge warn">${esc(s.status_name)}</span> ${esc(s.last_status_text||"")}</div>`;}
+  catch(e){document.getElementById("s_result").innerHTML='<p class=muted>'+esc(e.message)+'</p>';}
 }
 
 // ── Kuponlar ──
+// DALGA B / B1 - ALAN ADI UYUSMAZLIGI (uc parca, hepsi CANLI olculdu):
+//   (a) EKLEME: panel "discount_value" gonderiyordu, CouponAddRequestDto alani "value".
+//       Sonuc: %30 girilen kupon veritabanina value=0 olarak yaziliyor, uc 201 doneyor,
+//       panel "Kupon eklendi" diyor ve musteri sepette "Kupon gecerli" + indirim 0.00
+//       goruyordu. Her katman BASARILI diyordu; indirim yoktu.
+//   (b) LISTE DEGERI: panel "c.discount_value" okuyordu -> undefined -> her satirda "-".
+//   (c) LISTE TIPI: liste ucu discount_type'i ENUM ADI (metin) olarak doner
+//       (CouponProfile: ((DiscountTypeEnum)src.discount_type).ToString()), panel ise
+//       SAYIYLA karsilastiriyordu. "Percentage"==0 -> false, "Percentage"==1 -> false,
+//       dolayisiyla UCUNCU dala dusup HER kupon "Kargo" gorunuyordu - eksik bilgi degil,
+//       YANLIS bilgi: yuzde kuponu ucretsiz kargo kuponu gibi okunuyordu.
+// EKLEME ucu SAYI bekler, LISTE ucu METIN doner - ikisi ayni alan adini farkli tipte
+// tasidigi icin panel her iki gosterimi de tanir; tek merkez asagisi.
+const KUPON_TIPI={"0":"Yüzde","Percentage":"Yüzde","1":"Sabit","Fixed":"Sabit","2":"Ücretsiz Kargo","FreeShipping":"Ücretsiz Kargo"};
+function kuponTipEtiket(t){return KUPON_TIPI[String(t)]||esc(t==null?"—":t);}
+function kuponDegerMetni(c){
+  const t=String(c.discount_type);
+  if(t==="2"||t==="FreeShipping") return "—";            // kargo kuponunda deger anlamsiz
+  const v=Number(c.value);
+  if(!isFinite(v)) return "—";
+  // ONEMLI: v===0 icin "-" YAZILMAZ. Eski panel bunu gizliyordu; sifir degerli bir kupon
+  // BOZUK bir kupondur ve operatorun gormesi gereken sey tam olarak budur.
+  return (t==="0"||t==="Percentage") ? ("%"+v.toLocaleString("tr-TR",{maximumFractionDigits:2})) : money(v);
+}
 async function renderCoupons(el){
   const coupons=unwrap(await api.admin.listCoupons())||[];
   el.innerHTML=`<div class="topbar"><h2>Kuponlar (${coupons.length})</h2><button class="btn" onclick="couponForm()">+ Yeni Kupon</button></div>
-    <div class="panel"><table><thead><tr><th>Kod</th><th>Tip</th><th>Değer</th><th>Min. Sepet</th><th></th></tr></thead><tbody>
-      ${coupons.map(c=>`<tr><td><b>${c.code}</b></td><td class=muted>${c.discount_type==0?"Yüzde":c.discount_type==1?"Sabit":"Kargo"}</td><td>${c.discount_value||"-"}</td><td>${money(c.min_amount||0)}</td>
-        <td><button class="btn danger sm" onclick="delCoupon(${c.id})">Sil</button></td></tr>`).join("")||'<tr><td colspan=5 class=muted>Kupon yok</td></tr>'}
+    <div class="panel"><table><thead><tr><th>Kod</th><th>Tip</th><th>Değer</th><th>Min. Sepet</th><th>Kullanım</th><th></th></tr></thead><tbody>
+      ${coupons.map(c=>`<tr><td><b>${esc(c.code)}</b></td><td class=muted>${kuponTipEtiket(c.discount_type)}</td><td>${kuponDegerMetni(c)}</td><td>${money(c.min_amount||0)}</td><td class=muted>${(c.used_count||0)}${c.usage_limit>0?" / "+c.usage_limit:" / ∞"}</td>
+        <td><button class="btn danger sm" onclick="delCoupon(${c.id})">Sil</button></td></tr>`).join("")||'<tr><td colspan=6 class=muted>Kupon yok</td></tr>'}
     </tbody></table></div>`;
 }
 function couponForm(){
@@ -361,8 +500,18 @@ function couponForm(){
     </div>`;
 }
 async function saveCoupon(){
-  const payload={code:document.getElementById("c_code").value.trim().toUpperCase(),discount_type:parseInt(document.getElementById("c_type").value),discount_value:parseFloat(document.getElementById("c_val").value)||0,min_amount:parseFloat(document.getElementById("c_min").value)||0,is_active:true};
+  const tip=parseInt(document.getElementById("c_type").value);
+  const deger=parseFloat(document.getElementById("c_val").value)||0;
+  // ALAN ADI: "value" (CouponAddRequestDto). Eski "discount_value" DTO'da YOK, sessizce
+  // yok sayiliyordu. "is_active" de DTO'da yok - sunucu ekleme aninda zaten true yaziyor;
+  // gonderilmesi hicbir sey yapmiyordu, kaldirildi.
+  const payload={code:document.getElementById("c_code").value.trim().toUpperCase(),discount_type:tip,value:deger,min_amount:parseFloat(document.getElementById("c_min").value)||0};
   if(!payload.code)return toast("Kod girin",true);
+  // GIRIS KAPISI: yuzde/sabit kuponda 0 deger ANLAMSIZDIR - musteriye "kupon gecerli"
+  // denip 0 indirim uygulanmasi tam olarak B1'in zarariydi. Sunucu 0'i reddetmiyor
+  // (yalniz negatif ve %100 ustu reddediliyor); bu yuzden kapi burada.
+  if(tip!==2 && deger<=0) return toast("Yüzde/sabit kuponda değer 0'dan büyük olmalı",true);
+  if(tip===0 && deger>100) return toast("Yüzde indirim 100'den büyük olamaz",true);
   try{await api.admin.addCoupon(payload);toast("Kupon eklendi");render("coupons");}catch(e){toast(e.message,true);}
 }
 async function delCoupon(id){if(!confirm("Kupon silinsin mi?"))return;try{await api.admin.deleteCoupon(id);toast("Silindi");render("coupons");}catch(e){toast(e.message,true);}}

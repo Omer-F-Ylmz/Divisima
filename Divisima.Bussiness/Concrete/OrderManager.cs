@@ -587,6 +587,20 @@ Tarih: {order.created_at:dd.MM.yyyy}</p>
         }
 
         // Açıklayıcı yorum: Sipariş durumu değiştir (admin). byte status cast.
+        // DALGA B / B2: siparis durumunun MUSTERIYE gosterilecek Turkce adi. Zaman cizelgesi notu
+        // musteriye gorunuyor (order/timeline) ve ham enum adi basiyordu. Tanimsiz bir deger gelirse
+        // ham ada duser - UYDURMA etiket yazilmaz.
+        private static readonly Dictionary<byte, string> SiparisDurumAdlari = new()
+        {
+            [(byte)OrderStatusEnum.Pending] = "Onay bekliyor",
+            [(byte)OrderStatusEnum.Confirmed] = "Onaylandı",
+            [(byte)OrderStatusEnum.Preparing] = "Hazırlanıyor",
+            [(byte)OrderStatusEnum.Shipped] = "Kargoda",
+            [(byte)OrderStatusEnum.Delivered] = "Teslim edildi",
+            [(byte)OrderStatusEnum.Cancelled] = "İptal edildi"
+        };
+        private static string SiparisDurumAdi(byte s) => SiparisDurumAdlari.TryGetValue(s, out var v) ? v : ((OrderStatusEnum)s).ToString();
+
         public async Task<(HttpStatusCode, Result)> ChangeOrderStatus(OrderStatusChangeRequestDto dto)
         {
             var order = await _orderDal.GetAsync(o => o.id == dto.id);
@@ -621,8 +635,13 @@ Tarih: {order.created_at:dd.MM.yyyy}</p>
                 await _orderDal.UpdateAsync(order);
 
                 // Açıklayıcı yorum: Durum değişimini zaman çizelgesine kaydet (yalnızca gerçek değişimde)
+                // DALGA B / B2: not MUSTERIYE gorunur (order/timeline -> Hesabim > Siparislerim) ve
+                // eskiden ham ENUM ADI basiyordu. CANLI olculdu: musterinin cizelgesinde
+                // "Durum guncellendi: Preparing" yaziyordu - Turkce vitrinde Ingilizce bir sabit.
+                // Bu bir GORUNTU dizgesidir (CLAUDE.md bolum 6c), Turkce dogru olandir; durumun
+                // makine-okunur hali zaten ayni satirin `status` byte'indadir.
                 if (order.status != previousStatus)
-                    await _statusHistory.RecordAsync(order.id, order.status, $"Durum güncellendi: {((OrderStatusEnum)order.status)}");
+                    await _statusHistory.RecordAsync(order.id, order.status, $"Durum güncellendi: {SiparisDurumAdi(order.status)}");
 
                 // DALGA-2-FIX (B10): admin bir siparisi Confirmed'a tasidiginda da dort yan etki
                 // uygulanir. `!= previousStatus` sarti MUKERRER mesaji engeller: zaten Confirmed
@@ -830,15 +849,20 @@ Tarih: {order.created_at:dd.MM.yyyy}</p>
                 })
                 .ToList();
 
-            // Açıklayıcı yorum: Sayfalı sonuç (toplam sayı + sayfa bilgisi)
-            var paged = new Divisima.Core.Utilities.Dtos.PagedResult<Divisima.Entity.Dtos.Order.AdminOrderListItemDto>
+            // DALGA B / B2: repository tipi (PagedResult<T>) ARTIK HTTP yanitina KONMUYOR.
+            // Gerekce ve olculen zarar AdminOrderPagingListResponseDto'nun basinda; ozetle
+            // o tip PascalCase serilesip { items, totalCount, ... } uretiyordu, deponun
+            // diger sayfali uclari ise { items, total_count, ... } donuyor - ayni API'de
+            // iki konvansiyon vardi ve admin siparis listesi bu yuzden CANLIDA BOSTU.
+            var paged = new Divisima.Entity.Dtos.Order.AdminOrderPagingListResponseDto
             {
-                Items = items,
-                TotalCount = total,
-                Page = page,
-                Size = size
+                items = items,
+                total_count = total,
+                page = page,
+                size = size,
+                total_pages = size > 0 ? (int)Math.Ceiling(total / (double)size) : 0
             };
-            return (HttpStatusCode.OK, new SuccessDataResult<Divisima.Core.Utilities.Dtos.PagedResult<Divisima.Entity.Dtos.Order.AdminOrderListItemDto>>(paged));
+            return (HttpStatusCode.OK, new SuccessDataResult<Divisima.Entity.Dtos.Order.AdminOrderPagingListResponseDto>(paged));
         }
 
         // Açıklayıcı yorum: KISMİ İPTAL - siparişten tek kalemi iptal et.

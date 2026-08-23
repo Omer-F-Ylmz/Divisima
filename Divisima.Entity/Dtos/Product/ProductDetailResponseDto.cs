@@ -14,6 +14,17 @@ namespace Divisima.Entity.Dtos.Product
         public string sub_category_name { get; set; }
         public decimal price { get; set; }
         public decimal? old_price { get; set; }
+        // DALGA B / B2: sale_price EKLENDI - admin panelinin urun DUZENLEME formu icin ZORUNLU.
+        // Gerekce (olculdu): ProductManager.Update tam-varlik map yapar (_mapper.Map(dto, product)),
+        // yani ProductUpdateRequestDto'da BULUNAN ama gonderilmeyen her alan NULL'a duser. sale_price
+        // o DTO'da VAR; panel onu geri gonderemezse indirimli fiyat SESSIZCE SILINIR ve musteri tam
+        // fiyat oder. Panelin dolduracagi tek kaynak bu uctu.
+        // SIZINTI DEGERLENDIRILDI: uc [AllowAnonymous]. sale_start/sale_end depoda HICBIR kod yoluyla
+        // yazilmiyor (tarandi: yalniz PricingHelper okuyor), dolayisiyla PricingHelper.IsOnSale
+        // salePrice>0 oldugunda HER ZAMAN true doner - yani sale_price zaten musterinin ODEDIGI
+        // fiyattir ve listeleme uclarindan gorunur. Ileride ZAMANLI indirim eklenirse bu alan
+        // "gelecekteki kampanya fiyati" tasimaya baslar ve o gun burasi yeniden degerlendirilmelidir.
+        public decimal? sale_price { get; set; }
         public string description { get; set; }
         public string color_hex { get; set; }
         public string product_type { get; set; }

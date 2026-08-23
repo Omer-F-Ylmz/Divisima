@@ -217,25 +217,84 @@ namespace Divisima.Bussiness.Concrete
             if (product.price < oldPrice)
                 await _priceDropService.NotifyPriceDrop(product.id, product.price);
 
-            // Açıklayıcı yorum: Beden stoklarını güncelle - mevcutları pasifle, gelenleri yeniden yaz
+            // ══ DALGA B / B2 - BEDEN STOKLARI: "PASIFLE + YENIDEN EKLE" -> "UPSERT" ═══════════
+            //
+            // ONCEKI HAL: mevcut TUM satirlar is_active=false yapiliyor, sonra gelen bedenler YENI
+            // SATIR olarak ekleniyordu. IKI AYRI SEKILDE BOZUKTU - ikisi de CANLI olculdu (Dalga B):
+            //
+            //  (1) HER GUNCELLEME 500 VERIYOR. `IX_product_stocks_product_id_size` UNIQUE ve
+            //      FILTRESIZ, yani is_active'i ICERMEZ: bir satiri pasiflemek (product_id, size)
+            //      ciftini SERBEST BIRAKMAZ. Ayni bedeni tekrar eklemek dogrudan
+            //      "Cannot insert duplicate key ... The duplicate key value is (123, S)" ile duser.
+            //      Ustelik Update TRANSACTION'SIZ: pasifleme ZATEN KAYDEDILMIS oluyor, insert
+            //      patliyor -> urun TUM AKTIF BEDEN SATIRLARINI KAYBEDIYOR ve satin ALINAMAZ hale
+            //      geliyor. Operator yalnizca "Istek basarisiz (500)" goruyor. (Urun 123'te birebir
+            //      yasandi: iki satir da is_active=0 kaldi.)
+            //
+            //  (2) INSERT BASARILI OLSAYDI DAHA SESSIZ BIR ZARAR OLURDU: yeni satir
+            //      reserved_quantity=0 ile baslar. O anda sepetlerde tutulan rezervasyonlarin
+            //      muhasebesi SIFIRLANIR - "available = stock_quantity - reserved_quantity"
+            //      kimligi bozulur ve ayni mal iki kez satilabilir.
+            //
+            // Bu yol BUGUNE KADAR ULASILAMAZDI: admin paneli `stocks` alanini HIC gondermiyordu
+            // (form dogrulamaya takiliyordu) ve CSV ice-aktarma yalnizca EKLIYOR. Panel formu
+            // calisir hale gelince ilk denemede ortaya cikti.
+            //
+            // YENI HAL - UPSERT: satir KIMLIGI korunur (dolayisiyla reserved_quantity de),
+            // listede olmayan beden PASIFLENIR (silinmez - siparis/rezervasyon gecmisi durur),
+            // yalnizca GERCEKTEN yeni olan beden INSERT edilir.
             if (dto.stocks != null)
             {
+                // Bos beden adi bir satiri kimliksiz birakir; sessizce eklemek yerine ayiklanir.
+                var gelen = dto.stocks.Where(s => !string.IsNullOrWhiteSpace(s.size)).ToList();
+
+                // AYNI BEDEN IKI KEZ GELIRSE ONDEN REDDET. Aksi halde ilk insert/update gecer,
+                // ikincisi unique indekse takilir ve yukaridaki yarim-durumun aynisi olusurdu.
+                // Karsilastirma ORDINAL-IGNORECASE: veritabani indeksi Turkish_CI_AS altinda
+                // BUYUK/KUCUK HARF DUYARSIZ eslesir (CLAUDE.md bolum 6c), yani "S" ve "s" DB'de
+                // AYNI anahtardir - C# tarafinda Ordinal kullanmak onlari farkli sanip ayni
+                // cakismayi yeniden uretirdi.
+                var ilkTekrar = gelen.GroupBy(s => s.size.Trim(), StringComparer.OrdinalIgnoreCase)
+                                     .FirstOrDefault(g => g.Count() > 1);
+                if (ilkTekrar != null)
+                    return (HttpStatusCode.BadRequest, new ErrorResult($"Aynı beden birden fazla kez girilmiş: {ilkTekrar.Key}"));
+
                 var current = await _productStockDal.GetListAsync(s => s.product_id == product.id);
-                foreach (var old in current)
+
+                foreach (var s in gelen)
                 {
-                    old.is_active = false;
-                    await _productStockDal.UpdateAsync(old);
-                }
-                foreach (var s in dto.stocks)
-                {
-                    await _productStockDal.AddAsync(new ProductStock
+                    var beden = s.size.Trim();
+                    var mevcut = current.FirstOrDefault(c => string.Equals(c.size, beden, StringComparison.OrdinalIgnoreCase));
+                    if (mevcut != null)
                     {
-                        product_id = product.id,
-                        size = s.size,
-                        stock_quantity = s.stock_quantity,
-                        is_active = true,
-                        created_at = DateTime.Now
-                    });
+                        // VAR OLAN SATIR GUNCELLENIR - reserved_quantity'ye DOKUNULMAZ.
+                        mevcut.stock_quantity = s.stock_quantity;
+                        mevcut.is_active = true;          // once pasiflenmis bir beden geri acilabilir
+                        mevcut.updated_at = DateTime.Now;
+                        await _productStockDal.UpdateAsync(mevcut);
+                    }
+                    else
+                    {
+                        await _productStockDal.AddAsync(new ProductStock
+                        {
+                            product_id = product.id,
+                            size = beden,
+                            stock_quantity = s.stock_quantity,
+                            is_active = true,
+                            created_at = DateTime.Now
+                        });
+                    }
+                }
+
+                // Listede OLMAYAN bedenler PASIFLENIR (silinmez): satira bagli rezervasyon ve
+                // stok hareketi gecmisi korunur, ayrica unique indeks cifti uzerinde oturmaya
+                // devam eder - o beden geri eklenirse yukaridaki dal onu yeniden ACAR.
+                foreach (var eski in current.Where(c => c.is_active &&
+                         !gelen.Any(g => string.Equals(g.size.Trim(), c.size, StringComparison.OrdinalIgnoreCase))))
+                {
+                    eski.is_active = false;
+                    eski.updated_at = DateTime.Now;
+                    await _productStockDal.UpdateAsync(eski);
                 }
             }
 

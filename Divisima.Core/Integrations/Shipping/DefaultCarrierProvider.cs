@@ -22,9 +22,31 @@ namespace Divisima.Core.Integrations.Shipping
 
         public async Task<CarrierTrackingResult> TrackAsync(byte carrier, string trackingNumber)
         {
-            // Açıklayıcı yorum: Kapalıysa (dev) sorgu yapmadan "yolda" varsay
+            // DALGA B / B4 - KAPALI DAL DA SAHTE DURUM URETIYORDU (H53'un GORMEDIGI YARISI).
+            //
+            // ONCEKI HAL: Success=true, NormalizedStatus=1 (InTransit), RawStatusText="Takip devre disi (dev)".
+            // Cagiran (ShipmentManager.TrackByOrder) Success=true gorunce kaydi GUNCELLIYOR - yani bu
+            // deger VERITABANINA YAZILIYORDU. CANLI OLCULDU (Dalga B):
+            //     admin kargoyu olusturdu        -> shipments.status = 0 (Preparing)
+            //     musteri BIR KEZ track cagirdi
+            //     DB'deki satir                  -> status = 1 (InTransit)
+            //                                       last_status_text = "Takip devre disi (dev)"
+            // Paketi kimse tasimadi; durum uyduruldu ve bir GELISTIRICI DIZGESI hem musteriye hem
+            // admin paneline servis edilir hale geldi.
+            //
+            // H53 ayni kusuru Enabled=TRUE dali icin duzeltmisti ("hicbir sorgu yapmadan Yolda donuluyordu");
+            // FALSE dali atlanmisti - ustelik LAUNCH YAPILANDIRMASI o. Kargo firmasi entegrasyonu
+            // yok ve olmayacak (is karari), yani uretimde surekli kosacak dal BU.
+            //
+            // Success=false donuluyor: cagiran kaydi GUNCELLEMEZ, saklanan gercek durum (adminin
+            // girdigi firma + takip no + Preparing) oldugu gibi kalir. Musteriye gosterilecek dogru
+            // bilgi zaten budur - "elle girilmis takip numarasi", uydurulmus bir tasima durumu degil.
             if (!Enabled || string.IsNullOrEmpty(trackingNumber))
-                return new CarrierTrackingResult { Success = true, NormalizedStatus = 1, RawStatusText = "Takip devre dışı (dev)" };
+                return new CarrierTrackingResult
+                {
+                    Success = false,
+                    ErrorMessage = "Kargo takip entegrasyonu kapalı (Shipping:Enabled=false) - saklanan durum korunur."
+                };
 
             try
             {
