@@ -1962,10 +1962,325 @@ tutmazsa satirlar sadece ETKISIZ kalir, zarar vermez.
 Dis kontrolu ve 5. kontrol YENIDEN KOSULMADI - degisiklik yalnizca sabit degeri (literal ->
 `YanlisSifre`); pinlerin OLCTUGU sey ve assert'ler DEGISMEDI.
 
+
+## SECRET-SCAN DUZELTMESI PUSH RAPORU (d40be2f) - HER IKI WORKFLOW YESIL
+
+**Push `147a95d..d40be2f`.** Adim bazinda + annotation duzeyinde dogrulandi.
+
+### CI - Build & Test (run 32596590781) - TAMAMEN YESIL
+`build-and-test`: .NET kurulumu · geri yukleme · **Derle (Release)** · SQL Server hazir mi ·
+**SQL gerektiren testler (ATLANMAMALI)** · **Testler + coverage** · **Coverage raporunu
+yukle** hepsi SUCCESS; TESHIS skipped.
+`format-check`: **iki ZORUNLU adim** (whitespace + style) SUCCESS.
+
+### Security CI (run 32596590765) - TAMAMEN YESIL
+`codeql` SUCCESS · `dependency-scan` (RAPOR / KAPI / kullanimdan kalkmis paket) SUCCESS ·
+`tests` (Is mantigi simulasyonu / SQL hazir mi / **Entegrasyon testleri**) SUCCESS, TESHIS
+skipped · **`secret-scan` -> `Gitleaks (secret taramasi)` SUCCESS.**
+
+**ALTI JOB'IN HICBIRINDE failure seviyeli annotation YOK** (tek tek tarandi) ve "Leaks
+detected" satiri KAYBOLDU.
+
+### DISPATCH KOSUMU BIR YARISA DENK GELDI (durust kayit)
+
+Kullanici `workflow_dispatch`'i tetikledi -> **run 32596588688**. AMA o kosum
+`head_sha = 147a95d` uzerinde kostu, yani DUZELTMEDEN ONCEKI commit'te:
+
+```
+dispatch olusturuldu : 2026-08-22T20:24:32Z
+izleyicinin 1. turu  : 23:24:50 (+03)  = 20:24:50Z
+```
+
+Yani tetikleme ile push **18 saniye** arayla oldu; GitHub dispatch'i o anki main HEAD'ine
+(`147a95d`) bagladi. `.gitleaksignore`'daki iki fingerprint `d40be2f`'te oldugu icin o
+kosum onlari HIC GORMEDI. Kullanici hatasi degil, ZAMANLAMA.
+
+**YINE DE DEGERLI BIR OLCUM:** o kosum TUM GECMISI taradi ve `secret-scan` FAILURE dondu -
+yani bir tam-gecmis taramasinin `147a95d`'deki literal'leri GERCEKTEN buldugu KANITLANDI.
+Bu, iki seyi birden dogruluyor: (a) kok sebep teshisi gecmis duzeyinde de dogru,
+(b) fingerprint'ler GERCEKTEN gerekli - yalniz ileriye donuk kirpma yetmezdi.
+
+### FINGERPRINT'LER KESIN OLARAK KANITLANDI - KONTROLLU A/B
+
+Kullanici dispatch'i `d40be2f` HEAD iken TEKRAR tetikledi -> **run 32600833891**.
+Bu kosum `--log-opts` ALMADIGI icin **TUM GIT GECMISINI** taradi.
+
+```
+AYNI EVENT (workflow_dispatch), AYNI KAPSAM (tum gecmis), TEK FARK .gitleaksignore:
+
+  run 32596588688   head_sha 147a95d   (fingerprint YOK)   secret-scan -> FAILURE
+  run 32600833891   head_sha d40be2f   (fingerprint VAR)   secret-scan -> SUCCESS
+```
+
+`32600833891` adim bazinda: `tests` / `dependency-scan` / `codeql` SUCCESS ·
+**`secret-scan` -> `Gitleaks (secret taramasi)` SUCCESS** · dort job'da da failure
+seviyeli annotation **0** ve "Leaks detected" satiri **0**.
+
+Yani iki fingerprint (kural-id `generic-api-key`, satir 731/806) GERCEKTEN TUTTU.
+Sprint 8'de yalnizca "tutuyor gorunuyor" diyebildigimiz sey burada KONTROLLU BIR
+KARSILASTIRMAYLA kanitlandi: ayni tarama, ayni kapsam, tek degisken.
+
+## KALITE SUPURMESI - DALGA 4 (MOBIL + CAPRAZ CIHAZ) ve M10/M11-FIX
+
+Kalite supurmesinin SON dalgasi. Olcum uc katmanda yapildi: statik kaynak taramasi,
+390x844 / 360x800 emulasyonu ve **GERCEK CIHAZ TURU** (kullanicinin Android telefonu,
+Opera, 384x638 kullanilabilir alan). Duzeltmeler kullanici karariyla ayni commit'te geldi.
+
+### BULGU TABLOSU
+
+| # | Sinif | Bulgu | Bloke | Durum |
+|---|---|---|---|---|
+| M10 | ISLEV-KIRAN | "Sepeti Onayla" mobilde HIC calismiyor - satin alma kapali | **EVET** | **KAPANDI** |
+| M1 | ISLEV-KIRAN | Storefront API adresi `localhost:5000` SABIT gomulu | **EVET** | ACIK (dagitim kalemi) |
+| M11 | ISLEV-KIRAN | Cerez bari odeme sayfasinin TEK eylem dugmesini ortuyor | **EVET** | **KAPANDI** |
+| M3 | UX | Cerez bari alt navigasyonun dort ogesini ortuyor | hayir | **KAPANDI** (M11 ile ayni duzeltme) |
+| M2 | UX | 376 px altinda header aksiyon kumesi tasiyor, tasan kisim kaydirilamiyor | hayir | ACIK |
+| M4 | UX | Dokunma hedefleri 44x44 altinda (Kaldir 32x15, x 17x25, .cdot 15x15) | hayir | ACIK |
+| M5 | UX | Giris/kayit formlarinda `autocomplete` yok ve `<form>` elementi HIC yok | hayir | ACIK (onemi DUSURULDU) |
+| M6 | KOZMETIK | `safe-area-inset-top` hic kullanilmiyor (notch) | hayir | ACIK |
+| M7 | KOZMETIK | `manifest.json theme_color=#111111` vs HTML meta `#2b2724` | hayir | ACIK |
+| M8 | KOZMETIK | Service worker `VERSION = "2026-08-21-e3"` - E3'ten beri bumplanmadi | hayir | ACIK |
+| M9 | KOZMETIK | Alt navigasyon etiketleri 9.5 px | hayir | ACIK |
+
+### GERCEK CIHAZ TURUNUN GETIRDIGI (emulasyonun GOREMEDIGI) - DURUST KAYIT
+
+- **M10 emulasyonda CURUK GORUNDU.** Sentetik `.click()` DOGRUDAN butona gonderilir; o an
+  ripple ink YOKTUR. Gercek dokunusta ink DOM'a girer ve click hedefi O OLUR. Yani
+  "gercek cihaz turu neden sart" sorusunun kaniti bu maddedir.
+- **M2 gercek cihazda DOGRULANMADI** (ekran ~412 px; arama ikonu kirpik degil). 360/320
+  olcumu EMULASYON kaniti olarak gecerli, gercek-cihaz kaniti YOK.
+- **M4 kismen curudu**: sepette `-`/`+` gercek cihazda rahat kullanildi. Diger kucuk
+  hedefler (Kaldir / x / .cdot) cihazda AYRICA denenmedi.
+- **M5 kismen curudu**: telefon "Parola kaydedilsin mi?" onerdi ve klavyede "Git" tusu VAR.
+  `<form>` yoklugunun etkisi tahmin edilenden AZ; `autocomplete` eksikligi duruyor ama
+  onem derecesi DUSURULDU.
+- **M3 gercek cihazda DOGRULANDI** (cerez bari alt navigasyonu ortuyor).
+- **M6/M7 (PWA standalone) ve M8 (SW/offline) HENUZ TEST EDILMEDI.**
+
+### M10 - "SEPETI ONAYLA" MOBILDE CALISMIYORDU (LAUNCH BLOKE) - KAPANDI
+
+**GERCEK CIHAZ KANITI** (tani katmani, Android/Opera 384x638):
+
+```
+pointerdown -> button#checkoutBtn.btn            trusted=true  idEsit=true
+touchstart  -> button#checkoutBtn.btn.rippling   trusted=true
+pointerup   -> button#checkoutBtn.btn.rippling   trusted=true
+touchend    -> button#checkoutBtn.btn.rippling   trusted=true
+click       -> span.ripple-ink                   trusted=true  idEsit=false
+   hash: #/ -> #/   *** DEGISMEDI ***
+```
+
+**KOK SEBEP ZINCIRI (her halkasi OLCULDU, tahmin YOK):**
+
+1. `pointerdown` dinleyicisi (index.html) sinifi `btn|card-add|...` desenine uyan HER
+   butonun ICINE `<span class="ripple-ink">` ekliyor.
+2. `.ripple-ink{pointer-events:none}` kurali VARDI - **ama CEKMECE ICINDE ETKISIZDI.**
+   CSSOM ile olculdu: cekmecedeki ink'in hesaplanan `pointer-events` degeri **`auto`**.
+   Ezen kural: `.filter-side.open *,.cart.on *,.search.on *{pointer-events:auto}` -
+   ozgullugu **(0,2,0)**, `.ripple-ink` ise **(0,1,0)**.
+3. Ink isabet edilebilir oldugu icin gercek dokunusta click hedefi O oluyor.
+4. `cartFoot` handler'i `e.target.id==='checkoutBtn'` diye KATI karsilastirma yapiyordu ->
+   kosul dusuyor, `closeCart()` ve `location.hash='#/odeme'` HIC calismiyor.
+5. Kullanicinin gordugu: butona basiliyor, hicbir sey olmuyor. **Mobilde satin alma KAPALI.**
+
+**DEPO GENELI TARAMA (kullanici sarti) - kati hedef karsilastirmasi yapan TUM handler'lar:**
+
+```
+index.html'de 113 `.target` kullanimi var; 69'u ZATEN `closest` kullaniyor.
+Kalanlar:  .target.id (4) · .target.classList (5) · .target.checked (3)
+           .target.tagName (1) · .target.getAttribute (1) · .target === (8)
+api-bridge.js ve admin.html: delege handler'larin TAMAMI zaten `closest` kullaniyor.
+```
+
+| Konum | Desen | Hedef | Ripple? | Sinif |
+|---|---|---|---|---|
+| index.html cartFoot | `e.target.id==='checkoutBtn'` | `<button class="btn">` | EVET | **BUGUN KIRIK** (cihazda olculdu) |
+| index.html favFoot | `e.target.id==='favAll'` | `<button class="btn">` | EVET | **BUGUN KIRIK** (deterministik olculdu) |
+| index.html giftChk | `e.target.id==='giftChk'` | `<input type=checkbox>`, `change` | hayir | SAGLAM (yapisal) |
+| index.html cmpDiffChk | `e.target.id==='cmpDiffChk'` | `<input type=checkbox>`, `change` | hayir | SAGLAM (yapisal) |
+| index.html cp-input x2 | `classList.contains('cp-input')` | `keydown`, odakli input | hayir | SAGLAM |
+| index.html dotsEl | `e.target.getAttribute('data-i')` | `<button class="dot">` BOS | hayir | **KIRILGAN** (ikon eklenirse kirilir) |
+| index.html:2913 | `e.target.tagName` | window error ayrimi | - | ILGISIZ |
+| 7 modal/lightbox + api-bridge | `e.target===this/lb/stage/modal/m` | arka plan | - | **KASITLI - closest YASAK** |
+
+`favAll` neden AYNI SINIF: kapsayicisi `<aside id="favs" class="cart on">` - yani favori
+cekmecesi `.cart` sinifini YENIDEN KULLANIYOR ve `.cart.on *` kurali orada da gecerli.
+Olculdu: ink hedefiyle gonderilen click handler'i DUSURDU, buton hedefiyle CALISTI.
+
+**DUZELTME (iki katman, ASIL olan handler):**
+
+1. **ASIL:** iki handler `e.target.closest('#checkoutBtn')` / `closest('#favAll')` kullaniyor.
+   Yarin butona ikon/span konsa da kirilmaz. (Ayni handler'in kupon dallari ZATEN closest
+   kullaniyordu - duzeltme dosyanin kendi idiyomuna hizalandi.)
+2. **IKINCIL:** `.cart.on .ripple-ink,.search.on .ripple-ink,.filter-side.open .ripple-ink
+   {pointer-events:none}` - yazarin OZGUN niyetini (0,3,0) ozgullugu ile o uc kapsamda geri
+   verir. **Tek basina COZUM SAYILMADI:** 5. kontrolde olculdu ki bu satir yerinde olsa
+   bile handler kati kalirsa alt-eleman hedefi eylemi yine dusuruyor.
+   `.cart.on *` kuralina DOKUNULMADI - o kural cekmece kapaliyken etkilesimi kapatmak icin var.
+
+**"Ozellestir" dugmesi ve `hidden`:** bkz. M11 - ayni dalgada bulundu.
+
+### M11 + M3 - CEREZ BARI KENDI ALANINDA KALMIYORDU - KAPANDI
+
+**OLCULEN ZARAR (cerez bari ACIK, CIKISLI kullanici, `elementFromPoint` ile):**
+
+```
+360x640  bar 199-640 h=441 (ekranin %69'u)  "Giris yap" 235-284 ORTULU <- div.ck-text
+                                             alt navigasyon 0/4 ulasilabilir
+384x638  bar 217-638 h=421                   "Giris yap" ORTULU <- span      alt nav 0/4
+412x730  bar 326-730 h=404                   "Giris yap" ULASILIR            alt nav 0/4
+```
+
+Yani cikisli kullanici "Sepeti Onayla"dan `#/odeme`ye DUSUYOR (handler duzeldikten sonra),
+sayfa dogru mesaji basiyor - ama sayfadaki **TEK eylem dugmesi cerez barinin altinda** ve
+tiklanamiyor. Kullanicinin cikis yolu YOK.
+
+**KOK SEBEP (olculdu):** `#ckPanel` HTML `hidden` ozniteligini TASIYOR ama hesaplanan
+`display` degeri `flex` - cunku `.ck-panel{...display:flex}` yazar kurali, UA'nin
+`[hidden]{display:none}` kuralini EZIYOR. Panel "kapali" isaretliyken bile ciziliyor ve
+441 px'in **268 px'i** o panelden geliyor.
+**YAN SONUC:** "Ozellestir" dugmesi (`cust.onclick=function(){pan.hidden=!pan.hidden}`)
+GORSEL OLARAK OLU - basiliyor, hicbir sey degismiyor.
+**IDIOM KANITI:** ayni dosyada `.cmdk[hidden]`, `.a11y-panel[hidden]`, `.lb-nav[hidden]`
+kurallari ZATEN bu korumaya sahip; yalniz `.ck-panel` unutulmus.
+
+**DUZELTME - TEK MERKEZ, IKI KALEM (M3 ve M11 birlikte kapanir):**
+
+1. `.ck-panel[hidden]{display:none}` -> bar kendi KOMPAKT boyutuna doner (441 -> 139/158 px)
+   ve "Ozellestir" dugmesi GERCEKTEN calisir. **M11 bunu kapatir.**
+2. `@media(max-width:768px){.cookie-bar{bottom:calc(var(--mnav-h,63px) + var(--kb,0px))}}` ->
+   bar alt navigasyonun USTUNE oturur. `--mnav-h` navigasyonun OLCULEN yuksekliginden JS ile
+   yazilir (`--kb` kalibinin aynisi). **M3 bunu kapatir.**
+   `.cookie-bar.gone` transform'u da ofseti hesaba katar - yoksa bar kapanirken navigasyonun
+   uzerinde GORUNUR kalirdi.
+
+**IKISI DE GEREKLI - 5. kontrolde ayristirildi:** `[hidden]` guard'i kaldirilinca "Giris yap"
+ULASILAMAZ oldu ama alt navigasyon 4/4 ULASILIR KALDI. Yani bir kalem digerinin yerine gecmiyor.
+
+**SONRA (uc viewport'ta da, cerez bari ACIK):**
+
+```
+360x640  bar 419-577 h=159   GirisYap GECTI · altNav 4/4 GECTI · SepetiOnayla GECTI
+384x638  bar 436-575 h=139   GirisYap GECTI · altNav 4/4 GECTI · SepetiOnayla GECTI
+412x730  bar 528-667 h=139   GirisYap GECTI · altNav 4/4 GECTI · SepetiOnayla GECTI
+uc viewport'ta da: inkPointerEvents=none · alt-eleman hedefiyle tiklama -> hash #/odeme
+```
+
+### YAN KALEM - "Transition was aborted because of invalid state" = GURULTU
+
+Telefon turunda gorulen `*** PROMISE HATA` satiri olculdu. **Zarar YOK, YENI BULGU DA DEGIL:**
+`index.html:2914`'te uygulamanin KENDI `unhandledrejection` dinleyicisi tam bu mesaji
+ACIKCA suzuyor (`if(/abort|invalid state|transition was aborted/i.test(_m))return;`) ve hata
+raporlamasina GONDERMIYOR. Iki hizli `hashchange` ust uste geldiginde ilk View Transition
+iptal oluyor; DOM guncellemesi TAMAMLANIYOR, yalniz animasyon dusuyor.
+Satiri gorunur kilan sey GECICI TANI KATMANIDIR - o, uygulamanin suzgecine sahip degil.
+**DUZELTME YAPILMADI** (bir sey duzeltmek gerekmiyor); tek kalan kalem tarayici konsoluna
+basilan kozmetik satir. Kapatmak istenirse `withVT`/`openProductVT` icinde `vt.ready`
+promise'ine bos bir `.catch` baglamak yeter - **karar kullanicinin.**
+
+### CIKISLI KULLANICIDA SEPET CEKMECESININ KAPANMASI (kullanicinin sordugu gerekce)
+
+Bugunku davranis DOGRU tarafta ve DEGISTIRILMEDI. Gerekce: `#/odeme` bir SAYFA, cekmece ise
+onun UZERINDE duran bir katman; acik birakilsaydi kullanici odeme panelini goremeden ayni
+sepete bakmaya devam ederdi ve "bir sey olmadi" hissi ARTARDI. Baglam kaybi da gercek degil -
+sepet icerigi KORUNUYOR (E2'de pinli) ve odeme sayfasi ozeti tekrar gosteriyor.
+**GERCEK KUSUR CEKMECE DEGILDI**, hedefteki sayfanin tek eyleminin ortulu olmasiydi (M11) -
+o kapandi. Yine de "cikisli kullaniciyi odeme sayfasina dusurmek yerine dogrudan giris
+katmanini acmak" ayri ve savunulabilir bir URUN karari; **degisiklik karari kullanicinin.**
+
+### PINLER (`FrontendDokunmaHedefiTests`, 7)
+
+- `SepetOnayHandleri_HEDEFI_closest_ILE_Cozer_ALT_ELEMAN_DUSURMEZ` (vakum kirici: handler'in
+  hala bagli oldugu once dogrulanir)
+- `FavorileriSepeteEkle_Handleri_HEDEFI_closest_ILE_Cozer`
+- `HICBIR_YENI_EYLEM_HANDLERI_target_id_ILE_KATI_KARSILASTIRMA_YAPMAZ` - SINIF DUZEYI tarama;
+  izinli set TAM OLARAK `{giftChk, cmpDiffChk}` (ikisi de `change`-olayli checkbox, yapisal
+  olarak alt eleman TASIYAMAZ). Cift-anlam kirici: izinli kullanimlarin GERCEKTEN durdugu da
+  assert edilir, yoksa liste bosalinca tarama vakuma duserdi. `.target.matches(` = 0 pinli.
+- `ARKA_PLAN_KAPATMA_Handlerlari_KIMLIK_KARSILASTIRMASINI_KORUR` - CIFT-ANLAM KIRICI:
+  "hepsini closest yap" YANLIS duzeltmedir; 7 modal/lightbox + api-bridge kalibi kimlik
+  karsilastirmasina DAYANIR (closest'a cevrilseydi modallar iclerine tiklandiginda kapanirdi).
+- `RippleInk_CEKMECE_ARAMA_FILTRE_ICINDE_de_ISABET_HEDEFI_OLMAZ` (vakum kirici: EZEN kuralin
+  hala yururlukte oldugu once dogrulanir)
+- `CerezPaneli_hidden_OZNITELIGINE_SAYGI_Duyar` (vakum kirici: `display:flex`in hala orada
+  oldugu - yani guard'in GEREKLI oldugu - dogrulanir)
+- `CerezBari_MOBILDE_ALT_NAVIGASYONUN_USTUNE_Oturur` (cift-anlam kirici: degisken "gizliyse 0"
+  yazmali, aksi halde masaustunde bar gerekcesiz kayardi)
+
+**KIRILAN PIN YOK.**
+
+### PIN MEKANIZMASININ SINIRI (DURUST KAYIT - KARAR BEKLIYOR)
+
+Depoda **JS/DOM test kosucusu YOK** (olculdu: `Divisima.IntegrationTests.csproj`'de
+AngleSharp / Jint / ClearScript / Playwright / Selenium **yok**). Bu yuzden TARAYICI
+SEMANTIGI - hit-test, CSS ozgullugu, `elementFromPoint` - CI'da pinlenemiyor. Yukaridaki 7
+pin KAYNAK SOZLESMESINI tutar ("handler hedefi closest ile cozer", "bar kendi alanindadir"),
+davranisi degil. Bosluk gizlenmedi, IKI kanalla telafi edildi:
+
+1. **`frontend/test/mobil-erisilebilirlik.js`** - depoya konan TEKRARLANABILIR olcum betigi.
+   `await divisimaMobilKontrol()` uc kontrolu + alt-eleman hedefi kontrolunu kosar ve
+   GECTI/KALDI doner. Sepet bossa ya da cerez bari kapaliysa **yanlis yesil vermez**, uyarir.
+   CSP `unsafe-eval`e izin vermedigi icin `<script src>` ile yuklenir (olculdu).
+2. Bu bolumdeki olculen sayilar.
+
+Kalici cozum (bir JS test kosucusu eklemek) YENI BIR BAGIMLILIKTIR ve `dependency-scan`
+kapsamina girer - **ayri bir karar, kullanicinin.**
+
+### DIS KONTROLU + 5. KONTROL
+
+5 assert ters cevrildi (BES AYRI test) -> **5 AYRI ISIMLI KIRMIZI** (geri alindi).
+
+5. kontrol, IKI uretim mutasyonu:
+- **M1** (handler eski kati karsilastirmaya donduruldu): TARAYICIDA olculdu ->
+  alt-eleman (ripple ink) hedefiyle click **hash `#/` DEGISMEDI**, buton hedefiyle
+  `#/odeme` - telefonda olculen tablonun BIREBIR aynisi. Ustelik ikincil CSS savunmasi
+  YERINDEYKEN: yani handler'in ASIL duzeltme oldugu kanitlandi. .NET tarafinda TAM 2 pin
+  kirmizi (dogrudan pin + sinif duzeyi tarama), diger 5 YESIL - mutasyon lokalize.
+- **M2** (`.ck-panel[hidden]` guard'i kaldirildi): bar 441 px'e geri sisti,
+  "Giris yap" **ULASILAMAZ** (`ustundeki: button#ckCustom.ck-cust`) - olculen once-durum.
+  Alt navigasyon 4/4 ULASILIR KALDI (ofset duzeltmesi yerinde) - iki kalemin ayri isler
+  oldugunun kaniti. .NET tarafinda TAM 1 pin kirmizi, 6 YESIL.
+Ikisi de geri alindi.
+
+### YEREL DOGRULAMA
+
+252/252 `Category=Sql` · tam suitte **389 basarili / 392** (kirilan 3'un UCU DE Docker'li
+`OrderEndpointTests`) · Release 0 hata · whitespace + style TEMIZ (exit 0).
+
+### SURECTE YASANAN (kayit - iki ders)
+
+- **`</script>` dizgesi bir JS YORUMUNUN icine yazildi ve HTML ayristiricisi script blogunu
+  ORADA KAPATTI.** Blogun kalani ham metne dondu; belirti sinsiydi - `--mnav-h` yazilmadi ve
+  `.mob-nav` yuksekligi 63 yerine **245** olculdu. Fark edildi, yorum metni degistirildi,
+  onarim dogrulandi (tum global fonksiyonlar mevcut, `cart` yine Map, govde metni normal).
+  **DERS: index.html icindeki JS yorumlarina `</script>` YAZILMAZ.**
+- **`--no-build` ile kosulan test DEGISTIRILEN kodu dogrulamaz** (CLAUDE.md'de zaten yazili
+  olan tuzak bir kez daha yasandi): dis kontrolu geri alindiktan sonra yeniden derlemeden
+  kosulan mutasyon turu, bir ONCEKI kosumun 5 kirmizisini tekrarladi. Derleyip tekrarlandi.
+- Olcum betigimde `var cart = ...` yazarak sayfanin GLOBAL `cart` Map'ini ezdim; belirti
+  `cart.get is not a function` oldu ve iki olcum turu bosa gitti. Ayrica `navigate` yalniz
+  hash'i degistirdiginde sayfa YENIDEN YUKLENMEZ - clobber reload'lari asti.
+  **DERS: sayfa baglaminda calisan olcum betiginde uygulama global adlari KULLANILMAZ.**
+
 ## SIRA
 
-0. **KALITE SUPURMESI.** Dalga 1 + FIX, Dalga 2 + FIX, veri temizligi, Dalga 3 + FIX ve
-   **(C) GUVENLIK DALGASI + GUVENLIK-FIX** KAPANDI. SIRADA: **Dalga 4 (mobil + capraz cihaz)**.
+0. **KALITE SUPURMESI - BES DALGANIN TAMAMI KAPANDI.** Dalga 1 + FIX, Dalga 2 + FIX, veri
+   temizligi, Dalga 3 + FIX, **(C) GUVENLIK DALGASI + GUVENLIK-FIX** ve **DALGA 4 (mobil +
+   capraz cihaz) + M10/M11-FIX**.
+   Dalga 4'un LAUNCH BLOKE eden iki kalemi KAPANDI (M10 mobil satin alma, M11 cerez barinin
+   odeme sayfasini kilitlemesi); **UCUNCU BLOKE KALEM M1 - storefront API adresi
+   `localhost:5000` olarak SABIT gomulu - ACIK. Bu bir DAGITIM kalemidir (build/deploy
+   adiminda degistirilmeli ya da calisma aninda cozulmeli); karar kullanicinin.**
+   DALGA 4'TEN ACIK KALAN BLOKE ETMEYENLER: M2 (376 px header tasmasi), M4 (44x44 alti
+   dokunma hedefleri), M5 (autocomplete), M6 (safe-area-inset-top), M7 (theme_color
+   uyusmazligi), M8 (SW surumu bumplanmadi), M9 (9.5 px etiketler).
+   **HENUZ TEST EDILMEDI: M6/M7 (PWA standalone) ve M8 (SW/offline) telefon adimlari.**
+   **CI'da JS/DOM pini YOK** - tarayici semantigi bugun yalniz elle kosulan
+   `frontend/test/mobil-erisilebilirlik.js` ile dogrulanabiliyor (ayrinti Dalga 4 bolumunde,
+   "PIN MEKANIZMASININ SINIRI"). **KARAR VERILDI: launch-sonrasi deftere** (bkz. KARARLAR).
+0b. **SIRADAKI IS: DALGA-4-FIX-2 (M1).** Bu commit yesil gelince TEK BASINA ele alinir.
+   Kapsam (kullanici karari): storefront API adresinin calisma aninda/dagitim adiminda
+   cozulmesi + CSP origin'lerinin ayni kaynaktan turemesi + dagitim checklist maddesi + pin.
    ERTELENENLER: **B5** (100 ucun HTTP testi yok - ayri kapsam dalgasi),
    **B8**, **B13**, **P4** ve **P2-inline-bolme** (launch sonrasi defteri).
    **GUVENLIK DALGASINDAN ACIK KALAN TEK KALEM: G4** (satici refresh token'i govdede) -
@@ -2043,6 +2358,22 @@ Dis kontrolu ve 5. kontrol YENIDEN KOSULMADI - degisiklik yalnizca sabit degeri 
   metni sizdirilmiyor) ve bu YETERLI goruldu. Validatoru sikilastirmak ayri bir URUN karari:
   gecerli ama alisilmadik adresleri kapida cevirmek gercek musteri kaybettirebilir.
   **Sprint 8'e GIRMEZ.**
+  **YENI KALEM (Dalga 4 / M10-M11 eki - kullanici karari): CIKISLI KULLANICIYA DOGRUDAN
+  GIRIS KATMANI.** Bugun "Sepeti Onayla" cikisli kullaniciyi `#/odeme`ye dusuruyor ve orada
+  "Siparisi tamamlamak icin giris yapmalisin" + "Giris yap" gorunuyor. Bu davranis
+  DEGISTIRILMEDI ve gerekcesi Dalga 4 bolumunde: sepet icerigi KORUNUYOR (E2'de pinli),
+  odeme sayfasi ozeti tekrar gosteriyor, cekmecenin acik kalmasi "bir sey olmadi" hissini
+  ARTIRIRDI. Gercek kusur cekmece degil, hedef sayfanin tek eyleminin ortulu olmasiydi (M11)
+  ve o KAPANDI. Yine de "cikisli kullaniciyi ara bir sayfaya dusurmek yerine dogrudan giris
+  katmanini acmak" savunulabilir ve muhtemelen daha az adimli bir URUN karari. LAUNCH ONCESI
+  DEGIL.
+  **YENI KALEM (Dalga 4 eki - kullanici karari): JS/DOM TEST KOSUCUSU (Playwright vb.).**
+  Olculdu: depoda JS/DOM kosucusu YOK, dolayisiyla TARAYICI SEMANTIGI (hit-test, CSS
+  ozgullugu, `elementFromPoint`) CI'da pinlenemiyor - M10'un kok sebebi tam da bu katmandaydi.
+  Bugunku telafi YETERLI goruldu: 7 kaynak sozlesmesi pini (`FrontendDokunmaHedefiTests`) +
+  depoya konan tekrarlanabilir olcum betigi (`frontend/test/mobil-erisilebilirlik.js`).
+  **LAUNCH ONCESI EKLENMEZ:** yeni bir bagimlilik `dependency-scan` kapsamina girer ve tarayici
+  ikilisi indiren bir kosucu CI suresini/yuzeyini buyutur - launch oncesi alinacak risk degil.
 - **Iyzico'nun TELEMETRI alan adlari CSP'de ACILMAZ (kalici karar).** `countly.iyzico.com`
   ve `*.ingest.tr.sentry.io` (o120955...). Iyzico checkout formu kendi
   Countly analitigine baglaniyor (`campaign_banner_enabled`, `checkout_radio_button_layout_updated`
