@@ -21,16 +21,17 @@ namespace Divisima.Bussiness.Concrete
         private readonly IMailService _mailService;
 
         private readonly IMarketingGate _marketingGate;
-        private readonly IConfiguration _config;
+        // LAUNCH-FIX A1(c): IConfiguration bagimliligi KALKTI - taban okuma IMailLinkBuilder'a tasindi.
+        private readonly IMailLinkBuilder _links;
 
         public PriceDropManager(IPriceDropSubscriptionDal subDal, IProductDal productDal, IMailService mailService,
-            IMarketingGate marketingGate, IConfiguration config)
+            IMarketingGate marketingGate, IMailLinkBuilder links)
         {
             _subDal = subDal;
             _productDal = productDal;
             _mailService = mailService;
             _marketingGate = marketingGate;
-            _config = config;
+            _links = links;
         }
 
         public async Task<(HttpStatusCode, Result)> Subscribe(PriceDropSubscribeDto dto)
@@ -175,12 +176,15 @@ namespace Divisima.Bussiness.Concrete
         // servis edildigi "Storage:PublicBaseUrl"e duseriz - OLCULEN gerekce: gorseller de API'nin
         // wwwroot'undan servis ediliyor, yani ayni origin. Ikisi de bossa baglanti YERINE ne
         // yapilacagi ACIKCA yazilir; sessizce bos birakilmaz.
+        // LAUNCH-FIX A1(c): taban okuma ve bos-durum artik IMailLinkBuilder'da TEK YERDE. Ayni
+        // dusus (Api:PublicBaseUrl -> Storage:PublicBaseUrl) AYNEN korunuyor; degisen tek sey bos
+        // origin'in artik GURULTULU loglanmasi - eskiden sessizce yedek metne duserdi.
         private string AbonelikCikisMetni(string yol, string token)
         {
-            var taban = (_config["Api:PublicBaseUrl"] ?? _config["Storage:PublicBaseUrl"] ?? "").TrimEnd('/');
-            if (string.IsNullOrWhiteSpace(taban))
+            var link = _links.ApiBaglantisi($"{yol}?token={Uri.EscapeDataString(token)}");
+            if (link == null)
                 return "\n\nBu bildirimleri almak istemiyorsan Hesabım > Bildirimlerim sayfasından aboneliğini kaldırabilirsin.";
-            return $"\n\nBu bildirimleri almak istemiyorsan: {taban}{yol}?token={Uri.EscapeDataString(token)}";
+            return $"\n\nBu bildirimleri almak istemiyorsan: {link}";
         }
     }
 }

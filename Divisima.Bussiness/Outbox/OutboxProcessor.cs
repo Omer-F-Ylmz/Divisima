@@ -129,9 +129,25 @@ namespace Divisima.Bussiness.Outbox
                 "OUTBOX KALICI HATA. id={Id} tip={Tip} deneme={Deneme} hata={Hata}",
                 msg.id, msg.event_type, msg.retry_count, ex.Message);
 
-            if (msg.event_type != "PaymentConfirmed") return;
             try
             {
+                // LAUNCH-FIX A1(b): "OrderPlaced" da artik uretimde kullaniliyor (siparis onay maili
+                // + admin bildirimi bu mesajla tasiniyor). Kalici basarisizligi PaymentConfirmed ile
+                // AYNI kanaldan gorunur kilinir - aksi halde "musteriye onay maili hic gitmedi"
+                // durumu yalniz log satirinda kalirdi ve panelde IZI OLMAZDI.
+                if (msg.event_type == "OrderPlaced")
+                {
+                    var siparis = JsonSerializer.Deserialize<Divisima.Bussiness.Events.OrderPlacedEvent>(msg.payload);
+                    if (siparis == null || siparis.order_id <= 0) return;
+                    // Durum olarak Pending kullaniliyor: bu not "Sipariş oluşturuldu" ANINA aittir
+                    // (OrderManager'daki o satir da Pending yaziyor), yeni bir gecis DEGILDIR.
+                    await _statusHistory.RecordAsync(siparis.order_id, (byte)OrderStatusEnum.Pending,
+                        $"KRITIK: sipariş bildirimleri {msg.retry_count} denemede tamamlanamadı " +
+                        $"(onay e-postası/admin bildirimi). Son hata: {ex.Message}");
+                    return;
+                }
+
+                if (msg.event_type != "PaymentConfirmed") return;
                 var evt = JsonSerializer.Deserialize<Divisima.Bussiness.Events.PaymentConfirmedEvent>(msg.payload);
                 if (evt == null || evt.order_id <= 0) return;
                 await _statusHistory.RecordAsync(evt.order_id, (byte)OrderStatusEnum.Confirmed,

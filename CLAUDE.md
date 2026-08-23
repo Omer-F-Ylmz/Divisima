@@ -2506,33 +2506,414 @@ Ikisi de geri alindi.
   yazim zincirinde kaybolabilir - kacissiz bir cozum varsa o tercih edilir.**
   NOT: guard'in bozulma yonu FAIL-LOUD idi - yanlis alarm verdi, sessiz kalmadi.
 
+## DALGA-4-FIX-2 PUSH RAPORU (dbaa763) - HER IKI WORKFLOW TAMAMEN YESIL
+
+**Push `77c0308..dbaa763`** (tek commit -> tek push). Adim bazinda + annotation
+duzeyinde dogrulandi.
+
+### CI - Build & Test (run 32648639604) - TAMAMEN YESIL
+`format-check`: **iki ZORUNLU adim** (`Bicimlendirme dogrulama - whitespace` + `- style`)
+SUCCESS.
+`build-and-test`: `.NET 8 kurulumu` · `Bagimliliklari geri yukle` ·
+`Derle (Release, uyarilar gorunur)` · `SQL Server hazir mi (service container)` ·
+**`SQL gerektiren testler (ATLANMAMALI)`** · **`Testler + coverage`** ·
+**`Coverage raporunu yukle`** hepsi SUCCESS; `TESHIS` skipped.
+
+### Security CI (run 32648639646) - TAMAMEN YESIL
+`tests`: `Is mantigi guvenlik simulasyonu` · `SQL Server hazir mi` ·
+**`Entegrasyon testleri`** SUCCESS, `TESHIS` skipped.
+`codeql`: init / Build / analyze SUCCESS.
+**`secret-scan` -> `Gitleaks (secret taramasi)` SUCCESS** (bolum 7 kurali geregi ADIM
+SONUCUNDAN okundu; "Leaks detected" satiri YOK).
+`dependency-scan`: `Restore` · `Acik bagimlilik taramasi - RAPOR` ·
+**`Acik bagimlilik KAPISI (uretim projeleri)`** · `Kullanimdan kalkmis paket kontrolu`
+hepsi SUCCESS.
+
+### ANNOTATION: ALTI JOB'IN HICBIRINDE `failure` SEVIYESI YOK
+Bulunan her annotation `warning` ve UCU DE ONCEDEN VARDI: Node.js 20 deprecation,
+CodeQL Action v3 deprecation, ve `Divisima.Core/DataAccess/*` nullable uyarilari.
+**Bu commit YENI uyari uretmedi**; yeni `ops/set-api-origin.sh` ve
+`ApiOriginTekKaynakTests.cs` dosyalari `secret-scan` / `format-check` /
+`dependency-scan` kapilarinin UCUNDEN DE temiz gecti.
+
+---
+
+# KAPANIS KAYDI - KALITE SUPURMESI KAPANDI (23 Agustos 2026)
+
+**LAUNCH'I BLOKE EDEN TEKNIK KALEM KALMADI.**
+
+Bes olcum dalgasi ve karsiliklarindaki duzeltme dalgalari, artik yesil bir CI ile
+kapandi. Kapanisi kanitlayan son SHA: **`dbaa763`** (her iki workflow tamamen yesil,
+alti job'da failure seviyeli annotation SIFIR).
+
+## KAPANAN DALGALAR
+
+| Dalga | Konu | Duzeltme commit'i / durum |
+|---|---|---|
+| Dalga 1 | Envanter + tarama (B1..B9) | DALGA-1-FIX |
+| Dalga 2 | Mantik / invariant denetimi (B10..B14) | DALGA-2-FIX + veri temizligi (7 iptal faturasi) |
+| Dalga 3 | Performans (P1..P5) | DALGA-3-FIX |
+| (C) Guvenlik | IDOR / tutar / mass assignment / enjeksiyon / yaris (G1..G9) | GUVENLIK-FIX + GUVENLIK-FIX-2 |
+| Dalga 4 | Mobil + capraz cihaz (M1..M11) | M10/M11-FIX (`77c0308`) + DALGA-4-FIX-2 / M1 (`dbaa763`) |
+
+**Dalga 4'un UC LAUNCH-BLOKE kaleminin UCU DE kapandi:**
+- **M10** - "Sepeti Onayla" mobilde hic calismiyordu (delege handler'in kati hedef
+  karsilastirmasi ripple ink yuzunden dusuyordu). GERCEK CIHAZDA dogrulandi.
+- **M11** (+ M3) - cerez bari odeme sayfasinin TEK eylem dugmesini ve alt navigasyonu
+  ortuyordu (`.ck-panel{display:flex}` HTML `hidden`'i eziyordu). GERCEK CIHAZDA dogrulandi.
+- **M1** - storefront API adresi ve CSP origin'leri kaynakta sabit gomuluydu ve elle
+  senkron tutuluyordu. Tek kaynak + dagitim betigi + calisma ani tutarlilik guard'i.
+
+**MOBIL SATIN ALMA UCTAN UCA SURULDU** (kullanicinin telefonu, Android/Opera 384x694):
+sepet -> "Sepeti Onayla" -> `#/odeme` -> **Iyzico kart formu mobilde yuklendi**
+(kart no / ay-yil / CVC / 3DS + tutar). Bu, kapanisin saha kanitidir.
+
+## ACIK KALANLAR (HICBIRI LAUNCH'I BLOKE ETMIYOR)
+
+**TEKNIK DEFTER**
+- **SUPHELI #14** - `X-Api-Version` ayristirilamazsa TUM API blanket 400 veriyor.
+  Kapsam Sprint 8'de webhook yolu icin DARALTILDI ve pinlendi; genel cozum
+  **LAUNCH SONRASI** (bkz. SUPHELI DAVRANISLAR).
+- **SUPHELI #20** - varsayilan-kapali yetki kurali controller'larla sinirli; bugun
+  BOSLUK YOK (olculdu) ve bosluk testte kapatildi.
+
+**GUVENLIK**
+- **G4** - satici girisi refresh token'i GOVDEDE donuyor (`SellerAuthManager.cs:101`).
+  Bugun ERISILEMEZ (`sellers` 0 satir, kayit kapali/403). **Satici modulu acilmadan
+  ONCE ZORUNLU ON KOSUL** - ikinci on kosul (kilit kontrolu sirasi) ile birlikte
+  KARARLAR bolumunde.
+
+**DALGA 4 - BLOKE ETMEYENLER**
+- **M2** 376 px altinda header aksiyon kumesi tasiyor (gercek cihazda DOGRULANMADI -
+  emulasyon kaniti gecerli).
+- **M4** dokunma hedefleri 44x44 altinda (sepette `-`/`+` gercek cihazda sorunsuzdu).
+- **M5** `autocomplete` eksik, `<form>` elementi yok (onem derecesi DUSURULDU - telefon
+  parola kaydetmeyi onerdi, klavyede "Git" tusu var).
+- **M6 / M7** PWA standalone kalemleri - kisayol standalone ACMADIGI icin **OLCULEMEDI**;
+  "test edilmedi, bloke etmez" olarak kapatildi.
+- **M8** service worker `VERSION` E3'ten beri bumplanmadi. Offline testi kullanici
+  karariyla ATLANDI (oncelik degil); **VERSION bump'i DAGITIM KURALI olarak
+  `ops/deployment-checklist.md`'de**.
+- **M9** alt navigasyon etiketleri 9.5 px.
+
+**ERTELENENLER**
+- **B5** - 150 API ucunun 100'u HTTP duzeyinde test gormuyor (ayri kapsam dalgasi).
+- **B13** - terk edilmis Pending siparislere TTL yok (17 siparis, hepsi >24 saat;
+  rezervasyonlar serbest, stok/kupon guvende - politika URUN karari).
+- **B8**, **P4**, **P2-inline-bolme** ve KARARLAR'daki launch-sonrasi defterin tamami
+  (gift-card expiry, 2FA enrollment ucu, step-up `auth_time`, loyalty oransal geri alma
+  + referral clawback, Dashboard tam-tablo agregalari, sabit-zamanli kayit, RFC 2606
+  ust alan adlari, Turkce klavyede yazilan e-posta, istemci onbellegi, cikisli
+  kullaniciya dogrudan giris katmani, JS/DOM test kosucusu).
+
+## KAPANISTA KAYDA DEGER UC SEY
+
+1. **GERCEK CIHAZ TURU EMULASYONUN GOREMEDIGINI GOSTERDI.** M10 emulasyonda CURUK
+   gorundu: sentetik `.click()` dogrudan butona gider, o an ripple ink YOKTUR. Gercek
+   dokunusta ink DOM'a girer ve click hedefi O olur. Kok sebep ancak cihazda gorundu.
+2. **CI'DA JS/DOM PINI YOK.** Tarayici semantigi (hit-test, CSS ozgullugu,
+   `elementFromPoint`) bu suitte dogrulanamiyor; 13 kaynak/hesap pini
+   (`FrontendDokunmaHedefiTests` 7 + `ApiOriginTekKaynakTests` 6) sozlesmeyi tutuyor ve
+   `frontend/test/mobil-erisilebilirlik.js` olcumu tekrarlanabilir kiliyor. Kalici cozum
+   launch-sonrasi defterde (yeni bagimlilik + `dependency-scan` kapsami).
+3. **DAGITIM ARTIK BIR ADIM ISTIYOR.** `ops/set-api-origin.sh` kosulmadan yapilan bir
+   yayin, storefront'u localhost'a bakar halde birakir. Bu SESSIZ DEGIL: calisma ani
+   guard'i ekrana kirmizi uyari basar ve `--verify` exit 1 doner. Checklist maddesi
+   `ops/deployment-checklist.md`'de.
+
+---
+
+# LAUNCH-FIX - DALGA A: ILK MUSTERI ZINCIRI (TAMAMLANDI)
+
+Kapsama denetiminin (bir onceki dalga) cikardigi kirik halkalardan **ilk musteri zincirine**
+ait olanlar kapatildi. A1 + A2 + A4 yapildi; **A3 YALNIZ OLCULDU** (kullanici karari bekliyor,
+kod YAZILMADI).
+
+## OLCUM DUZENEGI - YEREL SMTP YAKALAYICI (depo DISINDA)
+
+Gercek SMTP hesabi HENUZ YOK (**"gercek mail turu - BEKLIYOR"**, ayri is: domain/hosting
+karariyla birlikte). Dalga kanitsiz kalmasin diye scratchpad'e **STARTTLS konusan bir SMTP
+yakalayicisi** yazildi ve `MailSettings` ona yonlendirildi.
+
+**Neden hazir bir arac degil, neden duz metin degil - OLCULDU:** `SmtpMailService` 465 disi
+portlarda `SecureSocketOptions.StartTls` kullaniyor ve bu **bilincli** bir karar ("Sifresiz
+baglanti KABUL EDILMEZ"). Duz metin konusan bir yakalayici bu yuzden ise yaramaz; uretim kodunu
+gevsetmek ise sorulu bile degil. Sertifika olarak makinede **ZATEN GUVENILEN** ASP.NET Core
+gelistirme sertifikasi (`CN=localhost`, thumbprint `A1BC63BC...`) disa aktarilip sunucu
+tarafinda sunuldu - **hicbir guven deposu DEGISTIRILMEDI**.
+
+Depo tarandi: `smtpsink` / `sink.pfx` / `2525` -> kod, yapilandirma ve dokumanda **SIFIR** iz.
+
+## A1 - MAIL ALTYAPISI
+
+### (a) SAHTE ALICI KALKTI
+
+OLCULEN ONCE-DURUM: `OrderPlacedEmailHandler` -> `To = $"customer-{id}@divisima.local"`.
+Siparis onay maili musteriye **HIC GITMIYORDU**; ustelik `.local` yonlendirilemez bir ust alan
+adidir, yani gercek SMTP'de gonderim **REDDEDILIR** ve `SmtpMailService` (bilincli olarak)
+istisna firlatir.
+
+ADRESIN KAYNAGI OLCULDU, UYDURULMADI: siparisin musterisi **her iki yolda da** `customers`
+tablosunda gercek e-postasiyla duruyor - uye siparisinde `customer_id` token'dan gelir,
+**misafir siparisinde** `GuestCheckoutManager` once Customer satirini `dto.guest_email` ile
+OLUSTURUR ve PlaceOrder'a o id ile devreder. Bu yuzden tek dogru kaynak `customer_id` uzerinden
+okumaktir; event'e ayri bir e-posta alani **EKLENMEDI** (snapshot degil, GUNCEL adres istenir).
+
+### (b) SMTP HATASI ARTIK AKISI DUSURMUYOR - IKI YERDE
+
+**Siparis yolu.** `PublishAsync` COMMIT'TEN SONRA ve **try blogunun DISINDA** cagriliyordu;
+publisher handler'lari duz `foreach { await }` ile kosuyor (try/catch YOK). Sonuc: siparis
+commit olmus haldeyken uc **HTTP 500** doner. Cozum **MEVCUT ALTYAPI**: `OutboxProcessor`'da
+`case "OrderPlaced"` ZATEN VARDI ve ayni publisher'i cagiriyordu - o dala uretimde mesaj YAZAN
+kimse yoktu (olculdu). Mesaj artik **transaction'in ICINDE** yaziliyor.
+
+**KAYIT YOLU - BU DALGANIN KENDI OLCUMUNDE CIKAN YENI BULGU.** Pin yazilirken sahte mail
+servisi her gonderimde istisna atacak sekilde ayarlandi ve `POST /api/auth/register` **HTTP 500**
+dondu. Zarar siparistekinden **AGIR**: musteri satiri ZATEN yazilmis oluyor (`AddAsync` mail'den
+ONCE), yani kullanici "kayit olamadim" sanip tekrar deniyor ve bu kez "var olan hesap" dalina
+dusuyor - hesabi VAR ama dogrulama maili HIC GITMEMIS durumda kaliyor. Kayit / var-olan-hesap
+bildirimi / yeniden-dogrulama / sifre sifirlama mailleri de `"EmailNotification"` outbox tipine
+tasindi (EngagementManager'in kullandigi kanal).
+
+**2FA KODU BILINCLI OLARAK HARIC**: o bir giris anahtaridir, 5 dakika omru vardir; gecikmeli ya
+da kayip gitmesi kullanicinin giris yapamamasi demektir - orada **gurultulu basarisizlik dogru
+davranistir**. (Bugun zaten ulasilamaz bir dal: `two_factor_enabled` hicbir kod yolunda `true`
+yapilmiyor - olculdu.)
+
+**BEDEL - DURUST KAYIT:** teslimat artik **at-least-once** ve `OrderPlaced` mesaji UC handler'i
+birden tasiyor. Son handler (SignalR bildirimi) patlarsa mesaj yeniden denenir ve onay maili
+IKINCI KEZ gidebilir. Kabul edildi: bir siparis onay mailinin tekrarlanmasi, hic gitmemesinden
+iyidir. Ikinci bedel: gecikme (~1 dk, `Cron.Minutely`).
+
+**SESSIZ DEGIL:** 5 deneme -> `status=Failed` + `LogError` + **siparis zaman cizelgesine KRITIK
+notu**. `KaliciHataylaBirakAsync` bugune kadar yalniz `PaymentConfirmed` icin not dusuyordu;
+`OrderPlaced` dali eklendi (durum olarak `Pending` kullaniliyor - not "Siparis olusturuldu"
+ANINA ait, yeni bir gecis DEGIL).
+
+### (c) TIKLANABILIR BAGLANTILAR - TEK KAYNAK
+
+Yeni `IMailLinkBuilder` / `MailLinkBuilder`. **IKI AYRI ORIGIN VAR VE BU BIR CELISKI DEGIL:**
+
+| Tur | Kaynak | Kullanan |
+|---|---|---|
+| VITRIN (kullanicinin acacagi sayfa) | `Storefront:BaseUrl` | dogrulama, sifre sifirlama, siparis takibi |
+| API (dogrudan bir uca giden) | `Api:PublicBaseUrl` -> `Storage:PublicBaseUrl` | abonelikten cikma (Sprint 8 madde 10 kalibi) |
+
+`Storefront:BaseUrl` yeni bir ayar DEGIL - `PaymentController.Callback` yonlendirmesi zaten onu
+kullaniyor, yani vitrin origin'inin TEK KAYNAGI oydu. **Ucuncu bir sabit origin EKLENMEDI**;
+kaynak dosyalarda tek bir `http://...` literali yok.
+
+**BOS ORIGIN'DE GURULTULU:** iki metot da `null` doner VE `LogError` basar; cagiran kullaniciya
+yedek yonergeyi kendi yazar. Yarim bir URL asla uretilmez. `StockNotificationManager` ve
+`PriceDropManager`'daki ikiz `AbonelikCikisMetni` metotlari da bu tek kaynaga baglandi
+(`IConfiguration` bagimliliklari KALKTI); dusus AYNEN korundu, degisen tek sey bos origin'in
+artik loglanmasi.
+
+**FAIL-FAST SECILMEDI - GEREKCE OLCUM:** `Storefront:BaseUrl` bos birakmak `PaymentController`
+icin **belgelenmis bir kacis yoludur** ("BOS ise callback eski davranisla ham JSON doner").
+Uretim fail-fast'ine eklemek o kacis yolunu kirardi; calisma ani gurultulu log + yedek metin,
+abonelikten-cikma kaliginda zaten kabul edilmis desen.
+
+### (d) SABLON: DUZ METIN - OLCUME DAYALI
+
+Depodaki **TUM** mailler duz metin (`IsHtml = false`): EngagementManager, StockNotificationManager,
+PriceDropManager, AuthManager. HTML sablon katmani **ACILMADI**; duz metinde kendi satirinda
+duran ciplak URL her istemcide tiklanabilir. Jeton her iki durumda da govdede KALIYOR - Giris
+ekranindaki mevcut dogrulama kutusu (E1'den beri calisan yol) bozulmasin diye; baglanti EK bir
+yoldur, YERINE GECEN degil.
+
+### YAKALANAN GERCEK MAIL GOVDELERI (STARTTLS uzerinden)
+
+```
+To: dalgaa.<...>@example.com     Subject: Divisima - E-posta adresinizi doğrulayın
+  Merhaba,
+  Divisima hesabını doğrulamak için aşağıdaki bağlantıya tıkla:
+  http://localhost:5173/#/dogrula/94-SsO4Zz-ALIq8ioYZ6MWJPpea5iDNPtDJHOJSQM1w
+  Bağlantı çalışmazsa Giriş ekranındaki doğrulama kutusuna şu kodu gir: 94-SsO4Zz-...
+
+To: dalgaa.<...>@example.com     Subject: Divisima - Şifre sıfırlama
+  Şifreni sıfırlamak için aşağıdaki bağlantıya tıkla (30 dakika geçerli):
+  http://localhost:5173/#/sifre-sifirla/a7sK1hP5d6NRsIMpexcffLb5ZhdUE2UER66PhWNzp6E
+  Bu isteği sen yapmadıysan bu e-postayı yok sayabilirsin; şifren değişmez.
+
+To: dalgaa.<...>@example.com     Subject: Divisima - Siparişin alındı (#DVS20260823-54740CC62D)
+  Merhaba Dalga A,
+  #DVS20260823-54740CC62D numaralı siparişin başarıyla oluşturuldu.
+  Tutar: 549,80 TL.
+  Siparişinin durumunu buradan takip edebilirsin:
+  http://localhost:5173/#/hesabim/siparislerim
+```
+
+Alici **gercek musteri adresi**, tutar **tr-TR bicimli** (madde 13 pini calisiyor), baglantilar
+**yapilandirilan origin'i** tasiyor.
+
+### HATA YOLU - CANLI (SMTP olu porta cevrildi, 2599)
+
+```
+POST /api/order/place                -> HTTP 201  {"data":89,"success":true}   (once: 500)
+outbox id=18  OrderPlaced  status=0  retry_count=1  error="Hedef makine ... reddettiğinden
+                                                            bağlantı kurulamadı."
+... dort minutely tur sonra ...
+outbox id=18  OrderPlaced  status=2 (Failed)  retry_count=5
+siparis #89 zaman cizelgesi:
+   "Sipariş oluşturuldu"
+   "Kapıda ödeme - sipariş onaylandı"
+   "KRITIK: sipariş bildirimleri 5 denemede tamamlanamadı (onay e-postası/admin bildirimi)..."
+```
+
+## A2 - SIFREMI UNUTTUM (OLU LINK BAGLANDI)
+
+OLCULEN ONCE-DURUM: `index.html`'de `<a href="#" data-i18n="forgot">Sifremi unuttum</a>` -
+**href="#" olu link**. `api-client.js`'te `forgotPassword`/`resetPassword` TANIMLIYDI ama
+`api-bridge.js`'te `forgot` **0 kez** geciyordu. Sifresini unutan musterinin siteden geri donus
+yolu **HIC YOKTU**.
+
+Iki yeni rota **router SARMALANARAK** eklendi (index.html'in router'ina DOKUNULMADI):
+`#/dogrula/<token>` ve `#/sifre-sifirla/<token>`. Bilinmeyen rota `show404()`'e dustugu icin bu
+iki yol ONCE yakalaniyor; sarmalayici digerlerini `origRouter.apply` ile devrediyor. Ekranlar
+yeni bir view acmadan `showVerifyPrompt` kalibiyla `#paneLogin`'e enjekte ediliyor. Ilk yukleme
+yarisi (E3/M12'de olculen) icin sarmalama kurulduktan sonra rota bir kez daha degerlendiriliyor.
+
+**BU DALGADA OLCULEN VE DUZELTILEN KENDI KUSURUM (M12 SINIFI):** ekran DOGRU cizildigi halde
+sekme basligi **"Sayfa Bulunamadi · Divisima"** kaliyordu - `setDocTitle()`'in bu yollar icin
+dali yok ve sarmalayici orijinal router'a devretmediginde o hic cagrilmiyor. Paylasilan/yer
+imine eklenen bir sifirlama baglantisinin "Sayfa Bulunamadi" gorunmesi kullaniciya linkin BOZUK
+oldugunu soyler. Baslik iki rota icin acikca set edildi.
+
+### ELLE DOGRULAMA (tarayici, uctan uca)
+
+```
+"Sifremi unuttum" linkine tiklandi -> kutu acildi ("Sifremi unuttum", e-posta alani)
+gonderildi -> "Bu adres kayıtlıysa şifre sıfırlama bağlantısını gönderdik. Bağlantı 30 dakika
+              geçerli."   (G2 kalibi: uc varligi sizdirmiyor, istemci de KESIN konusmuyor)
+outbox bosaldi -> YAKALANAN MAIL'deki link acildi
+  baslik  : "Yeni Şifre Belirle · Divisima"       (once: "Sayfa Bulunamadı")
+  ekran   : authView + "Yeni şifre belirle"; token URL'den geldigi icin kod alani CIZILMEDI
+yeni sifre girildi -> "Şifren güncellendi."
+  ESKI sifreyle giris  -> 401
+  AYNI jeton 2. kez    -> 400 "Geçersiz sıfırlama bağlantısı."   (TEK KULLANIMLIK korundu)
+  YENI sifreyle giris  -> 403 "Giriş için e-posta adresinizi doğrulamanız gerekiyor."
+maildeki DOGRULAMA linki acildi -> "E-postan doğrulandı."  -> YENI sifreyle giris -> 200
+```
+
+## A4 - TEK PARA BIRIMI (TRY) - KULLANICI KARARI
+
+OLCULEN ONCE-DURUM: `var CUR={TRY:{rate:1},EUR:{rate:53.2},USD:{rate:46.6}}` - kurlar **kaynaga
+gomulu** sabitlerdi. `tl(n)` non-TRY'de `sym+(n/rate)` donduruyordu. Buna karsilik `api-bridge.js`
+`tl()`'i **HIC KULLANMIYORDU** (olculdu: 0 cagri) ve odeme paneli / siparis listesi / faturalar
+ham TRY basiyordu. Backend her kosulda TRY tahsil ediyor. Yani USD secili kullanici vitrinde
+`$X`, odeme panelinde TRY tutar goruyordu.
+
+YAPILAN: kur tablosu TRY'ye indirildi ve `tl()` icindeki cevrim dali KALDIRILDI (tabloyu
+bosaltmak yetmez - dal kalsaydi tablo geri geldigi gun ayrisma da geri gelirdi). Secici
+**GIZLENDI, KALDIRILMADI** (`#curbox` + `#curSelect`, markup duruyor). `api-bridge.js`'in iki
+bicimleyicisi (`money`, `paraTL`) `window.tl`'e **delege** ediyor - "fiyat bicimi tek kaynaktan"
+sarti. Eski oturumdan kalan `dvs_cur` anahtari temizleniyor.
+
+**KENDINI SAVUNAN TASARIM:** `CUR[code]` guard'i her tuketicide ZATEN vardi; tablodan EUR/USD
+girdilerini kaldirmak `setCur('USD')`'i ve `localStorage`'daki eski secimi **otomatik olarak**
+etkisiz kildi.
+
+### ELLE DOGRULAMA (tarayici)
+
+```
+CUR = {"TRY":{"rate":1,"sym":"₺"}}      curCode = TRY      dvs_cur = null
+#curbox display=none  #curSelect display=none   (markup IKISI DE DURUYOR)
+setCur('USD') cagrildi -> curCode HALA "TRY", tl(499.90) HALA "499,90 TL"
+localStorage'a dvs_cur=USD YAZILDI + sayfa yenilendi
+   -> curCode=TRY, dvs_cur=null (temizlendi), sayfada $ veya € : YOK
+vitrin fiyati "499,90 TL"  =  tl(499.90)  ;  odeme panelinde yalniz TL satirlari, $/€ YOK
+```
+
+## A3 - MISAFIR CHECKOUT: YALNIZ OLCULDU, KOD YAZILMADI
+
+Kullanicinin karari beklendigi icin **hicbir sey degistirilmedi**. Olculenler:
+
+- `POST /api/guest-checkout/place` VAR: `[AllowAnonymous]` + `[EnableRateLimiting("auth")]` +
+  `[Idempotency]`. Musteri satirini rastgele guclu sifreyle olusturur, adresi yazar, `PlaceOrder`'a
+  devreder. E-posta kayitliysa **409** doner (hesap ele gecirme engeli).
+- **`GuestCheckoutDto`'da `payment_method` ALANI YOK** -> `PlaceOrder` varsayilani alir ->
+  `payment_type = 0` (Online).
+- `/api/payment/initialize` **`[RequireUserType(Customer)]`** ve musteriyi TOKEN'dan okuyor.
+  Misafirin token'i yok.
+- **SONUC: bugun bir misafir siparisi olusturulabilir ama ASLA ODENEMEZ** - sonsuza kadar Pending
+  kalir (B13'teki terk edilmis siparis yiginina duser).
+- Storefront'ta `guest-checkout` cagrisi: index.html 0, api-bridge 0, api-client 0.
+- `.co-guest` blogu **DOM'DA YOK** (tarayicida olculdu): E2'nin gercek odeme paneli, index.html'in
+  o blogu cizen mock checkout'unun yerine gecti. Yani UI vaadi zaten olu.
+- **YASAYAN TEK VAAT SSS'DE:** "Evet. Ödeme sayfasında misafir olarak devam edebilirsin; sipariş
+  bilgilerin belirttiğin e-posta adresine gönderilir." (tr/en/ar).
+- `IssueSessionAndTokenAsync` **`email_verified` KONTROLU YAPMIYOR** - o kapi `Login`'de. Yani
+  misafire oturum vermek yetki modelini degistirmeden mekanik olarak MUMKUN.
+
+Uc secenek ve maliyetleri rapora yazildi; **KARAR KULLANICININ**.
+
+## PINLER
+
+`LaunchFixMailZinciriTests` (7, SQL): dogrulama maili tiklanabilir link tasir ve origin TEK
+KAYNAKTAN gelir (+ yedek kod yolu KORUNUR - cift-anlam kirici) · sifre sifirlama maili TAM
+rotayi ve sure sinirini tasir · siparis onay maili GERCEK musteri adresine gider ve
+`divisima.local` HIC gecmez · **SMTP patlarsa siparis ucu 201 doner ve olay outbox'ta gorunur**
+(+ mesajin O siparise ait oldugu) · kalici hata 5 denemede `Failed` olur ve zaman cizelgesine
+KRITIK notu duser (GERCEK publisher + GERCEK handler kosuluyor, stub degil) · origin yoksa link
+URETILMEZ, varsa URETILIR (vakum kirici) ve vitrin origin'i API origin'inin YERINE GECMEZ
+(cift-anlam kirici) · **SUPHELI pini** (asagi).
+
+`LaunchFixDalgaAFrontendTests` (6, kaynak sozlesmesi): "Sifremi unuttum" handler'i VAR ve hedefi
+`closest` ile cozer (M10 dersi) · iki rota router sarmasinda tanimli + bilinmeyen rota orijinale
+DEVREDILIR (cift-anlam kirici) + ilk yukleme yarisi kapatilmis · sifirlama ucu istemcide tanimli
+ve token ile cagriliyor · kur tablosu yalniz TRY ve `(n/c.rate)` dali KALMADI · `money`/`paraTL`
+`tl()`'e delege eder (+ ikisi de HALA VAR - vakum kirici) · secici gizlenir ama markup DURUR ve
+`dvs_cur` temizlenir.
+
+**KIRILAN PIN YOK.**
+
+**PIN SINIRI (Dalga 4'teki ayni durust kayit):** depoda JS/DOM kosucusu YOK; frontend pinleri
+KAYNAK SOZLESMESINI tutar, tarayici semantigini degil. Davranis kaniti yukaridaki elle
+dogrulama bloklarinda.
+
+## DIS KONTROLU + 5. KONTROL
+
+**DIS:** 5 assert ters cevrildi (BES AYRI test, IKI ayri sinif) -> **5 AYRI ISIMLI KIRMIZI**.
+Geri alindi, 13/13 yesil.
+
+**5. KONTROL - IKI URETIM MUTASYONU:**
+- **M1** (outbox yazimi kaldirildi, publish ESKI YERINE - commit sonrasi, try disinda):
+  `SMTP_PATLARSA_...` -> **HTTP 500**, govde `{"status":500,...,"instance":"/api/order/place"}`.
+  Olculen once-durumun **BIREBIR** aynisi. Diger 5 pin yesil kaldi (mutasyon lokalize).
+- **M2** (alici adresi sahte haline donduruldu): `SiparisOnayMaili_...` ->
+  **`"customer-2@divisima.local"`** buldu. Olculen once-durumun BIREBIR aynisi. TAM 1 pin kirildi.
+Ikisi de geri alindi.
+
+## YEREL DOGRULAMA
+
+259/259 `Category=Sql` · tam suitte **408 basarili / 411** (kirilan 3'un UCU DE Docker'li
+`OrderEndpointTests`) · Release 0 hata · whitespace + style **exit 0**.
+
+**SURECTE YASANAN (kayit):** `dotnet format style` iki test dosyasinda `IMPORTS` hatasi verdi -
+`sed` ile dosyanin BASINA eklenen `using` satirlari siralamayi bozmustu. CLAUDE.md'de zaten
+yazili olan tuzak (migration notu) elle eklenen using'ler icin de gecerli; `dotnet format style
+--include <dosya>` ile duzeltildi.
+
+## DEFTERE (BEKLEYEN)
+
+- **GERCEK MAIL TURU - BEKLIYOR.** Gercek bir SMTP hesabiyla (domain/hosting karariyla birlikte)
+  dogrulama / sifre sifirlama / siparis onayi mailleri **gercek bir gelen kutusuna** surulmeli:
+  teslim edilebilirlik (SPF/DKIM/DMARC), spam klasoru, gonderen adi/adresi ve linklerin gercek
+  origin'i. Bu dalga yerel yakalayiciyla **govde + alici + link** duzeyinde kanitladi; **teslimat**
+  duzeyi kanitlanmadi.
+
 ## SIRA
 
-0. **KALITE SUPURMESI - BES DALGANIN TAMAMI KAPANDI.** Dalga 1 + FIX, Dalga 2 + FIX, veri
-   temizligi, Dalga 3 + FIX, **(C) GUVENLIK DALGASI + GUVENLIK-FIX** ve **DALGA 4 (mobil +
-   capraz cihaz) + M10/M11-FIX**.
-   **DALGA 4'UN UC LAUNCH-BLOKE KALEMININ UCU DE KAPANDI:** M10 (mobil satin alma),
-   M11 (cerez barinin odeme sayfasini kilitlemesi) ve **M1 (API origin'i tek kaynaktan +
-   dagitim betigi + calisma ani guard'i - DALGA-4-FIX-2)**. M10/M11/M3 ayrica GERCEK
-   CIHAZDA dogrulandi ve mobil odeme akisi uctan uca surtuldu (Iyzico kart formu yuklendi).
-   DALGA 4'TEN ACIK KALAN BLOKE ETMEYENLER: M2 (376 px header tasmasi), M4 (44x44 alti
-   dokunma hedefleri), M5 (autocomplete), M6 (safe-area-inset-top), M7 (theme_color
-   uyusmazligi), M8 (SW surumu bumplanmadi), M9 (9.5 px etiketler).
-   **HENUZ TEST EDILMEDI: M6/M7 (PWA standalone) ve M8 (SW/offline) telefon adimlari.**
-   **CI'da JS/DOM pini YOK** - tarayici semantigi bugun yalniz elle kosulan
-   `frontend/test/mobil-erisilebilirlik.js` ile dogrulanabiliyor (ayrinti Dalga 4 bolumunde,
-   "PIN MEKANIZMASININ SINIRI"). **KARAR VERILDI: launch-sonrasi deftere** (bkz. KARARLAR).
-0b. **DALGA-4-FIX-2 (M1) TAMAMLANDI** - ayrinti yukaridaki bolumde. Secilen tasarim
-   OLCUMLE belirlendi: saf calisma-ani yapilandirma CSP'yi cozemiyor (tarayicida olculdu),
-   bu yuzden dagitim-ani yerine koyma + calisma ani tutarlilik guard'i.
-   **M6/M7 (PWA standalone) ve M8 (offline) ACIK ama BLOKE ETMEZ:** M6/M7 kisayol
-   standalone acmadigi icin OLCULEMEDI; M8 kullanici karariyla ATLANDI (offline oncelik
-   degil), SW VERSION bump'i dagitim kurali olarak checklist'te.
-   ERTELENENLER: **B5** (100 ucun HTTP testi yok - ayri kapsam dalgasi),
-   **B8**, **B13**, **P4** ve **P2-inline-bolme** (launch sonrasi defteri).
-   **GUVENLIK DALGASINDAN ACIK KALAN TEK KALEM: G4** (satici refresh token'i govdede) -
-   bugun ERISILEMEZ, satici modulu acilmadan once ZORUNLU (bkz. KARARLAR). SUPHELI #19
-   (kilit enumeration) **GUVENLIK-FIX-2**'de KAPANDI.
+0. **KALITE SUPURMESI KAPANDI - LAUNCH'I BLOKE EDEN TEKNIK KALEM KALMADI.**
+   Kanit SHA: **`dbaa763`** (her iki workflow tamamen yesil, alti job'da failure seviyeli
+   annotation SIFIR). Bes olcum dalgasi ve duzeltmeleri, kapanan/acik kalan kalemlerin tam
+   listesi ve kapanisin saha kaniti icin **yukaridaki "KAPANIS KAYDI" bolumune** bak -
+   acik kalemlerin GUNCEL ve TEK dogru listesi ORASIDIR; bu madde yalnizca isaret eder.
+   Ozetle acik kalanlar (HICBIRI BLOKE ETMEZ): SUPHELI #14 · G4 (satici modulu ON KOSULU) ·
+   M2/M4/M5/M6/M7/M8/M9 · B5 · B13 · launch-sonrasi defterin tamami.
+0b. **SIRADAKI FAZ: YAYIN HAZIRLIGI.** Kapsami KULLANICIDAN gelecek; bu satir yazilirken
+   HENUZ IS ACILMADI.
 1. **TEKNIK DEFTERDE ACIK KALEM KALMADI - TEK ISTISNA SUPHELI #14** (surum okuyucusu
    kirilganligi, genel) ve o da **LAUNCH SONRASI**. #15, #17 ve **#18** KAPANDI; #16 BILINCLI
    olarak bos birakildi; siparis #33 hem odeme hem envanter tarafinda TEMIZLENDI.
@@ -3054,7 +3435,8 @@ canli tablonun BIREBIR aynisi.** Diger uc test yesil kaldi (mutasyon lokalize). 
 
 ## SUPHELI DAVRANISLAR
 
-**DURUM: ACIK KALEM YALNIZ #20 (bugun BOSLUK YOK, testte kapatildi) ve #14 (LAUNCH SONRASI).**
+**DURUM: ACIK KALEMLER #14 (LAUNCH SONRASI), #20 (bugun BOSLUK YOK, testte kapatildi) ve
+YENI #21 (LAUNCH-FIX Dalga A'da olculdu, DUZELTILMEDI - karar kullanicinin).**
 **#19 KAPANDI - GUVENLIK-FIX-2 (kullanici karari: secenek iii).**
 Kapananlar: #1..#13 ilgili sprintlerde · **#15, #17, #18 mini dalgalarda** ·
 **#16 BILINCLI olarak bos birakildi (verilmis karar, erteleme degil)**.
@@ -3381,6 +3763,35 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    VAKUM olurdu). Sessiz bir 401 yerine KIRMIZI BIR TEST secildi.
    Aday kalici cozum: Asp.Versioning'in hata endpoint'ine anonim metadata iliskilendirilebilir
    hale gelirse (ya da SUPHELI #14 genel olarak cozulurse) FallbackPolicy'ye gecilebilir.
+
+21. **SIFRE POLITIKASI UC AYRI GIRIS NOKTASINDA UC AYRI - SIFIRLAMA UCUNDA HIC YOK.**
+   (LAUNCH-FIX Dalga A / A2'de olculdu; A2 bu akisi ARAYUZE BAGLADIGI icin kapi artik her
+   musteriye acik.) Olculen tablo:
+   ```
+   POST /api/auth/register        CustomerRegisterRequestValidator
+                                  -> >=8 karakter + buyuk + kucuk + rakam
+   POST /api/account/change-password  AccountManager.cs:73
+                                  -> yalnizca >= 6 karakter, KARMASIKLIK YOK
+   POST /api/auth/reset-password      AuthManager.ResetPassword
+                                  -> HICBIR KONTROL YOK; dto.new_password dogrudan hash'leniyor
+                                     (bu DTO icin FluentValidation validator'i da YOK - tarandi)
+   ```
+   **URETIMDEKI ANLAMI:** "Sifremi unuttum" ile gelen bir kullanici, KAYITTA reddedilecek bir
+   sifreyi (ornegin `abc`) belirleyebilir. Yani politika, atlatilmasi en kolay yoldan
+   uygulanmiyor. Dalga A'da istemci tarafina kayit kuralinin AYNISI kondu (`sifreSifirlaEkrani`)
+   ama bu bir GUVENCE DEGIL - dogrudan uca istek atan biri icin yok hukmunde.
+   **DUZELTILMEDI** (ev kurali: supheli uretim davranisi duzeltilmez, pinlenir).
+   Bugunku davranis ADIYLA sabitlendi:
+   `LaunchFixMailZinciriTests.SUPHELI_SifreSifirlamada_SUNUCU_TARAFI_SIFRE_POLITIKASI_YOK_PINLENIR`
+   - pin CIFT-ANLAM KIRICI: ayni zayif sifrenin KAYITTA 400 aldigi da assert ediliyor, yani
+   kural VAR, yalnizca bu ucta UYGULANMIYOR.
+   Aday cozum: sifre politikasini TEK yerde toplayip (ornegin `SifrePolitikasi.Dogrula`) uc
+   giris noktasinin ucunde de cagirmak. `ChangePassword`'un 6 karakterlik esigi de bu kararin
+   kapsamina girer - onu 8'e cikarmak MEVCUT kullanicilarin sifre degistirmesini zorlastirir,
+   yani bir URUN karari. **Karar kullanicinin.**
+   **YAN GOZLEM (kozmetik, ayni metotta):** `ResetPassword`'un basinda AYNI
+   `string.IsNullOrWhiteSpace(dto.token)` kontrolu IKI KEZ var (farkli mesajlarla); ikincisi
+   ULASILAMAZ. Zarar yok, temizlik kalemi.
 
 ## SUREC (degismez)
 

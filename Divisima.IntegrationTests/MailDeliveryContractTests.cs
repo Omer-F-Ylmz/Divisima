@@ -11,6 +11,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Divisima.IntegrationTests
@@ -296,10 +297,10 @@ namespace Divisima.IntegrationTests
             {
                 var mgr = new Divisima.Bussiness.Concrete.StockNotificationManager(
                     new EfStockNotificationRequestDal(ctx), new EfProductDal(ctx), mail,
-                    // SPRINT 8 MADDE 10: yapilandirma abonelikten-cikma baglantisinin TABANI icin.
-                    // BOS birakiliyor - bu testler mail GONDERIMINI olcuyor, baglanti metnini degil;
-                    // taban bossa manager baglanti yerine "Hesabim > Bildirimlerim" metni yaziyor.
-                    new ConfigurationBuilder().Build());
+                    // LAUNCH-FIX A1(c): taban okuma IMailLinkBuilder'a tasindi. GERCEK uygulama veriliyor
+                    // (stub degil); yapilandirma BOS oldugu icin builder null doner ve manager
+                    // baglanti yerine "Hesabim > Bildirimlerim" metnini yazar - olculen sey yine gonderim.
+                    new MailLinkBuilder(new ConfigurationBuilder().Build(), NullLogger<MailLinkBuilder>.Instance));
                 await mgr.NotifyBackInStock(productId, "M");
             }
 

@@ -1746,11 +1746,21 @@ function nameOf(p){if(!p)return'';return (lang==='en'&&NAME_EN[p.id])?NAME_EN[p.
 function descOf(p){return (lang==='en'&&DESC_EN[p.id])?DESC_EN[p.id]:(p.desc||'');}
 var POPULAR_L={tr:['Elbise','Trençkot','Triko','Bluz','Abiye','Çanta'],en:['Dress','Trench','Knit','Blouse','Evening','Bag']};
 
-/* para birimi — guncel kur: 1 EUR ~ 53,2 TL / 1 USD ~ 46,6 TL */
-var CUR={TRY:{rate:1,sym:'₺'},EUR:{rate:53.2,sym:'€'},USD:{rate:46.6,sym:'$'}};
+/* LAUNCH-FIX A4 — TEK PARA BIRIMI (TRY). Kullanici karari.
+   ONCE: tabloda TRY yaninda EUR (~53,2) ve USD (~46,6) vardi — kurlar KAYNAGA GOMULU sabitlerdi
+   ve bayatliyordu. Vitrin bu tabloyla cevirip "$X" gosteriyor, api-bridge'in cizdigi odeme
+   paneli ham TRY basiyor, backend ise HER KOSULDA TRY tahsil ediyordu (order.currency ?? "TRY").
+   Yani ayni siparis komsu iki ekranda iki farkli para biriminde gorunuyordu.
+   Tablo TRY'ye indirildi; EUR/USD girdileri KALDIRILDI ki hicbir yol bayat kura dusemesin —
+   CUR[code] guard'i sayesinde setCur('USD') ve localStorage'daki eski secim SESSIZCE reddedilir.
+   Secicinin MARKUP'I DURUYOR, api-bridge.js gizliyor (ileride gercek kur servisiyle geri gelir). */
+var CUR={TRY:{rate:1,sym:'₺'}};
 var curCode='TRY';
 var FREE_SHIP=2000;
-function tl(n){if(n==null||isNaN(n))n=0;if(!CUR[curCode])curCode='TRY';var c=CUR[curCode];if(curCode==='TRY'){var dec=Math.abs(n-Math.round(n))>0.005;return n.toLocaleString('tr-TR',{minimumFractionDigits:dec?2:0,maximumFractionDigits:dec?2:0})+' TL';}return c.sym+(n/c.rate).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+/* LAUNCH-FIX A4: doviz cevrimi dali KALDIRILDI (gerekce CUR tanimindaki yorumda). Fonksiyon
+   TEK bicimleyici olarak kaliyor - api-bridge.js'in money()/paraTL() yardimcilari da buna
+   delege ediyor ki vitrin, odeme paneli ve fatura AYNI bicimi kullansin. */
+function tl(n){if(n==null||isNaN(n))n=0;if(!CUR[curCode])curCode='TRY';var dec=Math.abs(n-Math.round(n))>0.005;return n.toLocaleString('tr-TR',{minimumFractionDigits:dec?2:0,maximumFractionDigits:dec?2:0})+' TL';}
 
 var NAV=[
   {slug:'yeni',label:'Yeni Gelenler'},

@@ -18,14 +18,15 @@ namespace Divisima.Bussiness.Concrete
         private readonly IProductDal _productDal;
         private readonly IMailService _mailService;
 
-        private readonly IConfiguration _config;
+        // LAUNCH-FIX A1(c): IConfiguration bagimliligi KALKTI - taban okuma IMailLinkBuilder'a tasindi.
+        private readonly IMailLinkBuilder _links;
 
-        public StockNotificationManager(IStockNotificationRequestDal notificationDal, IProductDal productDal, IMailService mailService, IConfiguration config)
+        public StockNotificationManager(IStockNotificationRequestDal notificationDal, IProductDal productDal, IMailService mailService, IMailLinkBuilder links)
         {
             _notificationDal = notificationDal;
             _productDal = productDal;
             _mailService = mailService;
-            _config = config;
+            _links = links;
         }
 
         public async Task<(HttpStatusCode, Result)> Subscribe(StockNotificationSubscribeRequestDto dto)
@@ -178,12 +179,15 @@ namespace Divisima.Bussiness.Concrete
         // servis edildigi "Storage:PublicBaseUrl"e duseriz - OLCULEN gerekce: gorseller de API'nin
         // wwwroot'undan servis ediliyor, yani ayni origin. Ikisi de bossa baglanti YERINE ne
         // yapilacagi ACIKCA yazilir; sessizce bos birakilmaz.
+        // LAUNCH-FIX A1(c): taban okuma ve bos-durum artik IMailLinkBuilder'da TEK YERDE. Ayni
+        // dusus (Api:PublicBaseUrl -> Storage:PublicBaseUrl) AYNEN korunuyor; degisen tek sey bos
+        // origin'in artik GURULTULU loglanmasi - eskiden sessizce yedek metne duserdi.
         private string AbonelikCikisMetni(string yol, string token)
         {
-            var taban = (_config["Api:PublicBaseUrl"] ?? _config["Storage:PublicBaseUrl"] ?? "").TrimEnd('/');
-            if (string.IsNullOrWhiteSpace(taban))
+            var link = _links.ApiBaglantisi($"{yol}?token={Uri.EscapeDataString(token)}");
+            if (link == null)
                 return "\n\nBu bildirimleri almak istemiyorsan Hesabım > Bildirimlerim sayfasından aboneliğini kaldırabilirsin.";
-            return $"\n\nBu bildirimleri almak istemiyorsan: {taban}{yol}?token={Uri.EscapeDataString(token)}";
+            return $"\n\nBu bildirimleri almak istemiyorsan: {link}";
         }
     }
 }

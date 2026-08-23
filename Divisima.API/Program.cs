@@ -185,6 +185,8 @@ else
 // Framework bağımlı servisler
 builder.Services.AddScoped<ITokenHelper, JwtHelper>();
 builder.Services.AddScoped<IMailService, SmtpMailService>();
+// LAUNCH-FIX A1(c): e-postadaki baglantilarin TEK KAYNAGI. Gerekce IMailLinkBuilder'in basinda.
+builder.Services.AddScoped<IMailLinkBuilder, MailLinkBuilder>();
 builder.Services.AddScoped<INotificationService, SignalRNotificationService>();
 builder.Services.AddScoped<IIyzicoClient, IyzicoClient>();
 builder.Services.AddScoped<Divisima.Core.Security.TwoFactor.ITwoFactorService, Divisima.Core.Security.TwoFactor.TotpService>();

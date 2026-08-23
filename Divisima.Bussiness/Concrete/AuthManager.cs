@@ -27,10 +27,36 @@ namespace Divisima.Bussiness.Concrete
         private readonly IMailService _mailService;
         private readonly ISecurityEventService _securityEvents;
         private readonly ICacheService _cache;
+        // LAUNCH-FIX A1(c): dogrulama / sifre sifirlama maillerindeki TIKLANABILIR baglantinin
+        // tek kaynagi. Gerekce IMailLinkBuilder'in basinda yazili.
+        private readonly IMailLinkBuilder _links;
+
+        // ══ LAUNCH-FIX A1(b) EKI - KAYIT/SIFIRLAMA MAILLERI DE OUTBOX'TAN GECIYOR ═══════════
+        //
+        // BU BULGU DALGA A'NIN KENDI OLCUMUNDE CIKTI (planlanan kalem degildi): yeni pin
+        // yazilirken sahte mail servisi HER gonderimde istisna atacak sekilde ayarlandi ve
+        // POST /api/auth/register **HTTP 500** dondu. Kok sebep siparis yolundakiyle AYNI:
+        // gonderim istek hattinda, try/catch YOK, SmtpMailService hatayi FIRLATIYOR.
+        // ZARAR SIPARISTEKINDEN AGIR: musteri satiri ZATEN yazilmis oluyor (AddAsync mail'den
+        // ONCE), yani kullanici "kayit olamadim" sanip tekrar deniyor ve bu kez "var olan hesap"
+        // dalina dusuyor - hesabi VAR ama dogrulama maili HIC GITMEMIS durumda kaliyor.
+        //
+        // COZUM AYNI MEVCUT KANAL: EngagementManager'in kullandigi "EmailNotification" outbox
+        // tipi. Bedel ~1 dakikalik gecikme; kazanc, SMTP'nin kayit/sifirlama akisini
+        // DUSUREMEMESI ve hatanin 5 kez yeniden denenmesi.
+        //
+        // 2FA KODU BILINCLI OLARAK HARIC: o bir GIRIS anahtaridir, 5 dakika omru vardir ve
+        // gecikmeli/kayip gitmesi kullanicinin giris yapamamasi demektir - orada GURULTULU
+        // basarisizlik dogru davranistir. Bugun zaten ulasilamaz bir dal (two_factor_enabled
+        // hicbir kod yolunda true yapilmiyor - olculdu).
+        private readonly Divisima.Bussiness.Outbox.IOutboxService _outboxService;
 
         public AuthManager(ICustomerDal customerDal, IUserSessionDal userSessionDal, ITokenHelper tokenHelper, IMailService mailService, ISecurityEventService securityEvents,
-            IReferralService referralService, IConsentRecordDal consentDal, ICacheService cache)
+            IReferralService referralService, IConsentRecordDal consentDal, ICacheService cache,
+            IMailLinkBuilder links, Divisima.Bussiness.Outbox.IOutboxService outboxService)
         {
+            _outboxService = outboxService;
+            _links = links;
             _cache = cache;
             _referralService = referralService;
             _consentDal = consentDal;
@@ -39,6 +65,42 @@ namespace Divisima.Bussiness.Concrete
             _tokenHelper = tokenHelper;
             _mailService = mailService;
             _securityEvents = securityEvents;
+        }
+
+        // ══ LAUNCH-FIX A1(c) - MAIL GOVDELERI TEK YERDE ══════════════════════════════════════
+        //
+        // OLCULEN ONCE-DURUM: dort ayri cagri yerinde govde su tek satirdi ->
+        //   "Hesabinizi dogrulamak icin token: <token>"
+        // Ne baglanti, ne yonerge, ne marka satiri vardi. Kullanici jetonu NEREYE yazacagini
+        // e-postadan ogrenemiyordu.
+        //
+        // BICIM KARARI OLCUME DAYALI: depodaki TUM mailler duz metin (IsHtml=false) -
+        // EngagementManager, StockNotificationManager, PriceDropManager, AuthManager. HTML sablon
+        // katmani ACILMADI; duz metinde kendi satirinda duran ciplak URL her istemcide tiklanabilir.
+        //
+        // JETON HER IKI DURUMDA DA GOVDEDE KALIYOR: Giris ekranindaki mevcut dogrulama kutusu
+        // (E1'den beri calisan yol) bozulmasin diye. Baglanti EK bir yoldur, YERINE GECEN degil.
+        private string DogrulamaGovdesi(string token)
+        {
+            var link = _links.VitrinBaglantisi("#/dogrula/" + Uri.EscapeDataString(token));
+            if (link == null)
+                return "Merhaba,\n\nDivisima hesabını doğrulamak için Giriş ekranındaki doğrulama "
+                     + $"kutusuna şu kodu gir:\n\n{token}\n\nDivisima";
+            return "Merhaba,\n\nDivisima hesabını doğrulamak için aşağıdaki bağlantıya tıkla:\n\n"
+                 + $"{link}\n\nBağlantı çalışmazsa Giriş ekranındaki doğrulama kutusuna şu kodu "
+                 + $"gir: {token}\n\nDivisima";
+        }
+
+        private string SifreSifirlamaGovdesi(string token)
+        {
+            var link = _links.VitrinBaglantisi("#/sifre-sifirla/" + Uri.EscapeDataString(token));
+            if (link == null)
+                return "Merhaba,\n\nŞifreni sıfırlamak için Giriş ekranındaki \"Şifremi unuttum\" "
+                     + $"adımında açılan kod alanına şu kodu gir (30 dakika geçerli):\n\n{token}\n\n"
+                     + "Bu isteği sen yapmadıysan bu e-postayı yok sayabilirsin; şifren değişmez.\n\nDivisima";
+            return "Merhaba,\n\nŞifreni sıfırlamak için aşağıdaki bağlantıya tıkla "
+                 + $"(30 dakika geçerli):\n\n{link}\n\nBu isteği sen yapmadıysan bu e-postayı yok "
+                 + "sayabilirsin; şifren değişmez.\n\nDivisima";
         }
 
         // ══ GUVENLIK-FIX (G2) - KAYIT YANITI ARTIK "BU ADRES KAYITLI MI" SORUSUNU YANITLAMIYOR ══
@@ -115,11 +177,11 @@ namespace Divisima.Bussiness.Concrete
                 await _consentDal.AddAsync(new ConsentRecord { customer_id = customer.id, consent_type = "privacy", document_version = consentVersion, granted = true, created_at = consentTime });
             await _consentDal.AddAsync(new ConsentRecord { customer_id = customer.id, consent_type = "marketing", document_version = consentVersion, granted = dto.accepted_marketing, created_at = consentTime });
 
-            await _mailService.SendAsync(new MailMessageDto
+            await _outboxService.WriteAsync("EmailNotification", new MailMessageDto
             {
                 To = customer.email,
                 Subject = "Divisima - E-posta adresinizi doğrulayın",
-                Body = $"Hesabınızı doğrulamak için token: {customer.email_verification_token}"
+                Body = DogrulamaGovdesi(customer.email_verification_token)
             });
 
             return (HttpStatusCode.Created, new SuccessResult(Messages.RegisterSubmitted));
@@ -155,10 +217,10 @@ namespace Divisima.Bussiness.Concrete
                 mevcut.email_verification_sent_at = DateTime.Now;
                 await _customerDal.UpdateAsync(mevcut);
                 konu = "Divisima - E-posta adresinizi doğrulayın";
-                govde = $"Hesabınızı doğrulamak için token: {mevcut.email_verification_token}";
+                govde = DogrulamaGovdesi(mevcut.email_verification_token);
             }
 
-            await _mailService.SendAsync(new MailMessageDto { To = mevcut.email, Subject = konu, Body = govde });
+            await _outboxService.WriteAsync("EmailNotification", new MailMessageDto { To = mevcut.email, Subject = konu, Body = govde });
         }
 
         // Açıklayıcı yorum: Giriş. E-posta bul -> şifre doğrula -> JWT üret -> oturum kaydet.
@@ -445,7 +507,7 @@ namespace Divisima.Bussiness.Concrete
 
             if (customer != null && customer.email_verified)
             {
-                await _mailService.SendAsync(new MailMessageDto
+                await _outboxService.WriteAsync("EmailNotification", new MailMessageDto
                 {
                     To = customer.email,
                     Subject = "Divisima - Hesabınız zaten doğrulanmış",
@@ -458,11 +520,11 @@ namespace Divisima.Bussiness.Concrete
                 customer.email_verification_token = SecureTokenGenerator.Generate();
                 customer.email_verification_sent_at = DateTime.Now;
                 await _customerDal.UpdateAsync(customer);
-                await _mailService.SendAsync(new MailMessageDto
+                await _outboxService.WriteAsync("EmailNotification", new MailMessageDto
                 {
                     To = customer.email,
                     Subject = "Divisima - E-posta doğrulama (yeniden)",
-                    Body = $"Doğrulama token: {customer.email_verification_token}"
+                    Body = DogrulamaGovdesi(customer.email_verification_token)
                 });
             }
 
@@ -481,11 +543,11 @@ namespace Divisima.Bussiness.Concrete
                 customer.password_reset_token = SecureTokenGenerator.Generate();
                 customer.password_reset_expiry = DateTime.Now.AddMinutes(30); // kısa ömür
                 await _customerDal.UpdateAsync(customer);
-                await _mailService.SendAsync(new MailMessageDto
+                await _outboxService.WriteAsync("EmailNotification", new MailMessageDto
                 {
                     To = customer.email,
                     Subject = "Divisima - Şifre sıfırlama",
-                    Body = $"Şifrenizi sıfırlamak için token: {customer.password_reset_token} (30 dk geçerli)"
+                    Body = SifreSifirlamaGovdesi(customer.password_reset_token)
                 });
             }
             // Açıklayıcı yorum: Her durumda aynı yanıt (hesap var mı bilgisini sızdırma)

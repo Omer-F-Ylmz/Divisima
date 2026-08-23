@@ -480,7 +480,11 @@
 
   var checkoutState = { addresses: [], addrId: null, coupon: null, useCredit: 0, credit: 0, method: "card" };
 
+  // LAUNCH-FIX A4: fiyat bicimi TEK KAYNAKTAN. index.html'in tl() fonksiyonuna delege edilir;
+  // o yoksa (bu dosya tek basina yuklendiyse) eski TRY bicimi yedek kalir. Onceden bu dosya
+  // tl()'i HIC kullanmiyordu (olculdu: 0 cagri) ve vitrin ile odeme paneli ayrisabiliyordu.
   function money(n) {
+    if (typeof window.tl === "function") { try { return window.tl(Number(n || 0)); } catch (_) { } }
     try { return Number(n || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " TL"; }
     catch (e) { return (Number(n || 0)).toFixed(2) + " TL"; }
   }
@@ -1030,7 +1034,11 @@
     try { return new Date(iso).toLocaleDateString("tr-TR", { day: "2-digit", month: "long", year: "numeric" }); }
     catch (_) { return String(iso).slice(0, 10); }
   }
-  function paraTL(n) { return (Number(n) || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " TL"; }
+  // LAUNCH-FIX A4: money() ile AYNI gerekce - bicim tek kaynaktan (index.html tl()).
+  function paraTL(n) {
+    if (typeof window.tl === "function") { try { return window.tl(Number(n) || 0); } catch (_) { } }
+    return (Number(n) || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " TL";
+  }
   function bosDurum(metin, ctaMetin, ctaHref) {
     return '<div class="wrap" style="padding:24px 0"><p class="muted" style="margin:0 0 14px">' + esc(metin) + "</p>" +
       (ctaMetin ? '<a class="btn" href="' + ctaHref + '">' + esc(ctaMetin) + "</a>" : "") + "</div>";
@@ -1640,6 +1648,218 @@
     }
     // Ilk yukleme + katalog sonrasi tazeleme init() icinde yapiliyor.
   }
+  // ══ LAUNCH-FIX A2 - SIFREMI UNUTTUM + A1(c) DOGRULAMA ROTASI ═══════════════════════════════
+  //
+  // OLCULEN ONCE-DURUM (kapsama denetimi):
+  //   index.html'de  <a href="#" data-i18n="forgot">Sifremi unuttum</a>  -> href="#" OLU LINK.
+  //   api-client.js'te forgotPassword/resetPassword TANIMLI ama CAGIRAN YOK (api-bridge'de 0
+  //   eslesme). Yani sifresini unutan musterinin siteden geri donus yolu HIC YOKTU.
+  //   Backend tarafi hazirdi: token 30 dk, TEK KULLANIMLIK (kullanildiginda null'lanir) ve
+  //   sifre degisince TUM oturumlar kapatiliyor.
+  //
+  // ROTALAR ROUTER SARMALANARAK EKLENIYOR (index.html'in router'ina DOKUNULMADI):
+  //   #/dogrula/<token>        -> jetonu otomatik dogrula
+  //   #/sifre-sifirla/<token>  -> yeni sifre ekrani
+  // Sarmalama kalibi depoda zaten var (setDocTitle, logout, addToCart). Bilinmeyen rota
+  // show404'e dustugu icin bu iki yol ONCE yakalanmak zorunda.
+  //
+  // EKRANLAR AUTH GORUNUMUNU YENIDEN KULLANIR: yeni bir view acilmadi; kutular showVerifyPrompt
+  // kalibiyla #paneLogin'e enjekte ediliyor.
+  function authKutusu(baslik) {
+    if (typeof window.showAuth === "function") window.showAuth();
+    var host = document.getElementById("paneLogin") || document.body;
+    var box = document.getElementById("dvsAuthAksiyon");
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "dvsAuthAksiyon";
+      box.style.cssText = "margin-top:14px;padding:14px;border:1px solid #e8e4de;border-radius:10px;background:#faf8f5";
+      host.appendChild(box);
+    }
+    box.innerHTML = '<div style="font-weight:600;margin-bottom:8px">' + esc(baslik) + "</div>" +
+      '<div id="dvsAuthGovde" style="font-size:13px;color:#6b6b6b"></div>' +
+      '<div id="dvsAuthErr" style="color:#a32d2d;font-size:12px;margin-top:8px"></div>';
+    return box;
+  }
+  function authInput(id, ph, tip) {
+    return '<input id="' + id + '" type="' + (tip || "text") + '" placeholder="' + esc(ph) +
+      '" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-top:8px">';
+  }
+  function authBtn(id, metin) {
+    return '<button id="' + id + '" style="margin-top:10px;padding:9px 16px;border:none;border-radius:8px;' +
+      'background:#111;color:#fff;cursor:pointer">' + esc(metin) + "</button>";
+  }
+
+  function sifremiUnuttumEkrani(onDolu) {
+    authKutusu("Şifremi unuttum");
+    document.getElementById("dvsAuthGovde").innerHTML =
+      "Hesabının e-posta adresini gir; şifreni sıfırlaman için bir bağlantı gönderelim." +
+      authInput("dvsFpMail", "E-posta", "email") + authBtn("dvsFpGo", "Bağlantı gönder");
+    if (onDolu) document.getElementById("dvsFpMail").value = onDolu;
+    document.getElementById("dvsFpGo").onclick = async function () {
+      var er = document.getElementById("dvsAuthErr"); er.textContent = "";
+      var mail = (document.getElementById("dvsFpMail").value || "").trim();
+      if (!mail) { er.textContent = "E-posta gir."; return; }
+      try {
+        await api.auth.forgotPassword(mail);
+        // GUVENLIK-FIX (G2) KALIBI: uc, adresin kayitli olup olmadigini SIZDIRMIYOR (her durumda
+        // ayni yanit). Istemci de bu yuzden "gonderildi" diye KESIN konusamaz.
+        document.getElementById("dvsAuthGovde").innerHTML =
+          "Bu adres kayıtlıysa şifre sıfırlama bağlantısını gönderdik. Bağlantı 30 dakika geçerli.";
+      } catch (e) { er.textContent = e.message || "Gönderilemedi"; }
+    };
+  }
+
+  function sifreSifirlaEkrani(token) {
+    authKutusu("Yeni şifre belirle");
+    document.getElementById("dvsAuthGovde").innerHTML =
+      "Yeni şifreni gir. Kayıt kuralıyla aynı: en az 8 karakter, bir büyük harf, bir küçük harf ve bir rakam." +
+      (token ? "" : authInput("dvsRpToken", "E-postadaki kod", "text")) +
+      authInput("dvsRpPass", "Yeni şifre", "password") +
+      authInput("dvsRpPass2", "Yeni şifre (tekrar)", "password") +
+      authBtn("dvsRpGo", "Şifreyi güncelle");
+    document.getElementById("dvsRpGo").onclick = async function () {
+      var er = document.getElementById("dvsAuthErr"); er.textContent = "";
+      var tkEl = document.getElementById("dvsRpToken");
+      var tk = token || (tkEl ? (tkEl.value || "").trim() : "");
+      var p1 = document.getElementById("dvsRpPass").value || "";
+      var p2 = document.getElementById("dvsRpPass2").value || "";
+      if (!tk) { er.textContent = "E-postadaki kodu gir."; return; }
+      if (p1 !== p2) { er.textContent = "İki şifre aynı değil."; return; }
+      // ISTEMCI TARAFI POLITIKA - SUNUCUNUN YERINE GECMEZ, ONUNLA AYNI OLMAYA CALISIR.
+      // OLCULDU: /api/auth/reset-password ucunda sunucu tarafinda HICBIR sifre kurali YOK
+      // (8+buyuk+kucuk+rakam kurali yalniz KAYITTA, ChangePassword'de ise yalniz 6 karakter).
+      // Bu bir SUPHELI olarak raporlandi ve DUZELTILMEDI - karar kullanicinin. Buradaki kontrol
+      // kullaniciyi kayittan zayif bir sifre secmekten alikoyar ama bir GUVENCE DEGILDIR.
+      if (p1.length < 8 || !/[A-Z]/.test(p1) || !/[a-z]/.test(p1) || !/[0-9]/.test(p1)) {
+        er.textContent = "Şifre en az 8 karakter olmalı; büyük harf, küçük harf ve rakam içermeli.";
+        return;
+      }
+      try {
+        await api.auth.resetPassword({ token: tk, new_password: p1 });
+        document.getElementById("dvsAuthGovde").innerHTML =
+          "Şifren güncellendi. Şimdi yeni şifrenle giriş yapabilirsin.";
+        // Sunucu sifre degisince TUM oturumlari kapatiyor (InvalidateAllForCustomerAsync);
+        // istemcideki bayat access token da atilmali - aksi halde kullanici 15 dakika boyunca
+        // "girisli" gorunup her korumali cagrida 401 yerdi.
+        try { api.setAccessToken(null); api.setRefreshToken(null); } catch (_) { }
+        window.loggedIn = false;
+      } catch (e) { er.textContent = e.message || "Şifre güncellenemedi"; }
+    };
+  }
+
+  async function dogrulaEkrani(token) {
+    authKutusu("E-posta doğrulama");
+    var govde = document.getElementById("dvsAuthGovde");
+    if (!token) { govde.textContent = "Doğrulama kodu bulunamadı."; return; }
+    govde.textContent = "Doğrulanıyor…";
+    try {
+      await api.auth.verifyEmail(token);
+      govde.innerHTML = "E-postan doğrulandı. Artık giriş yapabilirsin.";
+    } catch (e) {
+      document.getElementById("dvsAuthErr").textContent = e.message || "Doğrulama başarısız";
+      govde.innerHTML = "Kod geçersiz ya da süresi dolmuş olabilir. Üye Ol sekmesinden " +
+        "\"Tekrar gönder\" ile yeni kod isteyebilirsin.";
+    }
+  }
+
+  function ozelAuthRotasi() {
+    var h = location.hash.replace(/^#\/?/, "").split("?")[0].split("/");
+    // BASLIK BURADA SET EDILIYOR - SPRINT 8 MADDE 12'NIN AYNI TUZAGI, BU DALGADA OLCULDU:
+    // ekran DOGRU cizildigi halde sekme basligi "Sayfa Bulunamadi · Divisima" kaliyordu, cunku
+    // index.html'in setDocTitle() fonksiyonunun bu yollar icin dali YOK ve sarmalayici orijinal
+    // router'a devretmediginde setDocTitle hic cagrilmiyor. Paylasilan/yer imine eklenen bir
+    // sifirlama baglantisinin "Sayfa Bulunamadi" gorunmesi, kullaniciya linkin BOZUK oldugunu
+    // soyler - oysa sayfa calisiyor.
+    if (h[0] === "dogrula") {
+      document.title = "E-posta Doğrulama · Divisima";
+      dogrulaEkrani(decodeURIComponent(h[1] || ""));
+      return true;
+    }
+    if (h[0] === "sifre-sifirla") {
+      document.title = "Yeni Şifre Belirle · Divisima";
+      sifreSifirlaEkrani(decodeURIComponent(h[1] || ""));
+      return true;
+    }
+    return false;
+  }
+
+  function wireSifreVeDogrulama() {
+    if (typeof window.router === "function" && !window.router.__dvsAuthWrapped) {
+      var origRouter = window.router;
+      var sarmal = function () {
+        // Ozel rotalar ONCE: aksi halde bilinmeyen yol show404'e duser.
+        if (ozelAuthRotasi()) {
+          if (typeof window.setNavActive === "function") window.setNavActive();
+          return;
+        }
+        return origRouter.apply(this, arguments);
+      };
+      sarmal.__dvsAuthWrapped = true;
+      window.router = sarmal;
+    }
+
+    // "Sifremi unuttum" - index.html'deki href="#" olu link. DELEGE dinleyici kullaniliyor:
+    // baglanti auth ekrani her cizildiginde YENIDEN olusuyor, dogrudan onclick baglamak
+    // ikinci cizimde kaybolurdu. DALGA 4 / M10 dersi: hedef ALT ELEMAN olabilir -> closest.
+    if (!document.__dvsForgotWired) {
+      document.__dvsForgotWired = true;
+      document.addEventListener("click", function (e) {
+        var a = e.target && e.target.closest ? e.target.closest('[data-i18n="forgot"]') : null;
+        if (!a) return;
+        e.preventDefault();
+        var em = document.getElementById("lgEmail");
+        sifremiUnuttumEkrani(em ? (em.value || "").trim() : "");
+      });
+    }
+
+    // ILK YUKLEME YARISI: index.html'in router'i sayfa ayristirilirken (DOMContentLoaded'dan
+    // ONCE) bir kez kosuyor, yani sarmalama devreye girmeden show404 cizilmis olabilir.
+    // E3/M12'de olculen ayni yaris; cozum de ayni - bir kez daha ciz.
+    ozelAuthRotasi();
+  }
+
+  // ══ LAUNCH-FIX A4 - TEK PARA BIRIMI (TRY) ══════════════════════════════════════════════════
+  //
+  // KULLANICI KARARI: launch'ta tek para birimi TRY. Secici KALDIRILMADI, GIZLENDI (ileride
+  // gercek bir kur servisiyle geri gelecek).
+  //
+  // OLCULEN ONCE-DURUM: index.html'de  var CUR={TRY:{rate:1},EUR:{rate:53.2},USD:{rate:46.6}}
+  // - kurlar KAYNAGA GOMULU sabitlerdi. tl(n) non-TRY'de  sym + (n/rate)  donduruyordu.
+  // Buna karsilik api-bridge.js'in cizdigi ekranlar (odeme paneli, siparis listesi, faturalar)
+  // tl() fonksiyonunu HIC KULLANMIYORDU (olculdu: 0 cagri) ve ham TRY basiyordu. Backend ise
+  // her kosulda TRY tahsil ediyor (order.currency ?? "TRY", Iyzico para birimi dogrulamasi).
+  // Yani USD secili bir kullanici vitrinde "$X", odeme panelinde TRY tutar goruyordu.
+  //
+  // BU DALGADA: kur tablosu index.html'de TRY'ye indirildi (o dosyadaki degisiklik) ve burada
+  // asagidaki iki sey yapiliyor:
+  //   1) secici gizlenir (markup DURUYOR),
+  //   2) bu dosyanin IKI para bicimleyicisi (money, paraTL) index.html'in tl() fonksiyonuna
+  //      DELEGE eder -> "fiyat bicimi tek kaynaktan" sarti saglanir.
+  function wireParaBirimi() {
+    // 1) Secici gizlenir. Kaldirmiyoruz: markup ileride gercek kur servisiyle geri acilacak.
+    ["curbox", "curSelect"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.hidden = true;
+      el.style.display = "none";
+      el.setAttribute("aria-hidden", "true");
+      // Klavye ile odaklanip degistirilebilmesin (display:none zaten engeller; select icin
+      // disabled ayrica form davranisini de kapatir).
+      if (el.tagName === "SELECT") el.disabled = true;
+    });
+    // Secicinin sarmalayici etiketi de gizlenmeli - aksi halde "Para birimi" basligi bos kutuyla
+    // kalirdi (olculdu: #curSelect bir <label> icinde).
+    var sel = document.getElementById("curSelect");
+    if (sel && sel.closest) {
+      var lbl = sel.closest("label");
+      if (lbl) { lbl.hidden = true; lbl.style.display = "none"; }
+    }
+    // 2) Eski oturumlardan kalan secim temizlenir: kullanicinin localStorage'inda "USD" varsa
+    //    index.html'in okuma guard'i (CUR[_sc]) zaten reddediyor, ama kaydi birakmak ileride
+    //    secici geri acildiginda sessizce USD'ye donmek demekti.
+    try { localStorage.removeItem("dvs_cur"); } catch (_) { }
+  }
+
   async function init() {
     wireCoupon();
     wireAuth();
@@ -1654,6 +1874,8 @@
     wireLegal();              // E3 (b): #/sozlesme icerigi content/get/{slug}'dan + DOMPurify
     wireNotify();             // E3 (d): stok / fiyat dususu abonelikleri gercek uclara
     wireUrunRotasi();         // Sprint 8 madde 12: paylasim baglantilarinin basligi
+    wireSifreVeDogrulama();   // LAUNCH-FIX A2 + A1(c): sifremi unuttum / sifre-sifirla / dogrula
+    wireParaBirimi();         // LAUNCH-FIX A4: tek para birimi TRY
     // Kategoriler ÖNCE: ürün kategorisi category_id üzerinden çözülüyor (liste yolu
     // category_name döndürmüyor), yükleme sırası ters olursa tüm ürünler "tumu" olur.
     await loadCategories();

@@ -58,7 +58,11 @@ namespace Divisima.Bussiness.Concrete
 
         // Açıklayıcı yorum: Frontend sabitleri (FREE_SHIP=2000, kargo 49.9)
         private const decimal FreeShipThreshold = 2000m;
-        private readonly IOrderPlacedEventPublisher _eventPublisher;
+        // LAUNCH-FIX A1(b): IOrderPlacedEventPublisher bagimliligi KALDIRILDI. Olay artik outbox'a
+        // yaziliyor ve publisher'i OutboxProcessor cagiriyor. Enjekte edilmis ama kullanilmayan bir
+        // publisher birakmak, ileride birinin ayni satiri istek hattinda TEKRAR cagirmasina davetiye
+        // olurdu - duzeltilen kusur tam olarak oydu. Derleyici de kaldirmanin guvenli oldugunu
+        // dogruluyor (Sprint 8 madde 11'deki "build kanittir" kalibi).
 
         private const decimal ShippingCost = 49.9m;
 
@@ -71,12 +75,11 @@ namespace Divisima.Bussiness.Concrete
             IOrderStatusHistoryService statusHistory, IMapper mapper,
             IStoreCreditTransactionDal creditTxDal, IAddressDal addressDal,
             IPaymentDal paymentDal, IIyzicoClient iyzico, IRefundService refundService, ILoyaltyService loyaltyService,
-            IDistributedLock distributedLock, IOrderPlacedEventPublisher eventPublisher,
+            IDistributedLock distributedLock,
             IOrderConfirmationService orderConfirmation,
             Divisima.Bussiness.Outbox.IOutboxService outboxService)
         {
             _outboxService = outboxService;
-            _eventPublisher = eventPublisher;
             _creditTxDal = creditTxDal;
             _addressDal = addressDal;
             _paymentDal = paymentDal;
@@ -374,6 +377,39 @@ namespace Divisima.Bussiness.Concrete
                 if (order.status == (byte)OrderStatusEnum.Confirmed)
                     await SiparisOnaylandiOlayiYazAsync(order);
 
+                // ══ LAUNCH-FIX A1(b) - SIPARIS OLAYI ARTIK OUTBOX'TAN GECIYOR ═══════════════
+                //
+                // OLCULEN ONCE-DURUM: _eventPublisher.PublishAsync(...) COMMIT'TEN SONRA ve
+                // TRY BLOGUNUN DISINDA cagriliyordu. Publisher handler'lari duz bir
+                // "foreach { await handler }" ile kosuyor, try/catch YOK. Handler'lardan biri
+                // OrderPlacedEmailHandler ve o da SmtpMailService'i cagiriyor - bu servis
+                // hatayi BILINCLI OLARAK FIRLATIR (yutmaz). Sonuc: gercek bir SMTP sunucusunda
+                // ilk gecici hatada siparis COMMIT OLMUS oldugu halde uc HTTP 500 doner;
+                // musteri "siparis olusmadi" sanip tekrar dener.
+                //
+                // COZUM MEVCUT ALTYAPI - YENI KANAL ICAT EDILMEDI: OutboxProcessor'da
+                // case "OrderPlaced" ZATEN VARDI ve ayni publisher'i cagiriyordu; bugune kadar
+                // o dala mesaj YAZAN kimse yoktu (olculdu: uretimde tek yazici yok, yalniz
+                // ClaimBeforeSendTests kurgusu). Mesaj COMMIT'TEN ONCE, AYNI TRANSACTION'da
+                // yaziliyor - "siparis var ama olay yok" durumu olusamaz.
+                //
+                // KAZANC: mail/SignalR hatasi siparis yanitini ETKILEMEZ; hata SESSIZ de kalmaz -
+                // 5 kez yeniden denenir, tukenirse status=Failed + LogError + siparis zaman
+                // cizelgesine KRITIK notu (OutboxProcessor.KaliciHataylaBirakAsync).
+                //
+                // BEDEL - DURUST KAYIT: teslimat artik AT-LEAST-ONCE ve tek bir mesaj UC handler'i
+                // birden tasiyor. Son handler (SignalR bildirimi) patlarsa mesaj yeniden denenir
+                // ve onay maili IKINCI KEZ gidebilir. Kabul edildi: alternatifi (handler basina
+                // ayri mesaj) publisher sozlesmesini bolerdi ve bir siparis onay mailinin
+                // tekrarlanmasi, hic gitmemesinden iyidir.
+                await _outboxService.WriteAsync("OrderPlaced", new Divisima.Bussiness.Events.OrderPlacedEvent
+                {
+                    order_id = order.id,
+                    customer_id = order.customer_id,
+                    order_number = order.order_number,
+                    total = order.total_price
+                });
+
                 await _unitOfWork.CommitAsync();
 
                 // FATURA SENKRON KALIR - bu cagri KALDIRILMADI, gerekcesi OLCUMDUR.
@@ -406,15 +442,10 @@ namespace Divisima.Bussiness.Concrete
                 return (HttpStatusCode.InternalServerError, new ErrorResult(Messages.OrderPlaceFailed));
             }
 
-            // Açıklayıcı yorum: 8) Event publish (commit SONRASI - rollback olduysa yayınlanmaz)
-            await _eventPublisher.PublishAsync(new OrderPlacedEvent
-            {
-                order_id = order.id,
-                customer_id = order.customer_id,
-                order_number = order.order_number,
-                total = order.total_price
-            });
-
+            // 8) Event publish: LAUNCH-FIX A1(b) ile BURADAN KALDIRILDI ve transaction'in ICINE,
+            //    outbox'a tasindi (gerekce ve olculen zarar yukarida, yazim satirinin basinda).
+            //    Buraya YENI bir cagri EKLENMEZ: bu noktada atilan her istisna, COMMIT OLMUS bir
+            //    siparis icin 500 dondurur.
             return (HttpStatusCode.Created, new SuccessDataResult<int>(order.id, Messages.OrderPlaced));
         }
 
