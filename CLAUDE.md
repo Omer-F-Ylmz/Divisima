@@ -2976,6 +2976,26 @@ gecici veritabaninda var olan hesaplara ait; jetonlar YEREL bir gelistirme verit
 kullanimlik dogrulama/sifirlama jetonlari - **ikisi de olcum sirasinda KULLANILDI** (dolayisiyla
 null'landi) ve sifirlama jetonunun 30 dakikalik omru coktan doldu.
 
+### DOGRULAMA BOSLUGU KAPANDI - KONTROLLU A/B/C (dispatch run 32658699209)
+
+Sprint 8'den beri UC KEZ "tutuyor gorunuyor" diyebildigimiz sey KANITLANDI. Kullanici
+`workflow_dispatch`'i `cee76fb` HEAD iken tetikledi; o kosum `--log-opts` ALMADIGI icin
+**TUM GIT GECMISINI** taradi - jetonlarin ve yuksek entropili sifre literallerinin durdugu
+`e6e9b71` commit'i DAHIL.
+
+```
+KOSUM         EVENT              KAPSAM            .gitleaksignore   secret-scan
+32655634056   push               son commit        fingerprint YOK   FAILURE
+32657695876   push               son commit        kapsam DISI       SUCCESS  (KANIT DEGIL)
+32658699209   workflow_dispatch  TUM GECMIS        fingerprint VAR   SUCCESS  <- KANIT
+```
+
+`32658699209` adim bazinda: `secret-scan` / `tests` / `codeql` / `dependency-scan` hepsi
+SUCCESS; dort job'da da **failure seviyeli annotation 0** ve **"Leaks detected" 0**.
+Bes fingerprint (uc sifre satiri + iki CLAUDE.md satiri) GERCEKTEN TUTTU.
+
+**Asagidaki eski not TARIHSEL kayittir; bosluk yukarida kapandi.**
+
 **DOGRULAMA BOSLUGU (onceki iki kalemle AYNI, durust kayit):** fingerprint'lerin tuttugu bir
 sonraki PUSH run'inda GORULEMEZ (push yalniz son commit'i tarar, orada bulgu zaten olmayacak).
 Kanit ancak TUM GECMISI tarayan bir kosumdan gelir - Pazartesi cron'u ya da ELLE
@@ -2995,6 +3015,103 @@ entropili bir SABIT mi.
 Dis kontrolu ve 5. kontrol YENIDEN KOSULMADI - degisiklik yalnizca sabit degeri (literal ->
 `GecerliSifre`) ve bir dokuman kirpmasi; pinlerin OLCTUGU sey ve assert'ler DEGISMEDI.
 
+
+---
+
+# A2-FIX - SIFRE POLITIKASI TEK MERKEZDEN (SUPHELI #21 KAPANDI)
+
+Kullanici karari: #21 duzeltilir, ama A3'le AYNI commit'te degil - AYRI kucuk commit.
+
+## OLCUM: DORT KOPYA VARDI (kullanicinin verdigi UC UCTAN FAZLASI)
+
+Kapsam "uc uc" olarak verilmisti; tarama DORDUNCU bir kopya cikardi:
+
+```
+POST /api/auth/register            8 + buyuk + kucuk + rakam   CustomerRegisterRequestValidator
+POST /api/seller/auth/register     AYNI KURALIN BIREBIR KOPYASI (dorduncu kopya)
+POST /api/account/change-password  YALNIZCA >= 6, karmasiklik YOK
+POST /api/auth/reset-password      HICBIR KONTROL YOK - dogrudan hash'leniyordu
+```
+
+Bir politika ancak **EN ZAYIF girisi kadar** gucludur ve en gevsek olan (reset-password),
+**EN KOLAY ulasilan** yoldu. A2 bu akisi arayuze bagladigi icin kapi her musteriye acilmisti.
+
+## YAPILAN
+
+**Yeni merkez:** `Divisima.Core/Security/SifrePolitikasi.cs`.
+`Dogrula(sifre)` -> `null` (gecerli) ya da **IHLAL EDILEN ILK kuralin OZEL mesaji**.
+Genel bir "sifre gecersiz" mesaji SECILMEDI: kullanici hangi kurali cignedigini bilmezse
+deneme yanilmaya duser. Bu mesajlar kayit ucunda zaten gosteriliyordu; degisen tek sey artik
+DORT ucta da ayni olmalari.
+
+**Dort giris de merkeze baglandi** - satici kopyasi DAHIL. O kural zaten BIREBIR ayniydi,
+yani davranis DEGISMIYOR; ama dorduncu kopyayi birakmak "TEK MERKEZ" iddiasini bosa dusururdu.
+Satici modulu bugun kapali (`Seller:RegistrationEnabled=false`).
+
+**change-password icin bu bir SIKILASTIRMADIR** (6 -> 8 + karmasiklik) ve bilinclidir: ayni
+hesabin sifresini belirleyen iki yolun farkli guc istemesi savunulabilir degil.
+
+### IKI OLCUME DAYALI TASARIM KARARI
+
+1. **`char.IsUpper` / `char.IsLower`, `[A-Z]`/`[a-z]` regex'i DEGIL.** Eski regex Turkce
+   `Ş`/`ş` harflerini GORMUYORDU ve Turkce harfli sifre kullanan musteriyi gereksizce
+   zorluyordu. Kural GEVSEMEDI, **KAPSAMI GENISLEDI** - uzunluk ve rakam sartlari aynen
+   duruyor. (CLAUDE.md bolum 6c ile celiski YOK: orada yasak olan kimlik dizgesinde KULTURLU
+   DONUSTURME; burada yapilan SINIFLANDIRMA ve kultur bagimsiz.)
+2. **Politika kontrolu JETON DOGRULAMASINDAN ONCE kosuyor.** Jeton TEK KULLANIMLIK; zayif bir
+   sifre denemesi onu HARCAMAMALI, yoksa kullanici yeniden "sifremi unuttum" yapmak zorunda
+   kalirdi. Ayrica pinlendi.
+
+### TEMIZLIK (ayni commit)
+
+- `Messages.PasswordTooShort` (`"Şifre en az 6 karakter olmalıdır."`) **SILINDI** - hem OLU
+  kaldi hem metni artik YALAN olurdu. Derleme olu oldugunu kanitladi (Sprint 8 madde 11 kalibi).
+- `ResetPassword`'un basindaki **ULASILAMAZ ikinci bos-token kontrolu** silindi.
+- A2'de yazilan istemci yorumu ("sunucuda hicbir kural yok") artik YANLIS olacagi icin
+  duzeltildi. Istemci kurali sunucudan **bir tik KATI** (ASCII regex): yanlis pozitif uretmez,
+  yalniz Turkce harfli bir sifreyi istemcide reddedip sunucuda kabul ettirebilir.
+  **Ters yonde bosluk YOK** - kritik olan da bu.
+
+## BILINCLI KIRILAN PIN
+
+`LaunchFixMailZinciriTests.SUPHELI_SifreSifirlamada_SUNUCU_TARAFI_SIFRE_POLITIKASI_YOK_PINLENIR`
+kaldirildi. Bozuk davranisi (reset-password'un `"abc"` sifresini 200 ile kabul etmesi) KABUL
+EDILMIS gibi sabitliyordu; kural duzelince duzeltmeyi KIRARDI. Yerine gerekcesi yazildi.
+
+## YENI PINLER (`SifrePolitikasiTests`, 11)
+
+- `MERKEZ_IHLAL_EDILEN_ILK_KURALIN_OZEL_MESAJINI_Doner` (Theory x5 - bos / kisa / buyuksuz /
+  kucuksuz / rakamsiz)
+- `MERKEZ_GECERLI_SIFREYI_KABUL_Eder` - **vakum kirici** ("her seyi reddet" de Theory'yi gecerdi)
+- `MERKEZ_TURKCE_BUYUK_KUCUK_HARFI_DE_SAYAR`
+- `ZAYIF_SIFRE_UC_UCTA_DA_REDDEDILIR`
+- `GECERLI_SIFRE_UC_UCTA_DA_KABUL_EDILIR` - **cift-anlam kirici** + sifirlama sonrasi YENI
+  sifreyle giris 200 (sifirlama KOZMETIK degil)
+- `ZAYIF_SIFRE_SIFIRLAMA_JETONUNU_HARCAMAZ`
+- `HICBIR_UC_KENDI_SIFRE_KURALINI_TANIMLAMAZ` - SINIF DUZEYI kaynak taramasi; **BESINCI** bir
+  kopya eklenirse kirilir (vakum kirici: taramanin gercekten dosya okudugu da assert ediliyor)
+
+## DIS KONTROLU + 5. KONTROL
+
+**DIS:** 6 assert ters -> **BES AYRI ISIMLI test kirmizi** (Theory'lerle 9 vaka). Geri alindi.
+
+**5. KONTROL - kullanicinin sarti birebir karsilandi:**
+- **M1** (reset-password'den politika cagrisi kaldirildi): zayif sifre **200 ile KABUL** edildi -
+  #21'in olculen zararinin ta kendisi. `ZAYIF_SIFRE_UC_UCTA_DA_REDDEDILIR` ve
+  `ZAYIF_SIFRE_SIFIRLAMA_JETONUNU_HARCAMAZ` kirildi; diger 9 pin YESIL kaldi (lokalize).
+- **M2** (change-password'de merkez kaldirilip eski `>= 6` kurali geri kondu): **TAM 6
+  KARAKTERLIK** `Aa1234` sifresi **200 ile GECTI** - eski davranisin birebir aynisi.
+Ikisi de geri alindi.
+
+## YEREL DOGRULAMA
+
+269/269 `Category=Sql` · tam suitte **430 basarili / 433** (kirilan 3'un UCU DE Docker'li
+`OrderEndpointTests`) · Release 0 hata · whitespace + style **exit 0**.
+
+**SURECTE YASANAN (kayit - AYNI TUZAK IKINCI KEZ):** `dotnet format style` yine `IMPORTS`
+hatasi verdi - `sed -i '1i using ...'` ile dosya BASINA eklenen using satirlari siralamayi
+bozuyor. Dalga A'da da yasanmisti. **DERS: bu depoda `using` satiri `sed` ile dosya basina
+EKLENMEZ; eklendiyse hemen ardindan `dotnet format style --include <dosya>` kosulur.**
 ## SIRA
 
 0. **KALITE SUPURMESI KAPANDI - LAUNCH'I BLOKE EDEN TEKNIK KALEM KALMADI.**
@@ -3527,8 +3644,8 @@ canli tablonun BIREBIR aynisi.** Diger uc test yesil kaldi (mutasyon lokalize). 
 
 ## SUPHELI DAVRANISLAR
 
-**DURUM: ACIK KALEMLER #14 (LAUNCH SONRASI), #20 (bugun BOSLUK YOK, testte kapatildi) ve
-YENI #21 (LAUNCH-FIX Dalga A'da olculdu, DUZELTILMEDI - karar kullanicinin).**
+**DURUM: ACIK KALEMLER #14 (LAUNCH SONRASI) ve #20 (bugun BOSLUK YOK, testte kapatildi).**
+**#21 KAPANDI - A2-FIX (kullanici karari: sifre politikasi TEK MERKEZDEN, dort giriste de).**
 **#19 KAPANDI - GUVENLIK-FIX-2 (kullanici karari: secenek iii).**
 Kapananlar: #1..#13 ilgili sprintlerde · **#15, #17, #18 mini dalgalarda** ·
 **#16 BILINCLI olarak bos birakildi (verilmis karar, erteleme degil)**.
@@ -3856,7 +3973,9 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    Aday kalici cozum: Asp.Versioning'in hata endpoint'ine anonim metadata iliskilendirilebilir
    hale gelirse (ya da SUPHELI #14 genel olarak cozulurse) FallbackPolicy'ye gecilebilir.
 
-21. **SIFRE POLITIKASI UC AYRI GIRIS NOKTASINDA UC AYRI - SIFIRLAMA UCUNDA HIC YOK.**
+21. **[KAPANDI - A2-FIX] SIFRE POLITIKASI UC AYRI GIRIS NOKTASINDA UC AYRI - SIFIRLAMA UCUNDA HIC YOK.**
+   **KAPANIS:** kural TEK MERKEZE (`Divisima.Core.Security.SifrePolitikasi`) tasindi ve DORT
+   giriste de uygulaniyor. Ayrinti: A2-FIX bolumu. Asagidaki metin BULGUNUN kaydidir.
    (LAUNCH-FIX Dalga A / A2'de olculdu; A2 bu akisi ARAYUZE BAGLADIGI icin kapi artik her
    musteriye acik.) Olculen tablo:
    ```

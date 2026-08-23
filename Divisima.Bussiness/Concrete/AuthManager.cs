@@ -1,5 +1,6 @@
 using System.Net;
 using Divisima.Bussiness.Abstract;
+using Divisima.Core.Security;
 using Divisima.Core.Security.Hashing;
 using Divisima.Core.Security.JWT;
 using Divisima.Core.Security.Tokens;
@@ -562,9 +563,18 @@ namespace Divisima.Bussiness.Concrete
             // müşteriye eşleşmesin diye önce reddedilir. Aksi halde null==null eşleşme riski (expiry ile de korunuyor).
             if (string.IsNullOrWhiteSpace(dto.token))
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.InvalidResetToken));
-            // Açıklayıcı yorum: Savunma derinliği - boş/null token null-alanlı kayıtlarla eşleşmesin
-            if (string.IsNullOrWhiteSpace(dto.token))
-                return (HttpStatusCode.BadRequest, new ErrorResult(Messages.PasswordResetInvalid));
+            // A2-FIX: burada AYNI kontrolun IKINCI bir kopyasi vardi (farkli mesajla) ve
+            // ULASILAMAZDI - ustteki guard zaten donuyordu. Olu kod kaldirildi.
+
+            // A2-FIX (SUPHELI #21) - ASIL BULGU: bu uc SIFREYE HIC BAKMIYORDU. dto.new_password
+            // dogrudan CreatePasswordHash'e gidiyordu; yani "Sifremi unuttum" ile gelen biri,
+            // KAYITTA reddedilecek bir sifreyi (ornegin "abc") belirleyebiliyordu. Bir politika
+            // ancak EN ZAYIF girisi kadar gucludur ve bu, atlatilmasi EN KOLAY yoldu.
+            // JETON KONTROLUNDEN ONCE: gecerli bir jetonu, sifre zaten reddedilecekse
+            // HARCAMAYALIM (jeton TEK KULLANIMLIK - asagida null'laniyor).
+            var sifreHatasi = SifrePolitikasi.Dogrula(dto.new_password);
+            if (sifreHatasi != null)
+                return (HttpStatusCode.BadRequest, new ErrorResult(sifreHatasi));
 
             var customer = await _customerDal.GetAsync(c => c.password_reset_token == dto.token);
             if (customer == null)

@@ -1,0 +1,281 @@
+using System;
+using System.Linq;
+using System.Net;
+using System.Net.Http.Json;
+using Divisima.Core.Security;
+using Divisima.DataAccess.Concrete.Context;
+using Divisima.Entity.Entities;
+using FluentAssertions;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+namespace Divisima.IntegrationTests
+{
+    // ══ A2-FIX (SUPHELI #21) - SIFRE POLITIKASI TEK MERKEZDEN, HER UCTA AYNI ═══════════════
+    //
+    // OLCULEN ONCE-DURUM: sifre belirlenen DORT yolda DORT ayri davranis vardi ve EN GEVSEK
+    // olan, EN KOLAY ulasilan yoldu:
+    //   POST /api/auth/register            8 + buyuk + kucuk + rakam
+    //   POST /api/seller/auth/register     AYNI KURALIN BIREBIR KOPYASI (dorduncu kopya)
+    //   POST /api/account/change-password  YALNIZCA >= 6, karmasiklik YOK
+    //   POST /api/auth/reset-password      HICBIR KONTROL YOK
+    // Yani "Sifremi unuttum" ile gelen biri, KAYITTA reddedilecek bir sifreyi belirleyebiliyordu.
+    // Bir politika ancak EN ZAYIF girisi kadar gucludur.
+    //
+    // BILINCLI KIRILAN PIN: LaunchFixMailZinciriTests'teki
+    // "SUPHELI_SifreSifirlamada_SUNUCU_TARAFI_SIFRE_POLITIKASI_YOK_PINLENIR" bu davranisi
+    // KABUL EDILMIS gibi sabitliyordu. Kural duzelince YALAN SOYLER hale gelirdi; kaldirildi ve
+    // yerini asagidaki UC-UCTA-AYNI pinleri aldi.
+    [Trait("Category", "Sql")]
+    public class SifrePolitikasiTests : IAsyncLifetime
+    {
+        private const string DbName = "DivisimaSifrePolitikasiTest";
+        private static readonly string? ExplicitConn = Environment.GetEnvironmentVariable("DIVISIMA_TEST_SQL");
+
+        // Politikanin UC farkli kuralini tek tek ihlal eden adaylar. Degerler DUSUK ENTROPILI
+        // secildi (secret-scan dersi: anahtar kelime + entropi >= 3.5 tetikler).
+        private const string KisaSifre = "Aa1";          // uzunluk ihlali
+        private const string BuyuksuzSifre = "aaaaaa11"; // buyuk harf yok
+        private const string RakamsizSifre = "Aaaaaaaa"; // rakam yok
+        private const string GecerliSifre = "Aaaaaa11";  // politikayi KARSILAR
+
+        private static string ConnStr
+        {
+            get
+            {
+                var baseConn = string.IsNullOrWhiteSpace(ExplicitConn)
+                    ? @"Server=(localdb)\MSSQLLocalDB;Trusted_Connection=True;TrustServerCertificate=True;"
+                    : ExplicitConn;
+                return new SqlConnectionStringBuilder(baseConn) { InitialCatalog = DbName }.ConnectionString;
+            }
+        }
+
+        private sealed class PolitikaFactory : WebApplicationFactory<Program>
+        {
+            protected override void ConfigureWebHost(IWebHostBuilder builder)
+            {
+                TestHostConfig.Apply(builder);
+                builder.ConfigureServices(services =>
+                {
+                    var d = services.SingleOrDefault(x => x.ServiceType == typeof(DbContextOptions<DivisimaDbContext>));
+                    if (d != null) services.Remove(d);
+                    services.AddDbContext<DivisimaDbContext>(o => o.UseSqlServer(ConnStr));
+                });
+            }
+        }
+
+        private PolitikaFactory? _factory;
+        private bool _sqlAvailable;
+
+        private static DivisimaDbContext NewContext() =>
+            new DivisimaDbContext(new DbContextOptionsBuilder<DivisimaDbContext>().UseSqlServer(ConnStr).Options);
+
+        public async Task InitializeAsync()
+        {
+            try
+            {
+                await using (var pre = NewContext())
+                {
+                    await pre.Database.EnsureDeletedAsync();
+                    await pre.Database.EnsureCreatedAsync();
+                }
+                _factory = new PolitikaFactory();
+                _ = _factory.Services;
+                _sqlAvailable = true;
+            }
+            catch (Exception ex) when (!string.IsNullOrWhiteSpace(ExplicitConn))
+            {
+                throw new InvalidOperationException(
+                    "DIVISIMA_TEST_SQL verildi ancak sifre politikasi testleri ortami hazirlanamadi - ATLANMAMALI.", ex);
+            }
+            catch { _sqlAvailable = false; }
+        }
+
+        public async Task DisposeAsync()
+        {
+            if (_factory != null) await _factory.DisposeAsync();
+            if (!_sqlAvailable) return;
+            try { await using var ctx = NewContext(); await ctx.Database.EnsureDeletedAsync(); } catch { }
+        }
+
+        private bool Skipped() => !_sqlAvailable;
+
+        // ── MERKEZ: KURALIN KENDISI ──────────────────────────────────────────────────────
+        [Theory]
+        [InlineData("", "boş")]
+        [InlineData(KisaSifre, "en az 8")]
+        [InlineData(BuyuksuzSifre, "büyük harf")]
+        [InlineData("AAAAAA11", "küçük harf")]
+        [InlineData(RakamsizSifre, "rakam")]
+        public void MERKEZ_IHLAL_EDILEN_ILK_KURALIN_OZEL_MESAJINI_Doner(string sifre, string beklenenParca)
+        {
+            var hata = SifrePolitikasi.Dogrula(sifre);
+            hata.Should().NotBeNull("politika bu sifreyi REDDETMELI");
+            // Genel bir "sifre gecersiz" mesaji YETMEZ: kullanici hangi kurali cignedigini
+            // bilmezse deneme yanilmaya duser.
+            hata.Should().Contain(beklenenParca);
+        }
+
+        [Fact]
+        public void MERKEZ_GECERLI_SIFREYI_KABUL_Eder()
+        {
+            // VAKUM KIRICI: "her seyi reddet" de yukaridaki Theory'yi gecerdi.
+            SifrePolitikasi.Dogrula(GecerliSifre).Should().BeNull();
+            SifrePolitikasi.Gecerli(GecerliSifre).Should().BeTrue();
+        }
+
+        [Fact]
+        public void MERKEZ_TURKCE_BUYUK_KUCUK_HARFI_DE_SAYAR()
+        {
+            // Eski kayit kuralindaki "[A-Z]" / "[a-z]" regex'leri "Ş"/"ş" gormezdi ve Turkce
+            // harfli bir sifre kullanan musteriyi GEREKSIZCE zorlardi. Kural GEVSEMEDI,
+            // KAPSAMI GENISLEDI - uzunluk ve rakam sartlari aynen duruyor.
+            SifrePolitikasi.Gecerli("Şşşşşş11").Should().BeTrue("Ş buyuk, ş kucuk harftir");
+            SifrePolitikasi.Gecerli("şşşşşş11").Should().BeFalse("buyuk harf YOK");
+        }
+
+        // ── UC UCTA DA AYNI POLITIKA ─────────────────────────────────────────────────────
+        [Fact]
+        public async Task ZAYIF_SIFRE_UC_UCTA_DA_REDDEDILIR()
+        {
+            if (Skipped()) return;
+            var anon = _factory!.CreateClient();
+
+            // 1) KAYIT
+            var kayit = await anon.PostAsJsonAsync("/api/auth/register", KayitGovdesi(
+                $"zayif-{Guid.NewGuid():N}@example.com", RakamsizSifre));
+            kayit.StatusCode.Should().Be(HttpStatusCode.BadRequest, "kayit zayif sifreyi reddetmeli");
+
+            // 2) SIFRE DEGISTIRME  (once gecerli bir hesap + oturum)
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+            var degistir = await musteri.Client.PostAsJsonAsync("/api/account/change-password", new
+            {
+                current_password = TestAuthHelper.TestPassword,
+                new_password = RakamsizSifre
+            });
+            degistir.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+                "change-password ARTIK karmasiklik da istemeli - eski kural yalnizca >= 6 idi");
+
+            // 3) SIFRE SIFIRLAMA - ASIL BULGU: bu uc sifreye HIC BAKMIYORDU
+            var jeton = await SifirlamaJetonuAlAsync(anon, musteri.Email);
+            var sifirla = await anon.PostAsJsonAsync("/api/auth/reset-password",
+                new { token = jeton, new_password = RakamsizSifre });
+            sifirla.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+                "reset-password ARTIK politikayi uygulamali - ONCEDEN 'abc' bile kabul ediliyordu");
+        }
+
+        [Fact]
+        public async Task GECERLI_SIFRE_UC_UCTA_DA_KABUL_EDILIR()
+        {
+            if (Skipped()) return;
+            // CIFT-ANLAM KIRICI: politikayi "her seyi reddet" diye uygulamak da yukaridaki
+            // testi gecerdi. Bu test, uclarin GERCEKTEN calismaya devam ettigini sabitler.
+            var anon = _factory!.CreateClient();
+
+            var eposta = $"gecerli-{Guid.NewGuid():N}@example.com";
+            var kayit = await anon.PostAsJsonAsync("/api/auth/register", KayitGovdesi(eposta, GecerliSifre));
+            kayit.StatusCode.Should().Be(HttpStatusCode.Created, "gecerli sifreyle kayit CALISMALI");
+
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+            var degistir = await musteri.Client.PostAsJsonAsync("/api/account/change-password", new
+            {
+                current_password = TestAuthHelper.TestPassword,
+                new_password = GecerliSifre
+            });
+            degistir.StatusCode.Should().Be(HttpStatusCode.OK, "gecerli sifreyle degistirme CALISMALI");
+
+            // Sifre degisince TUM oturumlar kapaniyor; sifirlama icin YENI bir hesap kullanilir.
+            var ikinci = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+            var jeton = await SifirlamaJetonuAlAsync(anon, ikinci.Email);
+            var sifirla = await anon.PostAsJsonAsync("/api/auth/reset-password",
+                new { token = jeton, new_password = GecerliSifre });
+            sifirla.StatusCode.Should().Be(HttpStatusCode.OK, "gecerli sifreyle sifirlama CALISMALI");
+
+            // VE GERCEKTEN DEGISTI: yeni sifreyle giris yapilabilmeli.
+            var giris = await anon.PostAsJsonAsync("/api/auth/login",
+                new { email = ikinci.Email, password = GecerliSifre });
+            giris.StatusCode.Should().Be(HttpStatusCode.OK,
+                "sifirlama KOZMETIK olmamali - yeni sifre gercekten gecerli olmali");
+        }
+
+        [Fact]
+        public async Task ZAYIF_SIFRE_SIFIRLAMA_JETONUNU_HARCAMAZ()
+        {
+            if (Skipped()) return;
+            // Jeton TEK KULLANIMLIK. Politika kontrolu jeton dogrulamasindan ONCE kosuyor;
+            // aksi halde kullanici zayif bir sifre denedigi icin jetonunu KAYBEDER ve
+            // yeniden "sifremi unuttum" yapmak zorunda kalirdi.
+            var anon = _factory!.CreateClient();
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+            var jeton = await SifirlamaJetonuAlAsync(anon, musteri.Email);
+
+            (await anon.PostAsJsonAsync("/api/auth/reset-password",
+                new { token = jeton, new_password = KisaSifre })).StatusCode
+                .Should().Be(HttpStatusCode.BadRequest);
+
+            // AYNI jeton hala GECERLI olmali.
+            (await anon.PostAsJsonAsync("/api/auth/reset-password",
+                new { token = jeton, new_password = GecerliSifre })).StatusCode
+                .Should().Be(HttpStatusCode.OK, "reddedilen deneme jetonu TUKETMEMELI");
+        }
+
+        [Fact]
+        public void HICBIR_UC_KENDI_SIFRE_KURALINI_TANIMLAMAZ()
+        {
+            // SINIF DUZEYI TARAMA: politikanin BESINCI bir kopyasi eklenirse bu pin kirilir.
+            // Kaynak okunur - yansima ile bakmak kural KOPYASINI goremezdi.
+            var kok = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
+            while (kok != null && !System.IO.Directory.Exists(
+                System.IO.Path.Combine(kok.FullName, "Divisima.Bussiness")))
+                kok = kok.Parent;
+            kok.Should().NotBeNull("depo koku bulunmali - sessiz skip YOK");
+
+            var dosyalar = System.IO.Directory.GetFiles(
+                System.IO.Path.Combine(kok!.FullName, "Divisima.Bussiness"), "*.cs",
+                System.IO.SearchOption.AllDirectories)
+                .Where(p => !p.Contains($"{System.IO.Path.DirectorySeparatorChar}obj{System.IO.Path.DirectorySeparatorChar}")
+                         && !p.Contains($"{System.IO.Path.DirectorySeparatorChar}bin{System.IO.Path.DirectorySeparatorChar}"));
+
+            foreach (var yol in dosyalar)
+            {
+                var metin = System.IO.File.ReadAllText(yol);
+                // Politikanin eski kopyalarinin imzasi: sifre alanina MinimumLength(8) ya da
+                // "[A-Z]" regex'i. Ikisi de artik YALNIZ merkezde olmali (merkez Core'da).
+                metin.Should().NotContain("MinimumLength(8)",
+                    $"sifre kurali kopyasi kalmamali: {System.IO.Path.GetFileName(yol)}");
+                metin.Should().NotContain(".Matches(\"[A-Z]\")",
+                    $"sifre kurali kopyasi kalmamali: {System.IO.Path.GetFileName(yol)}");
+            }
+
+            // VAKUM KIRICI: tarama GERCEKTEN dosya okuyor olmali.
+            dosyalar.Count().Should().BeGreaterThan(50, "Bussiness katmani taranmis olmali");
+        }
+
+        // ── Yardimcilar ─────────────────────────────────────────────────────────────────
+        private static object KayitGovdesi(string eposta, string sifre) => new
+        {
+            name = "Politika Musteri",
+            email = eposta,
+            phone = "5550000000",
+            password = sifre,
+            accepted_terms = true,
+            accepted_privacy = true,
+            accepted_marketing = false
+        };
+
+        private static async Task<string> SifirlamaJetonuAlAsync(HttpClient anon, string eposta)
+        {
+            (await anon.PostAsJsonAsync("/api/auth/forgot-password", new { email = eposta }))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+            await using var ctx = NewContext();
+            var m = await ctx.Set<Customer>().AsNoTracking()
+                .FirstAsync(c => c.email == eposta.ToLowerInvariant());
+            m.password_reset_token.Should().NotBeNullOrWhiteSpace("sifirlama jetonu uretilmis olmali");
+            return m.password_reset_token!;
+        }
+    }
+}

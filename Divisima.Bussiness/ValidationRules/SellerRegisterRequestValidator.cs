@@ -1,3 +1,4 @@
+using Divisima.Core.Security;
 using Divisima.Entity.Dtos.Seller;
 using FluentValidation;
 
@@ -12,12 +13,14 @@ namespace Divisima.Bussiness.ValidationRules
             RuleFor(s => s.email).NotEmpty().EmailAddress().WithMessage("Geçerli bir e-posta giriniz.");
             RuleFor(s => s.phone).NotEmpty().Matches(@"^[0-9+\s()-]{7,20}$").WithMessage("Geçerli telefon giriniz.");
             RuleFor(s => s.tax_number).MaximumLength(30).When(s => s.tax_number != null);
+            // A2-FIX (SUPHELI #21): bu kural musteri kaydindaki kuralin BIREBIR KOPYASIYDI -
+            // yani politikanin DORDUNCU kopyasi. Tek merkeze baglandi; DAVRANIS DEGISMEDI
+            // (kural zaten ayniydi), yalnizca kopya kalkti. Satici modulu bugun kapali
+            // (Seller:RegistrationEnabled=false) ama kopyayi birakmak "TEK MERKEZ" iddiasini
+            // bosa dusururdu.
             RuleFor(s => s.password)
-                .NotEmpty().WithMessage("Şifre boş olamaz.")
-                .MinimumLength(8).WithMessage("Şifre en az 8 karakter olmalı.")
-                .Matches("[A-Z]").WithMessage("Şifre en az bir büyük harf içermeli.")
-                .Matches("[a-z]").WithMessage("Şifre en az bir küçük harf içermeli.")
-                .Matches("[0-9]").WithMessage("Şifre en az bir rakam içermeli.");
+                .Must(p => SifrePolitikasi.Gecerli(p))
+                .WithMessage(s => SifrePolitikasi.Dogrula(s.password) ?? "");
         }
     }
 }

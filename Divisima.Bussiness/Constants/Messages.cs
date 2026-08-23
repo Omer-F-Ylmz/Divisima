@@ -282,7 +282,6 @@ namespace Divisima.Core.Utilities.Constants
         public static string RecentlyViewedRecorded = "Görüntüleme kaydedildi.";
         public static string ProfileNameRequired = "Ad boş olamaz.";
         public static string ProfileUpdated = "Profil güncellendi.";
-        public static string PasswordTooShort = "Şifre en az 6 karakter olmalıdır.";
         public static string CurrentPasswordWrong = "Mevcut şifre hatalı.";
         public static string PasswordChanged = "Şifreniz değiştirildi.";
         public static string NotificationPreferencesUpdated = "Bildirim tercihleriniz güncellendi.";

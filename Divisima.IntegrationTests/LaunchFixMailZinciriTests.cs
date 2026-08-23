@@ -416,56 +416,15 @@ namespace Divisima.IntegrationTests
                 "vitrin origin'i API origin'inin YERINE GECMEZ - iki ayri ayar");
         }
 
-        // ── SUPHELI (DUZELTILMEDI, KARAR KULLANICININ) ───────────────────────────────────
+        // ── A2-FIX (SUPHELI #21): BURADAKI SUPHELI PINI BILINCLI KIRILDI ─────────────────
         //
-        // OLCULDU: sifre politikasi UC AYRI YERDE UC AYRI: kayit 8+buyuk+kucuk+rakam
-        // (CustomerRegisterRequestValidator), ChangePassword yalniz >= 6 karakter,
-        // ResetPassword ise HICBIR KONTROL YAPMIYOR - dto.new_password dogrudan hash'leniyor.
-        // A2 bu akisi arayuze BAGLADIGI icin kapi artik her musteriye acik: "sifremi unuttum"
-        // ile gelen biri kayitta reddedilecek bir sifre koyabilir.
-        // Ev kurali geregi DUZELTILMEDI; bugunku davranis ADIYLA sabitleniyor.
-        [Fact]
-        public async Task SUPHELI_SifreSifirlamada_SUNUCU_TARAFI_SIFRE_POLITIKASI_YOK_PINLENIR()
-        {
-            if (Skipped()) return;
-            var client = _factory!.CreateClient();
-            var eposta = $"politika-{Guid.NewGuid():N}@example.com";
-            (await client.PostAsJsonAsync("/api/auth/register", new
-            {
-                name = "Politika Musteri",
-                email = eposta,
-                phone = "5550000000",
-                password = GecerliSifre,
-                accepted_terms = true,
-                accepted_privacy = true,
-                accepted_marketing = false
-            })).StatusCode.Should().Be(HttpStatusCode.Created);
-
-            // CIFT-ANLAM KIRICI: ayni zayif sifre KAYITTA reddediliyor - yani kural VAR,
-            // yalnizca bu ucta UYGULANMIYOR.
-            var kayit = await client.PostAsJsonAsync("/api/auth/register", new
-            {
-                name = "Zayif",
-                email = $"zayif-{Guid.NewGuid():N}@example.com",
-                phone = "5550000000",
-                password = "abc",
-                accepted_terms = true,
-                accepted_privacy = true,
-                accepted_marketing = false
-            });
-            kayit.StatusCode.Should().Be(HttpStatusCode.BadRequest, "kayit politikasi 'abc' sifresini REDDEDER");
-
-            await client.PostAsJsonAsync("/api/auth/forgot-password", new { email = eposta });
-            string jeton;
-            await using (var ctx = NewContext())
-                jeton = (await ctx.Set<Customer>().AsNoTracking()
-                    .FirstAsync(c => c.email == eposta.ToLowerInvariant())).password_reset_token!;
-
-            var sifirla = await client.PostAsJsonAsync("/api/auth/reset-password",
-                new { token = jeton, new_password = "abc" });
-            sifirla.StatusCode.Should().Be(HttpStatusCode.OK,
-                "SUPHELI: sifre sifirlama ucu kayit politikasini UYGULAMIYOR - 'abc' kabul ediliyor");
-        }
+        // Kaldirilan pin: SUPHELI_SifreSifirlamada_SUNUCU_TARAFI_SIFRE_POLITIKASI_YOK_PINLENIR
+        // Bugunku (bozuk) davranisi - reset-password ucunun "abc" sifresini 200 ile kabul
+        // etmesini - KABUL EDILMIS gibi sabitliyordu. Kural TEK MERKEZE tasinip dort ucta da
+        // uygulaninca bu pin YALAN SOYLER hale gelirdi: duzeltilmis davranisi savunacak yerde
+        // duzeltmeyi KIRARDI.
+        // Yerini SifrePolitikasiTests aldi - orada hem "zayif sifre UC UCTA DA reddedilir" hem
+        // de cift-anlam kirici "gecerli sifre UC UCTA DA kabul edilir" pini var.
 
         // ── Yardimcilar ─────────────────────────────────────────────────────────────────
         private static IConfiguration VitrinYapilandirmasi() =>

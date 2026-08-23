@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Net;
 using Divisima.Bussiness.Abstract;
+using Divisima.Core.Security;
 using Divisima.Core.Security.Hashing;
 using Divisima.Core.Utilities.Caching;
 using Divisima.Core.Utilities.Constants;
@@ -70,8 +71,14 @@ namespace Divisima.Bussiness.Concrete
 
         public async Task<(HttpStatusCode, Result)> ChangePassword(int customerId, ChangePasswordRequestDto dto)
         {
-            if (string.IsNullOrWhiteSpace(dto.new_password) || dto.new_password.Length < 6)
-                return (HttpStatusCode.BadRequest, new ErrorResult(Messages.PasswordTooShort));
+            // A2-FIX (SUPHELI #21): eski kural YALNIZCA ">= 6 karakter" idi - kayit ucunun
+            // istedigi karmasikliktan (buyuk/kucuk/rakam) HABERSIZDI. Ayni hesabin sifresini
+            // belirleyen iki yolun farkli guc istemesi savunulabilir degil; kural artik TEK
+            // MERKEZDEN (Divisima.Core.Security.SifrePolitikasi) geliyor.
+            // BU BIR SIKILASTIRMADIR ve bilinclidir: 6 -> 8 + karmasiklik.
+            var sifreHatasi = SifrePolitikasi.Dogrula(dto.new_password);
+            if (sifreHatasi != null)
+                return (HttpStatusCode.BadRequest, new ErrorResult(sifreHatasi));
 
             var c = await _customerDal.GetAsync(x => x.id == customerId);
             if (c == null) return (HttpStatusCode.NotFound, new ErrorResult(Messages.LoginFailed));

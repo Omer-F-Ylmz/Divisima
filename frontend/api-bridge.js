@@ -1726,10 +1726,14 @@
       if (!tk) { er.textContent = "E-postadaki kodu gir."; return; }
       if (p1 !== p2) { er.textContent = "İki şifre aynı değil."; return; }
       // ISTEMCI TARAFI POLITIKA - SUNUCUNUN YERINE GECMEZ, ONUNLA AYNI OLMAYA CALISIR.
-      // OLCULDU: /api/auth/reset-password ucunda sunucu tarafinda HICBIR sifre kurali YOK
-      // (8+buyuk+kucuk+rakam kurali yalniz KAYITTA, ChangePassword'de ise yalniz 6 karakter).
-      // Bu bir SUPHELI olarak raporlandi ve DUZELTILMEDI - karar kullanicinin. Buradaki kontrol
-      // kullaniciyi kayittan zayif bir sifre secmekten alikoyar ama bir GUVENCE DEGILDIR.
+      // A2-FIX (SUPHELI #21) SONRASI DURUM: sunucu tarafinda kural ARTIK VAR ve DORT ucta da
+      // AYNI (Divisima.Core.Security.SifrePolitikasi - register / seller register /
+      // change-password / reset-password). Buradaki kontrol kullaniciyi bir gidis-donusten
+      // kurtarir; GUVENCE SUNUCUDADIR.
+      // NOT: sunucu Unicode buyuk/kucuk harf sayar ("Ş"/"ş" de gecerlidir), buradaki regex ise
+      // ASCII. Yani istemci sunucudan BIR TIK KATI - yanlis pozitif uretmez, yalniz Turkce
+      // harfli bir sifreyi burada reddedip sunucuda kabul ettirebilir. Ters yonde bir bosluk
+      // YOK; kritik olan da bu.
       if (p1.length < 8 || !/[A-Z]/.test(p1) || !/[a-z]/.test(p1) || !/[0-9]/.test(p1)) {
         er.textContent = "Şifre en az 8 karakter olmalı; büyük harf, küçük harf ve rakam içermeli.";
         return;
