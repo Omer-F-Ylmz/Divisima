@@ -3,6 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http://localhost:5000; connect-src 'self' http://localhost:5000 https://api.divisima.com; font-src 'self' data:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'">
+<!-- API ORIGIN - TEK KAYNAK (DALGA-4-FIX-2 / M1). Storefront ile AYNI mekanizma:
+     deger burada beyan edilir, yukaridaki CSP'nin img-src ve connect-src direktifleri
+     AYNI origin'i tasir, ikisini birlikte yazan tek yer ops/set-api-origin.sh.
+     Panelde ayrica localStorage("divisima_api_base") override'i KORUNUR - operatorun
+     paneli baska bir ortama yoneltmesi mesru bir ihtiyac. AMA override CSP'yi
+     DEGISTIREMEZ; bu yuzden asagidaki guard ETKIN tabani (override dahil) CSP ile
+     karsilastirir - yoksa panel sessizce bos ekran verirdi. -->
+<meta name="divisima-api-origin" content="http://localhost:5000">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Divisima Yönetim Paneli</title>
 <!-- SRI: yayına almadan önce jsdelivr SRI hash ekle (integrity="sha384-...") -->
@@ -92,7 +100,44 @@
 <script src="api-client.js"></script>
 <script>
 // ── Yapılandırma ── API adresini kendi ortamına göre değiştir
-const API_BASE = localStorage.getItem("divisima_api_base") || "http://localhost:5000";
+// DALGA-4-FIX-2 / M1: taban TEK KAYNAKTAN (bastaki meta) turer; operator override'i
+// (localStorage) ONCELIKLI kalir. Ikinci bir "localhost" literali YOK.
+const API_ORIGIN_META = (document.querySelector('meta[name="divisima-api-origin"]') || {}).content || "";
+const API_BASE = (localStorage.getItem("divisima_api_base") || API_ORIGIN_META).trim().replace(/\/+$/, "");
+(function () {
+  function bagir(msg) {
+    if (window.console && console.error) console.error("[DIVISIMA YAPILANDIRMA] " + msg);
+    var b = document.createElement("div");
+    b.setAttribute("role", "alert");
+    b.style.cssText = "position:fixed;left:0;right:0;top:0;z-index:2147483647;background:#8c2f2f;color:#fff;font:600 13px/1.45 system-ui,sans-serif;padding:10px 14px";
+    b.textContent = "Yapilandirma hatasi: " + msg;
+    var koy = function () { (document.body || document.documentElement).appendChild(b); };
+    if (document.body) koy(); else document.addEventListener("DOMContentLoaded", koy);
+  }
+  if (!API_BASE) { bagir('API tabani belirlenemedi - meta[name="divisima-api-origin"] eksik.'); return; }
+  var cm = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
+  var csp = cm ? String(cm.getAttribute("content") || "") : "";
+  if (!csp) { bagir("CSP meta etiketi okunamadi - origin tutarliligi DOGRULANAMADI."); return; }
+  var ayniOrigin = (API_BASE === location.origin);
+  // REGEX YOK - storefront'takiyle ayni gerekce: ters bolu kacisi bir kez sessizce
+  // kayboldu ve guard YANLIS ALARM verdi. Duz split + trim'in kacis semantigi yoktur.
+  function direktifDegeri(d) {
+    var ps = csp.split(";");
+    for (var i = 0; i < ps.length; i++) {
+      var p = ps[i].trim();
+      if (p === d) return "";
+      if (p.indexOf(d + " ") === 0) return p.slice(d.length + 1);
+    }
+    return null;
+  }
+  var eksik = ["img-src", "connect-src"].filter(function (d) {
+    var v = direktifDegeri(d);
+    if (v === null) return true;
+    if (v.indexOf(API_BASE) >= 0) return false;
+    return !(ayniOrigin && v.indexOf("'self'") >= 0);
+  });
+  if (eksik.length) bagir('API origin "' + API_BASE + '" su CSP direktiflerinde YOK: ' + eksik.join(", ") + " - dagitimda ops/set-api-origin.sh kullanilmali.");
+})();
 const api = new DivisimaAPI(API_BASE);
 let chartRefs = {};
 

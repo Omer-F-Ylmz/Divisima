@@ -3,6 +3,19 @@
 <head>
 <meta charset="UTF-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-hashes' blob: https://sandbox-static.iyzipay.com https://static.iyzipay.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://sandbox-static.iyzipay.com https://static.iyzipay.com; font-src 'self' https://fonts.gstatic.com data: https://sandbox-static.iyzipay.com https://static.iyzipay.com https://cdn.iyzipay.com; img-src 'self' data: blob: http://localhost:5000 https://api.divisima.com https://sandbox-static.iyzipay.com https://static.iyzipay.com https://cdn.iyzipay.com; connect-src 'self' http://localhost:5000 https://api.divisima.com https://sandbox-api.iyzipay.com https://api.iyzipay.com https://sandbox-static.iyzipay.com https://static.iyzipay.com https://sandbox-merchantgw.iyzipay.com https://merchantgw.iyzipay.com https://sandbox-consumerapigw.iyzipay.com https://consumerapigw.iyzipay.com; manifest-src 'self' blob:; worker-src 'self' blob:; base-uri 'self'; form-action 'self' http://localhost:5000 https://api.divisima.com https://sandbox-api.iyzipay.com https://api.iyzipay.com" />
+<!-- ══ API ORIGIN - TEK KAYNAK (DALGA-4-FIX-2 / M1) ═══════════════════════════════════
+     Storefront'un API tabani BURADAN turer. Yukaridaki CSP meta'sinin UC direktifi
+     (img-src, connect-src, form-action) AYNI origin'i tasimak ZORUNDADIR; dagitimda
+     ikisini BIRLIKTE yazan tek mekanizma: ops/set-api-origin.sh
+     NEDEN DAGITIM ANI, NEDEN CALISMA ANI DEGIL - OLCULDU: CSP <meta> belge
+     AYRISTIRILIRKEN uygulanir; JS ile sonradan eklenen daha genis bir politika mevcut
+     olani GEVSETMEZ (enjekte edilen genis meta'ya ragmen istek
+     "securitypolicyviolation: connect-src" ile ENGELLENDI). Yani origin dosyaya
+     dagitim aninda YAZILIR, calisma aninda yalnizca DOGRULANIR (asagidaki guard).
+     form-action <-> Iyzico:CallbackUrl SENKRON KURALI burada da gecerlidir: callback
+     POST'u TARAYICIDAN gelir, dolayisiyla CallbackUrl'in origin'i form-action'da
+     BULUNMALIDIR (bkz. appsettings.Development.example.json icindeki //Iyzico notu). -->
+<meta name="divisima-api-origin" content="http://localhost:5000" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="description" content="Divisima — kadın giyimde zarafet. Elbise, dış giyim, üst & alt giyim ve aksesuarda özenle seçilmiş koleksiyon. Türkiye'nin her yerine hızlı ve güvenli kargo." />
 <meta name="theme-color" content="#2b2724" />
@@ -3073,7 +3086,55 @@ if(!lsGet('dvs_nl')){setTimeout(function(){var dm=document.getElementById('modal
 
 
 </script>
-<script>window.DIVISIMA_API_BASE="http://localhost:5000";</script>
+<script>
+/* DALGA-4-FIX-2 / M1: API tabani TEK KAYNAKTAN (bastaki meta[name="divisima-api-origin"])
+   turer - ikinci bir literal YOK. Ayrica CALISMA ANI TUTARLILIK GUARD'I: beyan edilen
+   origin CSP'nin UC direktifinde de bulunmuyorsa SESSIZ kalinmaz. Bugunku kusur
+   mekanizma degildi, DOGRULANMAMIS elle senkrondu; guard tam o bosluga bakar. */
+(function(){
+  var mo=document.querySelector('meta[name="divisima-api-origin"]');
+  var origin=mo?String(mo.getAttribute('content')||'').trim().replace(/\/+$/,''):'';
+  function bagir(msg){
+    try{ if(window.console&&console.error) console.error('[DIVISIMA YAPILANDIRMA] '+msg); }catch(e){}
+    try{
+      var b=document.createElement('div');
+      b.setAttribute('role','alert');
+      b.style.cssText='position:fixed;left:0;right:0;top:0;z-index:2147483647;background:#8c2f2f;color:#fff;font:600 13px/1.45 system-ui,sans-serif;padding:10px 14px';
+      b.textContent='Yapilandirma hatasi: '+msg;
+      var koy=function(){ (document.body||document.documentElement).appendChild(b); };
+      if(document.body) koy(); else document.addEventListener('DOMContentLoaded',koy);
+    }catch(e){}
+  }
+  if(!origin){ bagir('API origin meta etiketi yok ya da bos (meta[name="divisima-api-origin"]).'); return; }
+  window.DIVISIMA_API_BASE=origin;
+  var cm=document.querySelector('meta[http-equiv="Content-Security-Policy"]');
+  var csp=cm?String(cm.getAttribute('content')||''):'';
+  if(!csp){ bagir('CSP meta etiketi okunamadi - origin tutarliligi DOGRULANAMADI.'); return; }
+  /* API ile storefront AYNI origin'de servis edilirse 'self' zaten kapsar; o durumda
+     literal aramak YANLIS ALARM olurdu. */
+  var ayniOrigin=(origin===location.origin);
+  /* CSP ';' ile ayrilmis direktiflerden olusur. REGEX KULLANILMIYOR - bilerek:
+     ters boludan kacinmak, bu satirin bir kez sessizce bozulmasindan sonra alinmis
+     bir karardir (dosyaya '\s' yerine 's' inmisti ve guard UC DIREKTIFI DE "eksik"
+     sanip YANLIS ALARM verdi). Duz split + trim'in kacis semantigi YOKTUR. */
+  function direktifDegeri(d){
+    var ps=csp.split(';');
+    for(var i=0;i<ps.length;i++){
+      var p=ps[i].trim();
+      if(p===d) return '';
+      if(p.indexOf(d+' ')===0) return p.slice(d.length+1);
+    }
+    return null;
+  }
+  var eksik=['img-src','connect-src','form-action'].filter(function(d){
+    var v=direktifDegeri(d);
+    if(v===null) return true;
+    if(v.indexOf(origin)>=0) return false;
+    return !(ayniOrigin && v.indexOf("'self'")>=0);
+  });
+  if(eksik.length) bagir('API origin "'+origin+'" su CSP direktiflerinde YOK: '+eksik.join(', ')+' - dagitimda ops/set-api-origin.sh kullanilmali.');
+})();
+</script>
 <!-- E3: okuma katmani sanitizasyonu (iki katmanli savunmanin ikinci ayagi). api-bridge.js icindeki
      guvenliHTML() bunu kullandigi icin BRIDGE'TEN ONCE yuklenir. Surum/kaynak/SHA-256: frontend/vendor/README.txt -->
 <!-- DALGA-3-FIX (P2a): DORT HARICI SCRIPT'E defer.

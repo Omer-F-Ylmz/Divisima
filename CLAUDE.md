@@ -2262,15 +2262,259 @@ Ikisi de geri alindi.
   hash'i degistirdiginde sayfa YENIDEN YUKLENMEZ - clobber reload'lari asti.
   **DERS: sayfa baglaminda calisan olcum betiginde uygulama global adlari KULLANILMAZ.**
 
+## DALGA-4-FIX PUSH RAPORU (77c0308) - HER IKI WORKFLOW TAMAMEN YESIL
+
+**Push `d40be2f..77c0308`** (tek commit -> tek push). Adim bazinda + annotation
+duzeyinde dogrulandi.
+
+### CI - Build & Test (run 32644536553) - TAMAMEN YESIL
+
+`format-check`: **iki ZORUNLU adim** (`Bicimlendirme dogrulama - whitespace` +
+`- style`) SUCCESS.
+`build-and-test`: `.NET 8 kurulumu` · `Bagimliliklari geri yukle` ·
+`Derle (Release, uyarilar gorunur)` · `SQL Server hazir mi (service container)` ·
+**`SQL gerektiren testler (ATLANMAMALI)`** · **`Testler + coverage`** ·
+**`Coverage raporunu yukle`** hepsi SUCCESS; `TESHIS` skipped.
+
+### Security CI (run 32644536471) - TAMAMEN YESIL
+
+`tests`: `Is mantigi guvenlik simulasyonu` · `SQL Server hazir mi` ·
+**`Entegrasyon testleri`** SUCCESS, `TESHIS` skipped.
+`codeql`: init / Build / analyze SUCCESS.
+**`secret-scan` -> `Gitleaks (secret taramasi)` SUCCESS** (adim sonucundan okundu -
+bolum 7 kurali; "Leaks detected" satiri YOK).
+`dependency-scan`: `Restore` · `Acik bagimlilik taramasi - RAPOR` ·
+**`Acik bagimlilik KAPISI (uretim projeleri)`** · `Kullanimdan kalkmis paket kontrolu`
+hepsi SUCCESS.
+
+### ANNOTATION DURUMU: ALTI JOB'IN HICBIRINDE `failure` SEVIYESI YOK
+
+Tek tek tarandi. Bulunan her annotation `warning` seviyesinde ve UCU DE ONCEDEN VARDI:
+- `Node.js 20 is deprecated` (actions/checkout@v4, setup-dotnet@v4, upload-artifact@v4,
+  gitleaks-action@v2) - GitHub kosucusunun kendi uyarisi, bizim kodumuz degil.
+- `CodeQL Action v3 will be deprecated in December 2026` - ayni sinif.
+- `Cannot convert null literal to non-nullable reference type` -
+  `Divisima.Core/DataAccess/IEntityRepository.cs` ve `EfEntityRepositoryBase.cs`
+  (Dalga 1'de "eleneneler" arasinda orneklenmisti: guard'li ama derleyicinin
+  kanitlayamadigi desen).
+
+**Bu commit YENI bir uyari uretmedi.** Ozellikle: yeni eklenen
+`FrontendDokunmaHedefiTests.cs` ve `frontend/test/mobil-erisilebilirlik.js`
+`secret-scan`, `format-check` ve `dependency-scan` kapilarinin UCUNDEN DE temiz gecti.
+
+### KAYDA DEGER
+
+- **Yeni pin dosyasi DEPO KOKUNU bulup `frontend/index.html`'i okuyabildi** - yani
+  `AppContext.BaseDirectory`'den yukari yurume CI kosucusunun dizin duzeninde de
+  calisiyor. Bu, yerelde yesil olup CI'da sessizce atlanabilecek bir tasarimdi;
+  `KokDizin` bulunamazsa `InvalidOperationException` firlatiyor (sessiz skip YOK),
+  dolayisiyla `Testler + coverage` adiminin SUCCESS olmasi pinlerin GERCEKTEN
+  kostugunun kanitidir.
+- Yereldeki uc Docker'li `OrderEndpointTests` kirmizisi CI'da YOK (beklendigi gibi -
+  kosucuda Docker var).
+- Yerelde bir kez gorulen adi belli flake (`RefreshCookieContractTests.
+  Cerez_Secure_HER_ORTAMDA_ISARETLI_OrtamGuardi_YOK`) bu kosumda TEKRAR ETMEDI.
+
+## DALGA 4 SAHA TURU - GERCEK CIHAZ KANITI (M10 / M11 / M3 KAPANIS DOGRULAMASI)
+
+Duzeltme sonrasi tur kullanicinin kendi telefonunda kosuldu (Android/Opera, 384x694).
+**Uc kalem de CIHAZDA dogrulandi** - emulasyon degil, gercek dokunus:
+
+```
+click -> button#checkoutBtn.btn.rippling   idEsit=TRUE      (once: span.ripple-ink, idEsit=false)
+hash  -> #/odeme  (gecis OK)               (once: #/ -> #/ DEGISMEDI)
+cekmece: on=false  sol=378                 (kapandi)
+[e] cerez bari 0-0                         (ORTME YOK)
+alt navigasyon 4/4 gorunur · "Giris yap" ULASILABILIR
+```
+
+Ardindan **odeme sayfasi acildi ve IYZICO KART FORMU MOBILDE YUKLENDI** (kart no /
+ay-yil / CVC / 3DS + "2.499,50 TL ODE"). **Mobil satin alma akisi UCTAN UCA CALISIYOR.**
+
+**PWA (M6/M7) OLCULEMEDI - DURUST KAYIT:** "Ana ekrana ekle" CALISTI ve ikon ana ekrana
+dustu, ancak kisayol standalone modda ACMADIGI icin `safe-area-inset-top` (M6) ve
+`theme_color` sicramasi (M7) GORULEMEDI. Ikisi de **"test edilmedi, bloke etmez"**
+olarak kapatildi - olculmemis bir sey "yesil" diye yazilmiyor.
+
+**M8 / offline (KULLANICI KARARI):** offline deneyimi oncelik degil, test ATLANDI.
+Service worker `VERSION` bump'i **DAGITIM KURALI** olarak kaliyor (asagidaki checklist
+maddesinde); offline davranisi icin AYRI is ACILMADI.
+
+## DALGA-4-FIX-2 (M1) - STOREFRONT API ORIGIN'I TEK KAYNAKTAN
+
+Launch'i bloke eden SON teknik kalem. Kapsam kullanici karariyla cizildi.
+
+### OLCULEN ZARAR
+
+`http://localhost:5000` **BES ayri yerde** SABIT gomuluydu:
+
+```
+index.html:5      CSP meta      (img-src + connect-src + form-action)
+index.html:3076   window.DIVISIMA_API_BASE = "http://localhost:5000"
+api-bridge.js:27  window.DIVISIMA_API_BASE || "http://localhost:5000"   (sessiz yedek)
+admin.html:5      CSP meta      (img-src + connect-src)
+admin.html:95     localStorage(...) || "http://localhost:5000"
+```
+
+Depo neyse o yayina gidiyordu: LAN adresinden acilinca istekler kullanicinin KENDI
+makinesine gidiyor, tarayici engelliyor (`ERR_BLOCKED_BY_CLIENT`) ve **katalog BOS**
+geliyordu. Ustelik API tabani ile CSP origin'leri **ELLE** senkron tutuluyordu.
+
+### TASARIM: OLCUMLE SECILDI
+
+Iki aday vardi: (a) calisma ani yapilandirma, (b) dagitim adiminda yerine koyma.
+
+**(a) TEK BASINA YETMEZ - TARAYICIDA OLCULDU.** CSP `<meta>` belge AYRISTIRILIRKEN
+uygulanir; calisma aninda DAHA GENIS bir CSP meta'si eklemek politikayi GEVSETMEZ.
+Denendi:
+
+```
+1) mevcut politika altinda  fetch(LAN/health)  -> ENGEL
+2) daha GENIS bir CSP meta'si JS ile eklendi
+3) ayni fetch tekrar         -> YINE ENGEL
+   securitypolicyviolation: connect-src -> http://192.168.x.x:5000/health
+```
+
+Yani API tabani runtime'da ayarlanabilirdi ama **UC CSP DIREKTIFI ayarlanamazdi** - sart
+ise "hepsi TEK KAYNAKTAN turesin" idi. **(a) elendi.**
+
+**(b) TEK BASINA da yetersizdi:** bugunku elle senkron zaten "dagitim ani"ydi; kusur
+mekanizma degil, **DOGRULANMAMIS** olmasiydi.
+
+**SECILEN = (b) + CALISMA ANI TUTARLILIK GUARD'I.** Origin dosyaya dagitim aninda
+yazilir; calisma aninda yalnizca DOGRULANIR.
+
+### YAPILAN
+
+**1) TEK KAYNAK:** `<meta name="divisima-api-origin" content="...">` (index.html ve
+admin.html). API tabani BURADAN turer - `window.DIVISIMA_API_BASE=origin`.
+`api-bridge.js`'teki sessiz `|| "http://localhost:5000"` yedegi KALDIRILDI: bos taban
+GORUNUR sekilde bozuktur, sessiz yanlis taban DEGILDIR (sart ii).
+Admin'in `localStorage("divisima_api_base")` override'i KORUNDU (operatorun paneli baska
+bir ortama yoneltmesi mesru), ama ardindaki sabit yedek kalkti.
+
+**2) CALISMA ANI GUARD'I:** sayfa acilirken beyan edilen origin CSP'nin `img-src`,
+`connect-src`, `form-action` direktiflerinde ARANIR; eksikse konsola ERROR + **ekranda
+kirmizi uyari** basilir ve ne yapilmasi gerektigi (`ops/set-api-origin.sh`) SOYLENIR.
+API storefront ile AYNI origin'de servis edilirse `'self'` kapsami kabul edilir - yoksa
+mesru bir dagitimda YANLIS ALARM verirdi.
+
+**3) DAGITIM MEKANIZMASI:** `ops/set-api-origin.sh <origin>` - TEK girdiden hem meta hem
+UC CSP direktifi yazilir, sonra DOGRULANIR; eski origin bir yerde kalirsa HATA verir.
+`--verify` modu yalnizca dogrular ve tutarsizlikta **exit 1** doner.
+
+**4) CHECKLIST:** `ops/deployment-checklist.md` -> "Frontend origin'i - HER YAYINDA":
+betik kosuldu mu · `Iyzico:CallbackUrl` ayni origin mi (form-action senkronu) · SW
+`VERSION` bump'i · yayin sonrasi katalog dolu mu ve `[DIVISIMA YAPILANDIRMA]` satiri yok mu.
+
+**SENKRON KURALI KORUNDU:** `form-action` <-> `Iyzico:CallbackUrl` esitligi hem betigin
+basindaki yorumda, hem meta'nin yanindaki yorumda, hem checklist'te yazili - callback
+POST'u TARAYICIDAN gelir, uyusmazsa odeme sonucu SESSIZCE kaybolur (E2b'de yasandi).
+
+### OLCUMLER (once -> sonra)
+
+```
+YEREL VARSAYILAN (sart i - ek adim GEREKMEZ)
+  api tabani = http://localhost:5000 · guard SESSIZ · katalog 2 urun ("E4a Test Urun")
+
+FARKLI ORIGIN'E DAGITIM (gercek mekanizma, betikle)
+  ops/set-api-origin.sh http://127.0.0.1:5000  -> 7/7 OK
+  sayfa http://localhost:5173'ten servis edildi
+  api tabani = http://127.0.0.1:5000 · guard SESSIZ · katalog 2 urun
+  AG: GET http://127.0.0.1:5000/api/category/getlist -> 200
+      POST http://127.0.0.1:5000/api/product/filter  -> 200
+      OPTIONS .../product/filter                      -> 204
+```
+
+**OLCUM ORTAMI SINIRI (durust kayit):** ayni dogrulama LAN adresiyle de denendi; sayfa ve
+varliklari 200 geldi, `window.DIVISIMA_API_BASE` LAN degerini tasidi, guard SESSIZ kaldi -
+**ama API istekleri tarayici korumali alani tarafindan `ERR_BLOCKED_BY_CLIENT` ile
+engellendi.** Bu bir URUN kusuru DEGIL, olcum ortaminin ozel-ag kisitidir; bu yuzden
+"farkli origin" kaniti LAN yerine `127.0.0.1` ile uretildi (localhost'tan FARKLI bir
+origin, ama korumali alanin erisebildigi bir adres). Kullanicinin telefonu LAN uzerinden
+zaten calisiyordu.
+
+### PINLER (`ApiOriginTekKaynakTests`, 6)
+
+- `API_TABANI_TEK_KAYNAKTAN_Turer_IKINCI_LITERAL_YOK` (vakum kirici: once TEK KAYNAGIN
+  var ve dolu oldugu dogrulanir)
+- `CSP_UC_DIREKTIF_BEYAN_EDILEN_ORIGINI_Tasir` - **elle senkronun CI'daki karsiligi**;
+  CSP GERCEKTEN ayristirilir (split+trim, uretimdeki guard ile ayni yontem) ve uc
+  direktifin de beyan edilen origin'i tasidigi hesaplanir
+- `ADMIN_PANELI_de_AYNI_TEK_KAYNAK_SOZLESMESINI_Tasir` (iki yuzeyin AYNI origin'i beyan
+  ettigi de assert edilir - ayrisirlarsa dagitim yine elle senkrona donerdi)
+- `TEK_GIRDIYLE_DEGISTIRME_TUM_YERLERI_KAPSAR_ESKI_ORIGIN_KALMAZ` - **davranis pini**:
+  betigin yaptigi is bellekte simule edilir; cift-anlam kirici olarak eski origin'in
+  HICBIR dosyada kalmadigi, vakum kirici olarak degistirmenin GERCEKTEN bir sey yaptigi
+  assert edilir
+- `CALISMA_ANI_GUARD_I_UC_DIREKTIFI_de_Kontrol_Eder_ve_GURULTULUDUR` (uyari EKRANDA
+  gorunmeli - yalniz konsol son kullanicida SESSIZDIR; ayni-origin `'self'` istisnasi da pinli)
+- `DAGITIM_BETIGI_ve_CHECKLIST_MADDESI_VAR`
+
+**KIRILAN PIN YOK.**
+
+### DIS KONTROLU + 5. KONTROL
+
+DIS: 5 assert ters (BES AYRI test) -> **5 AYRI ISIMLI KIRMIZI**. Geri alindi.
+
+5. KONTROL, IKI mutasyon:
+- **A (tarayici):** `connect-src`ten origin SILINDI (elle senkronun unutuldugu durumun ta
+  kendisi) -> `--verify` **exit 1** ve YALNIZ `connect-src`i EKSIK gosterdi (digerleri OK -
+  guard'in isabetli oldugunun kaniti); tarayicida guard bannerı yalnizca `connect-src`i
+  adiyla bildirdi ve **katalog 0 URUN** oldu - M1'in olculen belirtisi.
+- **B (.NET):** `api-bridge.js`'e sessiz `|| "http://localhost:5000"` yedegi GERI KONDU ve
+  tek kaynak meta'si KALDIRILDI -> **4 pin kirmizi**, 2 yesil (lokalize). Tarayicida:
+  `window.DIVISIMA_API_BASE` **undefined**, guard "meta etiketi yok" diye BAGIRDI - yani
+  sessiz yedek geri gelse bile guard bagimsiz bir emniyet agi olarak calisiyor.
+Ikisi de geri alindi.
+
+### YEREL DOGRULAMA
+
+252/252 `Category=Sql` · tam suitte **395 basarili / 398** (kirilan 3'un UCU DE Docker'li
+`OrderEndpointTests`) · Release 0 hata · whitespace + style TEMIZ (exit 0).
+
+### TEMIZLIK (bu dalgada yapildi)
+
+- LAN shim KALDIRILDI: scratchpad'teki sunucu artik CSP/API tabani YENIDEN YAZMIYOR ve
+  tani katmani ENJEKTE ETMIYOR - duz bir statik dosya sunucusu (uretimdeki bir statik
+  host gibi). **Shim'i birakmak, gercek dagitim mekanizmasini TEST ETMEMEK olurdu.**
+- Tani katmani (`tani.js`) kaldirildi; saha turu tamamlandi.
+- Gecici sunucular DURDURULDU (port 5000 ve 5173 bos).
+- `Iyzico:CallbackUrl` user-secrets'ta `http://localhost:5000/api/payment/callback`
+  degerine dondu (diger secret'lar OKUNMADI/BASILMADI).
+- Depo tarandi: `tani.js` / `tani yuklendi` / `agsunucu` / `m10tani` -> **0 dosya**.
+  `trycloudflare` yalniz CLAUDE.md'nin TARIHSEL kaydinda ve gitignore'lu log dosyalarinda.
+  Olcum kanitindaki LAN IP'si depo PUBLIC oldugu icin `192.168.x.x` olarak genellestirildi
+  (kanit degeri "farkli bir origin engellendi" cumlesindedir, adresin kendisinde degil).
+- **KALAN (bilincli):** `frontend/test/mobil-erisilebilirlik.js` DEPODA KALIYOR - o bir
+  tani artigi degil, pin mekanizmasinin bilincli telafisi (Dalga 4 bolumu).
+
+### SURECTE YASANAN (kayit - iki ders)
+
+- **`set -o pipefail` + eslesmesi olmayan `grep` betigi YARIDA KESTI.** `ops/set-api-origin.sh`
+  ilk kosumda dosyalari degistirdikten SONRA, `api-bridge.js`'te sifir gecis oldugu icin
+  `grep -o` 1 dondu ve boru hatti tumuyle basarisiz sayildi; dogrulama ve "eski origin
+  kalmadi" kontrolu HIC kosmadi. CLAUDE.md bolum 7'deki "CI script'leri CALISTIRILARAK
+  dogrulanir" kurali bu betik icin de gecerliydi ve tam da bunu yakaladi. Duzeltildi
+  (sifir gecis acikca yutuluyor) ve gerekcesi koda yazildi.
+- **TERS BOLU KACISI SESSIZCE KAYBOLDU.** Guard'a yazilan `'\\s'` dosyaya `'\s'` olarak
+  indi; JS'te `'\s'` duz `s` demektir, yani regex HIC eslesmedi ve guard UC DIREKTIFI DE
+  "eksik" sanip **YANLIS ALARM** verdi. Fark edildi (tarayicida CSSOM ile olculdu: regex
+  aslinda dogru eslesiyordu), ve regex TUMDEN kaldirildi - CSP artik duz `split(';')+trim`
+  ile ayristiriliyor (kacis semantigi YOK, sessizce bozulamaz). Ayni yontem .NET pininde
+  de kullanildi. **DERS: uretim koduna gomulen regex'lerde ters bolu kacisi, dosyaya
+  yazim zincirinde kaybolabilir - kacissiz bir cozum varsa o tercih edilir.**
+  NOT: guard'in bozulma yonu FAIL-LOUD idi - yanlis alarm verdi, sessiz kalmadi.
+
 ## SIRA
 
 0. **KALITE SUPURMESI - BES DALGANIN TAMAMI KAPANDI.** Dalga 1 + FIX, Dalga 2 + FIX, veri
    temizligi, Dalga 3 + FIX, **(C) GUVENLIK DALGASI + GUVENLIK-FIX** ve **DALGA 4 (mobil +
    capraz cihaz) + M10/M11-FIX**.
-   Dalga 4'un LAUNCH BLOKE eden iki kalemi KAPANDI (M10 mobil satin alma, M11 cerez barinin
-   odeme sayfasini kilitlemesi); **UCUNCU BLOKE KALEM M1 - storefront API adresi
-   `localhost:5000` olarak SABIT gomulu - ACIK. Bu bir DAGITIM kalemidir (build/deploy
-   adiminda degistirilmeli ya da calisma aninda cozulmeli); karar kullanicinin.**
+   **DALGA 4'UN UC LAUNCH-BLOKE KALEMININ UCU DE KAPANDI:** M10 (mobil satin alma),
+   M11 (cerez barinin odeme sayfasini kilitlemesi) ve **M1 (API origin'i tek kaynaktan +
+   dagitim betigi + calisma ani guard'i - DALGA-4-FIX-2)**. M10/M11/M3 ayrica GERCEK
+   CIHAZDA dogrulandi ve mobil odeme akisi uctan uca surtuldu (Iyzico kart formu yuklendi).
    DALGA 4'TEN ACIK KALAN BLOKE ETMEYENLER: M2 (376 px header tasmasi), M4 (44x44 alti
    dokunma hedefleri), M5 (autocomplete), M6 (safe-area-inset-top), M7 (theme_color
    uyusmazligi), M8 (SW surumu bumplanmadi), M9 (9.5 px etiketler).
@@ -2278,9 +2522,12 @@ Ikisi de geri alindi.
    **CI'da JS/DOM pini YOK** - tarayici semantigi bugun yalniz elle kosulan
    `frontend/test/mobil-erisilebilirlik.js` ile dogrulanabiliyor (ayrinti Dalga 4 bolumunde,
    "PIN MEKANIZMASININ SINIRI"). **KARAR VERILDI: launch-sonrasi deftere** (bkz. KARARLAR).
-0b. **SIRADAKI IS: DALGA-4-FIX-2 (M1).** Bu commit yesil gelince TEK BASINA ele alinir.
-   Kapsam (kullanici karari): storefront API adresinin calisma aninda/dagitim adiminda
-   cozulmesi + CSP origin'lerinin ayni kaynaktan turemesi + dagitim checklist maddesi + pin.
+0b. **DALGA-4-FIX-2 (M1) TAMAMLANDI** - ayrinti yukaridaki bolumde. Secilen tasarim
+   OLCUMLE belirlendi: saf calisma-ani yapilandirma CSP'yi cozemiyor (tarayicida olculdu),
+   bu yuzden dagitim-ani yerine koyma + calisma ani tutarlilik guard'i.
+   **M6/M7 (PWA standalone) ve M8 (offline) ACIK ama BLOKE ETMEZ:** M6/M7 kisayol
+   standalone acmadigi icin OLCULEMEDI; M8 kullanici karariyla ATLANDI (offline oncelik
+   degil), SW VERSION bump'i dagitim kurali olarak checklist'te.
    ERTELENENLER: **B5** (100 ucun HTTP testi yok - ayri kapsam dalgasi),
    **B8**, **B13**, **P4** ve **P2-inline-bolme** (launch sonrasi defteri).
    **GUVENLIK DALGASINDAN ACIK KALAN TEK KALEM: G4** (satici refresh token'i govdede) -

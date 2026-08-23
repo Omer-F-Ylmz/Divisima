@@ -24,7 +24,15 @@
   "use strict";
 
   // ── Yapılandırma ──
-  var API_BASE = window.DIVISIMA_API_BASE || "http://localhost:5000";
+  // DALGA-4-FIX-2 / M1: IKINCI LITERAL YOK. Taban TEK KAYNAKTAN gelir
+  // (index.html'deki meta[name="divisima-api-origin"]); eksikligini oradaki guard
+  // GURULTULU bildirir. Burada sessiz bir "localhost" yedegi birakmak, yanlis
+  // yapilandirilmis bir dagitimda istekleri SESSIZCE kullanicinin KENDI makinesine
+  // yollamak demekti - M1'in ta kendisi (LAN'dan acilinca ERR_BLOCKED_BY_CLIENT,
+  // katalog BOS). Bos taban gorunur sekilde bozuktur; sessiz yanlis taban degildir.
+  var API_BASE = window.DIVISIMA_API_BASE || "";
+  if (!API_BASE && window.console && console.error)
+    console.error('[DIVISIMA YAPILANDIRMA] API tabani belirlenemedi - meta[name="divisima-api-origin"] eksik.');
   var api = new DivisimaAPI(API_BASE);
   window.divisimaApi = api; // konsoldan erişim
 
