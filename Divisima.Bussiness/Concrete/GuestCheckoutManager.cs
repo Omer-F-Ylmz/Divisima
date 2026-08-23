@@ -10,6 +10,7 @@ using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Guest;
 using Divisima.Entity.Dtos.Order;
 using Divisima.Entity.Entities;
+using Microsoft.Extensions.Logging;
 
 namespace Divisima.Bussiness.Concrete
 {
@@ -20,12 +21,19 @@ namespace Divisima.Bussiness.Concrete
         private readonly ICustomerDal _customerDal;
         private readonly IAddressDal _addressDal;
         private readonly IOrderService _orderService;
+        // A3: misafirin hesabini sonradan sahiplenebilmesi icin dogrulama maili tetiklenir.
+        // YENI bir kod yolu ACILMADI - var olan ANONIM ucun ta kendisi cagriliyor.
+        private readonly IAuthService _authService;
+        private readonly ILogger<GuestCheckoutManager> _logger;
 
-        public GuestCheckoutManager(ICustomerDal customerDal, IAddressDal addressDal, IOrderService orderService)
+        public GuestCheckoutManager(ICustomerDal customerDal, IAddressDal addressDal, IOrderService orderService,
+            IAuthService authService, ILogger<GuestCheckoutManager> logger)
         {
             _customerDal = customerDal;
             _addressDal = addressDal;
             _orderService = orderService;
+            _authService = authService;
+            _logger = logger;
         }
 
         public async Task<(HttpStatusCode, Result)> PlaceGuestOrder(GuestCheckoutDto dto)
@@ -36,6 +44,13 @@ namespace Divisima.Bussiness.Concrete
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.ProfileNameRequired));
             if (dto.items == null || dto.items.Count == 0)
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.OrderEmptyCart));
+
+            // A3 HIBRIT: misafir YALNIZ kapida odeme. Gerekce GuestCheckoutDto.payment_method'un
+            // basinda. SESSIZCE COD'A DUSURME YOK - musteri kart sectiyse bunu ACIKCA ogrenmeli;
+            // aksi halde "kartla odedim" sanip kapida nakit istenmesiyle karsilasirdi.
+            const byte KapidaOdeme = 1;
+            if (dto.payment_method != KapidaOdeme)
+                return (HttpStatusCode.BadRequest, new ErrorResult(Messages.GuestOnlyCashOnDelivery));
 
             var email = dto.guest_email.Trim().ToLowerInvariant();
 
@@ -81,6 +96,29 @@ namespace Divisima.Bussiness.Concrete
             };
             await _addressDal.AddAsync(address);
 
+            // ══ A3 HIBRIT - MISAFIR HESABINI SAHIPLENEBILSIN DIYE DOGRULAMA MAILI ═══════════
+            //
+            // OLCULEN SORUN: misafir siparisini TAKIP EDEMIYORDU. Siparis onay mailindeki
+            // takip baglantisi uye paneline gidiyor, misafirin oturumu yok; Login ise
+            // email_verified sarti ariyor ve misafir DOGRULANMAMIS olarak yaziliyor.
+            //
+            // YENI UC ACILMADI (kullanici karari). Olculdu: bugun var olan ANONIM zincir bunu
+            // zaten cozuyor -> resend-verification (var+dogrulanmamis dalinda YENI jeton uretir)
+            // -> #/dogrula -> forgot-password -> sifre belirle -> my-orders. Eksik olan tek sey
+            // MISAFIRE BUNUN SOYLENMESIYDI. Burada o zincirin ILK adimi tetikleniyor.
+            // "Siparis no + e-posta ile sorgulama" ucu REDDEDILDI: yeni bir ANONIM sorgu yuzeyi
+            // acar (enumeration + ayri rate-limit tasarimi gerektirir).
+            //
+            // BEST-EFFORT: mail tetiklenemezse SIPARIS DUSMEZ. Musterinin siparisi, hesabini
+            // sahiplenme kolayligindan daha onemli - ustelik ayni maili kullanici Giris
+            // ekranindan kendisi de isteyebilir. Sessiz de degil: hata loglanir.
+            try { await _authService.ResendVerification(email); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "MISAFIR DOGRULAMA MAILI TETIKLENEMEDI - siparis akisi "
+                    + "etkilenmedi. customer_id={CustomerId}", guest.id);
+            }
+
             // Açıklayıcı yorum: Normal sipariş akışına devret (stok/kupon/transaction hepsi PlaceOrder'da)
             var orderDto = new OrderCreateRequestDto
             {
@@ -88,6 +126,7 @@ namespace Divisima.Bussiness.Concrete
                 address_id = address.id,
                 coupon_code = dto.coupon_code,
                 request_id = dto.request_id,
+                payment_method = dto.payment_method,   // A3: yalnizca COD gecebilir (yukarida dogrulandi)
                 items = dto.items
             };
             return await _orderService.PlaceOrder(orderDto);

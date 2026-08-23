@@ -336,5 +336,8 @@ namespace Divisima.Core.Utilities.Constants
         public static string CompareInvalidCount = "2-4 ürün karşılaştırabilirsiniz.";
         public static string CompareNotEnoughProducts = "Karşılaştırma için yeterli geçerli ürün yok.";
         public static string GuestEmailExists = "Bu e-posta kayıtlı. Lütfen giriş yapın.";
+        // A3 HIBRIT: misafir siparisi YALNIZ kapida odeme ile alinir. Online secilirse uc
+        // REDDEDER - sessizce COD.a dusurmek musteriye SORMADAN odeme yontemini degistirmek olurdu.
+        public static string GuestOnlyCashOnDelivery = "Misafir siparişinde yalnızca kapıda ödeme kullanılabilir. Kartla ödemek için üye girişi yapın.";
     }
 }

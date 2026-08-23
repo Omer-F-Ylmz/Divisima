@@ -524,7 +524,10 @@ namespace Divisima.Bussiness.Concrete
                 await _outboxService.WriteAsync("EmailNotification", new MailMessageDto
                 {
                     To = customer.email,
-                    Subject = "Divisima - E-posta doğrulama (yeniden)",
+                    // A3: "(yeniden)" KALDIRILDI. Bu dal iki durumda kosuyor: (a) kullanici
+                    // ilk maili hic almadi, (b) misafir checkout'u bu ucu ILK KEZ tetikliyor.
+                    // Ikisinde de "yeniden" YANLIS bir sey soyluyordu. Kayit mailiyle ayni konu.
+                    Subject = "Divisima - E-posta adresinizi doğrulayın",
                     Body = DogrulamaGovdesi(customer.email_verification_token)
                 });
             }

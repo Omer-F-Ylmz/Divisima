@@ -366,6 +366,9 @@
         // degeri set etmeden ONCE kosuyor (token yine de ezer, govdedeki deger yok sayilir);
         // coupon_code non-nullable oldugu icin "" gonderilmeli. Alan adi payment_METHOD.
         place(payload) { return api._post("/api/order/place", payload); },
+        // A3 HIBRIT: misafir (hesapsiz) siparis. Uc ANONIM ve YALNIZ kapida odeme kabul eder;
+        // payment_method != 1 gelirse SUNUCU REDDEDER (sessizce COD'a dusurme YOK).
+        placeAsGuest(payload) { return api._post("/api/guest-checkout/place", payload); },
         get(id) { return api._get("/api/order/get/" + id); },
         my() { return api._get("/api/order/my-orders"); },
         // E3 - FATURA HTML. Uc "text/html" doner, JSON DEGIL; _parse JSON cozemezse ham metni

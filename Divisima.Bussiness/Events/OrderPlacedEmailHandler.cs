@@ -54,12 +54,33 @@ namespace Divisima.Bussiness.Events
                 ? "\n\nSiparişinin durumunu Hesabım > Siparişlerim sayfasından takip edebilirsin."
                 : $"\n\nSiparişinin durumunu buradan takip edebilirsin:\n{link}";
 
+            // ══ A3 HIBRIT - MISAFIR SIPARISI ICIN EK SATIR ══════════════════════════════════
+            //
+            // Misafir = DOGRULANMAMIS musteri (GuestCheckoutManager email_verified=false yaziyor).
+            // Takip baglantisi uye panelinedir ve misafirin oturumu YOKTUR; ustelik Login
+            // email_verified sarti arar. Yani ustteki satir tek basina MISAFIRE YARAMAZ.
+            //
+            // YENI UC ACILMADI: misafir checkout'unda dogrulama maili ZATEN tetiklendi
+            // (zincirin 1. adimi). Burada kalan tek eksik kapaniyor - MISAFIRE NE YAPACAGININ
+            // SOYLENMESI. Kalan adimlar var olan ANONIM uclardir: dogrula -> "Sifremi unuttum"
+            // ile sifre belirle -> giris -> siparislerim.
+            var sahiplen = "";
+            if (!customer.email_verified)
+            {
+                var sifirlama = _links.VitrinBaglantisi("#/giris");
+                sahiplen = "\n\nSiparişini takip edebilmek için hesabına bir şifre belirle: "
+                         + "e-postana gönderdiğimiz doğrulama bağlantısına tıkla, sonra Giriş "
+                         + "ekranındaki \"Şifremi unuttum\" adımıyla şifreni oluştur."
+                         + (sifirlama == null ? "" : $"\n{sifirlama}");
+            }
+
             await _mailService.SendAsync(new MailMessageDto
             {
                 To = customer.email,
                 Subject = $"Divisima - Siparişin alındı (#{@event.order_number})",
                 Body = $"Merhaba {customer.name},\n\n#{@event.order_number} numaralı siparişin "
-                     + $"başarıyla oluşturuldu.\nTutar: {@event.total:N2} TL." + takip + "\n\nDivisima",
+                     + $"başarıyla oluşturuldu.\nTutar: {@event.total:N2} TL." + takip + sahiplen
+                     + "\n\nDivisima",
                 IsHtml = false
             });
         }

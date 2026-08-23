@@ -592,20 +592,153 @@
   window.divisimaSyncCart = syncCartToServer;
 
   // ── Checkout paneli (MOCK ekranin yerine) ──────────────────────────────────
+  // ══ A3 HIBRIT - MISAFIR CHECKOUT (YALNIZ KAPIDA ODEME) ══════════════════════════════════
+  //
+  // OLCULEN ONCE-DURUM (kapsama denetimi):
+  //   - POST /api/guest-checkout/place VARDI ama storefront'ta cagrisi SIFIRDI
+  //     (index.html 0, api-bridge 0, api-client 0).
+  //   - index.html'in ".co-guest" blogu DOM'DA YOKTU: E2'nin gercek odeme paneli, o blogu
+  //     cizen mock checkout'un (coStep1) USTUNE yaziyor - yani UI vaadi ZATEN OLUYDU.
+  //   - YASAYAN TEK VAAT SSS'deydi ve YANLISTI.
+  //   - Ayrica misafir siparisi ASLA ODENEMIYORDU: DTO'da payment_method yoktu ->
+  //     payment_type=0 (online) -> /api/payment/initialize [RequireUserType(Customer)] ve
+  //     misafirin token'i YOK. Siparis sonsuza kadar Pending kaliyordu.
+  //
+  // KULLANICI KARARI (secenek iii): misafire YALNIZ KAPIDA ODEME. Misafire OTURUM VERILMEZ,
+  // yetki modeline DOKUNULMAZ. Kart secenegi misafire KAPALI ve NEDENI GORUNUR.
+  //
+  // OLU i18n ANAHTARLARI YENIDEN KULLANILIYOR: co_guest_t / co_guest_s / co_guest_login
+  // index.html'de tanimli ve UC DILDE cevirisi var (tr/en/ar) ama cizildikleri blok oluydu.
+  // Silmek yerine YENI FORMA baglandilar - ceviriler kazanildi, olu anahtar kalmadi.
+  var misafirState = { ad: "", eposta: "", telefon: "", il: "", ilce: "", adres: "", posta: "" };
+
+  function bosSepetEkrani() {
+    return '<div class="wrap" style="padding:40px 0"><h2>Ödeme</h2>' +
+      '<p class="muted" style="margin:10px 0 16px">Sepetin boş.</p>' +
+      '<a class="btn" href="#/kategori/tumu">Alışverişe başla</a></div>';
+  }
+
+  function misafirAlan(id, etiket, deger, tip) {
+    return '<label class="f" style="display:block;margin-top:10px">' +
+      '<span style="display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px">' +
+      esc(etiket) + "</span>" +
+      '<input id="' + id + '" type="' + (tip || "text") + '" value="' + esc(deger || "") +
+      '" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px"></label>';
+  }
+
+  function misafirCheckoutCiz(view) {
+    // OLCULDU (tarayici): sepet kalemi {id,size,qty,color} tutuyor - FIYAT TASIMIYOR. Ilk
+    // yazimda `it.price` okunmustu ve ozet "Ara toplam 0 TL" gosterdi. Fiyat katalogdan
+    // cozulur; bu is icin bu dosyada ZATEN cartSubtotal() var ve uye yolu da onu kullaniyor.
+    // Kendi hesabimi yazmak, ayni sayinin iki yerde ayrisması demekti.
+    var toplam = cartSubtotal();
+    var kargo = toplam >= 2000 ? 0 : 49.9;
+
+    view.innerHTML =
+      '<div class="wrap" style="padding:28px 0"><h2>Ödeme</h2>' +
+      // co_guest_t / co_guest_s: index.html'de ZATEN CEVIRILI, blogu olu kalmisti.
+      '<div class="co-guest" style="margin:12px 0 18px"><div><b>' +
+        esc(typeof t === "function" ? t("co_guest_t") : "Misafir olarak devam ediyorsun") + "</b><span>" +
+        esc(typeof t === "function" ? t("co_guest_s") : "Sipariş bilgilerin e-postana gönderilecek.") +
+        '</span></div><a href="#/giris" class="co-guest-link">' +
+        esc(typeof t === "function" ? t("co_guest_login") : "Üye girişi yap") + "</a></div>" +
+
+      '<div class="co-block"><h3>İletişim ve teslimat</h3>' +
+      misafirAlan("mgAd", "Ad Soyad", misafirState.ad) +
+      misafirAlan("mgMail", "E-posta", misafirState.eposta, "email") +
+      misafirAlan("mgTel", "Telefon", misafirState.telefon, "tel") +
+      misafirAlan("mgIl", "İl", misafirState.il) +
+      misafirAlan("mgIlce", "İlçe", misafirState.ilce) +
+      misafirAlan("mgAdres", "Açık adres", misafirState.adres) +
+      misafirAlan("mgPosta", "Posta kodu", misafirState.posta) +
+      "</div>" +
+
+      '<div class="co-block" style="margin-top:18px"><h3>Ödeme yöntemi</h3>' +
+      '<label class="saved-item" style="display:block"><input type="radio" name="mgOdeme" checked disabled> ' +
+      "<b>Kapıda ödeme</b></label>" +
+      // KART SECENEGI KAPALI VE NEDENI GORUNUR - sessizce gizlemek, kullaniciya neden
+      // secemedigini soylememek olurdu.
+      '<label class="saved-item" style="display:block;opacity:.55"><input type="radio" name="mgOdeme" disabled> ' +
+      "Kredi/banka kartı</label>" +
+      '<p class="muted" style="font-size:12.5px;margin:8px 0 0">Kartla ödeme için ' +
+      '<a href="#/giris">üye girişi</a> yapman gerekiyor. Misafir siparişleri kapıda ödeme ile alınır.</p>' +
+      "</div>" +
+
+      '<div class="co-block" style="margin-top:18px"><h3>Sipariş özeti</h3>' +
+      '<div class="od-sum"><span>Ara toplam</span><b>' + money(toplam) + "</b></div>" +
+      '<div class="od-sum"><span>Kargo' + (kargo === 0 ? " (ücretsiz)" : "") + "</span><b>" + money(kargo) + "</b></div>" +
+      '<div class="od-sum"><span>Toplam</span><b>' + money(toplam + kargo) + "</b></div>" +
+      '<p class="muted" style="font-size:12px;margin:8px 0 0">Kargo tutarı tahminidir; kesin tutar sipariş sonrası hesaplanır.</p>' +
+      "</div>" +
+
+      '<div class="co-nav" style="margin-top:18px">' +
+      '<button class="btn" id="mgGonder">Siparişi tamamla (kapıda ödeme)</button></div>' +
+      '<div id="mgErr" style="color:#a32d2d;font-size:13px;margin-top:10px"></div></div>';
+
+    var btn = document.getElementById("mgGonder");
+    if (btn) btn.onclick = misafirSiparisGonder;
+  }
+
+  function misafirDegerleriOku() {
+    function v(id) { var e = document.getElementById(id); return e ? (e.value || "").trim() : ""; }
+    misafirState = {
+      ad: v("mgAd"), eposta: v("mgMail"), telefon: v("mgTel"),
+      il: v("mgIl"), ilce: v("mgIlce"), adres: v("mgAdres"), posta: v("mgPosta")
+    };
+    return misafirState;
+  }
+
+  async function misafirSiparisGonder() {
+    var er = document.getElementById("mgErr");
+    if (er) er.textContent = "";
+    var d = misafirDegerleriOku();
+    if (!d.ad) { er.textContent = "Ad Soyad gir."; return; }
+    if (!d.eposta || d.eposta.indexOf("@") < 0) { er.textContent = "Geçerli bir e-posta gir."; return; }
+    if (!d.adres) { er.textContent = "Açık adres gir."; return; }
+
+    var kalemler = cartItemsPayload();
+    if (!kalemler.length) { er.textContent = "Sepetin boş."; return; }
+
+    var btn = document.getElementById("mgGonder");
+    if (btn) { btn.disabled = true; btn.textContent = "Gönderiliyor…"; }
+    try {
+      var r = await api.orders.placeAsGuest({
+        guest_name: d.ad, guest_email: d.eposta, guest_phone: d.telefon,
+        city: d.il, district: d.ilce, full_address: d.adres, zip_code: d.posta,
+        coupon_code: "",              // non-nullable string - eksikse 400 (E2 dersi)
+        payment_method: 1,            // A3: misafirde YALNIZ kapida odeme
+        request_id: "mg-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10),
+        items: kalemler
+      });
+      var siparisId = unwrap(r);
+      if (window.cart && window.cart.clear) { window.cart.clear(); if (typeof renderCart === "function") renderCart(); }
+      location.hash = "#/odeme/sonuc?order=" + encodeURIComponent(siparisId) + "&status=success&guest=1";
+    } catch (e) {
+      // Uc "e-posta kayitli" (409) ya da "yalniz kapida odeme" (400) donebilir - ikisi de
+      // KULLANICIYA GOSTERILIR; sessizce baska bir yola sapmak yanlis olurdu.
+      er.textContent = e.message || "Sipariş oluşturulamadı.";
+      if (btn) { btn.disabled = false; btn.textContent = "Siparişi tamamla (kapıda ödeme)"; }
+    }
+  }
+
   async function renderRealCheckout() {
     var view = document.getElementById("checkoutView");
     if (!view) return;
 
     if (!api.isLoggedIn()) {
-      view.innerHTML = '<div class="wrap" style="padding:40px 0"><h2>Ödeme</h2>' +
-        '<p class="muted" style="margin:10px 0 16px">Siparişi tamamlamak için giriş yapmalısın.</p>' +
-        '<a class="btn" href="#/giris">Giriş yap</a></div>';
+      // A3 HIBRIT: cikisli kullaniciya artik DUZ BIR DUVAR degil, MISAFIR FORMU gosteriliyor.
+      // Onceki hal "Siparisi tamamlamak icin giris yapmalisin" + tek buton idi; SSS ise
+      // "misafir olarak devam edebilirsin" diyordu - vaat ile davranis CELISIYORDU.
+      if (!window.cart || window.cart.size === 0) {
+        view.innerHTML = bosSepetEkrani();
+        return;
+      }
+      misafirCheckoutCiz(view);
       return;
     }
     if (!window.cart || window.cart.size === 0) {
-      view.innerHTML = '<div class="wrap" style="padding:40px 0"><h2>Ödeme</h2>' +
-        '<p class="muted" style="margin:10px 0 16px">Sepetin boş.</p>' +
-        '<a class="btn" href="#/kategori/tumu">Alışverişe başla</a></div>';
+      // A3: ayni metin iki dalda tekrarlaniyordu; tek yardimciya baglandi.
+      view.innerHTML = bosSepetEkrani();
       return;
     }
 
@@ -893,6 +1026,24 @@
       ozet = '<p class="muted" style="font-size:13px">Sipariş #' + orderId + " detayına şu an ulaşılamadı.</p>";
     }
 
+    // ══ A3 HIBRIT - MISAFIR SONUC EKRANI ═══════════════════════════════════════════════════
+    //
+    // OLCULDU (tarayici): misafir siparisinden sonra bu sayfa "Siparis #91 detayina su an
+    // ulasilamadi" gosteriyor ve tek eylem butonu "Siparislerime git" oluyordu. Ikisi de
+    // misafir icin DOGRU DEGIL: siparis detayi ucu [RequireUserType(Customer)] ve misafirin
+    // OTURUMU YOK (A3 karari geregi verilmiyor da). Yani kullaniciya ULASAMAYACAGI bir yol
+    // gosteriliyordu - M11'de ogrenilen ders: hedefteki eylem gercekten kullanilabilir olmali.
+    //
+    // Misafir oldugunu URL soyluyor (guest=1); tahmin edilmiyor.
+    var misafirMi = String(params.guest || "") === "1";
+    if (misafirMi) {
+      ozet = '<div class="panel" style="text-align:left"><h3>Sipariş no</h3>' +
+        '<p style="font-size:15px;font-weight:600;margin:6px 0 12px">#' + orderId + "</p>" +
+        '<p class="muted" style="font-size:13px;margin:0">Sipariş bilgilerin e-postana gönderildi. ' +
+        "Siparişini takip edebilmek için hesabına bir şifre belirle: e-postandaki doğrulama " +
+        'bağlantısına tıkla, sonra Giriş ekranındaki "Şifremi unuttum" adımıyla şifreni oluştur.</p></div>';
+    }
+
     view.innerHTML =
       '<div class="wrap" style="padding:40px 0;max-width:640px;text-align:center">' +
       '<div style="font-size:44px;margin-bottom:8px">' + (ok ? "✓" : "✕") + "</div>" +
@@ -900,7 +1051,10 @@
       '<p class="muted" style="margin:8px 0 18px">' + alt + "</p>" +
       ozet +
       '<div style="display:flex;gap:10px;justify-content:center;margin-top:18px">' +
-      '<a class="btn" href="#/hesabim/siparislerim">Siparişlerime git</a>' +
+      // A3: misafire "Siparislerime git" GOSTERILMEZ - oturumu yok, o sayfa ona bos/401 verir.
+      // Yerine hesabini sahiplenmeye goturen GERCEKTEN calisan yol.
+      (misafirMi ? '<a class="btn" href="#/giris">Şifre belirle</a>'
+                 : '<a class="btn" href="#/hesabim/siparislerim">Siparişlerime git</a>') +
       (ok ? '<a class="btn ghost" href="#/kategori/tumu">Alışverişe devam</a>'
           : '<a class="btn ghost" href="#/odeme">Tekrar dene</a>') +
       "</div></div>";
