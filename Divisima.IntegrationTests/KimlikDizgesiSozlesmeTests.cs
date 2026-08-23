@@ -277,8 +277,8 @@ namespace Divisima.IntegrationTests
             // deftere yazildi (kozmetik).
             var govde = JsonSerializer.Serialize(sonuc.Item2);
             govde.Should().Contain("1 hatali satir",
-                $"bozuk product_type satiri HATALI sayilmali - sessizce 0'a dusup ICERI ALINMAMALI. Yanit: {govde}");
-            govde.Should().Contain("0 urun eklendi", $"hicbir urun eklenmemis olmali. Yanit: {govde}");
+                $"bozuk product_type satiri HATALI sayilmali - sessizce 0'a dusup ICERI ALINMAMALI. Yanit: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(govde)}");
+            govde.Should().Contain("0 urun eklendi", $"hicbir urun eklenmemis olmali. Yanit: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(govde)}");
 
             await using var son = NewContext();
             (await son.Products.CountAsync(p => p.name == ad)).Should().Be(0,

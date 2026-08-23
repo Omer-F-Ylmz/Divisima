@@ -184,7 +184,7 @@ namespace Divisima.IntegrationTests
             var login = await anon.PostAsJsonAsync("/api/auth/login",
                 new { email = user.Email, password = TestAuthHelper.TestPassword });
             login.IsSuccessStatusCode.Should().BeTrue(
-                $"admin girisi calismali: {await login.Content.ReadAsStringAsync()}");
+                $"admin girisi calismali: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await login.Content.ReadAsStringAsync())}");
             using var loginDoc = JsonDocument.Parse(await login.Content.ReadAsStringAsync());
             var token = loginDoc.RootElement.GetProperty("data").GetProperty("token").GetString();
             token.Should().NotBeNullOrWhiteSpace("admin token alinmali");

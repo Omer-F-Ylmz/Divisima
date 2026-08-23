@@ -27,6 +27,27 @@ Kurallar kullanici tarafindan konulmustur; asistan bunlari kendi basina gevsetem
   kaybolmaz - "webhook jetonu `payments.token` ile ESLESIYOR" cumlesi tam degeri gerektirmez.
   Ayni kural `paymentConversationId`, `iyziReferenceCode`, oturum/refresh jetonlari ve
   imza degerleri icin de gecerlidir.
+- **MASKELEME URETIM NOKTASINDA YAPILIR, RAPOR ANINDA DEGIL (KALICI - UC KEZ KIRILDI).**
+  Yukaridaki kirpma kurali insan disiplinine birakildi ve **UC KEZ** kirildi; ucunde de bedeli
+  KIRMIZI BIR RUN oldu: Sprint 8 (Iyzico odeme jetonu CLAUDE.md'ye yapistirildi),
+  GUVENLIK-FIX-2 (test sifre literalleri), LAUNCH-FIX Dalga A (ikisi birden). Ortak nokta her
+  seferinde **uretim kodu degil, KANIT YAZMA ANIYDI** - ustelik Dalga A'da ayni blokta bir
+  sonraki satirda jeton KIRPILMISTI, yani kural biliniyordu ve tutarsiz uygulandi.
+  **Bu yuzden kirpma, kanitin URETILDIGI yere tasindi:**
+  - `Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(...)` - ham govdeyi ciktiya/loga koyan
+    her yer once buradan gecer. Bagli yerler: `TestAuthHelper` (register/verify/**login**
+    kosuyor, basarisiz login yaniti JWT tasir), assert mesajina govde koyan tum test siteleri,
+    ve `NetgsmSmsService`'in saglayici yaniti logu.
+  - Depo disindaki olcum araclari da **yazma aninda** maskeler (SMTP yakalayicisi `.eml`'i
+    kirpilmis yazar), boylece rapora ne yapistirilirsa yapistirilsin jeton ciplak halde
+    **ELDE OLMAZ**.
+  **OLCUT ENTROPI DEGIL, KARAKTER SINIFI - VERIDEN CIKARILDI:** `uzunluk >= 16 + en az bir
+  rakam + en az bir kucuk harf`. Gerekce olculdu: `Guid("N")` entropisi **3.480** ile
+  gitleaks'in 3.5 esiginin ALTINDA kalir ama maskelenmelidir; buna karsilik
+  `paymentTransactionId` **3.746** ile esigin USTUNDEDIR ama GORUNMELIDIR. Tam tablo ve
+  gerekce `KanitMaskesi`'nin basinda; davranis `KanitMaskesiTests` ile pinli.
+  **TESHIS DEGERI KORUNUR:** baglantida origin ve yol gorunur kalir
+  (`http://localhost:5173/#/dogrula/RcR276Ak…`), yalniz jetonun kendisi gider.
 - Run izleme **SHA bazlidir** (`head_sha=` ya da `?branch=main` + SHA eslesmesi).
   "En son run" ile calisilmaz — Dependabot kosulari araya girer ve yanlis run raporlanir.
 
@@ -2728,12 +2749,12 @@ yoldur, YERINE GECEN degil.
 To: dalgaa.<...>@example.com     Subject: Divisima - E-posta adresinizi doğrulayın
   Merhaba,
   Divisima hesabını doğrulamak için aşağıdaki bağlantıya tıkla:
-  http://localhost:5173/#/dogrula/94-SsO4Zz-ALIq8ioYZ6MWJPpea5iDNPtDJHOJSQM1w
+  http://localhost:5173/#/dogrula/94-SsO4Z...
   Bağlantı çalışmazsa Giriş ekranındaki doğrulama kutusuna şu kodu gir: 94-SsO4Zz-...
 
 To: dalgaa.<...>@example.com     Subject: Divisima - Şifre sıfırlama
   Şifreni sıfırlamak için aşağıdaki bağlantıya tıkla (30 dakika geçerli):
-  http://localhost:5173/#/sifre-sifirla/a7sK1hP5d6NRsIMpexcffLb5ZhdUE2UER66PhWNzp6E
+  http://localhost:5173/#/sifre-sifirla/a7sK1hP...
   Bu isteği sen yapmadıysan bu e-postayı yok sayabilirsin; şifren değişmez.
 
 To: dalgaa.<...>@example.com     Subject: Divisima - Siparişin alındı (#DVS20260823-54740CC62D)
@@ -2902,6 +2923,77 @@ yazili olan tuzak (migration notu) elle eklenen using'ler icin de gecerli; `dotn
   teslim edilebilirlik (SPF/DKIM/DMARC), spam klasoru, gonderen adi/adresi ve linklerin gercek
   origin'i. Bu dalga yerel yakalayiciyla **govde + alici + link** duzeyinde kanitladi; **teslimat**
   duzeyi kanitlanmadi.
+
+
+## DALGA A PUSH RAPORU (e6e9b71) - CI YESIL, SECURITY KIRMIZI (TEK JOB)
+
+**Push `dbaa763..e6e9b71`** (tek commit -> tek push). Adim bazinda + annotation duzeyinde okundu.
+
+### CI - Build & Test (run 32655634070) - TAMAMEN YESIL
+`format-check`: iki ZORUNLU adim SUCCESS.
+`build-and-test`: 14 adimin tamami SUCCESS (`SQL gerektiren testler` + `Testler + coverage`
++ `Coverage raporunu yukle` DAHIL); `TESHIS` skipped. **failure seviyeli annotation YOK.**
+
+### Security CI (run 32655634056) - KIRMIZI, TEK JOB
+`tests` SUCCESS (`Entegrasyon testleri` DAHIL, TESHIS skipped) · `dependency-scan` SUCCESS ·
+`codeql` SUCCESS · **`secret-scan` -> `Gitleaks (secret taramasi)` FAILURE**, annotation
+`warning` seviyesinde ve yalnizca "Leaks detected, see job summary for details" - **dosya,
+satir ve kural TASIMIYOR** (bolum 7 kurali bir kez daha dogrulandi).
+
+### KOK SEBEP - DEPO TARAMASIYLA, IKI AYRI BICIMDE VE IKISI DE BENIM RAPOR/TEST ALISKANLIGIM
+
+**(1) TEST SIFRE LITERALLERI - GUVENLIK-FIX-2'NIN BIREBIR TEKRARI.**
+Yeni pin dosyasinda `password = "<deger>"` bicimli uc satir vardi. `generic-api-key` anahtar
+kelime + entropi >= 3.5 arar. OLCULDU (Shannon; degerler bolum 1 geregi KIRPILDI):
+
+```
+"LinkTest..."   (13 krkt) -> 3.547   ESIGIN USTUNDE   (satir 177, 217)
+"GucluSifre..." (14 krkt) -> 3.522   ESIGIN USTUNDE   (satir 423)
+"abc"                     -> 1.585   esigin ALTINDA   (bulgu DEGIL - SUPHELI pininin kendisi)
+YanlisSifre               -> 3.278   depoda VAR, tam-gecmis taramasi YESIL
+TestAuthHelper.TestPassword -> 3.027  depoda VAR, tam-gecmis taramasi YESIL
+```
+
+**(2) CLAUDE.md'YE YAPISTIRILAN IKI JETON.** Rapor yazarken yakalanan mail govdeleri BIREBIR
+kopyalandi ve iki jeton (43 krkt) TAM HALIYLE depoya girdi. `generic-api-key` icin anahtar
+kelime tasimadiklarindan bulgu OLMAYABILIRLER - ama **bolum 1'in ACIK kuralinin ihlaliydi**
+("depoya yazilan her ornek govdede jeton ilk 8 karaktere kirpilir") ve Sprint 8'de bedeli bir
+kez odenmisti. Ustelik AYNI blokta bir sonraki satirda jetonu KIRPMISTIM - yani kurali
+biliyordum ve tutarsiz uyguladim.
+
+### DUZELTME (yerelde hazir)
+
+1. **Ileriye donuk:** uc sifre literali tek bir DUSUK ENTROPILI sabite (`GecerliSifre`, 2.855)
+   cevrildi; sabit kayit politikasini karsiliyor (>=8, buyuk, kucuk, rakam). Tanim satirinda
+   anahtar kelime YOK, kullanim satirinda TIRNAKLI deger YOK. Iki jeton CLAUDE.md'de kirpildi.
+2. **Gecmis icin:** `.gitleaksignore`'a DAR KAPSAMLI **bes fingerprint** + gerekcesi. Uc tanesi
+   sifre satirlari, ikisi CLAUDE.md jeton satirlari ve **ONLEM AMACLIDIR** (Sprint 8'deki 1277
+   satiri gibi - eslesmiyorlarsa etkisiz kalirlar). Force-push YASAK oldugu icin `e6e9b71`'in
+   gecmiste kalan hali ancak boyle susturulur.
+
+**SUSTURULAN SEY KIMLIK BILGISI DEGIL:** sifreler bir testin KENDI olusturdugu, yalniz o testin
+gecici veritabaninda var olan hesaplara ait; jetonlar YEREL bir gelistirme veritabaninin tek
+kullanimlik dogrulama/sifirlama jetonlari - **ikisi de olcum sirasinda KULLANILDI** (dolayisiyla
+null'landi) ve sifirlama jetonunun 30 dakikalik omru coktan doldu.
+
+**DOGRULAMA BOSLUGU (onceki iki kalemle AYNI, durust kayit):** fingerprint'lerin tuttugu bir
+sonraki PUSH run'inda GORULEMEZ (push yalniz son commit'i tarar, orada bulgu zaten olmayacak).
+Kanit ancak TUM GECMISI tarayan bir kosumdan gelir - Pazartesi cron'u ya da ELLE
+`workflow_dispatch`.
+
+### DERS (UCUNCU KEZ - ARTIK KALIP)
+
+Ayni hata sinifi ucuncu kez tekrarladi (Sprint 8 Iyzico jetonu, GUVENLIK-FIX-2 test sifreleri,
+Dalga A ikisi birden). Ortak nokta: **uretim kodu degil, KANIT YAZMA ANI**. Bundan sonra bir
+dalga raporuna govde/sifre yapistirilirken iki soru ONCE sorulur: (a) jeton/kimlik ilk 8
+karaktere kirpildi mi, (b) `password =` gibi bir anahtar kelimenin yanindaki deger dusuk
+entropili bir SABIT mi.
+
+### YEREL DOGRULAMA (duzeltme sonrasi)
+
+259/259 `Category=Sql` · 13/13 Dalga A pini · whitespace + style **exit 0**.
+Dis kontrolu ve 5. kontrol YENIDEN KOSULMADI - degisiklik yalnizca sabit degeri (literal ->
+`GecerliSifre`) ve bir dokuman kirpmasi; pinlerin OLCTUGU sey ve assert'ler DEGISMEDI.
 
 ## SIRA
 
@@ -3792,6 +3884,30 @@ KAPANDI. Acik kalan / yeni bulunanlar:
    **YAN GOZLEM (kozmetik, ayni metotta):** `ResetPassword`'un basinda AYNI
    `string.IsNullOrWhiteSpace(dto.token)` kontrolu IKI KEZ var (farkli mesajlarla); ikincisi
    ULASILAMAZ. Zarar yok, temizlik kalemi.
+
+### KALICI ONLEM: KANIT MASKESI (Dalga A duzeltmesine bindi)
+
+`secret-scan` kirmizisi UCUNCU KEZ ayni sinifta tekrarlayinca kural **kaynaginda kapatildi** -
+ayrinti bolum 1'deki "MASKELEME URETIM NOKTASINDA YAPILIR" maddesinde. Uygulanan yuzey:
+
+| Yer | Ne yapiyor |
+|---|---|
+| `Divisima.Core/Utilities/Text/KanitMaskesi.cs` | tek olcut, tek uygulama |
+| `TestAuthHelper.EnsureAsync` | **paylasilan** yardimci; register/verify/**login** kosuyor |
+| 26 test sitesi | assert mesajina ham govde koyan her yer mekanik olarak sarmalandi |
+| `NetgsmSmsService` | uretimdeki TEK ham saglayici-govdesi logu |
+| SMTP yakalayicisi (scratchpad) | `.eml`'i **yazarken** kirpar |
+
+**OLCULEN YAN ETKI (durust kayit):** olcut, uretilmis test e-postalarinin yerel kismini da
+maskeliyor (`maske.17…@example.com`) - cunku onlar da 16+ karakter, rakam ve kucuk harf
+iceriyor. Gercek musteri adresleri (`ad.soyad@...`) rakam icermedigi icin DOKUNULMAZ. Bu bir
+kayip degil kazanc sayildi: adres kisisel veridir, teshis kanalinda maskeli olmasi dogrudur.
+
+**SINIR (durust kayit):** `/` bilincli olarak jeton karakteri SAYILMIYOR - iceri alindiginda
+`.../#/dogrula/<jeton>` tek parca sayilip YOL da yutuluyordu (pin bunu yakaladi). Bedeli:
+standart base64 (base64url degil) bir sir `/` karakterlerinde parcalara bolunur; her parca
+ayri degerlendirilir ve 16+ karakterli olanlar YINE maskelenir. Olctugumuz jetonlarin
+(dogrulama/sifirlama, JWT, Guid) hicbiri `/` icermiyor.
 
 ## SUREC (degismez)
 

@@ -79,3 +79,52 @@
 # dosyadan okundu) tutmazsa bu satirlar sadece ETKISIZ kalir, zarar vermez.
 147a95db903c03cd6ebd644c59373d1d54997f78:Divisima.IntegrationTests/SecurityHardeningTests.cs:generic-api-key:731
 147a95db903c03cd6ebd644c59373d1d54997f78:Divisima.IntegrationTests/SecurityHardeningTests.cs:generic-api-key:806
+
+# ── UCUNCU KALEM: LAUNCH-FIX DALGA A (e6e9b71) - AYNI TUZAK, IKI AYRI BICIMDE ─────────
+#
+# NE OLDU: Dalga A push'unda (run 32655634056) `secret-scan` KIRMIZI dustu. CI - Build &
+# Test TAMAMEN YESILDI; kirilan tek job buydu. Kok sebep yine KANIT KANALINDAN DEGIL
+# DEPO TARAMASIYLA bulundu (annotation yalnizca "Leaks detected, see job summary for
+# details" - dosya/satir/kural TASIMIYOR).
+#
+# (1) TEST SIFRE LITERALLERI - GUVENLIK-FIX-2'nin BIREBIR TEKRARI.
+#     Yeni pin dosyasinda `password = "<deger>"` bicimli UC satir vardi. `generic-api-key`
+#     anahtar kelime (password) + entropi >= 3.5 arar. OLCULDU (Shannon, karakter basina;
+#     degerler CLAUDE.md bolum 1 geregi KIRPILDI - kanit entropi sayisinda):
+#         "LinkTest..."   (13 krkt) -> 3.547   ESIGIN USTUNDE (satir 177 ve 217)
+#         "GucluSifre..." (14 krkt) -> 3.522   ESIGIN USTUNDE (satir 423)
+#         "abc"                     -> 1.585   esigin ALTINDA (satir 436, 450 - bulgu DEGIL)
+#     MODEL DOGRULAMASI: `YanlisSifre` (3.278) ve `TestAuthHelper.TestPassword` (3.027)
+#     depoda ZATEN VAR ve TUM GECMISI tarayan workflow_dispatch kosumu (run 32540908505)
+#     SUCCESS'ti. 3.5 esigi yine teoriyle degil BILINEN-YESIL bir tam-gecmis taramasiyla
+#     dogrulandi.
+#
+# (2) CLAUDE.md'YE YAPISTIRILAN IKI DOGRULAMA/SIFIRLAMA JETONU.
+#     Rapor yazarken yakalanan mail govdeleri BIREBIR kopyalandi ve iki jeton (43 krkt,
+#     base64url) TAM HALIYLE depoya girdi. Bu, `generic-api-key` icin anahtar kelime
+#     tasimadigi icin bulgu OLMAYABILIR - ama CLAUDE.md bolum 1'in ACIK kuralinin
+#     ("depoya yazilan her ornek govdede jeton ilk 8 karaktere kirpilir") ihlaliydi ve
+#     Sprint 8'de bedeli bir kez odenmisti. Calisma agacinda KIRPILDILAR.
+#     Asagidaki 2731/2736 satirlari ONLEM AMACLIDIR (Sprint 8'deki 1277 satiri gibi):
+#     eslesmiyorlarsa sadece ETKISIZ kalirlar, zarar vermezler.
+#
+# SUSTURULAN SEY KIMLIK BILGISI DEGIL:
+#   - sifreler: bir testin KENDI olusturdugu, yalniz o testin gecici veritabaninda var
+#     olan hesaplarin sifreleri;
+#   - jetonlar: YEREL bir gelistirme veritabanindaki tek kullanimlik dogrulama/sifirlama
+#     jetonlari - ikisi de OLCUM SIRASINDA KULLANILDI (dolayisiyla null'landi) ve
+#     sifirlama jetonunun 30 dakikalik omru coktan doldu.
+#
+# ILERIYE DONUK DUZELTME AYNI PUSH'TA: sifreler tek bir dusuk entropili sabite
+# (`GecerliSifre`, 2.855) cevrildi; jetonlar CLAUDE.md'de kirpildi. Yani YENI commit'lerde
+# bulgu URETILMEZ. Bu fingerprint'ler YALNIZ e6e9b71'in GECMISTE kalan halini susturur
+# (force-push YASAK - gerekce yukarida).
+#
+# DOGRULAMA BOSLUGU (DURUST KAYIT - onceki iki kalemle AYNI): bu satirlarin ise yaradigi
+# bir sonraki PUSH run'inda GORULEMEZ (push yalniz son commit'i tarar). Kanit ancak TUM
+# GECMISI tarayan bir kosumdan gelir: Pazartesi cron'u ya da ELLE workflow_dispatch.
+e6e9b71e2c33e988923d374d9a485763395e1f40:Divisima.IntegrationTests/LaunchFixMailZinciriTests.cs:generic-api-key:177
+e6e9b71e2c33e988923d374d9a485763395e1f40:Divisima.IntegrationTests/LaunchFixMailZinciriTests.cs:generic-api-key:217
+e6e9b71e2c33e988923d374d9a485763395e1f40:Divisima.IntegrationTests/LaunchFixMailZinciriTests.cs:generic-api-key:423
+e6e9b71e2c33e988923d374d9a485763395e1f40:CLAUDE.md:generic-api-key:2731
+e6e9b71e2c33e988923d374d9a485763395e1f40:CLAUDE.md:generic-api-key:2736

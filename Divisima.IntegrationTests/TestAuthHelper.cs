@@ -90,7 +90,11 @@ namespace Divisima.IntegrationTests
         private static async Task EnsureAsync(HttpResponseMessage response, string step)
         {
             if (response.IsSuccessStatusCode) return;
-            var body = await response.Content.ReadAsStringAsync();
+            // MASKELEME URETIM NOKTASINDA (CLAUDE.md bolum 1): bu yardimci register/verify/LOGIN
+            // adimlarini kosuyor; basarisiz login yaniti JWT tasiyabilir ve bu mesaj DOGRUDAN CI
+            // ciktisina duser. Elle kirpmaya guvenilmez - jeton benzeri her dizge burada kirpilir.
+            var body = Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(
+                await response.Content.ReadAsStringAsync());
             throw new InvalidOperationException(
                 $"TestAuthHelper: '{step}' adimi basarisiz. HTTP {(int)response.StatusCode} {response.StatusCode}. Govde: {body}");
         }

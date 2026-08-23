@@ -45,7 +45,12 @@ namespace Divisima.Core.Integrations.Notifications
                     && (body.StartsWith("00", StringComparison.Ordinal)
                         || body.StartsWith("01", StringComparison.Ordinal)
                         || body.StartsWith("02", StringComparison.Ordinal));
-                if (!success) _logger.LogWarning("SMS gönderilemedi: {Body}", body);
+                // MASKELEME URETIM NOKTASINDA (CLAUDE.md bolum 1): saglayici yaniti loga -
+                // dolayisiyla teshis kanallarina ve olasi bir rapora - ham gecmemeli. Netgsm
+                // hata govdesi is ortagi kimligi/oturum referansi tasiyabilir. Durum KODU
+                // (ilk iki karakter) kirpmadan SONRA da gorunur kalir; teshis degeri kaybolmaz.
+                if (!success) _logger.LogWarning("SMS gönderilemedi: {Body}",
+                    Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(body));
                 return success;
             }
             catch (Exception ex)

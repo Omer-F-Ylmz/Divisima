@@ -130,7 +130,7 @@ namespace Divisima.IntegrationTests
             var login = await anon.PostAsJsonAsync("/api/auth/login",
                 new { email = user.Email, password = TestAuthHelper.TestPassword });
             login.IsSuccessStatusCode.Should().BeTrue(
-                $"admin girisi calismali: {await login.Content.ReadAsStringAsync()}");
+                $"admin girisi calismali: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await login.Content.ReadAsStringAsync())}");
 
             var body = await login.Content.ReadFromJsonAsync<LoginEnvelope>();
             var token = body?.data?.token;
@@ -216,7 +216,7 @@ namespace Divisima.IntegrationTests
 
             var resp = await admin.GetAsync($"/api/Stock/{productId}");
             resp.StatusCode.Should().Be(HttpStatusCode.OK,
-                $"admin stok detayini okuyabilmeli: {await resp.Content.ReadAsStringAsync()}");
+                $"admin stok detayini okuyabilmeli: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await resp.Content.ReadAsStringAsync())}");
 
             var payload = await resp.Content.ReadFromJsonAsync<StockDetailEnvelope>();
             var rows = payload?.data;
@@ -268,7 +268,7 @@ namespace Divisima.IntegrationTests
                 note = "Yeni sevkiyat"
             });
             resp.StatusCode.Should().Be(HttpStatusCode.OK,
-                $"admin duzeltmesi kabul edilmeli: {await resp.Content.ReadAsStringAsync()}");
+                $"admin duzeltmesi kabul edilmeli: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await resp.Content.ReadAsStringAsync())}");
 
             var (stok, rezerve) = await ReadStockAsync(productId);
             stok.Should().Be(25, "fiziksel stok yeni mutlak degere gitmeli");
@@ -354,7 +354,7 @@ namespace Divisima.IntegrationTests
 
             var okResp = await admin.PostAsync("/api/product-image/upload", gercek);
             okResp.StatusCode.Should().Be(HttpStatusCode.OK,
-                $"gecerli imzali gorsel kabul edilmeli: {await okResp.Content.ReadAsStringAsync()}");
+                $"gecerli imzali gorsel kabul edilmeli: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await okResp.Content.ReadAsStringAsync())}");
 
             string url;
             await using (var ctx = NewContext())

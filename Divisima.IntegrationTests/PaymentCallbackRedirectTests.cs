@@ -282,7 +282,7 @@ namespace Divisima.IntegrationTests
 
             resp.StatusCode.Should().Be(HttpStatusCode.OK, "ayar yoksa JSON donmeli - 302 DEGIL");
             var body = await resp.Content.ReadAsStringAsync();
-            body.Should().Contain("success", $"Result zarfi donmeli: {body}");
+            body.Should().Contain("success", $"Result zarfi donmeli: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(body)}");
 
             await using var ctx = NewContext();
             (await ctx.Set<Payment>().AsNoTracking().SingleAsync(p => p.order_id == orderId))

@@ -103,7 +103,7 @@ namespace Divisima.IntegrationTests
 
             var resp = await client.PostAsJsonAsync("/api/seller/auth/register", Basvuru(email));
             resp.StatusCode.Should().Be(HttpStatusCode.Forbidden,
-                $"bayrak kapaliyken basvuru reddedilmeli: {await resp.Content.ReadAsStringAsync()}");
+                $"bayrak kapaliyken basvuru reddedilmeli: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await resp.Content.ReadAsStringAsync())}");
 
             // ISLEM GERCEKTEN OLMADI - 403 kozmetik degil.
             await using var ctx = NewContext();
@@ -123,9 +123,9 @@ namespace Divisima.IntegrationTests
 
             var resp = await client.PostAsJsonAsync("/api/seller/auth/register", Basvuru(email));
             resp.StatusCode.Should().NotBe(HttpStatusCode.Forbidden,
-                $"bayrak acikken kapiya takilmamali: {(int)resp.StatusCode} {await resp.Content.ReadAsStringAsync()}");
+                $"bayrak acikken kapiya takilmamali: {(int)resp.StatusCode} {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await resp.Content.ReadAsStringAsync())}");
             resp.IsSuccessStatusCode.Should().BeTrue(
-                $"basvuru kabul edilmeli: {(int)resp.StatusCode} {await resp.Content.ReadAsStringAsync()}");
+                $"basvuru kabul edilmeli: {(int)resp.StatusCode} {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await resp.Content.ReadAsStringAsync())}");
 
             await using var ctx = NewContext();
             (await ctx.Set<Seller>().IgnoreQueryFilters().CountAsync(s => s.email == email))

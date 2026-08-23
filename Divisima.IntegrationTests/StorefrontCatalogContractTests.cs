@@ -154,7 +154,7 @@ namespace Divisima.IntegrationTests
 
             var filter = await anon.PostAsJsonAsync("/api/product/filter", FullFilter());
             filter.StatusCode.Should().Be(HttpStatusCode.OK,
-                $"storefront katalogu ANONIM erisilebilir olmali: {await filter.Content.ReadAsStringAsync()}");
+                $"storefront katalogu ANONIM erisilebilir olmali: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await filter.Content.ReadAsStringAsync())}");
 
             var getlist = await anon.GetAsync("/api/product/getlist");
             getlist.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
@@ -173,7 +173,7 @@ namespace Divisima.IntegrationTests
             var eksik = await anon.PostAsJsonAsync("/api/product/filter", new { page = 1, size = 5 });
             eksik.StatusCode.Should().Be(HttpStatusCode.BadRequest, "sort/sizes/colors eksikken 400 beklenir");
             var govde = await eksik.Content.ReadAsStringAsync();
-            govde.Should().Contain("required", $"hata gerekce ICERMELI (yalniz durum koduna bakilmaz): {govde}");
+            govde.Should().Contain("required", $"hata gerekce ICERMELI (yalniz durum koduna bakilmaz): {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(govde)}");
 
             // POZITIF OLAY: ucu de gonderilince ayni istek CALISIYOR.
             var tam = await anon.PostAsJsonAsync("/api/product/filter", FullFilter());

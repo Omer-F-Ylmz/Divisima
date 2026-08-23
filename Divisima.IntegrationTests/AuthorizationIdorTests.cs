@@ -162,7 +162,7 @@ namespace Divisima.IntegrationTests
             });
             var placeBody = await place.Content.ReadAsStringAsync();
             place.IsSuccessStatusCode.Should().BeTrue(
-                $"A kendi siparisini verebilmeli: {(int)place.StatusCode} {placeBody}");
+                $"A kendi siparisini verebilmeli: {(int)place.StatusCode} {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(placeBody)}");
 
             await using var ctx = NewContext();
             var o = await ctx.Set<Order>().AsNoTracking().SingleAsync(x => x.customer_id == A.CustomerId);
@@ -254,7 +254,7 @@ namespace Divisima.IntegrationTests
             // POZITIF OLAY: ayni cagri SAHIBI tarafindan yapilinca calisiyor -> 403 gercekten sahiplikten.
             var mine = await A.Client.PostAsync($"/api/Order/{orderId}/cancel-item/{itemId}", null);
             mine.IsSuccessStatusCode.Should().BeTrue(
-                $"sahibi kendi kalemini iptal edebilmeli: {await mine.Content.ReadAsStringAsync()}");
+                $"sahibi kendi kalemini iptal edebilmeli: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await mine.Content.ReadAsStringAsync())}");
             await using (var ctx = NewContext())
             {
                 (await ctx.Set<OrderItem>().AsNoTracking().SingleAsync(i => i.id == itemId))
@@ -307,7 +307,7 @@ namespace Divisima.IntegrationTests
                 is_default = true
             });
             upsert.IsSuccessStatusCode.Should().BeTrue(
-                $"A adres ekleyebilmeli: {await upsert.Content.ReadAsStringAsync()}");
+                $"A adres ekleyebilmeli: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await upsert.Content.ReadAsStringAsync())}");
 
             int addressId;
             await using (var ctx = NewContext())
@@ -327,7 +327,7 @@ namespace Divisima.IntegrationTests
             // POZITIF OLAY: sahibi silebiliyor.
             var mine = await A.Client.DeleteAsync($"/api/Address/delete/{addressId}");
             mine.IsSuccessStatusCode.Should().BeTrue(
-                $"sahibi kendi adresini silebilmeli: {await mine.Content.ReadAsStringAsync()}");
+                $"sahibi kendi adresini silebilmeli: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await mine.Content.ReadAsStringAsync())}");
             // IgnoreQueryFilters SART: Address uzerinde global is_active filtresi var; soft-delete
             // sonrasi satir normal sorguda GORUNMEZ. Filtre kalkmadan bu assert "satir yok"
             // istisnasi atardi - yani silinme kaniti degil, sorgu koruldugu icin kaybolurdu.
@@ -345,10 +345,10 @@ namespace Divisima.IntegrationTests
 
             var add = await A.Client.PostAsJsonAsync("/api/Cart/add", new CartItemRequestDto
             { customer_id = A.CustomerId, product_id = productId, size = "M", quantity = 1 });
-            add.IsSuccessStatusCode.Should().BeTrue($"A sepete ekleyebilmeli: {await add.Content.ReadAsStringAsync()}");
+            add.IsSuccessStatusCode.Should().BeTrue($"A sepete ekleyebilmeli: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await add.Content.ReadAsStringAsync())}");
 
             var wish = await A.Client.PostAsync($"/api/Wishlist/toggle?productId={productId}", null);
-            wish.IsSuccessStatusCode.Should().BeTrue($"A favoriye ekleyebilmeli: {await wish.Content.ReadAsStringAsync()}");
+            wish.IsSuccessStatusCode.Should().BeTrue($"A favoriye ekleyebilmeli: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await wish.Content.ReadAsStringAsync())}");
 
             // POZITIF OLAY: A nin listeleri gercekten dolu (DB seviyesinde).
             await using (var ctx = NewContext())
@@ -547,7 +547,7 @@ namespace Divisima.IntegrationTests
             var add = await A.Client.PostAsJsonAsync("/api/Cart/add", new CartItemRequestDto
             { customer_id = B.CustomerId, product_id = productId, size = "M", quantity = 1 });
             add.IsSuccessStatusCode.Should().BeTrue(
-                $"istek reddedilmemeli, govde SESSIZCE yok sayilmali: {await add.Content.ReadAsStringAsync()}");
+                $"istek reddedilmemeli, govde SESSIZCE yok sayilmali: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await add.Content.ReadAsStringAsync())}");
 
             await using var ctx = NewContext();
             var aCartIds = await ctx.Set<Cart>().Where(c => c.customer_id == A.CustomerId)
@@ -578,7 +578,7 @@ namespace Divisima.IntegrationTests
                 is_default = false
             });
             upsert.IsSuccessStatusCode.Should().BeTrue(
-                $"istek reddedilmemeli, govde SESSIZCE yok sayilmali: {await upsert.Content.ReadAsStringAsync()}");
+                $"istek reddedilmemeli, govde SESSIZCE yok sayilmali: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await upsert.Content.ReadAsStringAsync())}");
 
             await using var ctx = NewContext();
             (await ctx.Set<Address>().CountAsync(a => a.customer_id == A.CustomerId))
@@ -613,7 +613,7 @@ namespace Divisima.IntegrationTests
                 full_address = "Silme testi adresi",
                 is_default = true
             });
-            upsert.IsSuccessStatusCode.Should().BeTrue($"adres eklenebilmeli: {await upsert.Content.ReadAsStringAsync()}");
+            upsert.IsSuccessStatusCode.Should().BeTrue($"adres eklenebilmeli: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await upsert.Content.ReadAsStringAsync())}");
 
             // POZITIF OLAY: cagridan once hesap gercekten canli ve oturumu var.
             (await A.Client.GetAsync("/api/Account/summary")).StatusCode.Should().Be(HttpStatusCode.OK);
@@ -624,7 +624,7 @@ namespace Divisima.IntegrationTests
             // Govde YOK - sifre, ikinci faktor, yeniden kimlik dogrulama hicbiri istenmiyor.
             var del = await A.Client.DeleteAsync("/api/Account/delete");
             del.StatusCode.Should().Be(HttpStatusCode.OK,
-                $"silme basarili olmali: {await del.Content.ReadAsStringAsync()}");
+                $"silme basarili olmali: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await del.Content.ReadAsStringAsync())}");
 
             await using var ctx = NewContext();
             // Musteri satiri: global is_active filtresi pasif satiri gizler - filtresiz okunur.

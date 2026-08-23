@@ -410,9 +410,9 @@ namespace Divisima.IntegrationTests
 
             var imzalar = new[]
             {
-                $"{(int)r1.StatusCode}|{await r1.Content.ReadAsStringAsync()}",
-                $"{(int)r2.StatusCode}|{await r2.Content.ReadAsStringAsync()}",
-                $"{(int)r3.StatusCode}|{await r3.Content.ReadAsStringAsync()}"
+                $"{(int)r1.StatusCode}|{Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await r1.Content.ReadAsStringAsync())}",
+                $"{(int)r2.StatusCode}|{Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await r2.Content.ReadAsStringAsync())}",
+                $"{(int)r3.StatusCode}|{Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await r3.Content.ReadAsStringAsync())}"
             };
             imzalar.Distinct().Should().HaveCount(1,
                 "uc durumun UCU DE ayni yaniti vermeli. Bulunanlar: " + string.Join(" >< ", imzalar));
