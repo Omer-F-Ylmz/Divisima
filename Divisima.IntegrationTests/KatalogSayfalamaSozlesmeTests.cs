@@ -160,5 +160,117 @@ namespace Divisima.IntegrationTests
             etiket.Should().Contain("c.slug",
                 "etiket anahtari ile urun kategori slug'i AYNI kaynaktan turemeli");
         }
+
+        // ══ TAKSONOMI: MENU VERITABANINDAN URETILIR ════════════════════════════════════
+        //
+        // OLCULEN ZARAR (D3, 403 urunluk katalogla): index.html'in kategori menusu SABIT bir
+        // diziydi (`NAV` = yeni/elbise/ust/alt/dis/aksesuar/indirim) ve veritabaniyla yalnizca
+        // "elbise" uzerinden kesisiyordu. Sonuclari: (a) DB'de VAR olan ama navda olmayan
+        // kategoriye ROTA YOKTU - `#/kategori/d3olcek-3` SESSIZCE `#/kategori/tumu`ya yeniden
+        // yaziliyordu; (b) navda VAR ama DB'de OLMAYAN kategori "gecerli" sayilip BOS sayfa
+        // ciziyordu. Gercek katalog aktarildiginda (a) HER kategori icin gecerli olacakti.
+
+        // ── 5) MENU SUNUCUDAN GELIR ─────────────────────────────────────────────────────
+        [Fact]
+        public void MENU_VERITABANINDAN_URETILIR_SABIT_TAKSONOMI_KULLANILMAZ()
+        {
+            var js = Oku("frontend/api-bridge.js");
+
+            js.Should().Contain("function menuyuVeritabanindanKur",
+                "menu, kategori ucunun yanitindan URETILMELI");
+            js.Should().Contain("window.NAV = yeniNav",
+                "index.html'in SABIT NAV dizisi DEGISTIRILMELI - uzerine eklemek eski slug'lari birakirdi");
+            js.Should().Contain("window.CAT_INFO = yeniInfo",
+                "CAT_INFO da yeniden kurulmali: index.html'deki sabit girdiler (ust/alt/aksesuar) "
+              + "veritabaninda karsiligi olmasa bile rotayi 'gecerli' yapiyordu");
+            js.Should().Contain("window.MAINS = ",
+                "filtre/pill listesi de ayni kaynaktan gelmeli");
+
+            foreach (var ciz in new[] { "renderNav", "renderMob", "renderPills" })
+                js.Should().Contain(ciz, $"menu yeniden kurulunca {ciz} tekrar cizilmeli");
+
+            // ILK YUKLEME MALIYETI ARTMAMALI: kategori ucu ZATEN cagriliyor; menu AYNI
+            // yanittan uretiliyor. Ikinci bir cagri eklenirse bu assert kirilir.
+            Say(js, "api.categories.list(").Should().Be(1,
+                "kategori ucu TEK KEZ cagrilmali - menu icin AYRI bir istek eklenemez");
+
+            // TANIMLI OLMAK YETMEZ, CAGRILMALI DA.
+            // Bu assert 5. kontrolde ACILAN BIR BOSLUKTAN sonra eklendi: `init` icindeki
+            // cagriyi kaldiran bir mutasyon, fonksiyonun GOVDESI dosyada durdugu icin
+            // digerlerinin hicbirini kirmiyordu - yani menu sabit taksonomiye geri doner
+            // ve pinler YESIL kalirdi. Tanim + cagri = en az iki gecis.
+            foreach (var fn in new[] { "menuyuVeritabanindanKur", "taksonomiRotasiniBagla", "kategoriRotasiniTazele" })
+                Say(js, fn).Should().BeGreaterThan(1,
+                    $"{fn} yalniz TANIMLI degil, acilis akisinda CAGRILMIS da olmali");
+        }
+
+        // ── 6) TANINMAYAN ROTA SESSIZCE YENIDEN YAZILMAZ ────────────────────────────────
+        [Fact]
+        public void TANINMAYAN_ROTA_SESSIZCE_YENIDEN_YAZILMAZ_404E_DUSER()
+        {
+            var js = Oku("frontend/api-bridge.js");
+
+            js.Should().Contain("function taksonomiRotasiniBagla",
+                "rota dogrulamasi baglanmali");
+            js.Should().Contain("window.show404()",
+                "taninmayan kategori rotasi uygulamanin KENDI 404'une dusmeli - "
+              + "sessizce 'tumu'ya cevrilmemeli");
+
+            // CIFT-ANLAM KIRICI: "her seyi 404'e dusur" YANLIS duzeltmedir. Sentetik
+            // gorunumler (tumu/yeni/indirim) VERITABANI KATEGORISI DEGILDIR ama GECERLIDIR.
+            js.Should().Contain("SENTETIK_ROTALAR",
+                "sentetik gorunumler gecerli sayilmali - aksi halde vitrinin ana sayfalari 404 olurdu");
+            js.Should().Contain("SENTETIK_ROTALAR.indexOf(cat) >= 0",
+                "gecerlilik kontrolu sentetik gorunumleri KAPSAMALI");
+
+            // ILK YUKLEME YARISI: `defer` yuzunden index.html'in router'i ONCE kosuyor ve
+            // adresi yeniden yaziyor; asil istenen slug gezinme kaydindan okunmali.
+            js.Should().Contain("ILK_KATEGORI_SLUG",
+                "dogrudan acilan taninmayan rota da 404'e dusmeli - ilk yukleme yarisi kapatilmali");
+            js.Should().Contain("getEntriesByType(\"navigation\")",
+                "ISTENEN slug, hash yeniden yazildiktan sonra ancak gezinme kaydindan okunabilir");
+        }
+
+        // ── 7) KATEGORI YOKSA MENU BOS GORUNMEZ ─────────────────────────────────────────
+        // Yedek, UYDURMA bir kategori listesi DEGIL: "tumu/yeni/indirim" bellekteki urunler
+        // uzerinden turetilen istemci tarafi gorunumlerdir, kategori tablosuna BAGLI DEGILDIR.
+        [Fact]
+        public void KATEGORI_YOKSA_MENU_BOS_GORUNMEZ()
+        {
+            var js = Oku("frontend/api-bridge.js");
+
+            js.Should().Contain("{ slug: \"yeni\"",
+                "kategori gelmese de 'yeni' gorunumu menude kalmali");
+            js.Should().Contain("{ slug: \"indirim\"",
+                "kategori gelmese de 'indirim' gorunumu menude kalmali");
+            js.Should().Contain("[\"tumu\", \"Tümü\"]",
+                "filtre listesi her zaman 'tumu' ile baslamali");
+
+            // 404 sayfasinin "populer kategoriler" satiri da SABIT slug'lar tasiyordu; kategori
+            // yokken o satir OLU BAGLANTI listesine donusuyordu (404 -> yine 404). Olculdu.
+            js.Should().Contain("{ slug: \"tumu\" }, { slug: \"yeni\" }, { slug: \"indirim\" }",
+                "404 sayfasinin kategori satiri, kategori yokken HER ZAMAN GECERLI baglantilara dusmeli");
+        }
+
+        // ── 8) ALT KATEGORILER SUNUCUDAN GELIR - UYDURULMAZ ─────────────────────────────
+        // OLCULDU: `CategoryResponseDto` ZATEN `sub_categories` tasiyor ve `CategoryManager`
+        // onu dolduruyor; uc bugun `[]` donuyor (tablo bos, ayri uc yok). Yani sozlesme
+        // MEVCUT - dolu geldigi gun alt menu kendiliginden cizilir.
+        [Fact]
+        public void ALT_KATEGORILER_SUNUCUDAN_GELIR_UYDURULMAZ()
+        {
+            var js = Oku("frontend/api-bridge.js");
+
+            js.Should().Contain("c.sub_categories",
+                "alt menu SUNUCUDAN gelen sub_categories'ten uretilmeli");
+            js.Should().Contain("if (alt.length)",
+                "alt menu YALNIZCA gercekten alt kategori varsa cizilmeli - bos dizi menu uretmemeli");
+
+            // CIFT-ANLAM KIRICI: index.html'in SABIT alt menu listesi (gunluk/abiye/bluz/...)
+            // api-bridge tarafina KOPYALANMAMIS olmali - kaynak tek olmali.
+            foreach (var uydurma in new[] { "\"gunluk\"", "\"abiye\"", "\"bluz\"", "\"trenckot\"" })
+                js.Should().NotContain(uydurma,
+                    "sabit alt kategori slug'lari istemciye KOPYALANMAMALI - kaynak veritabanidir");
+        }
     }
 }

@@ -5298,6 +5298,206 @@ tatbikat yedegi     SILINDI (xp_delete_file; yedek klasoru ACL korumali oldugu i
 portlar 5000/5173   BOS              depo                git status TEMIZ (kod degismedi)
 ```
 
+## PUSH RAPORU `2bc53c5` - HER IKI WORKFLOW TAMAMEN YESIL
+
+Push `024a1a5..2bc53c5`. Adim bazinda + annotation duzeyinde dogrulandi: `build-and-test`,
+`format-check`, `tests`, `codeql`, `secret-scan`, `dependency-scan` - **alti job da SUCCESS**,
+**failure seviyeli annotation 0**. Retry annotation'i iki job'da da okundu:
+`TestDbKurulum: 1807 yeniden denemesi bu kosumda HIC ATESLEMEDI (0)`.
+
+# TAKSONOMI - GEZINME MENUSU VERITABANINDAN URETILIR (launch oncesi kucuk is)
+
+D3'un "gezinme taksonomisi veritabanindan uretilmiyor" bulgusu, kullanici karariyla
+**gercek katalog aktarimindan ONCE** kapatildi.
+
+## OLCULEN ONCE-DURUM
+
+```
+index.html NAV (SABIT) : yeni · elbise · ust · alt · dis · aksesuar · indirim
+veritabani slug'lari   : elbise · e4a-kategori          <- KESISIM: yalniz "elbise"
+index.html:2015        : if(!CAT_INFO[cat]&&!navBySlug[cat])cat='tumu';   <- SESSIZ YENIDEN YAZIM
+```
+
+Iki yonlu zarar: (a) veritabaninda VAR olan ama navda olmayan kategoriye ROTA YOKTU -
+`#/kategori/d3olcek-3` **sessizce `#/kategori/tumu`ya yeniden yaziliyordu**; (b) navda VAR
+ama veritabaninda OLMAYAN kategori (`ust`/`alt`/`aksesuar`) "gecerli" sayilip **BOS bir
+kategori sayfasi** ciziyordu. Gercek katalog aktarildiginda (a) HER kategori icin gecerli
+olacakti - musteri aktarilan hicbir kategoriye gezinerek ulasamazdi.
+
+## YAPILAN (hepsi `frontend/api-bridge.js`; index.html'e DOKUNULMADI)
+
+**1) MENU SUNUCUDAN.** `menuyuVeritabanindanKur()` - `NAV` / `navBySlug` / `CAT_INFO` /
+`MAINS` kategori ucunun yanitindan YENIDEN KURULUR (uzerine eklenmez; eklenseydi eski
+slug'lar "gecerli" kalirdi). Sonra `renderNav` + `renderMob` + `renderPills` tekrar cizilir.
+
+**EK ISTEK YOK - OLCULDU:** `/api/category/getlist` ZATEN ilk yuklemede cagriliyor; menu AYNI
+yanittan uretiliyor. Ilk yukleme **2 istek** (once de 2'ydi).
+
+**2) TANINMAYAN ROTA 404'E DUSER.** `showCategory` sarmalandi; gecerlilik `navBySlug` +
+sentetik gorunumlerden hesaplanir, degilse uygulamanin KENDI `show404()`'u cagrilir.
+`setDocTitle` de sarmalandi - router basligi `showCategory`DEN SONRA yazdigi icin 404'te
+"Sayfa Bulunamadi" olmaliydi.
+
+**3) ILK YUKLEME YARISI KAPATILDI - OLCUMLE.** Sarmalayicilar asenkron kategori yuklemesinden
+sonra baglaniyor; `defer` yuzunden index.html'in satir ici router'i DAHA ONCE kosuyor ve
+adresi yeniden yaziyor. Yani sarmalayici baglandiginda "taninmayan rota" bilgisi KAYBOLMUS
+oluyordu. Olculdu:
+
+```
+navigation.name -> ".../index.html?v=...#/kategori/olmayan"   (ORIJINAL)
+location.href   -> ".../index.html?v=...#/kategori/tumu"      (YENIDEN YAZILMIS)
+```
+
+Kaynak `location.hash` DEGIL **gezinme kaydinin adresi** secildi - o, belge hangi adresle
+getirildiyse onu tasir. `defer`i kaldirmak da bir cozumdu ama Dalga 3'un olcumle kazandigi
+"render-bloklayan kaynak 5 -> 0" iyilesmesini geri alirdi.
+
+**4) 404 SAYFASININ KATEGORI SATIRI.** `show404` sarmalandi: "populer kategoriler" satiri
+gercek kategorilerden uretilir. **Bu bir OLCUM BULGUSUDUR:** kategori yokken o satir SABIT
+bes slug tasiyordu ve hepsi artik 404'e dusuyordu - yani 404 sayfasi kullaniciyi BASKA BIR
+404'e gonderiyordu. Kategori yoksa HER ZAMAN GECERLI olan sentetik gorunumlere dusuyor.
+
+### ALT KATEGORILER - OLCULDU, UYDURULMADI
+
+`CategoryResponseDto` **ZATEN** `sub_categories` tasiyor ve `CategoryManager.GetList` onu
+dolduruyor; `sub_categories` tablosu BOS ve onlar icin AYRI BIR UC YOK. Yani sozlesme MEVCUT.
+Gecici olarak iki alt kategori eklenip **canli olculdu**: mega menu kendiliginden cizildi
+(`#/kategori/elbise/taksonomi-abiye` calisti, 404 YOK), satirlar silinince menu eski haline
+dondu. Uydurma bir alt-kategori kaynagi EKLENMEDI.
+
+### YEDEK DAVRANIS - MENU BOS GORUNMEZ (olculdu ve gerekcelendirildi)
+
+`tumu` / `yeni` / `indirim` **VERITABANI KATEGORISI DEGILDIR** - bellekteki urunler uzerinden
+turetilen ISTEMCI TARAFI GORUNUMLERDIR. Bu yuzden yedek, uydurma bir liste degil; zaten
+DB'ye bagli olmayan gorunumlerdir. Iki kategori de `is_active=0` yapilip **canli olculdu**:
+
+```
+menu           : Yeni Gelenler · İndirim      (BOS DEGIL)
+ana sayfa pill : Tümü
+#/kategori/tumu -> 6 kart · #/kategori/yeni -> 6 kart   (gorunumler GERCEKTEN calisiyor)
+404 kategori satiri -> Tümü / Yeni Gelenler / İndirim  (hicbiri OLU DEGIL)
+```
+
+## OLCUM - ONCE / SONRA
+
+```
+                                ONCE                          SONRA
+ilk yukleme API istegi          2                             2          (DEGISMEDI)
+menu kaynagi                    SABIT dizi (index.html)       /api/category/getlist
+menude gorunen                  yeni/elbise/ust/alt/dis/...   Yeni Gelenler · E4a Kategori ·
+                                                              Elbise · İndirim
+#/kategori/elbise (DB'de VAR)   calisir                       calisir, 1 filter istegi
+#/kategori/ust (DB'de YOK)      BOS kategori sayfasi          404 + "Sayfa Bulunamadı"
+#/kategori/olmayan              sessizce -> #/kategori/tumu   404, ADRES KORUNUR
+dogrudan acilan bilinmeyen rota sessizce -> tumu              404 (yaris kapatildi)
+alt kategori (DB'de varsa)      -                             mega menude KENDILIGINDEN
+```
+
+## PINLER
+
+**Davranis (SUNUCU, `StorefrontCatalogContractTests`e EKLENDI - yeni veritabani ACILMADI):**
+- `KategoriUcu_MENUNUN_DAYANDIGI_ALANLARI_Doner` - `slug` / `name` / `sub_categories`
+  alanlari sozlesmede olmali (vakum kirici: liste gercekten dolu olmali).
+
+**Kaynak sozlesmesi (ISTEMCI, `KatalogSayfalamaSozlesmeTests`):**
+- `MENU_VERITABANINDAN_URETILIR_SABIT_TAKSONOMI_KULLANILMAZ` - `NAV`/`CAT_INFO`/`MAINS`
+  yeniden kurulur, uc cizici tekrar cagrilir, **kategori ucu TEK KEZ cagrilir** (ek istek
+  yasagi) ve fonksiyonlar yalniz TANIMLI degil CAGRILMIS da olmali.
+- `TANINMAYAN_ROTA_SESSIZCE_YENIDEN_YAZILMAZ_404E_DUSER` (cift-anlam kirici: sentetik
+  gorunumler GECERLI kalmali - "her seyi 404'e dusur" yanlis duzeltmedir)
+- `KATEGORI_YOKSA_MENU_BOS_GORUNMEZ`
+- `ALT_KATEGORILER_SUNUCUDAN_GELIR_UYDURULMAZ` (cift-anlam kirici: sabit alt slug'lar
+  istemciye KOPYALANMAMIS olmali)
+
+**KIRILAN PIN YOK.** Pin siniri Dalga 4 / Dalga A ile ayni: JS/DOM kosucusu yok, istemci
+tarafi kaynak sozlesmesiyle tutuluyor; davranis kaniti yukaridaki tarayici olcumleridir.
+
+## DIS KONTROLU + 5. KONTROL
+
+**DIS:** 6 assert ters -> **5 AYRI ISIMLI KIRMIZI** (iki flip ayni teste dustu; >=3 sarti
+saglandi ve BES yeni pinin hepsi kirmizi oldu). Geri alindi, 16/16 yesil.
+
+**5. KONTROL - DORT URETIM MUTASYONU:**
+
+| Mutasyon | Kirilan pin | Uretilen once-durum |
+|---|---|---|
+| M1 404 satiri kategori yokken SABIT slug'lara duser | `KATEGORI_YOKSA_MENU_BOS_GORUNMEZ` | 404 -> yine 404 (olu baglantilar) |
+| M2 `show404()` cagrisi kaldirildi | `TANINMAYAN_ROTA_..._404E_DUSER` | sessiz `tumu` yeniden yazimi |
+| M3 alt kategoriler kaynakta sabitlendi | `ALT_KATEGORILER_..._UYDURULMAZ` | uydurma alt menu |
+| M4 `init`ten `menuyuVeritabanindanKur()` cagrisi kaldirildi | `MENU_VERITABANINDAN_URETILIR_...` | menu sabit taksonomiye doner |
+
+Dordunde de TAM 1 pin kirmizi (lokalize). Geri alindi; `[MUTASYON]` izi **0 dosya**.
+
+**M4 BIR PIN BOSLUGU ACTI ve KAPATILDI:** ilk halinde pinler fonksiyonun VAR OLDUGUNU
+olcuyordu, CAGRILDIGINI degil - cagriyi kaldiran mutasyon HICBIR pini kirmiyordu ve menu
+sessizce sabit taksonomiye donuyordu. "Tanim + cagri = en az iki gecis" asserti eklendi ve
+mutasyon TEKRARLANARAK kirmizi oldugu dogrulandi.
+**DURUST KAYIT:** M4'un ILK denemesi de kirmizi vermedi - ama sebebi pin degil MUTASYONUN
+KENDISIYDI (cagri yerine konan yorum fonksiyon adini HALA iceriyordu, yani sayim degismedi).
+Yeni kuralin (c) adimi geregi once bu ihtimal elendi, mutasyon duzeltildi, sonra sonuc yazildi.
+
+## YEREL DOGRULAMA
+
+316/316 `Category=Sql` · tam suitte **508 basarili / 511** (kirilan 3'un UCU DE Docker'li
+`OrderEndpointTests`) · Release 0 hata · whitespace + style **exit 0**.
+
+---
+
+# DALGA D KAPANIS KAYDI (25 Agustos 2026)
+
+**DALGA D RESMEN KAPANDI.** Kapanisi kanitlayan SHA: **`2bc53c5`** (her iki workflow tamamen
+yesil, alti job'da failure seviyeli annotation SIFIR).
+
+## ALTI KALEM
+
+| Kalem | Konu | Sonuc |
+|---|---|---|
+| **D1** | Gorsel yukleme sizintisi + yetim satirlar | Test host'u UCUNCU bir koke yaziyor (`UseWebRoot`); 3 yetim DB satiri URETIM YOLUYLA silindi, 131 yetim dosya OLCULEN IMZAYLA temizlendi. Depo kirliligi 0. |
+| **D2** | Yetim `product_stocks` + referans butunlugu | `FK_product_stocks_product_id` (RESTRICT, olcumle secildi); 120 yetim ISPATLI SEKILDE ATIL olanlar silindi, migration Sprint 6 kalibiyla. |
+| **D3** | Gercek olcek provasi (400 urun) | YALNIZ OLCUM. Dalga 3'un YAPI pinleri olcekte de tuttu. **ISLEV-KIRAN bulgu:** storefront katalogun ilk 24 urununu cekiyordu -> **D3-FIX** ile 403/403 urune ulasilir oldu. |
+| **D4** | Idempotency | UC olculmus kusur duzeltildi (capraz kullanici, anahtar yakma, olu replay dali) + DORDUNCU bulgu: `IDistributedCache` yalniz Redis dalinda kayitliydi, filtre dev/test/CI'da HIC calismiyordu. |
+| **D5** | Redis / rate limit | Canli Redis turu OLCULEMEDI (Docker/Redis yok -> staging). Ama AYRISMA duzeltildi: kova tanimlari TEK KAYNAKTAN, iki yol da her zaman devrede, cifte sayim OLMADIGI uctan uca olculdu. |
+| **D6** | Yedek / geri donus tatbikati | Tatbikat HIC YAPILMAMISTI. RTO dev'de **6,4 sn**; 11 invariant ONCE == SONRA. **Runbook'un IKI iddiasi curudu ve duzeltildi.** |
+
+## ARADA CIKAN UC BUYUK KALEM
+
+**D-SEMA (tek dogruluk kaynagi EF migrations).** D2'de acilan "44 FK farki" bulgusu once
+YALNIZ-OLCUM turuyle incelendi, sonra kullanici karariyla (secenek a) uygulandi:
+`01_schema.sql` artik `dotnet ef migrations script --idempotent` CIKTISI (`generate_schema.py`
+SILINDI), 47 dogrulanmis FK gercek migration'a tasindi (toplam **56 FK**, hepsi NO_ACTION),
+model<->migration kayma kapisi CI'ya eklendi. **D6'da KANITLANDI:** script ile kurulan bir
+veritabaninda `dotnet ef database update` **NO-OP** doner.
+
+**CI KIRMIZISI 1 - `cd51a52`: HANGFIRE YARISI.** Her test host'u kosulsuz bir Hangfire
+sunucusu calistirip `outbox-processor` isini DAKIKADA BIR kosuyor ve testlerin KENDI
+drenajiyla yarisiyordu (CI'da `retry_count` 1 yerine 2). `BackgroundJobs:Enabled` ile
+kapatildi. **CLAUDE.md'de kayitli ISIMSIZ FLAKE'lerin de aciklamasi budur** (kayitlar
+silinmedi, "aciklandi" olarak isaretlendi).
+
+**CI KIRMIZISI 2 - `10d794d`: `model` KILIDI.** SQL Server `CREATE/DROP DATABASE`'i `model`
+uzerinden serilestirir; depoda 46 sinif kendi veritabanini kuruyor (136 DDL cagrisi).
+Eklenen 47. katilimci **hic kullanmadigi** bir veritabani kuruyordu ve bedeli BES BASKA
+SINIFIN dusmesi oldu. Iki katman: (A) o sinif artik sifir DDL uretiyor, (B) `TestDbKurulum`
+ile **1807'ye ozel** yeniden deneme. **Yesilin sebebi AYRISTIRILDI** - retry gorunurluk adimi
+her kosumda `1807 ... HIC ATESLEMEDI (0)` diyor, yani kurtaran sey (A)'ydi; retry duran bir
+emniyet agi.
+
+## ACIK KALANLAR - TEK LISTE (hicbiri Dalga D'ye ait degil)
+
+| Kalem | Nerede kapanir |
+|---|---|
+| Canli **Redis** turu (dagitik kilit, blacklist, idempotency'nin Redis yolu, dagitik sayac) | staging |
+| **k6** yuk turu (`ops/load-test/k6-smoke.js`) | staging |
+| **Eksik indeks esigi** - 403 urunde DMV'nin canliligi bile gosterilemedi; korlemesine indeks EKLENMEZ | gercek katalog hacmi |
+| **SUPHELI #14** - `X-Api-Version` ayristirilamazsa TUM API blanket 400 | launch sonrasi |
+| **SUPHELI #20** - varsayilan-kapali yetki kurali controller'larla sinirli (bugun BOSLUK YOK, testte kapatildi) | launch sonrasi |
+| **G4 + satici kilit sirasi** | satici modulu acilmadan ONCE (on kosul) |
+| **Gercek mail turu** (SPF/DKIM/DMARC, gelen kutusu) | domain/hosting karariyla |
+| **B13** terk edilmis Pending siparislere TTL · **B5** uc kapsami · **P2-inline bolme** · **P4** istemci onbellegi · launch-sonrasi defterin tamami | launch sonrasi |
+
+**KOD TARAFINDA LAUNCH'I BLOKE EDEN IS KALMADI.** Siradaki faz IRL: domain karari, canli
+Iyzico basvurusu, hosting/DNS, gercek mail turu ve gercek katalog aktarimi.
+
 ## SIRA
 
 0. **KALITE SUPURMESI KAPANDI - LAUNCH'I BLOKE EDEN TEKNIK KALEM KALMADI.**
@@ -5358,6 +5558,11 @@ portlar 5000/5173   BOS              depo                git status TEMIZ (kod d
    sema uzerinde kosuldu: script ile kurulan DB'de `dotnet ef database update` **NO-OP**
    (56 FK / 45 tablo) - D-SEMA'nin iddiasi KANITLANDI. Ayrinti "DALGA D - D6" bolumunde.
    **DALGA D'NIN ALTI KALEMI DE KAPANDI: D1 · D2 · D3 · D4 · D5 · D6.**
+   **DALGA D RESMEN KAPANDI** (kanit SHA `2bc53c5`) - tam kayit "DALGA D KAPANIS KAYDI"
+   bolumunde: alti kalem + D-SEMA + iki CI kirmizisinin kok sebebi + acik kalanlarin TEK
+   listesi. **Ardindan TAKSONOMI isi de kapandi** (menu veritabanindan uretiliyor).
+   **KOD TARAFINDA LAUNCH'I BLOKE EDEN IS KALMADI** - siradaki faz IRL: domain karari,
+   canli Iyzico basvurusu, hosting/DNS, gercek mail turu, gercek katalog aktarimi.
 1. **TEKNIK DEFTERDE ACIK KALEM KALMADI - TEK ISTISNA SUPHELI #14** (surum okuyucusu
    kirilganligi, genel) ve o da **LAUNCH SONRASI**. #15, #17 ve **#18** KAPANDI; #16 BILINCLI
    olarak bos birakildi; siparis #33 hem odeme hem envanter tarafinda TEMIZLENDI.
@@ -5414,16 +5619,11 @@ portlar 5000/5173   BOS              depo                git status TEMIZ (kod d
   **KORLEMESINE INDEKS EKLENMEZ** (kullanici sarti). Gercek katalog hacmi olustugunda
   (ya da bilincli olarak cok daha buyuk bir seed'le) `sys.dm_db_missing_index_*` ve
   `sys.dm_exec_query_stats` yeniden okunur.
-  **YENI KALEM (D3 - olculdu, DUZELTILMEDI): GEZINME TAKSONOMISI VERITABANINDAN URETILMIYOR.**
-  **ZAMANLAMA (kullanici karari): LAUNCH ONCESI, GERCEK KATALOG AKTARIMINDAN ONCE.**
-  Dalga D'den SONRA ayri kucuk is olarak yapilir - launch'i BLOKE ETMIYOR ama gercek katalog
-  (Zuhredeki verisi) aktarilir aktarilmaz GEREKECEK: aktarilan kategorilerin hicbirine rota
-  olmayacagi icin musteri onlara gezinerek ulasamaz.
-  index.html'in kategori menusu SABIT (`yeni/elbise/ust/alt/dis...`) ve veritabaniyla yalnizca
-  `elbise` uzerinden kesisiyor. Olculdu: `#/kategori/d3olcek-3` router tarafindan
-  `#/kategori/tumu`ya YENIDEN YAZILIYOR - yani veritabaninda var olan ama navda olmayan bir
-  kategoriye ROTA YOK. D3-FIX'in sunucu tarafli kategori filtresi ancak IKI TARAFTA DA olan
-  rotalarda devreye girer. Menunun `/api/category/getlist`ten uretilmesi AYRI bir is.
+  **[KAPANDI - "TAKSONOMI" bolumu] GEZINME TAKSONOMISI VERITABANINDAN URETILMIYORDU.**
+  D3'te olculdu, Dalga D'den sonra kullanici karariyla kapatildi (gercek katalog aktarimindan
+  ONCE gerekiyordu). Menu artik `/api/category/getlist` yanitindan uretiliyor (EK ISTEK YOK),
+  taninmayan rota sessizce `tumu`ya yeniden yazilmak yerine 404'e dusuyor, alt kategoriler
+  sunucudan geliyor ve kategori yoksa menu bos gorunmuyor. Ayrinti "TAKSONOMI" bolumunde.
   **YENI KALEM (Dalga 3 / P4 - kullanici karari): ISTEMCI TARAFI ONBELLEK.**
   Olculdu: hesap sekmeleri arasi her gecis yeniden cekiyor; AYNI siparis detayini kapatip acmak
   2 istek daha (order/get + order/timeline). Tazelik acisindan savunulabilir bir tercih, ama

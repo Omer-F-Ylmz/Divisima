@@ -384,6 +384,44 @@ namespace Divisima.IntegrationTests
                 "kategori kimligi SAYFA 2'de de gelmeli");
         }
 
+        // ── TAKSONOMI) KATEGORI UCU MENUNUN DAYANDIGI ALANLARI DONER ────────────────────
+        // Gezinme menusu artik SABIT bir dizi degil, bu ucun yanitindan uretiliyor. Menu
+        // `slug` (rota), `name` (etiket), `display_order` (sira) ve `sub_categories`
+        // (alt menu) alanlarina dayaniyor; biri sessizce kaybolursa vitrin menusu bozulur.
+        [Fact]
+        public async Task KategoriUcu_MENUNUN_DAYANDIGI_ALANLARI_Doner()
+        {
+            if (Skipped()) return;
+            var anon = _factory!.CreateClient();
+
+            var resp = await anon.GetAsync("/api/category/getlist");
+            resp.StatusCode.Should().Be(HttpStatusCode.OK, "kategori listesi ANONIM erisilebilir olmali");
+            var env = await resp.Content.ReadFromJsonAsync<KategoriEnvelope>();
+
+            // VAKUM KIRICI: liste GERCEKTEN dolu olmali, yoksa alan iddialari bedava dogru olurdu.
+            env!.data.Should().NotBeNullOrEmpty("tohum kategori listede olmali");
+
+            var satir = env.data!.First(c => c.id == _categoryId);
+            satir.slug.Should().NotBeNullOrWhiteSpace("rota slug'i SUNUCUDAN gelmeli - istemci ad'dan turetmemeli");
+            satir.name.Should().NotBeNullOrWhiteSpace("menu etiketi gelmeli");
+
+            // ALT KATEGORI SOZLESMESI: alan MEVCUT olmali. Bugun BOS (sub_categories tablosu
+            // bos ve onlar icin ayri uc YOK) - istemci de bu yuzden alt menu CIZMIYOR.
+            // Alan tumden kaybolursa alt menu sessizce hic gelmez; pin bunu yakalar.
+            satir.sub_categories.Should().NotBeNull(
+                "sub_categories alani SOZLESMEDE olmali - istemci alt menuyu ONDAN uretiyor");
+        }
+
+        private sealed class KategoriEnvelope { public List<KategoriRow>? data { get; set; } }
+        private sealed class KategoriRow
+        {
+            public int id { get; set; }
+            public string? name { get; set; }
+            public string? slug { get; set; }
+            public int display_order { get; set; }
+            public List<object>? sub_categories { get; set; }
+        }
+
         private sealed class FilterEnvelope { public FilterPage? data { get; set; } }
         private sealed class FilterPage
         {

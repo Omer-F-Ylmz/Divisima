@@ -42,6 +42,30 @@
   // 24 degeri korunuyor - bu artik bir SINIR degil, makul bir sayfa boyutu.
   var CATALOG_PAGE_SIZE = 24;
 
+  // ILK YUKLEME YARISI ICIN: kullanicinin GERCEKTEN ISTEDIGI kategori slug'i.
+  //
+  // OLCULDU: index.html'in ozgun `showCategory`'si taninmayan slug'i 'tumu'ya cevirip
+  // ADRESI DE yeniden yaziyor. Bu betik `defer` ile yuklendigi icin (Dalga 3'un render
+  // engelini kaldiran duzeltmesi) index.html'in satir ici router'i DAHA ONCE kosuyor -
+  // yani bu satir calistiginda `location.hash` ARTIK `#/kategori/tumu` ve "taninmayan
+  // rota" bilgisi KAYBOLMUS oluyor. Olculdu:
+  //     navigation.name -> ".../index.html?v=...#/kategori/olmayan"   (ORIJINAL)
+  //     location.href   -> ".../index.html?v=...#/kategori/tumu"      (YENIDEN YAZILMIS)
+  // Bu yuzden kaynak `location.hash` DEGIL, gezinme kaydinin ADRESIDIR; o, belge hangi
+  // adresle getirildiyse ONU tasir ve sonradan yapilan hash yeniden yazimlarindan ETKILENMEZ.
+  // `defer`i kaldirmak da bir cozum olurdu ama Dalga 3'te OLCUMLE kazanilan
+  // "render-bloklayan kaynak 5 -> 0" iyilesmesini geri alirdi.
+  var ILK_KATEGORI_SLUG = (function () {
+    var kaynak = "";
+    try {
+      var nav = performance.getEntriesByType("navigation")[0];
+      kaynak = (nav && nav.name) || "";
+    } catch (e) { kaynak = ""; }
+    if (!kaynak) kaynak = location.href || "";
+    var m = kaynak.match(/#\/kategori\/([^\/?&]+)/);
+    return m ? m[1] : "";
+  })();
+
   // ── Yardımcılar ──
   function notify(msg) {
     try { if (typeof window.toast === "function") window.toast(msg); else console.log("Divisima:", msg); } catch (e) {}
@@ -249,6 +273,186 @@
       CATEGORY_BY_ID = {};
       console.warn("Divisima: kategoriler alınamadı", e);
     }
+  }
+
+  // ── TAKSONOMI: GEZINME MENUSU VERITABANINDAN URETILIR ──────────────────────
+  //
+  // OLCULEN ZARAR (D3'te 403 urunluk katalogla): index.html'in kategori menusu SABIT bir
+  // dizidir (`NAV` = yeni/elbise/ust/alt/dis/aksesuar/indirim) ve veritabaniyla yalnizca
+  // "elbise" uzerinden kesisiyordu. Iki sonucu vardi:
+  //   (a) Veritabaninda VAR OLAN ama navda olmayan bir kategoriye ROTA YOKTU. Olculdu:
+  //       `#/kategori/d3olcek-3` router tarafindan `#/kategori/tumu`ya SESSIZCE YENIDEN
+  //       YAZILIYORDU (index.html: `if(!CAT_INFO[cat]&&!navBySlug[cat])cat='tumu';`).
+  //   (b) Navda VAR ama veritabaninda OLMAYAN bir kategori (ust/alt/aksesuar...) "gecerli"
+  //       sayilip BOS bir kategori sayfasi ciziyordu.
+  // Gercek katalog aktarildiginda (a) sikintisi HER kategori icin gecerli olacakti.
+  //
+  // EK ISTEK MALIYETI YOK: `/api/category/getlist` ZATEN ilk yuklemede cagriliyor
+  // (`loadCategories`); menu o yanittan uretiliyor, yeni bir istek EKLENMIYOR.
+  //
+  // ALT KATEGORILER - OLCULDU, UYDURULMADI: `CategoryResponseDto` ZATEN `sub_categories`
+  // tasiyor ve `CategoryManager.GetList` onu dolduruyor; uc bugun her kategori icin `[]`
+  // donuyor (`sub_categories` tablosu BOS ve onlar icin ayri bir uc YOK). Yani sozlesme
+  // MEVCUT: dolu geldigi gun alt menu KENDILIGINDEN cizilir, bos oldugu surece cizilmez.
+  // Uydurma bir alt-kategori kaynagi EKLENMEDI.
+  //
+  // YEDEK DAVRANIS - MENU BOS GORUNMEZ: "tumu", "yeni" ve "indirim" VERITABANI KATEGORISI
+  // DEGILDIR; bellekteki urunler uzerinden turetilen ISTEMCI TARAFI GORUNUMLERDIR (tamami /
+  // en yeniler / indirimdekiler). Bu yuzden kategori tablosu BOS olsa ya da uc DUSSE bile
+  // menude bu ucu kalir ve vitrin gezilebilir olur. Yani "kategori yoksa menu bos gorunmez"
+  // sarti, uydurma bir yedek listeyle DEGIL, zaten DB'ye bagli olmayan gorunumlerle saglanir.
+  var SENTETIK_ROTALAR = ["tumu", "yeni", "indirim"];
+
+  // Taninmayan bir kategori rotasinda 404'e dustuk mu (baslik duzeltmesi icin).
+  var sonKategoriBulunamadi = false;
+
+  function kategoriEtiketiKaydet(anahtar, ad) {
+    if (typeof window.T !== "object" || !window.T) return;
+    // MEVCUT CEVIRI KORUNUR: index.html'de `cat_elbise` gibi anahtarlarin [tr, en] cifti
+    // olabilir; veritabaninda ceviri alani YOK. Slug'in TEK KAYNAGI veritabanidir, ama
+    // ETIKETIN cevirisi varsa onu silmek Ingilizce vitrini bozardi.
+    if (!window.T[anahtar]) window.T[anahtar] = [ad, ad];
+    if (typeof window.AR === "object" && window.AR && window.AR[anahtar] === undefined) window.AR[anahtar] = ad;
+  }
+
+  function menuyuVeritabanindanKur() {
+    if (typeof window.NAV === "undefined") return;   // index.html henuz kurulmadi
+
+    var dbKategoriler = (CATEGORIES || [])
+      .filter(function (c) { return c && c.is_active !== false && (c.slug || c.name); })
+      .slice()
+      .sort(function (a, b) { return (a.display_order || 0) - (b.display_order || 0); })
+      .map(function (c) {
+        var slug = c.slug || slugify(c.name);
+        var item = { slug: slug, label: c.name };
+        var alt = (c.sub_categories || []).filter(function (s) { return s && (s.slug || s.name); });
+        if (alt.length) {
+          item.subs = alt.map(function (s) {
+            var sslug = s.slug || slugify(s.name);
+            kategoriEtiketiKaydet("sub_" + sslug, s.name);
+            return { slug: sslug, label: s.name };
+          });
+        }
+        kategoriEtiketiKaydet("cat_" + slug, c.name);
+        return item;
+      });
+
+    // "yeni" basta, "indirim" sonda - index.html'in ozgun sirasi korunur.
+    var yeniNav = [{ slug: "yeni", label: "Yeni Gelenler" }]
+      .concat(dbKategoriler)
+      .concat([{ slug: "indirim", label: "İndirim", sale: true }]);
+
+    window.NAV = yeniNav;
+    window.navBySlug = {};
+    yeniNav.forEach(function (n) { window.navBySlug[n.slug] = n; });
+
+    // CAT_INFO artik YALNIZ GECERLI slug'lari tasir. index.html'deki sabit girdiler
+    // (elbise/ust/alt/dis/aksesuar) veritabaninda karsiligi olmasa bile rotayi "gecerli"
+    // yapiyordu - bu yuzden yeniden kuruluyor, uzerine eklenmiyor.
+    // NOT: CAT_INFO'nun `t`/`d` alanlari hicbir yerde CIZILMIYOR (tarandi: tek kullanim
+    // `showCategory`in uyelik kontrolu), bu yuzden veritabaninda olmayan bir "aciklama"
+    // UYDURULMUYOR.
+    var eskiInfo = window.CAT_INFO || {};
+    var yeniInfo = {};
+    SENTETIK_ROTALAR.forEach(function (s) { yeniInfo[s] = eskiInfo[s] || { t: s, d: "" }; });
+    dbKategoriler.forEach(function (c) { yeniInfo[c.slug] = { t: c.label, d: "" }; });
+    window.CAT_INFO = yeniInfo;
+
+    // Filtre kenar cubugu ve ana sayfa pill'leri de ayni kaynaktan.
+    window.MAINS = [["tumu", "Tümü"]].concat(dbKategoriler.map(function (c) { return [c.slug, c.label]; }));
+
+    ["renderNav", "renderMob", "renderPills"].forEach(function (fn) {
+      try { if (typeof window[fn] === "function") window[fn](); } catch (e) { console.warn("Divisima: " + fn + " cizilemedi", e); }
+    });
+
+    console.log("Divisima: menu " + dbKategoriler.length + " veritabani kategorisinden uretildi");
+  }
+
+  // TANINMAYAN ROTA ARTIK SESSIZCE YENIDEN YAZILMIYOR.
+  // Onceden `showCategory` bilinmeyen slug'i 'tumu'ya cevirip TUM KATALOGU gosteriyordu -
+  // kullanici yanlis sayfada oldugunu ANLAYAMIYORDU ve arama motoru ayni icerigi birden
+  // cok adreste goruyordu. Artik uygulamanin KENDI 404'une dusuyor (show404 zaten var).
+  function taksonomiRotasiniBagla() {
+    if (typeof window.showCategory === "function" && !window.showCategory.__taksonomi) {
+      var _showCategory = window.showCategory;
+      var sarmal = function (cat, sub) {
+        var gecerli = SENTETIK_ROTALAR.indexOf(cat) >= 0 || !!(window.navBySlug || {})[cat];
+        if (!gecerli && typeof window.show404 === "function") {
+          sonKategoriBulunamadi = true;
+          window.show404();
+          return;
+        }
+        sonKategoriBulunamadi = false;
+        return _showCategory.apply(this, arguments);
+      };
+      sarmal.__taksonomi = true;
+      window.showCategory = sarmal;
+    }
+
+    // Baslik: router `setDocTitle`i showCategory'DEN SONRA cagirir ve "kategori" dalina
+    // duserek kategori basligini yazar. 404'e dustugumuzde bu YANLIS olur.
+    if (typeof window.setDocTitle === "function" && !window.setDocTitle.__taksonomi) {
+      var _setDocTitle = window.setDocTitle;
+      var sarmalT = function () {
+        _setDocTitle.apply(this, arguments);
+        if (sonKategoriBulunamadi) {
+          var en = (typeof window.lang !== "undefined" && window.lang === "en");
+          document.title = (en ? "Page Not Found" : "Sayfa Bulunamadı") + " · Divisima";
+        }
+      };
+      sarmalT.__taksonomi = true;
+      window.setDocTitle = sarmalT;
+    }
+
+    // 404 sayfasinin "populer kategoriler" satiri da SABIT slug'lar tasiyordu
+    // (elbise/ust/alt/dis/aksesuar). Menu veritabanindan gelince o baglantilar OLU kalirdi.
+    if (typeof window.show404 === "function" && !window.show404.__taksonomi) {
+      var _show404 = window.show404;
+      var sarmal4 = function () {
+        _show404.apply(this, arguments);
+        try {
+          var kutu = document.querySelector(".nf-cats");
+          if (!kutu) return;
+          var gercek = (window.NAV || []).filter(function (n) { return SENTETIK_ROTALAR.indexOf(n.slug) < 0; });
+          // KATEGORI YOKSA SABIT SATIR BIRAKILAMAZ - OLCULDU: o satirdaki bes baglanti
+          // (elbise/ust/alt/dis/aksesuar) artik 404'e dusuyor, yani 404 sayfasi kullaniciyi
+          // BASKA BIR 404'e gonderiyordu. Yedek olarak HER ZAMAN gecerli olan sentetik
+          // gorunumler konur (bunlar veritabanina bagli DEGILDIR).
+          var satir = gercek.length
+            ? gercek.slice(0, 5)
+            : [{ slug: "tumu" }, { slug: "yeni" }, { slug: "indirim" }];
+          var etiket = kutu.querySelector("span");
+          kutu.innerHTML = (etiket ? etiket.outerHTML : "") + satir.map(function (n) {
+            return '<a href="#/kategori/' + n.slug + '">' +
+              (typeof window.t === "function" ? window.t("cat_" + n.slug) : n.label) + "</a>";
+          }).join("");
+        } catch (e) { console.warn("Divisima: 404 kategori satiri tazelenemedi", e); }
+      };
+      sarmal4.__taksonomi = true;
+      window.show404 = sarmal4;
+    }
+  }
+
+  // ILK YUKLEME YARISI - OLCULDU ve KAPATILDI.
+  // Acilistaki `router()` cagrisi, bu sarmalayicilar BAGLANMADAN once kosuyor; yani sayfa
+  // DOGRUDAN `#/kategori/olmayan` ile acildiginda index.html'in ozgun mantigi devreye girip
+  // rotayi SESSIZCE 'tumu'ya cevirmeye devam ediyordu (olculdu: 404 hic gorunmedi).
+  // Bu, depoda daha once E3/M12 ve D3-FIX'te yasanan yarisin AYNISI. Sarmalayicilar
+  // kurulduktan sonra rota BIR KEZ DAHA degerlendirilir.
+  function kategoriRotasiniTazele() {
+    var m = (location.hash || "").match(/^#\/kategori\/([^\/?]+)/);
+    if (!m) return;
+    var suanki = m[1];
+    var istenen = ILK_KATEGORI_SLUG || suanki;
+    try {
+      if (istenen !== suanki) {
+        // Adres yeniden yazilmis. ISTENEN slug'i geri koy - `hashchange` router'i tetikler
+        // ve bu kez sarmalanmis `showCategory` calisir (taninmiyorsa 404).
+        location.hash = "#/kategori/" + istenen;
+        return;
+      }
+      if (typeof window.router === "function") window.router();
+    } catch (e) { console.warn("Divisima: kategori rotasi tazelenemedi", e); }
   }
 
   // ── Ürünler (gerçek API - ANONİM yol) ──────────────────────────────────────
@@ -2202,6 +2406,14 @@
     // Kategoriler ÖNCE: ürün kategorisi category_id üzerinden çözülüyor (liste yolu
     // category_name döndürmüyor), yükleme sırası ters olursa tüm ürünler "tumu" olur.
     await loadCategories();
+
+    // TAKSONOMI: menu veritabanindan uretilir + taninmayan rota artik 404'e duser.
+    // `loadCategories`ten HEMEN SONRA - ek istek YOK, ayni yanittan uretiliyor.
+    // Rota sarmalayicisi ONCE baglanir ki acilistaki router cagrisi da dogru davransin.
+    taksonomiRotasiniBagla();
+    menuyuVeritabanindanKur();
+    kategoriRotasiniTazele();   // ilk yukleme yarisi (gerekce fonksiyonun basinda)
+
     await loadCatalog();
 
     // D3: gercek sayfalama. `renderCatGrid` KATALOG YUKLENDIKTEN SONRA sarmalanir -
