@@ -2,17 +2,27 @@ using Divisima.Core.Security.RateLimiting;
 
 namespace Divisima.API.Middlewares
 {
-    // Açıklayıcı yorum: Redis dağıtık rate limit middleware. Yol bazlı limit (auth/ödeme sıkı, genel gevşek).
-    // Yalnız Redis açıkken pipeline'a eklenir; kapalıyken .NET yerleşik limiter devrede kalır.
+    // Açıklayıcı yorum: Yol bazlı dağıtık rate limit middleware (auth/ödeme sıkı, genel gevşek).
+    //
+    // DALGA D / D5 - IKI DEGISIKLIK:
+    //  (1) Kova tanimlari artik `RateLimitPolitikasi`den geliyor; auth limiti KAYNAKTA SABIT 5
+    //      DEGIL, yapilandirmadan okunuyor ve YERLESIK yolla AYNI degeri goruyor.
+    //  (2) Middleware artik HER ZAMAN pipeline'da (eskiden yalniz `Redis:Enabled=true` iken).
+    //      Gerekce: `IDistributedRateLimiter` her iki dalda da kayitli (Redis ya da in-memory),
+    //      yani middleware'in Redis'e bagimliligi YOK - yalnizca ARKA DEPOSU degisiyor.
+    //      Boylece dev/test ve URETIM AYNI BORU HATTINI kosuyor; onceden uretimin gercek
+    //      rate limit yolu hicbir testte kosmuyordu (olculdu) ve ayrisma bu yuzden gorunmedi.
     public class RedisRateLimitMiddleware
     {
         private readonly RequestDelegate _next;
         private readonly IDistributedRateLimiter _limiter;
+        private readonly RateLimitPolitikasi _politika;
 
-        public RedisRateLimitMiddleware(RequestDelegate next, IDistributedRateLimiter limiter)
+        public RedisRateLimitMiddleware(RequestDelegate next, IDistributedRateLimiter limiter, RateLimitPolitikasi politika)
         {
             _next = next;
             _limiter = limiter;
+            _politika = politika;
         }
 
         public async Task InvokeAsync(HttpContext context)
@@ -29,16 +39,10 @@ namespace Divisima.API.Middlewares
             var path = context.Request.Path.Value ?? "";
             var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
-            // Açıklayıcı yorum: Yol bazlı limit - brute-force hassas uçlar sıkı
-            int limit; int window = 60; string scope;
-            if (path.Contains("/auth/login", StringComparison.OrdinalIgnoreCase)
-                || path.Contains("/auth/register", StringComparison.OrdinalIgnoreCase)
-                || path.Contains("/auth/forgot", StringComparison.OrdinalIgnoreCase))
-            { limit = 5; scope = "auth"; }
-            else if (path.Contains("/payment/", StringComparison.OrdinalIgnoreCase))
-            { limit = 10; scope = "payment"; }
-            else
-            { limit = 100; scope = "global"; }
+            // Yol -> kova secimi TEK KAYNAKTAN (RateLimitPolitikasi). Kultursuz eslesme ve
+            // limit degerleri orada; burada kopyasi TUTULMAZ - ayrisma tam da oyle olusmustu.
+            var (scope, limit) = _politika.KapsamSec(path);
+            var window = _politika.PencereSaniye;
 
             var result = await _limiter.CheckAsync($"{scope}:{ip}", limit, window);
 

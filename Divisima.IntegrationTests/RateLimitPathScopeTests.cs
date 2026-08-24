@@ -2,6 +2,7 @@ using Divisima.API.Middlewares;
 using Divisima.Core.Security.RateLimiting;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Xunit;
 
 namespace Divisima.IntegrationTests
@@ -37,10 +38,12 @@ namespace Divisima.IntegrationTests
             }
         }
 
-        private static async Task<(string kapsam, int limit)> KapsamOlcAsync(string yol)
+        private static readonly RateLimitPolitikasi VarsayilanPolitika = new(authLimiti: 10, odemeLimiti: 10, genelLimit: 100);
+
+        private static async Task<(string kapsam, int limit)> KapsamOlcAsync(string yol, RateLimitPolitikasi? politika = null)
         {
             var limiter = new YakalayanLimiter();
-            var mw = new RedisRateLimitMiddleware(_ => Task.CompletedTask, limiter);
+            var mw = new RedisRateLimitMiddleware(_ => Task.CompletedTask, limiter, politika ?? VarsayilanPolitika);
             var ctx = new DefaultHttpContext();
             ctx.Request.Path = yol;
             ctx.Response.Body = new MemoryStream();
@@ -59,7 +62,7 @@ namespace Divisima.IntegrationTests
 
             kapsam.Should().Be("auth",
                 "buyuk harfli yazim kaba kuvvet savunmasindan KACAMAZ - eskiden 'global' kovaya dusuyordu");
-            limit.Should().Be(5, "auth kovasinin limiti 5/dk");
+            limit.Should().Be(10, "auth kovasi ARTIK yerlesik yolla AYNI degeri kullanir (varsayilan 10)");
         }
 
         // VAKUM KIRICI: kucuk harfli yol da ayni kovaya dusmeli - yani duzeltme, calisan
@@ -69,7 +72,7 @@ namespace Divisima.IntegrationTests
         {
             var (kapsam, limit) = await KapsamOlcAsync("/api/auth/login");
             kapsam.Should().Be("auth");
-            limit.Should().Be(5);
+            limit.Should().Be(10);
         }
 
         // CIFT-ANLAM KIRICI: "her yol auth kovasina dusuyor" olsaydi ilk iki test de gecerdi.
@@ -84,6 +87,37 @@ namespace Divisima.IntegrationTests
             var (kapsam, limit) = await KapsamOlcAsync(yol);
             kapsam.Should().Be(beklenenKapsam);
             limit.Should().Be(beklenenLimit);
+        }
+        // === DALGA D / D5 - AUTH LIMITI IKI YOLDA DA AYNI ve YAPILANDIRMADAN GELIR ========
+        //
+        // BILINCLI KIRILAN PIN: SUPHELI_AUTH_LIMITI_REDIS_YOLUNDA_5_YERLESIK_YOLDA_10_PINLENIR.
+        // O pin OLCULEN AYRISMAYI sabitliyordu (Redis yolu 5 SABIT, yerlesik yol 10 config'ten)
+        // ve kullanici karariyla ayrisma DUZELTILDI - pin artik YANLIS bir sozlesmeyi savunur
+        // hale gelirdi. Yerine ayrismanin KAPANDIGINI olcen bu pin geldi.
+        [Fact]
+        public async Task AUTH_LIMITI_YAPILANDIRMADAN_GELIR_KAYNAKTA_SABIT_DEGIL()
+        {
+            // Ayirt edici bir deger: 5 de 10 de DEGIL - boylece "eski sabit geri geldi" ya da
+            // "varsayilan kullanildi" durumlarinin IKISI DE yakalanir.
+            var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["RateLimit:AuthPermitLimit"] = "37",
+                ["RateLimit:PaymentPermitLimit"] = "41",
+                ["RateLimit:GlobalPermitLimit"] = "43"
+            }).Build();
+            var politika = RateLimitPolitikasi.Olustur(cfg);
+
+            (await KapsamOlcAsync("/api/auth/login", politika)).limit.Should().Be(37,
+                "auth limiti YAPILANDIRMADAN gelmeli - kaynakta sabit 5 DEGIL");
+            (await KapsamOlcAsync("/api/payment/initialize", politika)).limit.Should().Be(41);
+            (await KapsamOlcAsync("/api/product/filter", politika)).limit.Should().Be(43);
+
+            // CIFT-ANLAM KIRICI: yapilandirma VERILMEDIGINDE yerlesik yolun varsayilanlari
+            // gecerli olmali (10/10/100) - "her zaman config" degil, "config VARSA config".
+            var bos = RateLimitPolitikasi.Olustur(new ConfigurationBuilder().Build());
+            bos.AuthLimiti.Should().Be(10, "varsayilan YERLESIK yolun degeridir (5 DEGIL)");
+            bos.OdemeLimiti.Should().Be(10);
+            bos.GenelLimit.Should().Be(100);
         }
     }
 }

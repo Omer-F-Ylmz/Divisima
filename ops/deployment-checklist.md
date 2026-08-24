@@ -102,6 +102,28 @@ Yerelde karşılığı `docker compose up` — `frontend` servisi aynı davranı
 - [ ] Giriş doğrulandıktan sonra `AdminSeed:Enabled` **false**'a çekildi ve `Password`
       secret'ı kaldırıldı/rotate edildi
 
+## Redis ve rate limit - DALGA D / D5
+
+**`Redis:Enabled=true` iken Redis ERİŞİLEMEZSE uygulama HİÇ AÇILMAZ** — ölçüldü:
+`StackExchange.Redis.RedisConnectionException`, `Program.cs`'te bağlantı kurulurken.
+Sessizce in-memory'ye **düşmez**. Bu bilinçli ve doğru: dağıtık kilit/sayaç olmadan açılan bir
+sunucu, koruma varmış gibi davranırdı. Ama sonucu şudur: **Redis kesintisi = deploy blokajı**,
+dolayısıyla Redis'i uygulamadan **önce** ayağa kaldırın.
+
+- [ ] Redis erişilebilir ve `Redis:Connection` doğru (uygulama açılmıyorsa önce burayı bakın —
+      hata mesajı `redis` kelimesini içerir, şema/JWT ile ilgisi yoktur)
+- [ ] `RateLimit:AuthPermitLimit` / `PaymentPermitLimit` / `GlobalPermitLimit` prod trafiğine
+      göre ayarlandı. **Bu ayarlar artık HER İKİ yolda da okunur** (D5 öncesinde Redis yolu
+      kaynakta sabit 5/10/100 kullanıyordu ve ayarları HİÇ okumuyordu)
+- [ ] Yayın sonrası bir auth ucuna ayarlanan limitten bir fazla istek atıldı ve **429** alındı
+      (limitin gerçekten yürürlükte olduğunun tek doğrudan kanıtı)
+
+> Rate limit iki katmanlıdır ve **ikisi de her ortamda devrededir**: yol bazlı dağıtık
+> middleware (çok sunucuda merkezi sayaç) + .NET yerleşik limiter (`[EnableRateLimiting]`
+> öznitelikleri). İkisi de değerleri `RateLimitPolitikasi`den okur. Çifte sayım **yoktur** —
+> ölçüldü: iki sayaç aynı bölümleme anahtarıyla ve aynı limitle kilitli adımda ilerler
+> (`RateLimitTekKaynakTests`).
+
 ## Zorunlu adımlar
 - [ ] `Iyzico:BaseUrl` = `https://api.iyzipay.com` (sandbox değil)
 - [ ] `Webhook:AllowedIps` = Iyzico production IP aralıkları

@@ -183,6 +183,13 @@ builder.Services.AddDbContext<DivisimaDbContext>((sp, options) =>
 
 // B3: cache + dağıtık altyapı (Redis:Enabled true ise Redis, değilse in-memory)
 builder.Services.AddMemoryCache();
+// DALGA D / D5 - RATE LIMIT KOVALARININ TEK KAYNAGI.
+// Ayni politika eskiden IKI YERDE, FARKLI degerlerle tanimliydi (auth: yerlesik 10 / Redis 5)
+// ve Redis yolundaki degerler YAPILANDIRMADAN OKUNMUYORDU. Gerekcesi RateLimitPolitikasi'nin
+// basinda. Artik hem AddRateLimiter hem RedisRateLimitMiddleware BURADAN okuyor.
+var rateLimitPolitikasi = Divisima.Core.Security.RateLimiting.RateLimitPolitikasi.Olustur(builder.Configuration);
+builder.Services.AddSingleton(rateLimitPolitikasi);
+
 var redisEnabled = bool.TryParse(builder.Configuration["Redis:Enabled"], out var re) && re;
 var redisConn = builder.Configuration["Redis:Connection"] ?? "localhost:6379";
 if (redisEnabled)
@@ -200,6 +207,13 @@ if (redisEnabled)
 else
 {
     // Açıklayıcı yorum: Dev/tek sunucu - in-memory (aynı arayüzler)
+    // DALGA D / D4 - IDistributedCache BURADA DA KAYITLI OLMALI.
+    // OLCULDU: IdempotencyAttribute `IDistributedCache` cozemezse SESSIZCE devre disi kaliyor
+    // (`cache == null -> await next()`). ASP.NET Core bu servisi VARSAYILAN OLARAK KAYDETMEZ;
+    // eskiden yalnizca Redis dalinda (AddStackExchangeRedisCache) kayitliydi. Yani filtre
+    // dev/test/CI'da TUMDEN ETKISIZDI - ustelik kendi yorumu "Redis yoksa in-memory'ye duser"
+    // diyordu, ki O YANLISTI. Bu satir yorumu DOGRU hale getirir.
+    builder.Services.AddDistributedMemoryCache();
     builder.Services.AddSingleton<ICacheService, MemoryCacheService>();
     builder.Services.AddSingleton<Divisima.Core.Utilities.Locking.IDistributedLock, Divisima.Core.Utilities.Locking.InMemoryDistributedLock>();
     builder.Services.AddSingleton<Divisima.Core.Security.RateLimiting.IDistributedRateLimiter, Divisima.Core.Security.RateLimiting.InMemoryRateLimiter>();
@@ -325,7 +339,7 @@ builder.Services.AddRateLimiter(options =>
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            factory: _ => new FixedWindowRateLimiterOptions { PermitLimit = 100, Window = TimeSpan.FromMinutes(1) }));
+            factory: _ => new FixedWindowRateLimiterOptions { PermitLimit = rateLimitPolitikasi.GenelLimit, Window = TimeSpan.FromMinutes(1) }));   // D5: TEK KAYNAK
     // GÜVENLİK/DOĞRULUK: "payment" policy'si EKSİKTİ -> PaymentController [EnableRateLimiting("payment")]
     // tanımsız policy'ye referans veriyordu; .NET 8 yerleşik limiter bunu runtime'da InvalidOperationException
     // ile reddeder (ödeme endpoint'i 500). Redis middleware'indeki "payment" scope (10/dk) ile tutarlı tanımlandı.
@@ -346,8 +360,8 @@ builder.Services.AddRateLimiter(options =>
     //     null); onlarca müşteri yaratan bir test tek partition'da limite takılıyordu. Test host'u
     //     bu anahtarı yükselterek limiti devre dışı bırakabiliyor - üretim varsayılanı değişmiyor
     //     ve limitin KENDİSİ AuthRateLimitPinTests'te varsayılan değerle pinli kalıyor.
-    var authPermitLimit = int.TryParse(builder.Configuration["RateLimit:AuthPermitLimit"], out var apl) && apl > 0 ? apl : 10;
-    var paymentPermitLimit = int.TryParse(builder.Configuration["RateLimit:PaymentPermitLimit"], out var ppl) && ppl > 0 ? ppl : 10;
+    var authPermitLimit = rateLimitPolitikasi.AuthLimiti;        // D5: TEK KAYNAK
+    var paymentPermitLimit = rateLimitPolitikasi.OdemeLimiti;   // D5: TEK KAYNAK
 
     options.AddPolicy("auth", context => RateLimitPartition.GetFixedWindowLimiter(
         partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -514,17 +528,35 @@ app.UseMiddleware<CorrelationIdMiddleware>();      // B5 correlation
 app.UseHttpsRedirection();
 app.UseStaticFiles();                              // wwwroot/uploads - ürün görselleri (statik dosya sunumu)
 app.UseCors("DivisimaFrontend");                   // B10
-// Açıklayıcı yorum: Redis açıksa dağıtık rate limit (merkezi sayaç); değilse .NET yerleşik (sunucu-başına)
-var _redisRateLimit = bool.TryParse(app.Configuration["Redis:Enabled"], out var _rr) && _rr;
-if (_redisRateLimit)
-    app.UseMiddleware<Divisima.API.Middlewares.RedisRateLimitMiddleware>();
-else
-    app.UseRateLimiter();                              // B6 (yerleşik, tek sunucu)
-app.UseMiddleware<IdempotencyMiddleware>();        // çift işlem engeli (tüm mutasyonlar)
+// DALGA D / D5 - IKI YOL DA HER ZAMAN DEVREDE (eskiden BIRBIRININ ALTERNATIFIYDI).
+//
+// OLCULEN ONCE-DURUM: app.UseRateLimiter() YALNIZCA else dalindaydi. Uretimde
+// Redis:Enabled=true oldugu icin [EnableRateLimiting("auth"/"payment")] oznitelikleri
+// URETIMDE ETKISIZDI ve RateLimit:* ayarlari HIC OKUNMUYORDU.
+//
+// CIFTE SAYIM YOK - OLCULDU (RateLimitCiftYolTests): iki sayac da AYNI istekte, AYNI
+// bolumleme anahtariyla (RemoteIpAddress) ve AYNI limitle artiyor, yani KILITLI ADIMDA
+// ilerliyorlar; etkin limit ikisinin MINIMUMU = beklenen deger. Limit N iken N. istek
+// GECIYOR, N+1. istek 429 aliyor - limit yariya INMIYOR.
+//
+// Middleware yol-bazli ve dagitik (cok sunucuda merkezi sayac); yerlesik limiter
+// oznitelik-bazli ve sunucu-basina. Ikisi de ayni degerleri RateLimitPolitikasi'nden okur.
+// Middleware'in Redis'e bagimliligi YOK: IDistributedRateLimiter her iki dalda da kayitli
+// (Redis ya da in-memory), yalnizca ARKA DEPO degisiyor. Boylece dev/test ve URETIM AYNI
+// BORU HATTINI kosuyor - onceden uretimin gercek rate limit yolu HICBIR TESTTE kosmuyordu.
+app.UseMiddleware<Divisima.API.Middlewares.RedisRateLimitMiddleware>();
+app.UseRateLimiter();                                  // B6 - oznitelikler HER ORTAMDA etkili
 app.UseMiddleware<AntiforgeryMiddleware>();        // CSRF (cookie tabanlı istekler)
 app.UseAuthentication();
 app.UseMiddleware<TokenBlacklistMiddleware>();     // iptal edilen token kontrolü
 app.UseAuthorization();
+
+// DALGA D / D4 - IDEMPOTENCY MIDDLEWARE ARTIK AUTH/AUTHZ SONRASINDA.
+// Eskiden UseAuthentication'DAN ONCEYDI; o noktada kimlik YOKTU, dolayisiyla anahtar
+// kullaniciyla kapsanamiyordu ve CANLI OLCULDU: A'nin kullandigi anahtari B gonderince
+// B'nin MESRU istegi 409 ile dusuyordu. Ayrica 401/403 alan istekler bile anahtari
+// 24 saat yakiyordu. Buraya tasinmasi ikisini birden kapatir.
+app.UseMiddleware<IdempotencyMiddleware>();        // cift islem engeli (auth SONRASI - D4)
 
 // ══ GUVENLIK-FIX (G5) - KIMLIK DOGRULAMA ARTIK VARSAYILAN ════════════════════════════════
 //

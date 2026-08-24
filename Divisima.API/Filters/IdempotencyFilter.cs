@@ -12,7 +12,18 @@ namespace Divisima.API.Filters
     // Açıklayıcı yorum: Idempotency-Key desteği. Aynı anahtarla gelen mutasyon isteği ikinci kez işlenmez;
     // ilk yanıt cache'ten döner. Ağ tekrar denemesi/çift-tık kaynaklı çift işlemi (çift sipariş, çift ödeme) önler.
     // B3: IDistributedCache (Redis) tabanlı - ÇOK-INSTANCE deploy'da tutarlı (instance-başı IMemoryCache değil).
-    // Redis yoksa DI IDistributedCache'i in-memory implementasyona düşer; yine çalışır ama tek-instance kapsamında.
+    //
+    // DALGA D / D4 - BU YORUM ESKIDEN YANLISTI: "Redis yoksa DI IDistributedCache'i in-memory
+    // implementasyona duser" diyordu. ASP.NET Core bu servisi VARSAYILAN OLARAK KAYDETMEZ;
+    // `IDistributedCache` yalnizca Redis dalinda (AddStackExchangeRedisCache) kayitliydi.
+    // OLCULEN SONUC: `cache == null` -> filtre `await next()` ile SESSIZCE devre disi kaliyor,
+    // yani dev/test/CI'da bu filtre HIC CALISMIYORDU. Program.cs'in Redis-disi dalina
+    // `AddDistributedMemoryCache()` eklendi; yorum artik DOGRU.
+    //
+    // KAPSAM (D4 tasarim karari): bu filtre DORT PARA UCUNDA kullanilir ve orada REPLAY
+    // dogru davranistir - ag tekrari yapan musteri ILK istegin sonucunu (siparis numarasi)
+    // ogrenmelidir. IdempotencyMiddleware bu uclardan KENARA CEKILIR (endpoint metadata'sinda
+    // bu ozniteligi gorurse atlar), boylece iki mekanizma da ULASILABILIR ve OLU KOD YOKTUR.
     public class IdempotencyAttribute : ActionFilterAttribute
     {
         private const string HeaderName = "Idempotency-Key";
@@ -86,7 +97,14 @@ namespace Divisima.API.Filters
                 if (executed.Result is ObjectResult objResult)
                 {
                     var status = objResult.StatusCode ?? 200;
-                    if (status < 500)
+
+                    // DALGA D / D4: YALNIZCA BASARILI (2xx) yanit cache'lenir; digerlerinde
+                    // lock BIRAKILIR. Eskiden kosul `status < 500` idi - yani bir 400 de
+                    // "kesin sonuc" sayilip cache'leniyor ve anahtari 24 SAAT yakiyordu.
+                    // OLCULEN ZARAR (middleware tarafinda birebir ayni sinif): istemci
+                    // girdisini DUZELTIP ayni anahtarla tekrar dendiginde istegi HIC islenmiyordu.
+                    // 4xx bir ISTEMCI HATASIDIR ve duzeltilebilir; "kesin sonuc" DEGILDIR.
+                    if (status >= 200 && status < 300)
                     {
                         try
                         {
@@ -101,7 +119,7 @@ namespace Divisima.API.Filters
                     }
                     else if (cacheSvc != null)
                     {
-                        cacheSvc.Remove(lockKey);   // 5xx geçici hata -> lock'u bırak, tekrar denenebilsin
+                        cacheSvc.Remove(lockKey);   // 4xx/5xx -> lock'u bırak, tekrar denenebilsin
                     }
                 }
             }

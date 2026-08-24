@@ -35,6 +35,21 @@ namespace Divisima.IntegrationTests
             // bayragi KENDILERI aciyor - `UseSetting` daha SONRA cagrildigi icin oradaki deger
             // kazanir. Boylece davranis makinedeki secret'lardan BAGIMSIZ hale gelir.
             builder.UseSetting("AdminSeed:Enabled", "false");
+
+            // ══ DALGA D / D1 - TEST YUKLEMELERI DEPOYU KIRLETMESIN ═══════════════════════════
+            //
+            // OLCULDU: her kosum `Divisima.API/wwwroot/uploads/products` altina 64 baytlik sahte
+            // PNG'ler birakiyordu (olcum aninda 96 dosya) - hicbirinin veritabaninda karsiligi
+            // YOK. Bu bir hata DEGIL, eksikti: Sprint 8 madde 4 LocalImageStorage'i DOGRU sekilde
+            // WebRootPath'e tasidi; test host'unun ContentRoot'u Divisima.API oldugu icin de
+            // WebRoot dogal olarak deponun kendi wwwroot'u oluyordu.
+            //
+            // Test host'u artik UCUNCU bir koke yaziyor (gecici dizin).
+            // SPRINT 8 MADDE 4'UN PINI ZAYIFLAMIYOR, GUCLENIYOR: yazma ile sunum HALA ayni
+            // kokten turuyor - yalnizca o kok ne CWD ne de ContentRoot. Yani "yazma ve sunum
+            // ortusur" iddiasi bagimsiz bir dizinde de kanitlanmis oluyor.
+            // `UseContentRoot(Directory.GetCurrentDirectory())` GERI GELMEDI (bkz. AdminFactory).
+            builder.UseWebRoot(TestWebRoot.Yol);
         }
     }
 }

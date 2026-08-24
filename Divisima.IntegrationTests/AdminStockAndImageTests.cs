@@ -388,6 +388,29 @@ namespace Divisima.IntegrationTests
             dosya.Headers.TryGetValues("X-Content-Type-Options", out var nosniff).Should().BeTrue(
                 "MIME-sniffing engeli basligi gorsel yanitinda BULUNMALI");
             nosniff!.Should().Contain("nosniff");
+
+            // ── DALGA D / D1: YAZMA YOLU TEST HOST'UNUN WebRoot'UNDAN TURER ────────────────
+            // Sprint 8 madde 4'un invarianti (yazma ve sunum ORTUSUR) yukaridaki 200 ile zaten
+            // kanitlandi. Burada ayrica dosyanin FIZIKSEL olarak NEREYE dustugu olculur:
+            // test host'unun WebRoot'una - depoya ya da calisma dizinine DEGIL.
+            var dosyaAdi = Path.GetFileName(path);
+            File.Exists(Path.Combine(TestWebRoot.YuklemeDizini, dosyaAdi)).Should().BeTrue(
+                "yukleme test host'unun WebRoot'una yazilmali - yazma ve sunum ayni kokten turer");
+
+            // CIFT-ANLAM KIRICI (1): DEPO agacina SIZMAMALI. Olculen sizinti buydu - her kosum
+            // Divisima.API/wwwroot/uploads/products altina 64 baytlik sahte PNG birakiyordu.
+            var depoKoku = new DirectoryInfo(AppContext.BaseDirectory);
+            while (depoKoku != null && !File.Exists(Path.Combine(depoKoku.FullName, "docker-compose.yml")))
+                depoKoku = depoKoku.Parent;
+            depoKoku.Should().NotBeNull("depo koku bulunmali - sessiz skip YOK");
+            File.Exists(Path.Combine(depoKoku!.FullName, "Divisima.API", "wwwroot", "uploads", "products", dosyaAdi))
+                .Should().BeFalse("test yuklemesi DEPO agacina yazilmamali (D1 sizintisi)");
+
+            // CIFT-ANLAM KIRICI (2): CALISMA DIZININE de dusmemeli. Sprint 8 madde 4 oncesinde
+            // yazma tam da oraya gidiyordu; `UseContentRoot(CWD)` hizalamasi bunu GIZLIYORDU ve
+            // o ayar GERI GELMEMELI.
+            File.Exists(Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", "products", dosyaAdi))
+                .Should().BeFalse("yukleme CALISMA DIZININE dusmemeli");
         }
 
         private sealed class StockDetailEnvelope { public List<StockDetailRow>? data { get; set; } }

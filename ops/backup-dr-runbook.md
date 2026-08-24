@@ -101,3 +101,22 @@ cikti ama asil bedeli **tam da bu runbook'un anlattigi kurtarma yolunda** olurdu
 | Hatali deploy | Blue-green: onceki surume aninda geri don (trafik switch) |
 | Veri bozulmasi | Point-in-time restore (bozulma oncesi ana) |
 | Ransomware | Sifreli + immutable yedekten temiz ortama restore |
+| **Redis kaybi** | **Uygulama ACILMAZ** (asagi bak) - once Redis'i ayaga kaldir, sonra uygulamayi baslat |
+
+### Redis erisilemezse uygulama ACILMAZ (D5 - OLCULDU)
+
+`Redis:Enabled=true` iken baglanti kurulamazsa `Program.cs` acilista
+`StackExchange.Redis.RedisConnectionException` firlatir ve surec baslamaz. **Sessizce
+in-memory'ye DUSMEZ.** Bu DOGRU davranistir - dagitik kilit ve merkezi sayac olmadan acilan
+bir sunucu, koruma varmis gibi davranirdi (cift odeme, kacan rate limit).
+
+Kurtarma sirasindaki sonucu: **once Redis, sonra uygulama.** Uygulama acilmiyorsa ve hata
+metni `redis` iceriyorsa sorun sema ya da JWT DEGILDIR.
+
+Acil durumda Redis'siz ayaga kaldirmak gerekirse `Redis:Enabled=false` ile baslatilabilir -
+ama o zaman kilit/sayac/blacklist **sunucu-basina** olur; **TEK INSTANCE** ile kosulmalidir,
+aksi halde cift islem ve kacan rate limit riski dogar.
+
+> Rate limit esikleri (`RateLimit:AuthPermitLimit` / `PaymentPermitLimit` /
+> `GlobalPermitLimit`) her iki yolda da okunur (D5). Once Redis yolu bu degerleri HIC
+> okumuyordu ve auth kovasi kaynakta sabit 5'ti.
