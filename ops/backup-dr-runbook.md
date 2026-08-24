@@ -12,10 +12,45 @@
 - Yedekler **sifreli** olmali (TDE veya backup encryption).
 - Ayda bir **restore tatbikati**: yedekten yeni ortama geri yukleyip dogrula (yedek ise yaramiyorsa yedek degildir).
 
+### ON KOSUL — RECOVERY MODELI **FULL** OLMALI (D6 tatbikatinda OLCULDU)
+
+Yukaridaki tablonun **ucuncu satiri** (transaction log, 15 dk) ve bolum 3'teki point-in-time
+proseduru, veritabani **FULL recovery** modelindeyse calisir. **SIMPLE modelde ikisi de
+IMKANSIZDIR** — olculdu:
+
+```
+recovery modeli = SIMPLE
+BACKUP LOG DivisimaDb ...
+  -> Msg 4208: The statement BACKUP LOG is not allowed while the recovery model is SIMPLE.
+```
+
+SIMPLE modelde gercek RPO, **son full/differential yedekten bu yana gecen suredir** —
+gunluk 03:00 full ile **24 saate kadar veri kaybi** demektir, 15 dakika DEGIL.
+
+**DAGITIMDA DOGRULANACAK (zorunlu):**
+
+```sql
+SELECT DATABASEPROPERTYEX('Divisima','Recovery');   -- FULL donmeli
+ALTER DATABASE Divisima SET RECOVERY FULL;          -- degilse
+BACKUP DATABASE Divisima TO DISK='...full.bak';     -- FULL'e gecisten SONRA log zinciri
+                                                    -- ancak bir full yedekle BASLAR
+```
+
+**SURUM SINIRI (D6'da olculdu):** tatbikat ortami **SQL Server Express Edition**'di ve
+Express **backup compression** ile **TDE** DESTEKLEMIYOR (`Msg 1844: BACKUP DATABASE WITH
+COMPRESSION is not supported on Express Edition`). Yani yukaridaki "yedekler sifreli olmali"
+maddesi Express'te KARSILANAMAZ; uretim Standard/Enterprise olmalidir.
+
 ## 2. Hedefler
 
-- **RPO (max veri kaybi):** 15 dakika (log backup sikligina bagli).
-- **RTO (max kesinti):** 1 saat (full + differential + log zinciri geri yukleme).
+- **RPO (max veri kaybi):** 15 dakika — **KOSULLU**: yalnizca FULL recovery + 15 dakikada bir
+  log yedegi varsa. Bu on kosul bolum 1'de ve dagitim checklist'inde dogrulanir.
+  **D6 tatbikatinda ORTAM SIMPLE oldugu icin bu hedef DOGRULANAMADI** (log yedegi alinamadi).
+- **RTO (max kesinti):** 1 saat — **UST SINIR**. D6 tatbikatinda dev ortaminda uctan uca
+  **6,4 saniye** olculdu (dusurme 1,7 sn + geri yukleme 0,5 sn + uygulama ayaga kalkma 4,2 sn;
+  80 MB / 19 MB yedek). Uretim donaniminda, gercek veri hacminde ve differential+log zinciriyle
+  bu sure BUYUR; 1 saatlik hedef makul bir tavan olarak KORUNUYOR.
+  **SINIR (durust kayit): tatbikat DEV ortaminda yapildi, uretim donaniminda RTO FARKLI olabilir.**
 
 ## 3. Geri yukleme prosedueru (point-in-time)
 
@@ -28,6 +63,55 @@ RESTORE DATABASE Divisima FROM DISK='...diff.bak' WITH NORECOVERY;
 RESTORE LOG Divisima FROM DISK='...log1.trn' WITH NORECOVERY;
 RESTORE LOG Divisima FROM DISK='...log2.trn' WITH STOPAT='2026-07-20T14:30:00', RECOVERY;
 ```
+
+## 3b. TATBIKAT — YAPILDI (D6), TEKRARLANABILIR ADIMLAR
+
+Bolum 1 "ayda bir restore tatbikati" diyordu ama tatbikat **hic yapilmamisti**. D6'da yapildi;
+asagidaki adimlar aynen tekrarlanabilir. **SIRA KRITIK: yedek once YAN BIR ISIMLE geri
+yuklenip DOGRULANIR, veritabani ancak ondan sonra dusurulur** — kanitlanmamis bir yedege
+guvenerek uretim veritabanini dusurmek, kurtarmayi denemek degil kumar oynamaktir.
+
+```sql
+-- 1) Yedek al + dogrula
+BACKUP DATABASE Divisima TO DISK='...\Divisima_drill.bak' WITH INIT, FORMAT, CHECKSUM;
+RESTORE VERIFYONLY FROM DISK='...\Divisima_drill.bak' WITH CHECKSUM;   -- "backup set is valid"
+
+-- 2) YAN ISIMLE geri yukle (yedegin GERCEKTEN ise yaradiginin kaniti)
+RESTORE DATABASE Divisima_DrillRestore FROM DISK='...\Divisima_drill.bak'
+  WITH MOVE 'Divisima' TO '...\Divisima_DrillRestore.mdf',
+       MOVE 'Divisima_log' TO '...\Divisima_DrillRestore_log.ldf', RECOVERY;
+-- invariant sorgularini BURADA kostur; asil veritabaniyla BIREBIR ayni cikmali
+
+-- 3) Asil tatbikat
+ALTER DATABASE Divisima SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+DROP DATABASE Divisima;
+RESTORE DATABASE Divisima FROM DISK='...\Divisima_drill.bak' WITH RECOVERY;
+
+-- 4) Uygulamayi ayaga kaldir, /health 200 bekle, invariantlari TEKRAR kostur
+```
+
+**OLCUM SABLONU** (D6'da elde edilen degerler ornek olarak):
+
+| Adim | D6 (dev, 80 MB DB / 19 MB yedek) |
+|---|---|
+| Yedek alma | 330 ms (2425 sayfa, 0,068 sn saf yedek suresi) |
+| VERIFYONLY | gecerli |
+| Yan geri yukleme | 466 ms |
+| Veritabanini dusurme | 1.693 ms |
+| Geri yukleme | 503 ms |
+| Uygulama ayaga kalkma (`/health` 200) | 4.185 ms |
+| **TOPLAM KESINTI (RTO)** | **6,4 saniye** |
+| Veri tutarliligi | 11 invariant sorgusu, ONCE ile SONRA **BIREBIR AYNI** |
+| Uygulama dogrulamasi | katalog 200 · kategori 200 · **gercek giris 200** · my-orders 200 |
+
+Uygulama, kesinti penceresini durust olcmek icin **ON DERLENIR** (`--no-build` ile baslatilir);
+uretimde yayinlanmis ikili zaten hazirdir, `dotnet run`in derleme adimi RTO'ya girmez.
+
+**MIGRATION'LARIN GERCEK VERIYLE KOSMASI da D6'da dogrulandi:** uretilen idempotent script ile
+kurulan bos bir veritabanina (`56 FK / 45 tablo + __EFMigrationsHistory`, 12 migration kaydi)
+`dotnet ef database update` uygulandi -> **"No migrations were applied. The database is already
+up to date."** ve sayilar DEGISMEDI. Yani `database/mssql/01_schema.sql` ile migration'lar
+AYNI semayi uretiyor; D-SEMA'nin iddiasi olcumle KANITLANDI.
 
 ## 4. Migration stratejisi (sifir kesinti — expand/contract)
 

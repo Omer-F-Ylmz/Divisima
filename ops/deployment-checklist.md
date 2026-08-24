@@ -39,6 +39,13 @@ sonucu verir — ortamda .NET araç zinciri varsa (a), yoksa (b):
       `sys.tables` → **45** (+ `__EFMigrationsHistory`)
 - [ ] Uygulamanın çalışma zamanı DB kullanıcısı **DDL yetkisiz** (aşağıdaki "Zorunlu adımlar")
       — migration'ı koşan hesap AYRI ve yalnızca dağıtım anında kullanılır
+- [ ] **Recovery modeli `FULL`** — `SELECT DATABASEPROPERTYEX('Divisima','Recovery')` → `FULL`.
+      **SIMPLE ise runbook'un RPO 15 dk hedefi ve point-in-time geri yükleme proseduru
+      IMKANSIZDIR** (D6 tatbikatında ölçüldü: `BACKUP LOG` → `Msg 4208`). `FULL`'e geçildikten
+      **sonra** bir full yedek alınmalı — log zinciri ancak öyle başlar.
+- [ ] SQL Server sürümü **Express DEĞİL** — Express `backup compression` ve `TDE`
+      desteklemiyor (D6'da ölçüldü: `Msg 1844`), yani "yedekler şifreli olmalı" maddesi
+      Express'te karşılanamaz
 
 > **SIRA:** şema → (opsiyonel `02_seed.sql`) → uygulama açılışı → frontend dağıtımı.
 > Migration üreten bir sürüm yayınlanıyorsa şema adımı **kod deploy'undan ÖNCE** koşar
