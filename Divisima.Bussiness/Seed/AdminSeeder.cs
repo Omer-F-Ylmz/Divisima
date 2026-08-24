@@ -39,6 +39,28 @@ namespace Divisima.Bussiness.Seed
                 return;
             }
 
+            // ══ DALGA C / C3 - SIFRE POLITIKASI BURADA DA UYGULANIR (BESINCI GIRIS NOKTASI) ══
+            // A2-FIX (SUPHELI #21) sifre kuralini TEK MERKEZE tasidi ve DORT girise bagladi:
+            // kayit, satici kaydi, sifre degistirme, sifre sifirlama. BU BESINCISIYDI ve
+            // GOZDEN KACMISTI - yani sistemin EN YETKILI hesabi, kayit ucunun reddedecegi bir
+            // sifreyle acilabiliyordu ("abc" gecerdi).
+            //
+            // FAIL-FAST SECILMEDI - GEREKCE: AdminSeed tek seferlik bir ONYUKLEME bayragidir.
+            // Yanlis yazilmis bir sifre yuzunden uygulamanin ACILMAMASI, siteyi tumden indirir;
+            // burada dogru davranis "admini OLUSTURMA ve GURULTULU soyle"dir. Bu, Program.cs'in
+            // tohumlama hatasini yutup logladigi mevcut tasarimla da tutarli.
+            //
+            // Mesaj IHLAL EDILEN KURALI soyler (SifrePolitikasi zaten onu doner) - operator
+            // neyi duzeltecegini bilmeden deneme yanilmaya dusmesin.
+            var sifreIhlali = Divisima.Core.Security.SifrePolitikasi.Dogrula(password);
+            if (sifreIhlali != null)
+            {
+                _logger.LogError(
+                    "AdminSeed sifresi POLITIKAYA UYMUYOR, ilk admin OLUSTURULMADI: {Sebep} " +
+                    "(AdminSeed:Password duzeltilip uygulama yeniden baslatilmali).", sifreIhlali);
+                return;
+            }
+
             // Açıklayıcı yorum: Zaten bir admin varsa hiçbir şey yapma (idempotent + istenmeyen ikinci admin'i önler)
             var existingAdmin = await _customerDal.GetAsync(c => c.user_type == (byte)UserTypeEnum.Admin);
             if (existingAdmin != null)

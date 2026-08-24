@@ -21,6 +21,17 @@ RUN apt-get update \
 # Non-root kullanıcı oluştur
 RUN groupadd -r divisima && useradd -r -g divisima divisima
 COPY --from=build /app/publish .
+# ══ DALGA C / C2 - YUKLEME DIZINI ACIKCA OLUSTURULUR (SAHIPLIK ICIN ZORUNLU) ═══════════════
+# Bu satir olmadan zincir SESSIZCE kirilir:
+#   .dockerignore, dev makinesindeki yuklenmis gorselleri build context'inden DISLIYOR
+#   -> `dotnet publish` bos bir dizini ciktiya KOPYALAMAZ (bos dizinler korunmaz)
+#   -> imajda /app/wwwroot/uploads YOK
+#   -> compose'daki adlandirilmis volume OLMAYAN bir yola mount edilir ve Docker onu
+#      root:root olarak olusturur
+#   -> `USER divisima` oraya YAZAMAZ; gorsel yukleme uretimde basarisiz olur.
+# Dizin BURADA, chown'dan ONCE olusturuluyor; boylece volume ilk mount'ta dogru sahipligi
+# devralir. (Volume sahipliginin imajdaki dizinden devralindigi Dalga C'de olculdu.)
+RUN mkdir -p /app/wwwroot/uploads/products
 # Açıklayıcı yorum: Dosya sahipliği non-root'a, sadece okuma
 RUN chown -R divisima:divisima /app
 USER divisima

@@ -24,6 +24,19 @@ namespace Divisima.API.Controllers
             return StatusCode((int)r.Item1, r.Item2);
         }
 
+        // DALGA C / C4: basarisiz arka plan isleri. Hangfire panosu tarayicidan ERISILEMEZ
+        // (uygulamada tek kimlik semasi JwtBearer; tarayici gezintisi Authorization basligi
+        // gondermez -> pano filtresi HER ZAMAN reddeder) ve outbox durumunu donen baska uc YOKTU.
+        // Bu uc mevcut Bearer auth ile calisir; YENI BIR KIMLIK YUZEYI ACMAZ.
+        [HttpGet("failed-jobs")]
+        [SwaggerOperation(Summary = "Başarısız arka plan işleri",
+            Description = "Yeniden deneme hakkı tükenmiş outbox mesajları (e-posta, ödeme yan etkileri, sipariş bildirimleri).")]
+        public async Task<IActionResult> FailedJobs([FromQuery] int take = 50)
+        {
+            var r = await _dashboardService.GetFailedJobs(take);
+            return StatusCode((int)r.Item1, r.Item2);
+        }
+
         [HttpGet("daily-sales")]
         [SwaggerOperation(Summary = "Günlük satış grafiği", Description = "Tarih aralığında günlük ciro + sipariş sayısı.")]
         public async Task<IActionResult> DailySales([FromQuery] DateTime? start, [FromQuery] DateTime? end)

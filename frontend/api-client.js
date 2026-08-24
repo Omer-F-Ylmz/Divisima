@@ -541,6 +541,10 @@
         topProducts(top) { return api._get("/api/dashboard/top-products" + api._qs({ top })); },
         orderStatus() { return api._get("/api/dashboard/order-status"); },
         lowStock(threshold) { return api._get("/api/dashboard/low-stock" + api._qs({ threshold })); },
+        // DALGA C / C4: basarisiz arka plan isleri. Hangfire panosu tarayicidan ERISILEMEZ
+        // (uygulamada tek kimlik semasi JwtBearer; tarayici gezintisi Authorization basligi
+        // gondermez), bu yuzden operatorun arka plan hatalarini gorebilecegi TEK yuzey budur.
+        failedJobs(take) { return api._get("/api/dashboard/failed-jobs" + api._qs({ take })); },
         // Ürün yönetimi
         addProduct(p) { return api._post("/api/product/add", p); },
         updateProduct(p) { return api._put("/api/product/update", p); },

@@ -39,6 +39,40 @@ uyuşmazlıkta ekrana kırmızı bir uyarı basar (sessizce yanlış origin'e d�
 - [ ] Yayın sonrası: storefront gerçek adresinden açıldı, katalog **dolu** geldi ve
       konsolda `[DIVISIMA YAPILANDIRMA]` satırı **yok**
 
+## Storefront'u kim sunuyor - DALGA C / C1
+
+İki origin: **API `api.divisima.com`**, **storefront `divisima.com`**. Bu ayrım depo genelinde
+varsayılıdır (`AllowedOrigins`, `Storefront:BaseUrl`, `Cookies:Domain=.divisima.com`).
+
+- [ ] `ops/infra/nginx.conf` sunucuya kuruldu — **iki server block da** (`api.divisima.com`
+      ve `divisima.com`) yürürlükte
+- [ ] `frontend/` içeriği **`ops/set-api-origin.sh` koşulduktan SONRA** `/var/www/divisima`
+      altına kopyalandı (sıra ters olursa storefront localhost'a bakar)
+- [ ] `https://divisima.com/sitemap.xml` **200 + XML** döndü (nginx `/api/seo/sitemap`'e
+      proxy'ler; `robots.txt` bu adresi gösteriyor)
+- [ ] `https://divisima.com/admin.html` yanıtı `X-Robots-Tag: noindex` taşıyor
+
+Yerelde karşılığı `docker compose up` — `frontend` servisi aynı davranışı `:5173`'te verir
+(`ops/infra/frontend-dev.conf`).
+
+## Yüklenen görsellerin kalıcılığı - DALGA C / C2
+
+- [ ] API konteynerinde `/app/wwwroot/uploads` bir **kalıcı volume**'e bağlı
+      (compose'da `uploads_data`; k8s/başka orkestratörde eşdeğeri)
+- [ ] Konteyner yeniden oluşturulduktan sonra **var olan bir ürün görseli hâlâ 200 dönüyor**
+      (volume yoksa `product_images` satırları var olmayan dosyaları gösterir → kalıcı 404)
+
+## İlk admin - DALGA C / C3
+
+- [ ] `AdminSeed:Enabled=true` + `AdminSeed:Email` + `AdminSeed:Password` **secret olarak**
+      verildi (appsettings'e YAZILMAZ)
+- [ ] Şifre politikayı karşılıyor (≥8, büyük, küçük, rakam) — karşılamıyorsa admin
+      **oluşturulmaz** ve log'a `AdminSeed sifresi POLITIKAYA UYMUYOR` düşer
+- [ ] Uygulama açıldıktan sonra **panele gerçekten giriş yapıldı** (seed hatası uygulamayı
+      durdurmaz; tek doğrulama girişin kendisidir)
+- [ ] Giriş doğrulandıktan sonra `AdminSeed:Enabled` **false**'a çekildi ve `Password`
+      secret'ı kaldırıldı/rotate edildi
+
 ## Zorunlu adımlar
 - [ ] `Iyzico:BaseUrl` = `https://api.iyzipay.com` (sandbox değil)
 - [ ] `Webhook:AllowedIps` = Iyzico production IP aralıkları
@@ -46,5 +80,23 @@ uyuşmazlıkta ekrana kırmızı bir uyarı basar (sessizce yanlış origin'e d�
 - [ ] DB kullanıcısı en az yetki (SELECT/INSERT/UPDATE; DDL/DROP yok)
 - [ ] `dotnet list package --vulnerable` temiz
 - [ ] Serilog SIEM sink aktif (bkz. serilog-siem.md)
-- [ ] Hangfire dashboard yetkilendirme (yalnız admin - şu an açık!)
 - [ ] Rate limit eşikleri prod trafiğine göre ayarlandı
+
+## Launch sonrası (bloke etmez)
+- [ ] `og:image` için gerçek **1200×630** marka görseli hazırlanınca `frontend/index.html`'de
+      değiştirilip `twitter:card` tekrar `summary_large_image` yapılabilir (bugün 512×512
+      ikon + `summary` kullanılıyor — yanlış vaat etmemek için)
+
+## Arka plan işleri nasıl izlenir - DALGA C / C4
+
+**Hangfire panosu tarayıcıdan erişilemez** ve bu bilinçlidir: uygulamada tek kimlik şeması
+`JwtBearer`'dır, tarayıcı gezintisi `Authorization` başlığı göndermez, dolayısıyla pano
+filtresi her zaman reddeder. Panoyu açmak çerez tabanlı ikinci bir auth şeması gerektirirdi.
+
+Operatörün baktığı yer: **Panel sekmesindeki "Başarısız Arka Plan İşleri"** listesi
+(`GET /api/dashboard/failed-jobs`). Yeniden deneme hakkı tükenmiş outbox mesajlarını gösterir;
+bu kayıtlar `DataRetentionJob` tarafından **silinmez** (yalnız `Processed` olanlar silinir).
+
+- [ ] Yayın sonrası ilk gün panelde bu liste kontrol edildi (boş olması beklenen durumdur)
+- [ ] Log dosyaları: günlük + 100 MB'da parçalanır, 30 dosya saklanır (`Program.cs`).
+      Disk planlaması buna göre yapıldı

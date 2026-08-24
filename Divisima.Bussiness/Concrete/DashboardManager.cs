@@ -21,9 +21,14 @@ namespace Divisima.Bussiness.Concrete
         private readonly ICustomerDal _customerDal;
 
         private readonly ICategoryDal _categoryDal;
+        // DALGA C / C4: basarisiz arka plan islerini gosteren salt-okur uc icin.
+        private readonly IOutboxMessageDal _outboxDal;
+
         public DashboardManager(IOrderDal orderDal, IOrderItemDal orderItemDal, IProductDal productDal,
-            IProductStockDal productStockDal, ICustomerDal customerDal, ICategoryDal categoryDal)
+            IProductStockDal productStockDal, ICustomerDal customerDal, ICategoryDal categoryDal,
+            IOutboxMessageDal outboxDal)
         {
+            _outboxDal = outboxDal;
             _orderDal = orderDal;
             _orderItemDal = orderItemDal;
             _productDal = productDal;
@@ -210,5 +215,36 @@ namespace Divisima.Bussiness.Concrete
             return (HttpStatusCode.OK, new SuccessDataResult<List<CategorySalesDto>>(report));
         }
 
+        // ══ DALGA C / C4 - BASARISIZ ARKA PLAN ISLERI ════════════════════════════════════════
+        // Gerekce ve olculen once-durum FailedJobDto'nun basinda. Ozetle: uretimde yedi recurring
+        // is kosuyor ve biri dustugunde operatorun gorebilecegi HICBIR YUZEY yoktu (Hangfire
+        // panosu JwtBearer-only auth yuzunden tarayicidan HERKESE KAPALI, outbox ucu YOK).
+        //
+        // Bu uc YENI BIR DEPOLAMA ACMIYOR: DataRetentionJob yalniz Processed mesajlari siliyor,
+        // Failed olanlar zaten KALICI. Yapilan is o kaydi GORUNUR kilmak.
+        public async Task<(HttpStatusCode, Result)> GetFailedJobs(int take)
+        {
+            if (take is < 1 or > 200) take = 50;
+
+            var failed = await _outboxDal.GetListAsync(m => m.status == (byte)OutboxStatusEnum.Failed);
+
+            var liste = failed
+                .OrderByDescending(m => m.created_at)
+                .Take(take)
+                .Select(m => new FailedJobDto
+                {
+                    id = m.id,
+                    event_type = m.event_type,
+                    retry_count = m.retry_count,
+                    // KANIT MASKESI (CLAUDE.md bolum 1): hata metni saglayici yaniti ya da govde
+                    // parcasi tasiyabilir; jeton/kimlik ciplak halde EKRANA gelmez.
+                    error = Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(m.error),
+                    created_at = m.created_at,
+                    processed_at = m.processed_at
+                })
+                .ToList();
+
+            return (HttpStatusCode.OK, new SuccessDataResult<List<FailedJobDto>>(liste));
+        }
     }
 }

@@ -57,7 +57,41 @@ services:
       TokenOptions__SecurityKey: "divisima-local-compose-key-do-not-use-in-production"
     ports:
       - "5000:5000"
+    volumes:
+      # ══ DALGA C / C2 - YUKLENEN GORSELLER KALICI ══════════════════════════════════════════
+      # OLCULEN ONCE-DURUM: compose'da mssql_data ve redis_data vardi, YUKLEMELER icin volume
+      # YOKTU. LocalImageStorage dosyalari WebRootPath/uploads/products altina yazar (Sprint 8
+      # madde 4), yani konteynerin YAZILABILIR KATMANINA - konteyner degistirildiginde (yeni
+      # surum, yeniden olusturma) admin'in yukledigi TUM urun gorselleri KAYBOLUR ve
+      # product_images tablosu var olmayan dosyalara isaret eder (vitrinde kalici 404).
+      #
+      # NON-ROOT YAZILABILIRLIGI OLCULDU (varsayilmadi): imajda `chown -R divisima:divisima
+      # /app` COPY'den SONRA kosuyor ve `dotnet publish` wwwroot'u ciktiya kopyaliyor
+      # (olculdu: 77 dosya), yani /app/wwwroot/uploads IMAJDA VAR ve divisima:divisima sahipli.
+      # Docker adlandirilmis volume'u ilk mount'ta imaj icerigiyle VE SAHIPLIGIYLE baslatir ->
+      # USER divisima yazabilir. (Bos bir host bind-mount kullanilsaydi root:root olur ve
+      # yuklemeler sessizce basarisiz olurdu - bu yuzden ADLANDIRILMIS volume secildi.)
+      - uploads_data:/app/wwwroot/uploads
+
+  # ══ DALGA C / C1 - STOREFRONT'U SUNAN SERVIS ══════════════════════════════════════════════
+  # Bu servis YOKTU: frontend'i kimin sunacagi depoda tanimsizdi (Dockerfile yalniz API'yi
+  # publish ediyor, nginx.conf'ta yalniz api.divisima.com blogu vardi).
+  # IKI ORIGIN korunuyor (kullanici karari): API :5000, storefront :5173 - yerelde bugune
+  # kadar elle kurulan duzenin ta kendisi, artik `docker compose up` ile geliyor.
+  # Uretimde karsiligi ops/infra/nginx.conf'taki divisima.com blogudur.
+  frontend:
+    image: nginx:1.27-alpine
+    depends_on:
+      - api
+    ports:
+      - "5173:80"
+    volumes:
+      # SALT-OKUR: konteyner vitrin dosyalarini DEGISTIREMEZ. Origin yazimi bir DAGITIM
+      # adimidir (ops/set-api-origin.sh), calisma ani isi degil.
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./ops/infra/frontend-dev.conf:/etc/nginx/conf.d/default.conf:ro
 
 volumes:
   mssql_data:
   redis_data:
+  uploads_data:

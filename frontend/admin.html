@@ -199,12 +199,17 @@ async function render(view){
 
 // ── Dashboard ──
 async function renderDashboard(el){
-  const [sum,daily,top,status,low]=await Promise.all([
+  const [sum,daily,top,status,low,hatali]=await Promise.all([
     api.admin.summary().then(unwrap),
     api.admin.dailySales().then(unwrap),
     api.admin.topProducts(5).then(unwrap),
     api.admin.orderStatus().then(unwrap),
     api.admin.lowStock(5).then(unwrap),
+    // DALGA C / C4: basarisiz arka plan isleri. Uretimde YEDI recurring is kosuyor ve biri
+    // dustugunde operatorun gorebilecegi HICBIR yuzey yoktu (Hangfire panosu tarayicidan
+    // ERISILEMEZ - tek kimlik semasi JwtBearer). Panel sekmesine konuldu cunku operator
+    // her giriste BURAYA bakiyor; ayri bir sekmede gozden kacardi.
+    api.admin.failedJobs(20).then(unwrap),
   ]);
   el.innerHTML=`
     <div class="topbar"><h2>Panel</h2><button class="btn ghost sm" onclick="render('dashboard')">↻ Yenile</button></div>
@@ -225,8 +230,15 @@ async function renderDashboard(el){
         ${(top||[]).map(p=>`<tr><td>${p.product_name}</td><td>${p.total_quantity}</td><td>${money(p.total_revenue)}</td></tr>`).join("")||'<tr><td colspan=3 class=muted>Veri yok</td></tr>'}
       </tbody></table></div>
       <div class="panel"><h3>Stok Uyarıları</h3><table><thead><tr><th>Ürün</th><th>Beden</th><th>Stok</th></tr></thead><tbody>
-        ${(low||[]).map(s=>`<tr><td>${s.product_name}</td><td>${s.size}</td><td><span class="badge warn">${s.quantity}</span></td></tr>`).join("")||'<tr><td colspan=3 class=muted>Kritik stok yok</td></tr>'}
+        ${(low||[]).map(s=>`<tr><td>${esc(s.product_name)}</td><td>${esc(s.size)}</td><td><span class="badge warn">${s.quantity}</span></td></tr>`).join("")||'<tr><td colspan=3 class=muted>Kritik stok yok</td></tr>'}
       </tbody></table></div>
+    </div>
+    <div class="panel">
+      <h3>Başarısız Arka Plan İşleri ${(hatali||[]).length?`<span class="badge danger">${hatali.length}</span>`:""}</h3>
+      <p class="muted" style="margin-bottom:12px">Yeniden deneme hakkı tükenmiş işler (e-posta, ödeme yan etkileri, sipariş bildirimleri). Boş olması beklenen durumdur.</p>
+      <table><thead><tr><th>ID</th><th>İş</th><th>Deneme</th><th>Hata</th><th>Zaman</th></tr></thead><tbody>
+        ${(hatali||[]).map(j=>`<tr><td>${j.id}</td><td><b>${esc(j.event_type)}</b></td><td><span class="badge danger">${j.retry_count}</span></td><td class=muted style="max-width:420px;word-break:break-word">${esc(j.error||"-")}</td><td class=muted>${new Date(j.created_at).toLocaleString("tr-TR")}</td></tr>`).join("")||'<tr><td colspan=5 class=muted>Başarısız iş yok</td></tr>'}
+      </tbody></table>
     </div>`;
   // Grafikler
   Object.values(chartRefs).forEach(c=>c&&c.destroy());chartRefs={};
@@ -425,8 +437,45 @@ async function procReturn(id,approve){
 }
 
 // ── Kargo ──
+// ══ DALGA C / C6b - "KARGOLANMAYI BEKLEYENLER" LISTESI ═══════════════════════════════════
+// OLCULEN ONCE-DURUM: Kargo ekrani KOR BIR FORMDU - operatorden siparis ID'si ELLE isteniyor,
+// hangi siparisin kargolanmayi bekledigini gosteren HICBIR liste yok. Operator ID'yi baska
+// ekrandan bulup kopyalamak zorundaydi.
+//
+// HANGI DURUM "BEKLIYOR" - UYDURULMADI, DURUM MAKINESINDEN TURETILDI:
+// OrderStatusMachine'e gore Shipped'e YALNIZ Preparing(2) gecebilir ve CreateShipment bu
+// gecisi zaten dogruluyor. Yani liste = status 2. Baska bir durumu gostermek operatore
+// ucun REDDEDECEGI siparisleri sunmak olurdu.
+//
+// BACKEND DEGISIKLIGI SIFIR: AdminOrderFilterDto'da `status` filtresi ZATEN var.
+async function kargoBekleyenler(){
+  try{
+    const res=unwrap(await api.admin.allOrders({status:2,page:1,page_size:50}));
+    const list=(res&&res.items)||[];
+    document.getElementById("s_pending").innerHTML=list.length
+      ? `<table><thead><tr><th>No</th><th>Müşteri</th><th>Tutar</th><th>Tarih</th><th></th></tr></thead><tbody>${
+          list.map(o=>`<tr><td>${esc(o.order_number||String(o.id))}</td><td class=muted>#${o.customer_id}</td><td>${money(o.total_price)}</td><td class=muted>${new Date(o.created_at).toLocaleDateString("tr-TR")}</td>
+            <td><button class="btn ghost sm" onclick="kargoFormunaAl(${o.id})">Kargo gir</button></td></tr>`).join("")
+        }</tbody></table>`
+      : '<p class="muted">Kargolanmayı bekleyen sipariş yok.</p>';
+  }catch(e){
+    // SESSIZ DEGIL: liste alinamadiysa operatore SOYLENIR (Dalga B'de kaldirilan sessiz
+    // catch'in ayni tuzagina dusmemek icin) - ama ekranin kalani calismaya devam eder.
+    document.getElementById("s_pending").innerHTML='<p class="muted">Bekleyen sipariş listesi alınamadı: '+esc(e.message||"hata")+'</p>';
+  }
+}
+function kargoFormunaAl(id){
+  document.getElementById("s_order").value=id;
+  document.getElementById("s_track").focus();
+  toast("Sipariş #"+id+" forma alındı - takip no gir");
+}
+
 async function renderShipments(el){
-  el.innerHTML=`<div class="topbar"><h2>Kargo</h2></div>
+  el.innerHTML=`<div class="topbar"><h2>Kargo</h2><button class="btn ghost sm" onclick="render('shipments')">↻ Yenile</button></div>
+    <div class="panel"><h3>Kargolanmayı Bekleyenler</h3>
+      <p class="muted" style="margin-bottom:12px">Durumu <b>Hazırlanıyor</b> olan siparişler — kargoya verilebilecek tek durum budur.</p>
+      <div id="s_pending"><p class="muted">Yükleniyor…</p></div>
+    </div>
     <div class="panel" style="max-width:560px"><h3>Kargo Oluştur</h3>
       <label class="f"><span>Sipariş ID</span><input id="s_order" type="number"></label>
       <div class="grid2">
@@ -440,11 +489,21 @@ async function renderShipments(el){
       <button class="btn ghost" onclick="queryShipment()">Sorgula</button>
       <div id="s_result" style="margin-top:14px"></div>
     </div>`;
+  await kargoBekleyenler();
 }
 async function createShipment(){
   const payload={order_id:parseInt(document.getElementById("s_order").value),carrier:parseInt(document.getElementById("s_carrier").value),tracking_number:document.getElementById("s_track").value.trim()};
   if(!payload.order_id||!payload.tracking_number)return toast("Sipariş ID + takip no girin",true);
-  try{await api.admin.createShipment(payload);toast("Kargo oluşturuldu");}catch(e){toast(e.message,true);}
+  // DALGA C / C6b: basarili kargodan sonra bekleyenler listesi TAZELENIR - siparis artik
+  // Kargoda durumuna gecti, listede kalmasi operatoru ayni siparisi ikinci kez girmeye
+  // yoneltirdi (uc Conflict doner, ama once bosuna is yapilmis olur).
+  try{
+    await api.admin.createShipment(payload);
+    toast("Kargo oluşturuldu");
+    document.getElementById("s_track").value="";
+    document.getElementById("s_order").value="";
+    await kargoBekleyenler();
+  }catch(e){toast(e.message,true);}
 }
 async function queryShipment(){
   const id=parseInt(document.getElementById("s_q").value);if(!id)return;

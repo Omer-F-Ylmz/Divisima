@@ -23,16 +23,34 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Divisima">
+<!-- DALGA C / C5 - PAYLASIM ONIZLEMESI.
+     OLCULEN ONCE-DURUM: og:type/site_name/title/description/locale VARDI ama og:image ve
+     og:url YOKTU. Ustelik twitter:card "summary_large_image" idi - yani GENIS bir gorsel
+     vaat ediyor, hicbir gorsel vermiyordu; WhatsApp/Twitter/Facebook paylasimlari GORSELSIZ
+     (cogu istemcide bos kutu) cikiyordu.
+     KART TURU "summary"ye CEKILDI: elimizdeki varlik 512x512 KARE (icons/icon-512.png);
+     "summary_large_image" 1200x630 bekler ve kare gorseli kirpar. Yanlis vaat etmek yerine
+     dogru kart turu secildi. Gercek 1200x630 marka gorseli hazirlandiginda kart turu geri
+     genisletilebilir - dagitim checklist'ine madde olarak yazildi.
+     SINIR (durust kayit): og etiketlerini CALISMA ANINDA guncelleyen setProductSchema VAR,
+     ama paylasim botlari JS CALISTIRMAZ - yani URUNE OZEL onizleme bu etiketlerle SAGLANAMAZ;
+     onun icin sunucu tarafi render/prerender gerekir (ayri is). Buradaki etiketler SITE
+     DUZEYI onizlemeyi calisir hale getirir. -->
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Divisima" />
 <meta property="og:title" content="Divisima — Kadın Giyim" />
 <meta property="og:description" content="Zarafet, ayrıntıda gizlidir. Özenle seçilmiş kadın giyim koleksiyonu." />
 <meta property="og:locale" content="tr_TR" />
-<meta name="twitter:card" content="summary_large_image" />
+<meta property="og:url" content="https://divisima.com/" />
+<meta property="og:image" content="https://divisima.com/icons/icon-512.png" />
+<meta property="og:image:width" content="512" />
+<meta property="og:image:height" content="512" />
+<meta property="og:image:alt" content="Divisima" />
+<meta name="twitter:card" content="summary" />
 <script>document.documentElement.classList.add('js');(function(){try{var m=localStorage.getItem('dvs_theme');if(!m)m=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';if(m==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();(function(){try{var l=localStorage.getItem('dvs_lang');if(l==='ar'){document.documentElement.setAttribute('dir','ltr');document.documentElement.setAttribute('lang','ar');}else if(l==='en')document.documentElement.setAttribute('lang','en');}catch(e){}})();</script>
 <title>Divisima — Kadın Giyim</title>
 <link rel="manifest" href="/manifest.json">
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Divisima","url":"https://divisima.com","logo":"https://divisima.com/logo.png","description":"Kadın giyimde zarafet — elbise, dış giyim, üst & alt giyim ve aksesuar.","sameAs":["https://instagram.com/divisima","https://facebook.com/divisima"]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Divisima","url":"https://divisima.com","logo":"https://divisima.com/icons/icon-512.png","description":"Kadın giyimde zarafet — elbise, dış giyim, üst & alt giyim ve aksesuar.","sameAs":["https://instagram.com/divisima","https://facebook.com/divisima"]}</script>
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"Divisima","url":"https://divisima.com","potentialAction":{"@type":"SearchAction","target":{"@type":"EntryPoint","urlTemplate":"https://divisima.com/#/ara?q={search_term_string}"},"query-input":"required name=search_term_string"}}</script>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0Ij4KICA8cmVjdCB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHJ4PSIxNCIgZmlsbD0iIzJiMjcyNCIvPgogIDx0ZXh0IHg9IjMyIiB5PSIzMyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZG9taW5hbnQtYmFzZWxpbmU9ImNlbnRyYWwiCiAgICAgICAgZm9udC1mYW1pbHk9IkFyaWFsLCBIZWx2ZXRpY2EsIHNhbnMtc2VyaWYiIGZvbnQtd2VpZ2h0PSI4MDAiIGZvbnQtc2l6ZT0iMjMiIGxldHRlci1zcGFjaW5nPSIwLjUiPgogICAgPHRzcGFuIGZpbGw9IiNmNWVkZTMiPkQ8L3RzcGFuPjx0c3BhbiBmaWxsPSIjZTIzNzQ4Ij5WPC90c3Bhbj48dHNwYW4gZmlsbD0iI2Y1ZWRlMyI+UzwvdHNwYW4+CiAgPC90ZXh0Pgo8L3N2Zz4K">
 <link rel="preconnect" href="https://fonts.googleapis.com">

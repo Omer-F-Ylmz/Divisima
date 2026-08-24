@@ -8,3 +8,9 @@
 logs
 *.user
 ops
+
+# DALGA C / C2: dev makinesinde yuklenmis urun gorselleri URETIM IMAJINA GIRMESIN.
+# Olculdu: `dotnet publish` wwwroot'u ciktiya kopyaliyor (77 dosya) - bunlar imaja gomulur
+# ve adlandirilmis volume ilk mount'ta onlarla TOHUMLANIR. Dizinin KENDISI imajda kalmali
+# (volume sahipligini oradan devraliyor), yalniz ICERIK dislaniyor.
+Divisima.API/wwwroot/uploads/**

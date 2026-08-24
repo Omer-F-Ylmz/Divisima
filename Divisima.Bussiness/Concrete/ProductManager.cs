@@ -40,8 +40,12 @@ namespace Divisima.Bussiness.Concrete
         // SPRINT 8 MADDE 5: liste yolu artik category_name dolduruyor - kategori adlarina erisim gerekli.
         private readonly ICategoryDal _categoryDal;
 
+        // DALGA C / C6: beden-stok upsert dongusunu ATOMIK yapmak icin.
+        private readonly Divisima.Core.DataAccess.IUnitOfWork _unitOfWork;
+
         public ProductManager(IProductDal productDal, IProductStockDal productStockDal, IProductReviewDal productReviewDal, IMapper mapper,
-            IPriceDropService priceDropService, ICacheService cache, ICategoryDal categoryDal)
+            IPriceDropService priceDropService, ICacheService cache, ICategoryDal categoryDal,
+            Divisima.Core.DataAccess.IUnitOfWork unitOfWork)
         {
             _categoryDal = categoryDal;
             _productDal = productDal;
@@ -50,6 +54,7 @@ namespace Divisima.Bussiness.Concrete
             _priceDropService = priceDropService;
             _cache = cache;
             _mapper = mapper;
+            _unitOfWork = unitOfWork;
         }
 
         // Açıklayıcı yorum: Yeni ürün ekle. Aynı isim+marka varsa reddedilir, sonra beden stokları eklenir.
@@ -259,43 +264,63 @@ namespace Divisima.Bussiness.Concrete
                 if (ilkTekrar != null)
                     return (HttpStatusCode.BadRequest, new ErrorResult($"Aynı beden birden fazla kez girilmiş: {ilkTekrar.Key}"));
 
-                var current = await _productStockDal.GetListAsync(s => s.product_id == product.id);
-
-                foreach (var s in gelen)
+                // ══ DALGA C / C6a - UPSERT DONGUSU ATOMIK ═══════════════════════════════════
+                // Dalga B upsert'e gecti ama dongu HALA TRANSACTION'SIZDI: ortada bir DB hatasi
+                // olursa bazi bedenler yazilmis bazilari yazilmamis kalirdi (or. "S" 12'ye
+                // guncellenmis, "M" eski degerinde, "L" hic eklenmemis). Yeniden gondermekle
+                // duzelir ama ARADA vitrin tutarsiz stok gosterir.
+                //
+                // KAPSAM EN DAR TUTULDU - YALNIZ BU DONGU. Urun satirinin kendi yazimi tek bir
+                // SaveChanges'tir, zaten atomiktir; _priceDropService.NotifyPriceDrop ise DIS IS
+                // yapar (abonelere bildirim) ve bir transaction icinde tutulmamalidir.
+                //
+                // ExecuteInTransactionAsync SECILDI, manuel BeginTransaction DEGIL: Program.cs'in
+                // kendi notu "EnableRetryOnFailure acilirsa manuel BeginTransaction retry
+                // stratejisi tarafindan REDDEDILIR" diyor (IyzicoPaymentManager ayni gerekceyle
+                // tasinmisti). Bu yol o bayragi acmanin onunu tikamiyor.
+                await _unitOfWork.ExecuteInTransactionAsync<bool>(async () =>
                 {
-                    var beden = s.size.Trim();
-                    var mevcut = current.FirstOrDefault(c => string.Equals(c.size, beden, StringComparison.OrdinalIgnoreCase));
-                    if (mevcut != null)
+                    var current = await _productStockDal.GetListAsync(s => s.product_id == product.id);
+
+                    foreach (var s in gelen)
                     {
-                        // VAR OLAN SATIR GUNCELLENIR - reserved_quantity'ye DOKUNULMAZ.
-                        mevcut.stock_quantity = s.stock_quantity;
-                        mevcut.is_active = true;          // once pasiflenmis bir beden geri acilabilir
-                        mevcut.updated_at = DateTime.Now;
-                        await _productStockDal.UpdateAsync(mevcut);
-                    }
-                    else
-                    {
-                        await _productStockDal.AddAsync(new ProductStock
+                        var beden = s.size.Trim();
+                        var mevcut = current.FirstOrDefault(c => string.Equals(c.size, beden, StringComparison.OrdinalIgnoreCase));
+                        if (mevcut != null)
                         {
-                            product_id = product.id,
-                            size = beden,
-                            stock_quantity = s.stock_quantity,
-                            is_active = true,
-                            created_at = DateTime.Now
-                        });
+                            // VAR OLAN SATIR GUNCELLENIR - reserved_quantity'ye DOKUNULMAZ.
+                            mevcut.stock_quantity = s.stock_quantity;
+                            mevcut.is_active = true;          // once pasiflenmis bir beden geri acilabilir
+                            mevcut.updated_at = DateTime.Now;
+                            await _productStockDal.UpdateAsync(mevcut);
+                        }
+                        else
+                        {
+                            await _productStockDal.AddAsync(new ProductStock
+                            {
+                                product_id = product.id,
+                                size = beden,
+                                stock_quantity = s.stock_quantity,
+                                is_active = true,
+                                created_at = DateTime.Now
+                            });
+                        }
                     }
-                }
 
-                // Listede OLMAYAN bedenler PASIFLENIR (silinmez): satira bagli rezervasyon ve
-                // stok hareketi gecmisi korunur, ayrica unique indeks cifti uzerinde oturmaya
-                // devam eder - o beden geri eklenirse yukaridaki dal onu yeniden ACAR.
-                foreach (var eski in current.Where(c => c.is_active &&
-                         !gelen.Any(g => string.Equals(g.size.Trim(), c.size, StringComparison.OrdinalIgnoreCase))))
-                {
-                    eski.is_active = false;
-                    eski.updated_at = DateTime.Now;
-                    await _productStockDal.UpdateAsync(eski);
-                }
+                    // Listede OLMAYAN bedenler PASIFLENIR (silinmez): satira bagli rezervasyon ve
+                    // stok hareketi gecmisi korunur, ayrica unique indeks cifti uzerinde oturmaya
+                    // devam eder - o beden geri eklenirse yukaridaki dal onu yeniden ACAR.
+                    // PASIFLEME DE AYNI TRANSACTION ICINDE: aksi halde "eski beden pasiflendi ama
+                    // yenisi yazilamadi" durumu kalirdi - Dalga B'de olculen zararin ta kendisi.
+                    foreach (var eski in current.Where(c => c.is_active &&
+                             !gelen.Any(g => string.Equals(g.size.Trim(), c.size, StringComparison.OrdinalIgnoreCase))))
+                    {
+                        eski.is_active = false;
+                        eski.updated_at = DateTime.Now;
+                        await _productStockDal.UpdateAsync(eski);
+                    }
+                    return true;
+                });
             }
 
             InvalidateStorefrontCache();   // H47: vitrin listeleri bayat kalmasin

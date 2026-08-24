@@ -12,5 +12,9 @@ namespace Divisima.Bussiness.Abstract
         Task<(HttpStatusCode, Result)> GetOrderStatusBreakdown();
         Task<(HttpStatusCode, Result)> GetLowStock(int threshold);
         Task<(HttpStatusCode, Result)> GetSalesByCategory(DateTime startDate, DateTime endDate);
+
+        // DALGA C / C4: basarisiz arka plan isleri (outbox status=Failed). Operatorun bu bilgiyi
+        // gorebilecegi TEK yuzey - gerekce FailedJobDto'nun basinda.
+        Task<(HttpStatusCode, Result)> GetFailedJobs(int take);
     }
 }

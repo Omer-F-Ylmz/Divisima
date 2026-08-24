@@ -128,11 +128,34 @@ var builder = WebApplication.CreateBuilder(args);
 }
 
 // B5: Serilog - yapılandırılmış loglama (console + günlük dosya)
+//
+// ══ DALGA C / C4 - SAKLAMA SINIRLARI ACIKCA YAZILDI ══════════════════════════════════════
+// ONCEKI HALI yalnizca `rollingInterval: Day` veriyordu ve gerisi Serilog.Sinks.File 5.0.0
+// VARSAYILANLARINA birakiliyordu: fileSizeLimitBytes = 1 GB, rollOnFileSizeLimit = FALSE,
+// retainedFileCountLimit = 31.
+// TEHLIKELI OLAN "rollOnFileSizeLimit = false" IDI: bir gunun dosyasi 1 GB'a ulastiginda sink
+// yeni dosyaya GECMEZ, yazmayi SESSIZCE BIRAKIR - yani en cok log uretilen (yani en cok sorun
+// yasanan) gunde loglar tam da ihtiyac duyuldugu anda kesilir. Uzerine, bu depoda log dosyasi
+// operatorun bakabilecegi tek teshis kanallarindan biri (Hangfire panosu erisilemez durumda -
+// bkz. C4 / FailedJobDto).
+//
+// DataRetentionJob bu bosluğu KAPATMIYOR: o yalniz VERITABANINI temizler (oturum 90g,
+// islenmis outbox 30g, guvenlik olayi 1y) - log DOSYALARINA hic dokunmaz.
+//
+// Degerler ACIKCA yaziliyor ki varsayilanlar surum yukseltmesiyle degistiginde davranis
+// SESSIZCE kaymasin:
+//   - gunluk dosya + 100 MB'da PARCALA (rollOnFileSizeLimit) -> yazma ASLA sessizce durmaz
+//   - 30 gun saklama -> DataRetentionJob'un outbox penceresiyle ayni buyukluk
+//   - shared: false (varsayilan) korunur - tek surec yaziyor
 builder.Host.UseSerilog((ctx, cfg) => cfg
     .ReadFrom.Configuration(ctx.Configuration)
     .Enrich.FromLogContext()
     .WriteTo.Console()
-    .WriteTo.File("logs/divisima-.log", rollingInterval: RollingInterval.Day));
+    .WriteTo.File("logs/divisima-.log",
+        rollingInterval: RollingInterval.Day,
+        rollOnFileSizeLimit: true,
+        fileSizeLimitBytes: 100L * 1024 * 1024,
+        retainedFileCountLimit: 30));
 
 // B10: Secrets - environment değişkenleri (production'da JWT key + connection string buradan)
 builder.Configuration.AddEnvironmentVariables();
