@@ -398,7 +398,24 @@ builder.Services.AddHangfire(cfg => cfg
     .UseSimpleAssemblyNameTypeSerializer()
     .UseRecommendedSerializerSettings()
     .UseSqlServerStorage(builder.Configuration.GetConnectionString("DivisimaDb")));
-builder.Services.AddHangfireServer();
+// DALGA D - ARKA PLAN ISLERI TEST HOST'LARINDA KAPATILABILIR OLMALI.
+//
+// OLCULEN ZARAR (CI kirmizisi cd51a52): `AddHangfireServer()` ve asagidaki `RecurringJob`
+// kayitlari KOSULSUZDU, yani HER test host'u da bir Hangfire sunucusu calistiriyor ve
+// "outbox-processor" isini DAKIKADA BIR kosuyordu. Test kendi drenajini yapip
+// `retry_count == 1` beklerken arka plan isi araya girip 2 yapabiliyordu.
+// CI'da birebir goruldu: PaymentCallbackSecurityTests.YanEtkiHatasi_... -> "found 2".
+// Yerelde 3/3 gecmisti; fark suit suresi ve makine hizi (dakikalik is ancak host YETERINCE
+// UZUN yasarsa atesler) - yani YARISIN kendisi ONCEDEN VARDI, sadece gorunmuyordu.
+//
+// AYRICA: Hangfire depolamasi `ConnectionStrings:DivisimaDb`e bagli - yani her test host'u
+// GELISTIRICININ veritabanina recurring job tanimi yaziyordu.
+//
+// Bayrak varsayilani TRUE: uretim ve gelistirme davranisi DEGISMEZ. Yalnizca TestHostConfig
+// false veriyor.
+var arkaPlanIsleri = !bool.TryParse(builder.Configuration["BackgroundJobs:Enabled"], out var bgj) || bgj;
+if (arkaPlanIsleri)
+    builder.Services.AddHangfireServer();
 
 // B9: Health checks
 builder.Services.AddHealthChecks()
@@ -610,15 +627,19 @@ app.UseHangfireDashboard("/hangfire", new Hangfire.DashboardOptions
     Authorization = new[] { new Divisima.API.Services.HangfireAuthorizationFilter() }
 });
 
-// B8: Recurring job - Outbox işleyici (dakikada bir)
-RecurringJob.AddOrUpdate<OutboxProcessor>("outbox-processor", p => p.ProcessPendingAsync(), Cron.Minutely);
-// Açıklayıcı yorum: Veri saklama/temizlik - her gün (eski oturum/outbox/log temizliği)
-RecurringJob.AddOrUpdate<Divisima.Bussiness.Outbox.DataRetentionJob>("data-retention", j => j.RunAsync(), Cron.Daily);
-RecurringJob.AddOrUpdate<Divisima.Bussiness.Jobs.ReservationCleanupJob>("reservation-cleanup", j => j.RunAsync(), "*/5 * * * *"); // her 5 dk süresi dolan rezervasyonlar
-RecurringJob.AddOrUpdate<Divisima.Bussiness.Jobs.AbandonedCartReminderJob>("abandoned-cart-reminder", j => j.RunAsync(), Cron.Hourly); // saatlik terk sepet hatırlatması
-RecurringJob.AddOrUpdate<Divisima.Bussiness.Jobs.BirthdayOfferJob>("birthday-offers", j => j.RunAsync(), "0 9 * * *"); // her gün 09:00 doğum günü teklifleri
-RecurringJob.AddOrUpdate<Divisima.Bussiness.Jobs.WinBackJob>("win-back", j => j.RunAsync(), "0 10 * * *"); // her gün 10:00 win-back
-RecurringJob.AddOrUpdate<Divisima.Bussiness.Jobs.ReviewInviteJob>("review-invites", j => j.RunAsync(), "0 11 * * *"); // her gün 11:00 yorum daveti
+// Recurring job kayitlari da ayni bayraga bagli (gerekce yukarida).
+if (arkaPlanIsleri)
+{
+    // B8: Recurring job - Outbox işleyici (dakikada bir)
+    RecurringJob.AddOrUpdate<OutboxProcessor>("outbox-processor", p => p.ProcessPendingAsync(), Cron.Minutely);
+    // Açıklayıcı yorum: Veri saklama/temizlik - her gün (eski oturum/outbox/log temizliği)
+    RecurringJob.AddOrUpdate<Divisima.Bussiness.Outbox.DataRetentionJob>("data-retention", j => j.RunAsync(), Cron.Daily);
+    RecurringJob.AddOrUpdate<Divisima.Bussiness.Jobs.ReservationCleanupJob>("reservation-cleanup", j => j.RunAsync(), "*/5 * * * *"); // her 5 dk süresi dolan rezervasyonlar
+    RecurringJob.AddOrUpdate<Divisima.Bussiness.Jobs.AbandonedCartReminderJob>("abandoned-cart-reminder", j => j.RunAsync(), Cron.Hourly); // saatlik terk sepet hatırlatması
+    RecurringJob.AddOrUpdate<Divisima.Bussiness.Jobs.BirthdayOfferJob>("birthday-offers", j => j.RunAsync(), "0 9 * * *"); // her gün 09:00 doğum günü teklifleri
+    RecurringJob.AddOrUpdate<Divisima.Bussiness.Jobs.WinBackJob>("win-back", j => j.RunAsync(), "0 10 * * *"); // her gün 10:00 win-back
+    RecurringJob.AddOrUpdate<Divisima.Bussiness.Jobs.ReviewInviteJob>("review-invites", j => j.RunAsync(), "0 11 * * *"); // her gün 11:00 yorum daveti
+}
 
 app.Run();
 

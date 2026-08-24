@@ -327,7 +327,7 @@ Bu bolum, yeni bir oturumun tek basina devam edebilmesi icin yazildi.
   yukle` / iki ZORUNLU format adimi / `Entegrasyon testleri` / `Gitleaks (secret taramasi)` /
   `Acik bagimlilik KAPISI` / CodeQL hepsi SUCCESS; TESHIS adimlari skipped; **alti job'in
   hicbirinde failure seviyeli annotation YOK**. Yerelde bir kez gorulen ISIMSIZ 4. kirmizi
-  CI'da TEKRAR ETMEDI.
+  CI'da TEKRAR ETMEDI. **[ACIKLANDI - Dalga D: Hangfire yarisi; bkz. MINI DALGA 2 kaydi.]**
 - **SIPARIS #33'UN ENVANTER SAPMASI GIDERILDI** (kullanici karari: secenek B). Duzeltilmis
   uretim yolu bir kez kosturuldu: stok 10 -> 8, rezervasyon Expired -> Confirmed, denetim izli
   TEK hareket satiri. Ikinci cagri NO-OP (canli teyit). Elle SQL YOK. Ayrinti MINI DALGA 2
@@ -335,10 +335,18 @@ Bu bolum, yeni bir oturumun tek basina devam edebilmesi icin yazildi.
 - **MINI DALGA 2 TAMAMLANDI** - SUPHELI #18 duzeltildi (ayrinti MINI DALGA 2 bolumunde).
   **Yerel: 204/204 `Category=Sql`, tam suitte 328 basarili / 331** (kirilan 3'un UCU DE
   Docker'li `OrderEndpointTests`; UC ARDISIK kosumda ayni sonuc). Release 0 hata, format TEMIZ.
-  **DURUST KAYIT - ISIMSIZ FLAKE:** bicim duzeltmesinden hemen sonraki TEK bir kosumda 4
-  kirmizi gorundu; adlari YAKALANMADI. Ardindan UC kosum ust uste 3 kirmizi (yalnizca Docker)
-  verdi. Dorduncusunun ne oldugu BILINMIYOR - uydurma bir aciklama yazilmiyor. CI'da tekrar
-  ederse adiyla yakalanacak.
+  **DURUST KAYIT - ISIMSIZ FLAKE [ACIKLANDI - kayit tarihsel iz olarak DURUYOR]:** bicim
+  duzeltmesinden hemen sonraki TEK bir kosumda 4 kirmizi gorundu; adlari YAKALANMADI.
+  Ardindan UC kosum ust uste 3 kirmizi (yalnizca Docker) verdi. Dorduncusunun ne oldugu
+  o gun BILINMIYORDU.
+  **KOK SEBEP SONRADAN OLCULDU (Dalga D / `cd51a52` CI kirmizisi):** her test host'u kosulsuz
+  bir Hangfire sunucusu calistirip `outbox-processor` isini DAKIKADA BIR kosuyordu ve testlerin
+  KENDI drenajiyla yarisiyordu. Yaris bu satirlar yazildiginda ZATEN VARDI; dakikalik bir is
+  ancak host yeterince uzun yasarsa atesledigi icin yalnizca ARADA BIR gorunuyordu - "bir
+  kosumda cikip UC kosumda tekrar etmemesi" tam da bu desendir. Duzeltme: `BackgroundJobs:Enabled`
+  (bkz. "CI KIRMIZISI cd51a52 ve DUZELTMESI").
+  **SINIR (durust kayit):** adlar o gun yakalanmadigi icin BIREBIR esleme yapilamaz; bu, adi
+  bilinen bir mekanizmanin adi bilinmeyen bir belirtiye EN OLASI aciklamasidir, ispat degil.
 - **Yerel (mini dalga sonrasi): 203/203 `Category=Sql`, tam suitte 327 basarili / 330
   toplam** - kirilan 3'un UCU DE `OrderEndpointTests` (Testcontainers; yerelde Docker kapali,
   CI'da yesil kosuyor). Release 0 hata, format kapilari TEMIZ.
@@ -1852,6 +1860,15 @@ uydurma bir aciklama yazilmiyor. Bu test PRODUCTION ortamli IKINCI bir host aciy
 kendi host'u zaten ayakta), yani en olasi sinif ana-host ile ikinci host arasindaki bir yaris -
 ama bu OLCULMEDI, tahmindir. Onceki dalgalardaki ISIMSIZ flake'ten farki: bu sefer AD BELLI.
 CI'da tekrar ederse SUPHELI olarak ACILIR.
+
+**SONRADAN EKLENEN ADAY ACIKLAMA (Dalga D - ACIK KALIYOR, kapatilmadi):** Dalga D'de olculen
+Hangfire yarisi (her test host'u kosulsuz bir arka plan sunucusu aciyordu) bu kayit icin de
+bir adaydir - cunku bu test IKINCI bir host aciyor ve o host da kendi Hangfire sunucusunu
+kaldirip AYNI depolamaya (`ConnectionStrings:DivisimaDb`) baglaniyordu. Belirtinin
+"assert satiri suzgecine takilmamasi" da bununla tutarli: host KURULUMUNDA patlayan bir
+istisna assert mesaji URETMEZ. **AMA BU OLCULMEDI ve belirtinin kendisi (cerez `Secure`
+bayragi) outbox mekanizmasiyla dogrudan ilgisiz** - bu yuzden ISIMSIZ flake'lerden farkli
+olarak bu kayit **ACIKLANMIS SAYILMIYOR**. CI'da tekrar ederse SUPHELI olarak acilir.
 
 
 ## GUVENLIK-FIX-2 - SUPHELI #19 (KILIT ENUMERATION) KAPANDI
@@ -4627,6 +4644,51 @@ bagimli (ayni derleme). Boru hatti sirasi degisti -> tam suit 489/492 ile dogrul
 **PIN DURUSTLUGU:** bu dalgadaki 8 yeni/degisen pinin **tamami DAVRANIS pini** (gercek HTTP
 istekleri, gercek DB satirlari, gercek dosya sistemi). Kaynak sozlesmesi pini YOK.
 
+## CI KIRMIZISI cd51a52 ve DUZELTMESI - ARKA PLAN ISLERI TESTLERLE YARISIYORDU
+
+`cd51a52` push'unda **CI KIRMIZI** oldu: Security CI tamamen yesil, `format-check` yesil,
+ama `build-and-test` -> `Testler + coverage` FAILURE. Annotation'lar arasinda **TEK ISIMLI
+kirmizi** vardi:
+
+```
+Failed PaymentCallbackSecurityTests.YanEtkiHatasi_OdemeSUCCESS_KALIR_..._TAMAMLANIR
+Expected mesaj.retry_count to be 1 because deneme sayaci artmali, but found 2.
+```
+
+Diger "failure" seviyeli satirlar (`Invalid object name 'contents'`, Kerberos, DbUpdateException)
+uygulamanin KENDI Serilog ciktisidir - TESHIS adimi kosum sirasindaki istisna satirlarini da
+basar (bolum 7'de kayitli). `SQL gerektiren testler` adimi SUCCESS oldugu icin SQL saglamdi.
+
+**KOK SEBEP:** `Program.cs`'te `AddHangfireServer()` ve `RecurringJob.AddOrUpdate(...)`
+cagrilari KOSULSUZDU. Yani **HER test host'u** bir Hangfire sunucusu calistirip
+`outbox-processor` isini **DAKIKADA BIR** kosuyordu. Test kendi drenajini yapip
+`retry_count == 1` beklerken arka plan isi araya giriyor ve 2 yapiyordu.
+
+**YARIS ONCEDEN VARDI, YALNIZCA GORUNMUYORDU.** Dakikalik bir is ancak host YETERINCE UZUN
+yasarsa atesler. Ayni test yerelde **3/3 GECTI** (izole kosumda host saniyeler yasiyor);
+CI'da suit daha uzun surdugu icin atesledi - ustelik bu dalgada iki yeni test SINIFI eklendi.
+Yani "degisiklik kirdi" degil, **"degisiklik ORTAYA CIKARDI"**; sonuc yine de CI kirmizisi.
+**CLAUDE.md'de kayitli ISIMSIZ FLAKE'lerin en olasi aciklamasi da budur.**
+
+**YAN BULGU:** Hangfire depolamasi `ConnectionStrings:DivisimaDb`e bagli - yani her test
+host'u GELISTIRICININ veritabanina recurring job tanimi yaziyordu.
+
+**DUZELTME:** `BackgroundJobs:Enabled` bayragi (varsayilan **TRUE** - uretim ve gelistirme
+davranisi DEGISMEZ). `AddHangfireServer()` ve recurring kayitlarinin ikisi de bu bayraga
+bagli; `TestHostConfig` false veriyor. Testler arka plan ZAMANLAMASINA dayanmiyor - outbox'i
+olcen her test isleyiciyi KENDISI cagiriyor (`OutboxProcessor.ProcessPendingAsync`), yani
+kapatmak hicbir testin OLCTUGU seyi kaldirmaz, yalnizca YARISI kaldirir.
+
+**PINLER (`ArkaPlanIsleriIzolasyonTests`, 2):**
+- `TEST_HOSTUNDA_HANGFIRE_ARKA_PLAN_SUNUCUSU_KOSMAZ` - **DAVRANIS**: DI'dan cozulen
+  `IHostedService` listesinde Hangfire tipi BULUNMAMALI (+ vakum kirici: liste GERCEKTEN
+  dolu olmali, yoksa iddia bedava dogru olurdu)
+- `ARKA_PLAN_KAPALI_OLSA_DA_OUTBOX_ISLEYICISI_COZULEBILIR` - **CIFT-ANLAM KIRICI**: bayrak
+  yalnizca ZAMANLAYICIYI kapatir, isleyicinin kendisini DEGIL
+
+**5. KONTROL:** bayrak `true`ya cevrildi -> `TEST_HOSTUNDA_HANGFIRE_...` KIRMIZI
+(`found {"Hangfire.BackgroundJobServerHostedService"}`), ikinci pin YESIL kaldi (lokalize).
+Geri alindi.
 ## ACIK KALAN (D5)
 
 - **Canli Redis turu OLCULMEDI** - dagitik kilit, blacklist, idempotency'nin Redis yolu ve
@@ -4677,8 +4739,13 @@ istekleri, gercek DB satirlari, gercek dosya sistemi). Kaynak sozlesmesi pini YO
 1. **TEKNIK DEFTERDE ACIK KALEM KALMADI - TEK ISTISNA SUPHELI #14** (surum okuyucusu
    kirilganligi, genel) ve o da **LAUNCH SONRASI**. #15, #17 ve **#18** KAPANDI; #16 BILINCLI
    olarak bos birakildi; siparis #33 hem odeme hem envanter tarafinda TEMIZLENDI.
-   **ISIMSIZ FLAKE (kullanici karari):** yerelde bir kez gorulen ve adi yakalanamayan 4.
-   kirmizi icin simdilik KAYIT YETERLI. CI'da adiyla yakalanirsa SUPHELI olarak ACILIR.
+   **ISIMSIZ FLAKE - KAPANDI (ACIKLANDI, Dalga D).** Yerelde bir kez gorulen ve adi
+   yakalanamayan 4. kirminin kok sebebi `cd51a52` CI kirmizisinda ADIYLA olculdu: her test
+   host'u kosulsuz bir Hangfire sunucusu calistirip dakikalik outbox isini testlerin kendi
+   drenajiyla YARISTIRIYORDU. `BackgroundJobs:Enabled` ile kapatildi ve pinlendi. Kayitlar
+   SILINMEDI, tarihsel iz olarak duruyor (bkz. MINI DALGA 2).
+   **HALA ACIK:** `RefreshCookieContractTests.Cerez_Secure_...` (ADI OLAN flake) - Hangfire
+   yarisi onun icin yalnizca bir ADAY, belirtisi eslesmiyor; CI'da tekrar ederse SUPHELI acilir.
 3. **Sema kapanis dalgasi** - kalan tek aday: **gift-card expiry**
    (`refunded_amount` Sprint 6'da kapandi; seller migration DEGIL - `sellers` ve
    `seller_id` zaten `InitialCreate`'te)
@@ -5652,6 +5719,37 @@ Alti baslik, sirayla:
   yasandi: `dotnet format` 116 dosyayi degistirdi, `dotnet build` calisan API yuzunden dosya
   kilidiyle 8 hata verdi, ama `--no-build` testler ESKI ikililerden gecip yesil gorundu.
   Kod degistiyse ONCE temiz build, SONRA test.
+- **5. KONTROLUN KENDISI DOGRULANIR (KALICI - kullanici karari, Dalga D).**
+  5. kontrolun sonucu ("mutasyon lokalize kaldi") ancak mutasyon GERCEKTEN uygulandiysa
+  anlamlidir. Dalga D'de uc mutasyon **HIC UYGULANMADI** (`powershell -File` yurutme
+  politikasina takildi) ve testler "14 basarili" dedi - yani rapor "mutasyon lokalize"
+  diye YANLIS yazilacakti. Fark edilmesi kalinti kontrolune, yani TESADUFE kalmisti.
+  Bundan sonra HER uretim mutasyonunda, sirayla:
+  - **(a) YAZILDI MI:** mutasyonun dosyaya gercekten indigi `grep` / `git diff` ile
+    DOGRULANIR. "Betik hata vermedi" kanit DEGILDIR.
+  - **(b) TEMIZ BUILD:** mutasyondan sonra derleme yapilir ve `grep " Hata"` / `grep "error"`
+    ile bakilir (`tail -1` ALDATIR). `--no-build` ile kosulan test degistirilen kodu
+    dogrulamaz; `Copy-Item` zaman damgasini korudugu icin geri alinan dosya `touch`lanir.
+  - **(c) BEKLENEN PIN KIRMIZI OLMADIYSA:** bu **"mutasyon lokalize"** DEGIL,
+    **"MUTASYON UYGULANMADI"** suphesidir. ONCE bu ihtimal elenir; ancak (a) ve (b)
+    kanitlandiktan sonra "lokalize" sonucu yazilabilir.
+  Ayni kural DIS KONTROLU icin de gecerlidir (ters cevrilen assert dosyaya indi mi).
+- **TEST, URUNUN GERCEK KAYNAKLARINA DOKUNMAZ (KALICI - kullanici karari, Dalga D).**
+  Bir test altyapisi eklenirken sorulacak soru: **bu, gelistiricinin ya da uretimin GERCEK
+  kaynagina mi yaziyor?** Kaynak = depo agaci, gelistirici veritabani, kullanici secret'lari,
+  gercek dosya sistemi, dis saglayici. Cevap "evet" ise test AYRI, atilabilir bir koke
+  yonlendirilir. Ayni sinif **UC KEZ** cikti ve ucu de sessizdi:
+  - **wwwroot sizintisi (D1):** her kosum depo agacina 64 baytlik sahte PNG birakiyordu
+    (96 dosya birikmisti). Cozum: `UseWebRoot(TestWebRoot.Yol)` - UCUNCU bir kok.
+  - **user-secrets sizintisi (Dalga C):** `WebApplicationFactory` Development'ta user-secrets
+    yukledigi icin `AdminSeed:Enabled=true` her test host'una siziyordu - sonuc MAKINEYE gore
+    degisiyordu. Cozum: `TestHostConfig`te varsayilan `false`.
+  - **Hangfire dev DB'ye yaziyordu (Dalga D):** her test host'u kosulsuz bir arka plan
+    sunucusu acip GELISTIRICININ veritabanina recurring job tanimi yaziyor ve dakikalik
+    outbox isini testlerin drenajiyla YARISTIRIYORDU (CI kirmizisi `cd51a52`).
+    Cozum: `BackgroundJobs:Enabled=false`.
+  Ortak belirti: **yerelde yesil, CI'da kirmizi** (ya da tersi) - yani sonuc ORTAMA bagli
+  hale gelir ve pin yalan soyler. Yeni yazilan her test altyapisi bu soruyla gecer.
 - **Izleyici adabi**: nabiz >= 300 sn, tur basina TEK konsolide cagri, kota yandiysa bekle.
   Dependabot run'i beklenmez - asil iki workflow (CI + Security) yeter.
 - **PAT veya tarayici eklentisi ASLA istenmez.**

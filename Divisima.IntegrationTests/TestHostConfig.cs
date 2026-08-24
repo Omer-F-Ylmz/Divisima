@@ -50,6 +50,28 @@ namespace Divisima.IntegrationTests
             // ortusur" iddiasi bagimsiz bir dizinde de kanitlanmis oluyor.
             // `UseContentRoot(Directory.GetCurrentDirectory())` GERI GELMEDI (bkz. AdminFactory).
             builder.UseWebRoot(TestWebRoot.Yol);
+
+            // ══ DALGA D - ARKA PLAN ISLERI TEST HOST'LARINDA KAPALI ═════════════════════════
+            //
+            // OLCULEN ZARAR (CI kirmizisi cd51a52): `AddHangfireServer()` ve recurring job
+            // kayitlari KOSULSUZDU; her test host'u bir Hangfire sunucusu calistirip
+            // "outbox-processor" isini DAKIKADA BIR kosuyordu. Bir test kendi drenajini yapip
+            // `retry_count == 1` beklerken arka plan isi araya girip 2 yapabiliyordu.
+            // CI'da birebir goruldu: PaymentCallbackSecurityTests.YanEtkiHatasi_... -> "found 2".
+            //
+            // YARIS ONCEDEN VARDI, YALNIZCA GORUNMUYORDU: dakikalik bir is ancak host YETERINCE
+            // UZUN yasarsa atesler. Yerelde suit 1 dk 20 sn, CI'da (soguk SQL konteyneri) daha
+            // uzun; ustelik bu dalgada iki yeni test SINIFI eklendi. Yani "benim degisikligim
+            // kirdi" DEGIL, "benim degisikligim ORTAYA CIKARDI" - ama sonuc ayni: CI kirmizi.
+            // CLAUDE.md'de kaydi olan ISIMSIZ FLAKE'lerin de en olasi aciklamasi budur.
+            //
+            // AYRICA: Hangfire depolamasi `ConnectionStrings:DivisimaDb`e bagli - yani her test
+            // host'u GELISTIRICININ veritabanina recurring job tanimi yaziyordu.
+            //
+            // Testler arka plan zamanlamasina DAYANMIYOR: outbox'i olcen her test isleyiciyi
+            // KENDISI cagiriyor (`OutboxProcessor.ProcessPendingAsync`). Yani kapatmak hicbir
+            // testin olctugu seyi kaldirmaz - yalnizca YARISI kaldirir.
+            builder.UseSetting("BackgroundJobs:Enabled", "false");
         }
     }
 }
