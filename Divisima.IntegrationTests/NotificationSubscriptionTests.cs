@@ -71,8 +71,8 @@ namespace Divisima.IntegrationTests
             {
                 await using (var pre = NewContext())
                 {
-                    await pre.Database.EnsureDeletedAsync();
-                    await pre.Database.EnsureCreatedAsync();
+                    await TestDbKurulum.SilAsync(pre.Database);
+                    await TestDbKurulum.OlusturAsync(pre.Database);
                 }
                 _factory = new NotifFactory();
                 _ = _factory.Services;
@@ -90,7 +90,7 @@ namespace Divisima.IntegrationTests
         {
             if (_factory != null) await _factory.DisposeAsync();
             if (!_sqlAvailable) return;
-            try { await using var ctx = NewContext(); await ctx.Database.EnsureDeletedAsync(); } catch { }
+            try { await using var ctx = NewContext(); await TestDbKurulum.SilAsync(ctx.Database); } catch { }
         }
 
         private bool Skipped() => !_sqlAvailable;

@@ -61,7 +61,7 @@ namespace Divisima.IntegrationTests
 
             using var scope = Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<DivisimaDbContext>();
-            await db.Database.EnsureCreatedAsync();
+            await TestDbKurulum.OlusturAsync(db.Database);
         }
 
         // D BULGUSU (gizleme kaldirildi): eskiden "public new async Task DisposeAsync()" vardi.

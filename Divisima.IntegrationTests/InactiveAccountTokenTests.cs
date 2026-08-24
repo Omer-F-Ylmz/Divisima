@@ -72,8 +72,8 @@ namespace Divisima.IntegrationTests
             {
                 await using (var pre = NewContext())
                 {
-                    await pre.Database.EnsureDeletedAsync();
-                    await pre.Database.EnsureCreatedAsync();
+                    await TestDbKurulum.SilAsync(pre.Database);
+                    await TestDbKurulum.OlusturAsync(pre.Database);
                 }
                 _host = new InactiveFactory();
                 // TEK musteri: auth policy si 5 istek/dk ve TestAuthHelper musteri basina 3 istek
@@ -93,7 +93,7 @@ namespace Divisima.IntegrationTests
         {
             if (_host != null) await _host.DisposeAsync();
             if (!_sqlAvailable) return;
-            try { await using var ctx = NewContext(); await ctx.Database.EnsureDeletedAsync(); } catch { }
+            try { await using var ctx = NewContext(); await TestDbKurulum.SilAsync(ctx.Database); } catch { }
         }
 
         private bool Skipped() => !_sqlAvailable;

@@ -84,8 +84,8 @@ namespace Divisima.IntegrationTests
             try
             {
                 await using var ctx = NewContext();
-                await ctx.Database.EnsureDeletedAsync();
-                await ctx.Database.EnsureCreatedAsync();
+                await TestDbKurulum.SilAsync(ctx.Database);
+                await TestDbKurulum.OlusturAsync(ctx.Database);
                 _sqlAvailable = true;
             }
             catch (Exception ex) when (!string.IsNullOrWhiteSpace(ExplicitConn))
@@ -109,7 +109,7 @@ namespace Divisima.IntegrationTests
             try
             {
                 await using var ctx = NewContext();
-                await ctx.Database.EnsureDeletedAsync();
+                await TestDbKurulum.SilAsync(ctx.Database);
             }
             catch { /* temizlik best-effort */ }
         }

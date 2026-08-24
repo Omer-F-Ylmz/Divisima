@@ -62,8 +62,8 @@ namespace Divisima.IntegrationTests
                 // (Hangfire vb.) hemen baglanmaya calisir.
                 await using (var pre = NewContext())
                 {
-                    await pre.Database.EnsureDeletedAsync();
-                    await pre.Database.EnsureCreatedAsync();
+                    await TestDbKurulum.SilAsync(pre.Database);
+                    await TestDbKurulum.OlusturAsync(pre.Database);
                 }
                 _factory = new MoneyFactory();
                 _ = _factory.Services;
@@ -87,7 +87,7 @@ namespace Divisima.IntegrationTests
             try
             {
                 await using var ctx = NewContext();
-                await ctx.Database.EnsureDeletedAsync();
+                await TestDbKurulum.SilAsync(ctx.Database);
             }
             catch { }
         }

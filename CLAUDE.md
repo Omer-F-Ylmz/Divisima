@@ -1870,6 +1870,20 @@ istisna assert mesaji URETMEZ. **AMA BU OLCULMEDI ve belirtinin kendisi (cerez `
 bayragi) outbox mekanizmasiyla dogrudan ilgisiz** - bu yuzden ISIMSIZ flake'lerden farkli
 olarak bu kayit **ACIKLANMIS SAYILMIYOR**. CI'da tekrar ederse SUPHELI olarak acilir.
 
+**IKINCI ADAY ACIKLAMA (Dalga D - YINE ADAY, KAPATILMADI): `model` KILIDI.** CI kirmizisi
+10d794d'de olculdu ki `CREATE DATABASE` / `DROP DATABASE` islemleri `model` uzerinden
+serilesiyor ve cakisma **`SqlException 1807`** uretiyor. Bu kayit icin neden ADAY: (a) bu
+test IKINCI bir host aciyor, yani ekstra kurulum yuku tasiyor; (b) 1807 host/kurulum
+asamasinda patlar ve **assert mesaji URETMEZ** - "hata mesaji YAKALANAMADI, ciktiyi suzen
+grep deseni mesaji disarida birakti" gozlemiyle BIREBIR tutarli; (c) belirtinin
+"bir kosumda cikip UC kosumda tekrar etmemesi" contention desenine uyar.
+**AMA OLCULMEDI:** o kosumun hata metni elde YOK, dolayisiyla 1807 oldugu KANITLANAMAZ.
+Bu bir ADAYDIR - "kapandi" DEGIL. 1807 tarafi artik yeniden denemeyle azaltildi
+(`TestDbKurulum`), yani bu aday dogruysa belirti kendiliginden seyrelir; **yine de kayit
+ACIK kalir** ve CI'da tekrar ederse SUPHELI olarak acilir.
+Not: iki aday BIRBIRINI DISLAMAZ - Hangfire yarisi ve `model` kilidi ayri mekanizmalardir
+ve ikisi de o kosumda yururlukteydi.
+
 
 ## GUVENLIK-FIX-2 - SUPHELI #19 (KILIT ENUMERATION) KAPANDI
 
@@ -4689,6 +4703,129 @@ kapatmak hicbir testin OLCTUGU seyi kaldirmaz, yalnizca YARISI kaldirir.
 **5. KONTROL:** bayrak `true`ya cevrildi -> `TEST_HOSTUNDA_HANGFIRE_...` KIRMIZI
 (`found {"Hangfire.BackgroundJobServerHostedService"}`), ikinci pin YESIL kaldi (lokalize).
 Geri alindi.
+
+## CI KIRMIZISI 10d794d - GEREKSIZ BIR VERITABANI 47. KATILIMCI OLDU ve BASKALARINI DUSURDU
+
+Hangfire duzeltmesinin push'unda **CI YESIL, Security CI KIRMIZI** oldu. Adim bazinda okundu:
+`secret-scan` / `codeql` / `dependency-scan` SUCCESS; **`tests` -> `Entegrasyon testleri`
+FAILURE**. Annotation'larda **BES AYRI SINIF**, hepsi AYNI kokle:
+
+```
+System.InvalidOperationException : DIVISIMA_TEST_SQL verildi ancak <X> ortami hazirlanamadi
+---- SqlException : Could not obtain exclusive lock on database 'model'. Retry the operation later.
+```
+
+Dusen bes sinif: `InvoiceLineVatTests`, `InactiveAccountTokenTests`, `ContentSeedAndSanitizeTests`,
+`LaunchFixMailZinciriTests`, `NotificationSubscriptionTests`.
+
+**KOK SEBEP (olculdu):** SQL Server `CREATE DATABASE` / `DROP DATABASE` islemlerini **`model`
+veritabani uzerinden SERILESTIRIR**. Depoda her test SINIFI kendi veritabanini kuruyor
+(CLAUDE.md bolum 4 - xUnit siniflari paralel kostugu icin DOGRU bir tasarim). Olcum:
+
+```
+kendi veritabanini kuran dosya : 46
+AYRI veritabani adi            : 55
+DDL cagrisi (Deleted+Created)  : 136     <- hepsi `model` uzerinde serilesir
+```
+
+`ArkaPlanIsleriIzolasyonTests` bu kalibi KOPYALAYARAK kendi veritabanini kuruyordu.
+**AMA O VERITABANINI HIC KULLANMIYORDU** - sinifin iki pini de YALNIZCA DI kayitlarina bakiyor
+(`IHostedService` listesi + `OutboxProcessor` cozumu), tek bir sorgu bile calistirmiyor.
+Yani 47. katilimci **gereksizdi** ve bedeli **BASKA siniflarin dusmesi** oldu; kirilanlar
+arasinda bu sinif YOKTU.
+
+**MARJ BICAK SIRTIYDI (kayit):** bir onceki push `cd51a52` IKI yeni sinif ekledi ve Security CI
+**tamamen yesildi** (46 katilimci). 47. eklenince bes sinif dustu. Yani yaris ONCEDEN vardi;
+bu commit onu tetikledi.
+
+**DUZELTME:** sinif artik **HIC veritabani olusturmuyor** (sifir DDL) ve
+`[Trait("Category","Sql")]` KALDIRILDI - SQL gerektirmiyor. Host yine de IZOLE, KASITLI OLARAK
+VAR OLMAYAN bir veritabani adina yonlendiriliyor; amac onu kullanmak degil, acilistaki
+`ContentSeeder`in GELISTIRICININ veritabanina yazmasini ENGELLEMEK (ayni dalgada yazilan
+"TEST, URUNUN GERCEK KAYNAKLARINA DOKUNMAZ" kurali). Var olmayan veritabani acilis
+tohumlamasini dusurur; `Program.cs` bunu ACIKCA yakalayip loglar ve uygulama DEVAM EDER
+("Tohumlama hatasi uygulamayi DURDURMAZ") - host saglikli kalkiyor, pinlerin olctugu DI
+kayitlari eksiksiz. KANIT: sinif veritabanisiz **2/2 yesil, 231 ms**.
+
+**DERS (ayni dalgada yazilan kuralin UCUNCU bicimi):** "test urunun gercek kaynaklarina
+dokunmaz" kuralinin ikizi var - **test IHTIYACI OLMAYAN kaynagi da OLUSTURMAZ.** Kalip
+kopyalamak bedavaymis gibi gorunur; burada bedeli PAYLASILAN bir kaynakta (SQL Server'in
+`model` kilidi) BASKALARI odedi.
+
+### KALICI COZUM - KULLANICI KARARI: (A) + RETRY
+
+Yalniz (A) marj'i 46'ya geri dondururdu (o hal yesildi) ama **bicak sirtini KORURDU**;
+D3/D6 daha sinif ekleyecek. Paralelligi dusurmek (tek dosyalik `xunit.runner.json`) kok
+sebebi GIZLEDIGI icin REDDEDILDI. Uygulanan: `Divisima.IntegrationTests/TestDbKurulum.cs` -
+veritabani kurulumunun TEK NOKTASI ve **1807'ye ozel yeniden deneme**.
+
+**DORT SART, DORDU DE UYGULANDI:**
+
+1. **YALNIZ 1807.** Yuklem `HataKoduIceriyorMu(ex, 1807)` - ic-istisna zincirini yurur ve
+   `SqlException`larin HATA KOLEKSIYONUNU tarar (tek istisna birden cok `SqlError` tasiyabilir;
+   `ex.Number` yalnizca ilkini verir). Baska HICBIR kod yutulmaz - farkli numarali bir
+   `SqlException` bile ANINDA firlar.
+2. **SINIRLI DENEME.** `MaxDeneme = 6`, artan bekleme + **serpinti** (serpinti olmadan ayni
+   anda dusen istekler KILITLI ADIMDA yeniden denerdi ve cakismayi surdururdu). Hak bitince
+   hata GURULTULU firlar - sessiz sonsuz dongu YOK.
+3. **OLCUM KANALI AYRI.** "Yesil cunku hic 1807 gelmedi" ile "yesil cunku retry calisti"
+   ayrimi PIN ile yanitlanamaz (kosuma baglidir), bu yuzden AYRI bir kanal var:
+   `YenidenDenemeSayisi` / `BasariliIslemSayisi` sayaclari + her denemede `Console.Error`'a
+   ve `%TEMP%\divisima-testdb-retry.log`'a basilan satir.
+4. **OLCUM (asagi).**
+
+**MEKANIK DEGISIKLIK GUVENLIYDI - ONCE OLCULDU:** 136 cagrinin tamami YALNIZCA BES bicimde
+yaziliydi (`ctx|pre|db` + `.Database.Ensure{Deleted,Created}Async()`), hepsi tek satirlik.
+Yardimci AYNI namespace'te oldugu icin **tek bir `using` satiri eklenmedi** - CLAUDE.md'de
+iki kez bedeli odenen "sed ile dosya basina using ekleme" tuzagi bu yuzden HIC dogmadi.
+
+**OLCUM (sart 4) - duzeltme SONRASI:**
+
+```
+veritabani kuran sinif dosyasi : 46      (once 47 - ArkaPlanIsleriIzolasyonTests cikti)
+AYRI veritabani adi            : 55
+DDL cagrisi                    : 136     (hepsi TestDbKurulum uzerinden)
+dogrudan Ensure* cagrisi       : 0       (atlayan sinif yok - pinli)
+ArkaPlanIsleriIzolasyonTests   : 0 DDL
+tam suit                       : 496 basarili / 499, 1 dk 37 sn   (once 1 dk 15 sn / 494)
+Category=Sql                   : 312/312
+GERCEK 1807 (yerel kosumlar)   : 0  -> retry DEVREDE ama YERELDE GEREKMEDI
+```
+
+**Son satir bilincli olarak boyle yazildi:** yerel makinede SQL Server sicak ve tek kosucu
+var; 1807 hic gelmedi. Yani yerelde "retry calisti" DENEMEZ - yalnizca "devrede ve gerekmedi"
+denir. Retry'in DAVRANISI pinlerle, DEVREDE OLDUGU kaynak taramasiyla kanitlandi; GERCEKTEN
+ATESLENDIGI ancak 1807 ureten bir ortamda (CI'nin soguk SQL konteyneri) gorulur ve o zaman
+kosum ciktisinda `[TestDbKurulum] 1807 (...) - yeniden deneniyor` satiri belirir.
+
+**PINLER (`TestDbKurulumTests`, 5):**
+- `YENIDEN_DENEME_YALNIZ_1807_ICIN_BASKA_HATA_KODU_YUTULMAZ` - GERCEK bir `SqlException`
+  uretilir (sifira bolme) ve yuklem ona HAYIR demeli. Vakum kirici: tarayici kendi hata
+  numarasini BULMALI (yoksa "her zaman false don" da gecerdi). Cift-anlam kirici: ayni
+  gercek istisna 1807 SAYILMAMALI.
+- `YENIDEN_DENENEBILIR_HATA_TEKRAR_DENENIR_ve_SONUNDA_BASARIR` - vakum kirici: islem
+  GERCEKTEN uc kez cagrilmis olmali.
+- `YENIDEN_DENENEMEYEN_HATA_ANINDA_FIRLAR_YUTULMAZ` - TEK deneme.
+- `SINIRLI_DENEME_SONRASI_GURULTULU_DUSER_SESSIZ_SONSUZ_DONGU_YOK` - tam `maxDeneme` kadar,
+  sonra firlatir; ayrica uretim `MaxDeneme` degeri makul aralikta.
+- `HICBIR_TEST_SINIFI_KURULUM_YARDIMCISINI_ATLAMAZ` - KAPSAM pini; iki vakum kirici
+  (tarama >40 dosya okumali, yardimci >100 kez cagrilmis olmali).
+
+**KIRILAN PIN YOK.**
+
+**DIS KONTROLU:** 5 assert ters -> **5 AYRI ISIMLI KIRMIZI**, geri alindi.
+**5. KONTROL - UC URETIM MUTASYONU** (yeni kural geregi her birinde (a) dosyaya indi mi,
+(b) temiz build, (c) kirmizi olmadiysa "uygulanmadi" suphesi ONCE elenir):
+
+| Mutasyon | Kirilan pin | Uretilen once-durum |
+|---|---|---|
+| M1 bir sinif dogrudan `EnsureCreatedAsync`a donduruldu | `HICBIR_TEST_SINIFI_..._ATLAMAZ` | duzeltme oncesi "atlayan sinif" hali |
+| M2 `ModelKilidiMi` -> her zaman `true` | `YENIDEN_DENEME_YALNIZ_1807_...` | sart 1 ihlali: gercek hatalar YUTULUR |
+| M3 `MaxDeneme` -> 1000 | `SINIRLI_DENEME_..._SONSUZ_DONGU_YOK` | sinirsiz yeniden deneme riski |
+
+Ucunde de TAM 1 pin kirmizi / 4 yesil (lokalize). Hepsi geri alindi, `[MUTASYON]` izi
+depoda **0 dosya**.
+
 ## ACIK KALAN (D5)
 
 - **Canli Redis turu OLCULMEDI** - dagitik kilit, blacklist, idempotency'nin Redis yolu ve

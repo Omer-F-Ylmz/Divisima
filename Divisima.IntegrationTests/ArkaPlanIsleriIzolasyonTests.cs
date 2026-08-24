@@ -3,7 +3,6 @@ using Divisima.DataAccess.Concrete.Context;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -32,22 +31,37 @@ namespace Divisima.IntegrationTests
     // Testler arka plan ZAMANLAMASINA dayanmiyor: outbox'i olcen her test isleyiciyi KENDISI
     // cagiriyor (`OutboxProcessor.ProcessPendingAsync`). Kapatmak hicbir testin OLCTUGU seyi
     // kaldirmaz - yalnizca YARISI kaldirir.
-    [Trait("Category", "Sql")]
+    //
+    // ─────────────────────────────────────────────────────────────────────────────────────
+    // BU SINIF VERITABANI OLUSTURMAZ - ve bu bilincli bir DUZELTMEDIR (CI kirmizisi 10d794d).
+    //
+    // Ilk yazimda sinif, depodaki diger SQL sinifllarinin kalibini KOPYALAYIP kendi
+    // veritabanini `EnsureDeleted` + `EnsureCreated` ile kuruyordu. OLCULDU: bu sinifin IKI
+    // pini de YALNIZCA DI kayitlarina bakiyor - tek bir sorgu bile calistirmiyor. Yani
+    // olusturulan veritabani HIC KULLANILMIYORDU.
+    //
+    // Bedeli SESSIZ DEGILDI: depoda 46 test sinifi kendi veritabanini kuruyor ve SQL Server
+    // `CREATE DATABASE`/`DROP DATABASE` islemlerini `model` veritabani uzerinden SERILESTIRIR.
+    // 47. katilimci eklenince Security CI'da bes AYRI sinif ayni hatayla dustu:
+    //
+    //   SqlException : Could not obtain exclusive lock on database 'model'. Retry the operation later.
+    //
+    // Kirilan siniflar BU SINIF DEGILDI (InvoiceLineVatTests, InactiveAccountTokenTests,
+    // ContentSeedAndSanitizeTests, LaunchFixMailZinciriTests, NotificationSubscriptionTests) -
+    // yani zarar, gereksiz DDL yukunun BASKALARINI dusurmesiydi.
+    //
+    // Cozum: veritabani HIC olusturulmuyor (sifir DDL). Host yine de IZOLE bir veritabani ADINA
+    // yonlendiriliyor - amac onu kullanmak degil, uygulamanin acilisindaki `ContentSeeder`in
+    // GELISTIRICININ veritabanina yazmasini ENGELLEMEK (CLAUDE.md: "TEST, URUNUN GERCEK
+    // KAYNAKLARINA DOKUNMAZ"). Var olmayan veritabani acilis tohumlamasini dusurur; `Program.cs`
+    // bunu ACIKCA yakalayip loglar ve uygulama DEVAM EDER ("Tohumlama hatasi uygulamayi
+    // DURDURMAZ") - yani host saglikli kalkiyor ve pinlerin olctugu DI kayitlari eksiksiz.
+    // `[Trait("Category","Sql")]` de bu yuzden YOK: sinif SQL GEREKTIRMIYOR.
     public class ArkaPlanIsleriIzolasyonTests : IAsyncLifetime
     {
-        private const string DbName = "DivisimaArkaPlanIzolasyonTest";
-        private static readonly string? ExplicitConn = Environment.GetEnvironmentVariable("DIVISIMA_TEST_SQL");
-
-        private static string ConnStr
-        {
-            get
-            {
-                var baseConn = string.IsNullOrWhiteSpace(ExplicitConn)
-                    ? @"Server=(localdb)\MSSQLLocalDB;Trusted_Connection=True;TrustServerCertificate=True;"
-                    : ExplicitConn;
-                return new SqlConnectionStringBuilder(baseConn) { InitialCatalog = DbName }.ConnectionString;
-            }
-        }
+        // Kasitli olarak VAR OLMAYAN bir veritabani adi: host'un gercek bir kaynaga
+        // (gelistirici DivisimaDb'si) baglanmasini engeller, ama kurulmasi da gerekmez.
+        private const string KullanilmayanDb = "DivisimaArkaPlanIzolasyon_KULLANILMAZ";
 
         private sealed class IzolasyonFactory : WebApplicationFactory<Program>
         {
@@ -58,52 +72,30 @@ namespace Divisima.IntegrationTests
                 {
                     var d = services.SingleOrDefault(x => x.ServiceType == typeof(DbContextOptions<DivisimaDbContext>));
                     if (d != null) services.Remove(d);
-                    services.AddDbContext<DivisimaDbContext>(o => o.UseSqlServer(ConnStr));
+                    services.AddDbContext<DivisimaDbContext>(o => o.UseSqlServer(
+                        $"Server=(localdb)\\MSSQLLocalDB;Initial Catalog={KullanilmayanDb};"
+                      + "Trusted_Connection=True;TrustServerCertificate=True;Connect Timeout=3;"));
                 });
             }
         }
 
         private IzolasyonFactory? _factory;
-        private bool _sqlAvailable;
 
-        private static DivisimaDbContext NewContext() =>
-            new DivisimaDbContext(new DbContextOptionsBuilder<DivisimaDbContext>().UseSqlServer(ConnStr).Options);
-
-        public async Task InitializeAsync()
+        public Task InitializeAsync()
         {
-            try
-            {
-                await using (var pre = NewContext())
-                {
-                    await pre.Database.EnsureDeletedAsync();
-                    await pre.Database.EnsureCreatedAsync();
-                }
-                _factory = new IzolasyonFactory();
-                _ = _factory.Services;
-                _sqlAvailable = true;
-            }
-            catch (Exception ex) when (!string.IsNullOrWhiteSpace(ExplicitConn))
-            {
-                throw new InvalidOperationException(
-                    "DIVISIMA_TEST_SQL verildi ancak izolasyon testi ortami hazirlanamadi - ATLANMAMALI.", ex);
-            }
-            catch { _sqlAvailable = false; }
+            _factory = new IzolasyonFactory();
+            _ = _factory.Services;   // host'u GERCEKTEN kur - DI kayitlari ancak boyle olculur
+            return Task.CompletedTask;
         }
 
         public async Task DisposeAsync()
         {
             if (_factory != null) await _factory.DisposeAsync();
-            if (!_sqlAvailable) return;
-            try { await using var ctx = NewContext(); await ctx.Database.EnsureDeletedAsync(); } catch { }
         }
-
-        private bool Skipped() => !_sqlAvailable;
 
         [Fact]
         public void TEST_HOSTUNDA_HANGFIRE_ARKA_PLAN_SUNUCUSU_KOSMAZ()
         {
-            if (Skipped()) return;
-
             var barindirilanlar = _factory!.Services.GetServices<IHostedService>().ToList();
 
             // VAKUM KIRICI: host GERCEKTEN barindirilan servis tasiyor olmali. Aksi halde
@@ -125,8 +117,6 @@ namespace Divisima.IntegrationTests
         [Fact]
         public void ARKA_PLAN_KAPALI_OLSA_DA_OUTBOX_ISLEYICISI_COZULEBILIR()
         {
-            if (Skipped()) return;
-
             using var scope = _factory!.Services.CreateScope();
             var islemci = scope.ServiceProvider.GetService<Divisima.Bussiness.Outbox.OutboxProcessor>();
             islemci.Should().NotBeNull(

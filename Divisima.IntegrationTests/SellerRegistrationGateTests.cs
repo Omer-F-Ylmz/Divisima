@@ -64,8 +64,8 @@ namespace Divisima.IntegrationTests
             try
             {
                 await using var ctx = NewContext();
-                await ctx.Database.EnsureDeletedAsync();
-                await ctx.Database.EnsureCreatedAsync();
+                await TestDbKurulum.SilAsync(ctx.Database);
+                await TestDbKurulum.OlusturAsync(ctx.Database);
                 _sqlAvailable = true;
             }
             catch (Exception ex) when (!string.IsNullOrWhiteSpace(ExplicitConn))
@@ -79,7 +79,7 @@ namespace Divisima.IntegrationTests
         public async Task DisposeAsync()
         {
             if (!_sqlAvailable) return;
-            try { await using var ctx = NewContext(); await ctx.Database.EnsureDeletedAsync(); } catch { }
+            try { await using var ctx = NewContext(); await TestDbKurulum.SilAsync(ctx.Database); } catch { }
         }
 
         private bool Skipped() => !_sqlAvailable;
