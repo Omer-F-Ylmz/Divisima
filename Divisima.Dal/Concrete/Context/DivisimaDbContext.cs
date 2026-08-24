@@ -131,6 +131,35 @@ namespace Divisima.DataAccess.Concrete.Context
 
                 // Açıklayıcı yorum: Aynı ürün + beden tek satır olmalı (benzersiz index)
                 b.HasIndex(s => new { s.product_id, s.size }).IsUnique();
+
+                // ══ DALGA D / D2 - REFERANS BUTUNLUGU DB'DE ═══════════════════════════════
+                //
+                // OLCULEN ONCE-DURUM: product_stocks -> products FK'si YOKTU. Dev veritabaninda
+                // 120 YETIM satir vardi (40 ayri product_id, 3..182) - Dalga 3'un performans
+                // seed temizligi urun satirlarini DOGRUDAN silmis, stok satirlarini birakmisti.
+                //
+                // "Bugun uretimde fiziksel silme yolu yok" (ProductManager.Delete SOFT-delete)
+                // bunu ONLEMEYE YETMEZ - kullanici karari: yarin da olmayacagi anlamina gelmiyor
+                // ve bir pin kirildiginda hasar COKTAN olusmus olur. Ayni tabloda bu gece zaten
+                // bir kez "kimse buraya dokunmaz" varsayiminin bedeli odendi (filtresiz UNIQUE
+                // indeks -> urunun TUM bedenlerini kaybettiren guncelleme, Dalga B).
+                //
+                // SILME DAVRANISI: Restrict (SQL Server'da ON DELETE NO ACTION) - OLCUMLE SECILDI.
+                // products'a isaret eden MEVCUT iki FK de (product_reviews, order_items)
+                // NO_ACTION; yani deponun kendi konvansiyonu zaten "silmeyi ENGELLE".
+                // CASCADE REDDEDILDI: uretimde silme SOFT oldugu icin cascade normal isleyiste
+                // HIC atesLENMEZ - yalnizca TEHLIKELI durumda (dogrudan SQL ile fiziksel silme)
+                // atesLENIR ve tam da durdurulmasi gereken anda stok gecmisini SESSIZCE goturur.
+                //
+                // NAVIGATION EKLENMEDI: ProductStock duz bir entity (yalniz product_id tasiyor)
+                // ve oyle kalmali - iliski model duzeyinde navigasyonsuz tanimlanabiliyor.
+                // ProductStock'ta is_active global filtresi YOK (bilincli - satir 796), Product'ta
+                // VAR; FK yalnizca INSERT/DELETE'i DB duzeyinde baglar, sorgulari etkilemez.
+                b.HasOne<Product>()
+                 .WithMany()
+                 .HasForeignKey(s => s.product_id)
+                 .OnDelete(DeleteBehavior.Restrict)
+                 .HasConstraintName("FK_product_stocks_product_id");   // ad SEMA DOSYASIYLA ayni - gerekce migration'da
             });
 
             // Açıklayıcı yorum: Category tablo + kolon konfigürasyonu
