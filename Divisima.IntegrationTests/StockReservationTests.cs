@@ -73,21 +73,22 @@ namespace Divisima.IntegrationTests
             var (mgr, ctx) = NewManager();
             await using var d = ctx;
 
-            var reserve = await mgr.ReserveStock(pid, "M", 3, orderId: 5001);
+            var oid = await GercekSiparisAsync(ctx);   // D-SEMA-FIX: uydurma id yerine GERCEK siparis
+            var reserve = await mgr.ReserveStock(pid, "M", 3, orderId: oid);
             reserve.Item2.Success.Should().BeTrue($"rezervasyon basarili olmali: {reserve.Item2.Message}");
             var afterReserve = await ReadStockAsync(pid);
             afterReserve.physical.Should().Be(10, "REZERVE fiziksel stogu DUSURMEZ");
             afterReserve.reserved.Should().Be(3);
             afterReserve.available.Should().Be(7);
 
-            var confirm = await mgr.ConfirmReservation(5001);
+            var confirm = await mgr.ConfirmReservation(oid);
             confirm.Item2.Success.Should().BeTrue();
             var afterConfirm = await ReadStockAsync(pid);
             afterConfirm.physical.Should().Be(7, "ONAY fiziksel stogu dusurur");
             afterConfirm.reserved.Should().Be(0, "onaydan sonra rezerve serbest kalir");
             afterConfirm.available.Should().Be(7);
 
-            (await ReservationCountAsync(5001, ReservationStatusEnum.Confirmed)).Should().Be(1);
+            (await ReservationCountAsync(oid, ReservationStatusEnum.Confirmed)).Should().Be(1);
             (await MovementsAsync(pid)).Should().ContainSingle(m =>
                 m.movement_type == (byte)StockMovementType.Out && m.quantity == 3, "onay bir Out hareketi yazmali");
         }
@@ -100,17 +101,18 @@ namespace Divisima.IntegrationTests
             var (mgr, ctx) = NewManager();
             await using var d = ctx;
 
-            (await mgr.ReserveStock(pid, "M", 4, orderId: 5002)).Item2.Success.Should().BeTrue();
+            var oid = await GercekSiparisAsync(ctx);   // D-SEMA-FIX: uydurma id yerine GERCEK siparis
+            (await mgr.ReserveStock(pid, "M", 4, orderId: oid)).Item2.Success.Should().BeTrue();
             (await ReadStockAsync(pid)).reserved.Should().Be(4, "on kosul: rezerve olusmali");
 
-            var release = await mgr.ReleaseReservation(5002);
+            var release = await mgr.ReleaseReservation(oid);
             release.Item2.Success.Should().BeTrue();
 
             var after = await ReadStockAsync(pid);
             after.physical.Should().Be(10, "SERBEST BIRAKMA fiziksel stogu DEGISTIRMEZ");
             after.reserved.Should().Be(0);
             after.available.Should().Be(10);
-            (await ReservationCountAsync(5002, ReservationStatusEnum.Released)).Should().Be(1);
+            (await ReservationCountAsync(oid, ReservationStatusEnum.Released)).Should().Be(1);
         }
 
         [Fact]
@@ -121,11 +123,12 @@ namespace Divisima.IntegrationTests
             var (mgr, ctx) = NewManager();
             await using var d = ctx;
 
-            (await mgr.ReserveStock(pid, "M", 3, orderId: 5003)).Item2.Success.Should().BeTrue();
-            await mgr.ConfirmReservation(5003);
+            var oid = await GercekSiparisAsync(ctx);   // D-SEMA-FIX: uydurma id yerine GERCEK siparis
+            (await mgr.ReserveStock(pid, "M", 3, orderId: oid)).Item2.Success.Should().BeTrue();
+            await mgr.ConfirmReservation(oid);
             (await ReadStockAsync(pid)).physical.Should().Be(7, "on kosul: ilk onay dusurmus olmali");
 
-            await mgr.ConfirmReservation(5003);
+            await mgr.ConfirmReservation(oid);
 
             var after = await ReadStockAsync(pid);
             after.physical.Should().Be(7, "ikinci onay stogu TEKRAR dusurmemeli");
@@ -142,11 +145,12 @@ namespace Divisima.IntegrationTests
             var (mgr, ctx) = NewManager();
             await using var d = ctx;
 
-            (await mgr.ReserveStock(pid, "M", 4, orderId: 5004)).Item2.Success.Should().BeTrue();
-            await mgr.ReleaseReservation(5004);
+            var oid = await GercekSiparisAsync(ctx);   // D-SEMA-FIX: uydurma id yerine GERCEK siparis
+            (await mgr.ReserveStock(pid, "M", 4, orderId: oid)).Item2.Success.Should().BeTrue();
+            await mgr.ReleaseReservation(oid);
             (await ReadStockAsync(pid)).reserved.Should().Be(0, "on kosul: ilk serbest birakma calismali");
 
-            await mgr.ReleaseReservation(5004);
+            await mgr.ReleaseReservation(oid);
 
             var after = await ReadStockAsync(pid);
             after.reserved.Should().Be(0, "rezerve negatife dusmemeli");
@@ -162,7 +166,8 @@ namespace Divisima.IntegrationTests
             var (mgr, ctx) = NewManager();
             await using var d = ctx;
 
-            (await mgr.ReserveStock(pid, "M", 6, orderId: 5005)).Item2.Success.Should().BeTrue();
+            var oid = await GercekSiparisAsync(ctx);   // D-SEMA-FIX: uydurma id yerine GERCEK siparis
+            (await mgr.ReserveStock(pid, "M", 6, orderId: oid)).Item2.Success.Should().BeTrue();
 
             var m = await ReadStockAsync(pid, "M");
             var l = await ReadStockAsync(pid, "L");
@@ -202,7 +207,8 @@ namespace Divisima.IntegrationTests
             var (mgr, ctx) = NewManager();
             await using var d = ctx;
 
-            (await mgr.ReserveStock(pid, "M", 6, orderId: 5006)).Item2.Success.Should().BeTrue();
+            var oid = await GercekSiparisAsync(ctx);   // D-SEMA-FIX: uydurma id yerine GERCEK siparis
+            (await mgr.ReserveStock(pid, "M", 6, orderId: oid)).Item2.Success.Should().BeTrue();
 
             var bad = await mgr.AdjustStock(pid, "M", 2, "rezerve altina indirme denemesi");
 
@@ -249,11 +255,12 @@ namespace Divisima.IntegrationTests
             await using var d = ctx;
 
             // Odemesi onaylanmis siparis: rezervasyon onaylanmis, fiziksel dusmus
-            (await mgr.ReserveStock(pid, "M", 4, orderId: 5007)).Item2.Success.Should().BeTrue();
-            await mgr.ConfirmReservation(5007);
+            var oid = await GercekSiparisAsync(ctx);   // D-SEMA-FIX: uydurma id yerine GERCEK siparis
+            (await mgr.ReserveStock(pid, "M", 4, orderId: oid)).Item2.Success.Should().BeTrue();
+            await mgr.ConfirmReservation(oid);
             (await ReadStockAsync(pid)).physical.Should().Be(6, "on kosul: onay fizikseli dusurmus olmali");
 
-            var inc = await mgr.IncreaseStock(pid, "M", 4, referenceId: 5007);
+            var inc = await mgr.IncreaseStock(pid, "M", 4, referenceId: oid);
 
             inc.Item2.Success.Should().BeTrue();
             var after = await ReadStockAsync(pid);
@@ -273,12 +280,13 @@ namespace Divisima.IntegrationTests
             await using var d = ctx;
 
             // 5 adetlik siparis onaylanmis -> fiziksel 5
-            (await mgr.ReserveStock(pid, "M", 5, orderId: 5008)).Item2.Success.Should().BeTrue();
-            await mgr.ConfirmReservation(5008);
+            var oid = await GercekSiparisAsync(ctx);   // D-SEMA-FIX: uydurma id yerine GERCEK siparis
+            (await mgr.ReserveStock(pid, "M", 5, orderId: oid)).Item2.Success.Should().BeTrue();
+            await mgr.ConfirmReservation(oid);
             (await ReadStockAsync(pid)).physical.Should().Be(5, "on kosul");
 
             // KISMI iptal: 5 adetten yalniz 2 adet iade
-            (await mgr.IncreaseStock(pid, "M", 2, referenceId: 5008)).Item2.Success.Should().BeTrue();
+            (await mgr.IncreaseStock(pid, "M", 2, referenceId: oid)).Item2.Success.Should().BeTrue();
 
             var after = await ReadStockAsync(pid);
             after.physical.Should().Be(7, "kismi iadede YALNIZ iade edilen adet geri donmeli (5 + 2)");

@@ -238,9 +238,11 @@ namespace Divisima.IntegrationTests
             azalis.Item2.Success.Should().BeTrue();
 
             // Gercek satis yolu: rezervasyon -> onay (Out hareketi yazar).
-            // GERCEK bir siparis satiri kurulur: `stock_reservations.order_id` uzerinde yayin
-            // semasinda FK var (01_schema.sql) - uydurma bir id ile calismak, ortama gore
-            // davranan kirilgan bir test olurdu.
+            // GERCEK bir siparis satiri kurulur: `stock_reservations.order_id` uzerinde FK var.
+            // NOT (D-SEMA-FIX): bu yorum eskiden "yayin semasinda (01_schema.sql) FK var" diyordu -
+            // yani kisit YALNIZ o dosyada tanimliydi ve EF tarafinda YOKTU. O ayrisma kapandi:
+            // artik tek dogruluk kaynagi EF migrations ve FK HER ORTAMDA yururlukte. Uydurma bir
+            // id ile calismak o zaman "ortama gore davranan" bir testti; simdi HER YERDE duser.
             var siparisId = await SiparisSatiriKurAsync();
             var rez = await WithScopeAsync(sp => sp.GetRequiredService<IStockService>()
                 .ReserveStock(urunId, "M", 2, siparisId));

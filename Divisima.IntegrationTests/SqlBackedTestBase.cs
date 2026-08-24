@@ -68,6 +68,18 @@ namespace Divisima.IntegrationTests
 
         protected bool Skipped() => !_sqlAvailable;
 
+        // === D-SEMA-FIX: GERCEK SIPARIS KURGUSU (uydurma id YERINE) ==========================
+        // Stok testleri `ReserveStock(..., orderId: 5001)` gibi UYDURMA sayilar geciriyordu.
+        // Uretimde o parametre HER ZAMAN OrderManager'in az once yazdigi GERCEK bir siparisin
+        // id'sidir; kurgu bunu atliyordu ve `FK_stock_reservations_order_id` eklenince kirildi.
+        // Kurgu UYDURMAYA degil URETIME uyduruldu - Sprint 8 madde 10'da ayni karar verilmisti
+        // ("kolonu opsiyonel yapmak yerine KURGULAR uretimle ayni sozlesmeye uyduruldu"):
+        // hicbir gercek rezervasyon var olmayan bir siparise ait olamaz, yani FK dogru olan.
+        // Uygulamasi TestVeriKurgusu'nda - ayni yardimciyi SqlBackedTestBase turetmeyen
+        // test siniflari da (ClaimBeforeSendTests, AdminStockAndImageTests) kullaniyor.
+        protected static Task<int> GercekSiparisAsync(DivisimaDbContext ctx, byte durum = 0) =>
+            TestVeriKurgusu.GercekSiparisAsync(ctx, durum);
+
         // Açıklayıcı yorum: Her test KENDI musterisini benzersiz alanlarla yaratir - var olan
         // satirlara guvenmek yok (testler paralel kosabilir).
         protected async Task<Customer> NewCustomerAsync(decimal storeCredit = 0m, int loyaltyPoints = 0)

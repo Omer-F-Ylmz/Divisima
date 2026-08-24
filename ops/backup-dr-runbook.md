@@ -46,8 +46,24 @@ dotnet ef migrations add <Ad> --project Divisima.Dal --startup-project Divisima.
 dotnet ef database update --project Divisima.Dal --startup-project Divisima.API
 # Geri alma:  dotnet ef database update <OncekiMigration>
 ```
-> NOT: Bu projede henuz migration yok. Ilk adim: `dotnet ef migrations add InitialCreate`.
-> Alternatif/kopru: database/mssql/01_schema.sql ile semayi dogrudan kurabilirsiniz.
+> **SEMANIN TEK DOGRULUK KAYNAGI `Divisima.Dal/Migrations`'dir** (D-SEMA karari).
+> Bu depoda 11 migration vardir; `InitialCreate` en eskisidir. (Bu satir uzun sure
+> "Bu projede henuz migration yok" diyordu - on bir migration BAYATLAMISTI.)
+>
+> **.NET araci olmayan bir ortamda** (felaket kurtarma, ayricalikli bir bastion) sema
+> `database/mssql/01_schema.sql` ile kurulur. O dosya URETILMIS bir artefakttir
+> (`dotnet ef migrations script --idempotent` ciktisi), elle duzenlenmez ve idempotenttir -
+> ayni script iki kez kosulabilir.
+>
+> ```bash
+> sqlcmd -S <sunucu> -d Divisima -b -f 65001 -i database/mssql/01_schema.sql
+> ```
+> `-b` ve `-f 65001` ZORUNLUDUR; gerekcesi dosyanin basindaki baslik blogunda (bayraksiz
+> koşumda script'in yarisi calismasa bile sqlcmd EXIT 0 doner).
+>
+> Sema kurulumu AYRICALIKLI bir adimdir: uygulamanin calisma zamani DB kullanicisinin DDL
+> yetkisi YOKTUR ve uygulama acilista migrate ETMEZ (bkz. `ops/deployment-checklist.md` ->
+> "Veritabani semasi").
 
 ## 5. Felaket senaryolari
 

@@ -15,6 +15,35 @@
 - `Captcha--SecretKey`
 - `ConnectionStrings--DivisimaDb`
 
+## Veritabanı şeması - UYGULAMA AÇILMADAN ÖNCE (D-ŞEMA-FIX)
+
+**Uygulama açılışta migrate ETMEZ** (`Program.cs`'te `Migrate()` çağrısı yoktur) ve bu
+checklist'in aşağıdaki maddesi uygulamanın DB kullanıcısına **DDL yetkisi vermez**. Yani şema
+kurulumu **ayrı ve ayrıcalıklı bir adımdır**; kimse yapmazsa uygulama boş/eksik bir şemaya
+bağlanır. Bu adım bugüne kadar checklist'te **hiç yoktu**.
+
+**Tek doğruluk kaynağı: `Divisima.Dal/Migrations`.** İki uygulama yolu vardır, ikisi de aynı
+sonucu verir — ortamda .NET araç zinciri varsa (a), yoksa (b):
+
+- [ ] **(a) EF ile** — DDL yetkili bir hesapla, uygulama sürümüyle **aynı** commit'ten:
+      `dotnet ef database update --project Divisima.Dal --startup-project Divisima.API`
+- [ ] **(b) Script ile** — `database/mssql/01_schema.sql` (üretilmiş, idempotent):
+      `sqlcmd -S <sunucu> -d Divisima -b -f 65001 -i database/mssql/01_schema.sql`
+      **`-b` ve `-f 65001` ZORUNLU** — gerekçesi dosyanın başında ve `database/README.md`'de
+      (bayraksız koşum, script'in yarısı çalışmasa bile `EXIT 0` döndürür).
+- [ ] Veritabanı **`Turkish_CI_AS`** collation ile oluşturuldu
+      (`CREATE DATABASE Divisima COLLATE Turkish_CI_AS`) — Latin1 kurulumda kimlik
+      karşılaştırmaları sessizce yanlış çalışır (CLAUDE.md bölüm 6c)
+- [ ] Şema kurulduktan **sonra** uygulama başlatıldı (AdminSeeder ilk admini o anda oluşturur)
+- [ ] Kurulum sonrası doğrulandı: `SELECT COUNT(*) FROM sys.foreign_keys` → **53** ve
+      `sys.tables` → **45** (+ `__EFMigrationsHistory`)
+- [ ] Uygulamanın çalışma zamanı DB kullanıcısı **DDL yetkisiz** (aşağıdaki "Zorunlu adımlar")
+      — migration'ı koşan hesap AYRI ve yalnızca dağıtım anında kullanılır
+
+> **SIRA:** şema → (opsiyonel `02_seed.sql`) → uygulama açılışı → frontend dağıtımı.
+> Migration üreten bir sürüm yayınlanıyorsa şema adımı **kod deploy'undan ÖNCE** koşar
+> (expand-migrate-contract; bkz. `ops/backup-dr-runbook.md`).
+
 ## Frontend origin'i - HER YAYINDA (DALGA-4-FIX-2 / M1)
 
 Storefront ve admin panelinin API tabanı **kaynakta sabit gömülüdür** ve dağıtımda

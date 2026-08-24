@@ -15,13 +15,27 @@ namespace Divisima.Bussiness.Concrete
     public class SizeGuideManager : ISizeGuideService
     {
         private readonly ISizeGuideEntryDal _dal;
+        private readonly ICategoryDal _categoryDal;
 
-        public SizeGuideManager(ISizeGuideEntryDal dal) { _dal = dal; }
+        public SizeGuideManager(ISizeGuideEntryDal dal, ICategoryDal categoryDal)
+        {
+            _dal = dal;
+            _categoryDal = categoryDal;
+        }
 
         public async Task<(HttpStatusCode, Result)> Upsert(SizeGuideEntryDto dto)
         {
             if (string.IsNullOrWhiteSpace(dto.size_label))
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.SizeGuideInvalid));
+
+            // D-SEMA-FIX: kategori VARLIK kontrolu. Bu uc bugune kadar dto.category_id'yi
+            // DOGRULAMADAN yaziyordu; var olmayan bir kategori id'si SESSIZCE yetim satir
+            // uretiyordu. FK_size_guide_entries_category_id eklendigi an ayni girdi HTTP 500
+            // olurdu - yani kendi degisikligimiz operatore anlasilmaz bir hata dondururdu.
+            // Guard, ayni katmandaki ProductAttributeManager.SetAttributes idiyomunun aynisi
+            // (var olmayan ebeveyn -> 404 + adiyla mesaj), boylece 500 yerine DOGRU yanit doner.
+            if (await _categoryDal.GetAsync(c => c.id == dto.category_id) == null)
+                return (HttpStatusCode.NotFound, new ErrorResult(Messages.CategoryNotFound));
 
             // Açıklayıcı yorum: Aynı kategori+beden varsa güncelle, yoksa ekle (idempotent)
             var existing = await _dal.GetAsync(e => e.category_id == dto.category_id && e.size_label == dto.size_label && e.is_active);

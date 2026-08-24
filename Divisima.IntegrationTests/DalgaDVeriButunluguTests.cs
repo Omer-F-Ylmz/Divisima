@@ -253,11 +253,16 @@ namespace Divisima.IntegrationTests
             var sema = File.ReadAllText(Path.Combine(kok!.FullName, "database", "mssql", "01_schema.sql"));
 
             // VAKUM KIRICI: dosya gercekten sema dosyasi olmali.
-            sema.Should().Contain("CREATE TABLE product_stocks", "01_schema.sql gercek sema tanimi olmali");
+            // NOT (D-SEMA-FIX): 01_schema.sql artik ELLE BAKIMLI degil, EF migration'larindan
+            // URETILEN bir artefakt. Uretilen script tablolari KOSELI PARANTEZLE yazar
+            // (`CREATE TABLE [product_stocks]`), eski elle yazilan dosya parantezsiz yaziyordu -
+            // bu vakum kirici o bicime bagliydi ve dosya degisince kirildi. Assert'in OLCTUGU
+            // sey degismedi, yalnizca aradigi bicim guncellendi.
+            sema.Should().Contain("CREATE TABLE [product_stocks]", "01_schema.sql gercek sema tanimi olmali");
 
             sema.Should().Contain("ADD CONSTRAINT FK_product_stocks_product_id",
-                "deploy varligi bu FK'yi ZATEN tanimliyor - EF tarafindaki ad onunla AYNI olmali, "
-              + "aksi halde sema dosyasindan kurulmus bir DB'de MUKERRER kisit olusur");
+                "kisit adi deploy artefaktinda da GORUNMELI - D2 migration'inin ham SQL'i uretilen "
+              + "script'e oldugu gibi gomulur; ad degisirse burasi da degisir");
 
             var migrationYolu = Path.Combine(kok.FullName, "Divisima.Dal", "Migrations");
             var migrationHam = Directory.GetFiles(migrationYolu, "*YetimStokReferansButunlugu.cs")

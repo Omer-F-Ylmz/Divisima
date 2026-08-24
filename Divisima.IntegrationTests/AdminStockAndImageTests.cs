@@ -192,8 +192,15 @@ namespace Divisima.IntegrationTests
 
             if (reserve > 0)
             {
+                // D-SEMA-FIX: `orderId: 0` bir SENTINEL'di - uretimde rezervasyon HER ZAMAN
+                // OrderManager'in az once yazdigi gercek bir siparisin id'siyle acilir.
+                // FK_stock_reservations_order_id eklenince kurgu kirildi ve URETIME uyduruldu.
+                int siparisId;
+                await using (var kur = NewContext())
+                    siparisId = await TestVeriKurgusu.GercekSiparisAsync(kur);
+
                 var r = await WithScopeAsync(sp => sp.GetRequiredService<IStockService>()
-                    .ReserveStock(productId, "M", reserve, orderId: 0));
+                    .ReserveStock(productId, "M", reserve, orderId: siparisId));
                 r.Item2.Success.Should().BeTrue($"rezervasyon kurulmali: {r.Item2.Message}");
             }
             return productId;

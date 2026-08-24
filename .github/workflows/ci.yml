@@ -238,3 +238,28 @@ jobs:
         run: dotnet format Divisima-Backend.sln whitespace --verify-no-changes --verbosity diagnostic
       - name: Bicimlendirme dogrulama - style (ZORUNLU)
         run: dotnet format Divisima-Backend.sln style --verify-no-changes --verbosity diagnostic
+
+      # === MODEL <-> MIGRATION KAYMA KAPISI (D-SEMA-FIX) - ZORUNLU ===
+      # NEDEN VAR (olcum): testler semayi `EnsureCreated` ile MODELDEN kuruyor (46 cagri),
+      # `Migrate` cagrisi SIFIR. Dev ve uretim ise MIGRATION'lardan kuruluyor. Yani DbContext'i
+      # migration uretmeden degistiren biri, testleri YESIL birakirken dev/uretim semasini
+      # sessizce ayirir - ve bunu tutan HICBIR SEY yoktu.
+      # Karar sonrasi (tek dogruluk kaynagi EF migrations) bu kapi, senkronu KORUYAN tek
+      # mekanizmadir. `database/mssql/01_schema.sql` de migration'lardan URETILDIGI icin
+      # kayma, dagitim artefaktini da bayatlatirdi.
+      # CIKIS KODU DAVRANISI OLCULDU (varsayilmadi):
+      #   senkron  -> exit 0   ("No changes have been made to the model since the last migration.")
+      #   kayma    -> exit 1   ("Changes have been made to the model since the last migration.")
+      # Surum 8.* ile PINLI: proje EF Core 8 hedefliyor. PATH acikca eklenir - global araclarin
+      # dizini kosucuda PATH'te olmayabilir ve o zaman "dotnet ef" bulunamaz.
+      # SURUM DAVRANISI DOGRULANDI: ayni komut, ayni surumle (8.0.30) izole bir tool-path'e
+      # kurulup yerelde iki dalda da kosuldu (senkron -> 0, kayma -> 1).
+      - name: EF araci kurulumu (8.x)
+        run: |
+          dotnet tool install --global dotnet-ef --version 8.*
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+      - name: Model ile migration'lar SENKRON mu (ZORUNLU)
+        run: |
+          set -o pipefail
+          dotnet ef migrations has-pending-model-changes \
+            --project Divisima.Dal --startup-project Divisima.API --context DivisimaDbContext

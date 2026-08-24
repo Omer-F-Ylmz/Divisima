@@ -984,18 +984,100 @@ namespace Divisima.DataAccess.Concrete.Context
             // NOT: Mevcut Customer satirlari icin migration user_type=2 backfill etmeli; admin(1) satirlari elle atanir.
             modelBuilder.Entity<Customer>().Property(c => c.user_type).HasDefaultValue((byte)2);
 
-            // === A3: Referans butunlugu (FK constraint) - DB seviyesinde yetim kayit onleme ===
-            // Aciklayici yorum: Entity'ler duz (navigation yok), bu yuzden navigation'siz Fluent API.
-            // DeleteBehavior.Restrict - kaza cascade silme onleme (uygulama zaten soft-delete kullaniyor).
-            // NOT: Mevcut veride yetim kayit varsa migration bu FK'lari eklerken hata verir - once veri temizligi gerekir.
-            modelBuilder.Entity<Order>().HasOne<Customer>().WithMany().HasForeignKey(o => o.customer_id).OnDelete(DeleteBehavior.Restrict);
-            modelBuilder.Entity<OrderItem>().HasOne<Order>().WithMany().HasForeignKey(i => i.order_id).OnDelete(DeleteBehavior.Restrict);
-            modelBuilder.Entity<OrderItem>().HasOne<Product>().WithMany().HasForeignKey(i => i.product_id).OnDelete(DeleteBehavior.Restrict);
-            modelBuilder.Entity<Address>().HasOne<Customer>().WithMany().HasForeignKey(a => a.customer_id).OnDelete(DeleteBehavior.Restrict);
-            modelBuilder.Entity<Cart>().HasOne<Customer>().WithMany().HasForeignKey(c => c.customer_id).OnDelete(DeleteBehavior.Restrict);
-            modelBuilder.Entity<CartItem>().HasOne<Cart>().WithMany().HasForeignKey(i => i.cart_id).OnDelete(DeleteBehavior.Restrict);
-            modelBuilder.Entity<ProductReview>().HasOne<Product>().WithMany().HasForeignKey(r => r.product_id).OnDelete(DeleteBehavior.Restrict);
-            modelBuilder.Entity<WishlistItem>().HasOne<Customer>().WithMany().HasForeignKey(w => w.customer_id).OnDelete(DeleteBehavior.Restrict);
+            // ══ REFERANS BUTUNLUGU - TEK MERKEZ (D-SEMA-FIX) ══════════════════════════════════
+            //
+            // Entity'ler DUZ (navigation YOK), bu yuzden navigation'siz Fluent API kullaniliyor.
+            // Silme davranisi HER FK'da Restrict = SQL Server'da ON DELETE NO ACTION.
+            // CASCADE REDDEDILDI (olculdu): uretimde silme SOFT'tur (is_active=false) ve fiziksel
+            // silme yapan TEK yol dogrudan SQL'dir; cascade tam da durdurulmasi gereken anda
+            // gecmisi SESSIZCE goturur.
+            //
+            // AD BICIMI: FK_<cocuk_tablo>_<kolon> (KISA bicim). EF'in varsayilani
+            // FK_<cocuk>_<ebeveyn>_<kolon> (UZUN bicim) idi; ikisi ayni kolonda MUKERRER kisit
+            // uretir. Depo tarihinde bu iki bicim yan yana yasadi - D-SEMA olcumu ortak dokuz
+            // iliskinin SEKIZINDE ad ayrismasi buldu. Bu blok ayrismayi kapatir; asagidaki
+            // sekiz satirdaki HasConstraintName BILINCLI BIR YENIDEN ADLANDIRMADIR.
+            //
+            // KAPSAM NEREDEN GELDI (D-SEMA, olcum): eski database/mssql/01_schema.sql 55 FK
+            // beyan ediyordu ama dokumandaki komutla yalniz 17'si kuruluyordu (batch abort).
+            // 54 gecerli adayin tamami GERCEK dev verisine karsi tarandi.
+            //
+            // TASINMAYAN IKI ADAY (gerekce):
+            //   * orders.payment_id -> payments.id : ANLAMSIZ. Order.payment_id bir string?'tir
+            //     ve IYZICO'NUN PaymentId'sini tasir (IyzicoPaymentManager), bizim payments
+            //     tablomuza isaret ETMEZ. Tip bile uyumsuz (nvarchar -> int) ve sema dosyasinda
+            //     bu satir batch'i dusuruyordu. Kaynak: eski generate_schema.py FK'lari
+            //     ADLANDIRMA KURALINDAN cikariyordu ("<x>_id -> <x>s(id)"), modelden degil.
+            //   * consent_records.customer_id -> customers.id : KULLANICI KARARI, FK KONMAZ.
+            //     KVKK'da riza kaydi, hesap silindikten sonra da "su kisi su tarihte suna riza
+            //     verdi" kaniti olarak saklanmasi GEREKEBILIR; FK bunu imkansiz kilardi.
+            //     Dev'deki 6 yetim satir SILINMEZ. Ayrinti: CLAUDE.md D-SEMA-FIX bolumu.
+            //
+            // NOT: product_stocks -> products FK'si (Dalga D / D2) bu bloga TASINMADI, kendi
+            // yapilandirma blogunda duruyor (yukarida, ProductStock). Adi zaten kisa bicimde.
+
+            // ── (1) MEVCUT DOKUZ ILISKI - ad KISA bicime cekiliyor (yeniden adlandirma) ──────
+            modelBuilder.Entity<Order>().HasOne<Customer>().WithMany().HasForeignKey(o => o.customer_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_orders_customer_id");
+            modelBuilder.Entity<OrderItem>().HasOne<Order>().WithMany().HasForeignKey(i => i.order_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_order_items_order_id");
+            modelBuilder.Entity<OrderItem>().HasOne<Product>().WithMany().HasForeignKey(i => i.product_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_order_items_product_id");
+            modelBuilder.Entity<Address>().HasOne<Customer>().WithMany().HasForeignKey(a => a.customer_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_addresses_customer_id");
+            modelBuilder.Entity<Cart>().HasOne<Customer>().WithMany().HasForeignKey(c => c.customer_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_carts_customer_id");
+            modelBuilder.Entity<CartItem>().HasOne<Cart>().WithMany().HasForeignKey(i => i.cart_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_cart_items_cart_id");
+            modelBuilder.Entity<ProductReview>().HasOne<Product>().WithMany().HasForeignKey(r => r.product_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_product_reviews_product_id");
+            modelBuilder.Entity<WishlistItem>().HasOne<Customer>().WithMany().HasForeignKey(w => w.customer_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_wishlist_items_customer_id");
+
+            // ── (2) VERI KANITI OLAN 28 ILISKI ──────────────────────────────────────────────
+            // Her biri GERCEK dev verisinde ihlalsiz olcculdu (cocuk tablo DOLU: 127'ye kadar satir).
+            modelBuilder.Entity<CartItem>().HasOne<Product>().WithMany().HasForeignKey(i => i.product_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_cart_items_product_id");
+            modelBuilder.Entity<Invoice>().HasOne<Customer>().WithMany().HasForeignKey(e => e.customer_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_invoices_customer_id");
+            modelBuilder.Entity<Invoice>().HasOne<Order>().WithMany().HasForeignKey(e => e.order_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_invoices_order_id");
+            modelBuilder.Entity<LoyaltyTransaction>().HasOne<Customer>().WithMany().HasForeignKey(e => e.customer_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_loyalty_transactions_customer_id");
+            modelBuilder.Entity<LoyaltyTransaction>().HasOne<Order>().WithMany().HasForeignKey(e => e.order_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_loyalty_transactions_order_id");
+            modelBuilder.Entity<OrderSnapshotItem>().HasOne<OrderSnapshot>().WithMany().HasForeignKey(e => e.order_snapshot_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_order_snapshot_items_order_snapshot_id");
+            modelBuilder.Entity<OrderSnapshotItem>().HasOne<Product>().WithMany().HasForeignKey(e => e.product_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_order_snapshot_items_product_id");
+            modelBuilder.Entity<OrderSnapshot>().HasOne<Customer>().WithMany().HasForeignKey(e => e.customer_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_order_snapshots_customer_id");
+            modelBuilder.Entity<OrderSnapshot>().HasOne<Order>().WithMany().HasForeignKey(e => e.order_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_order_snapshots_order_id");
+            modelBuilder.Entity<OrderStatusHistory>().HasOne<Order>().WithMany().HasForeignKey(e => e.order_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_order_status_histories_order_id");
+            modelBuilder.Entity<Order>().HasOne<Address>().WithMany().HasForeignKey(e => e.address_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_orders_address_id");
+            modelBuilder.Entity<Payment>().HasOne<Order>().WithMany().HasForeignKey(e => e.order_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_payments_order_id");
+            modelBuilder.Entity<PriceDropSubscription>().HasOne<Product>().WithMany().HasForeignKey(e => e.product_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_price_drop_subscriptions_product_id");
+            modelBuilder.Entity<ProductImage>().HasOne<Product>().WithMany().HasForeignKey(e => e.product_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_product_images_product_id");
+            modelBuilder.Entity<Product>().HasOne<Category>().WithMany().HasForeignKey(e => e.category_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_products_category_id");
+            modelBuilder.Entity<Product>().HasOne<SubCategory>().WithMany().HasForeignKey(e => e.sub_category_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_products_sub_category_id");
+            modelBuilder.Entity<ReturnRequest>().HasOne<Customer>().WithMany().HasForeignKey(e => e.customer_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_return_requests_customer_id");
+            modelBuilder.Entity<ReturnRequest>().HasOne<Order>().WithMany().HasForeignKey(e => e.order_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_return_requests_order_id");
+            modelBuilder.Entity<ReturnRequest>().HasOne<Product>().WithMany().HasForeignKey(e => e.product_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_return_requests_product_id");
+            modelBuilder.Entity<SecurityEvent>().HasOne<Customer>().WithMany().HasForeignKey(e => e.customer_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_security_events_customer_id");
+            modelBuilder.Entity<Shipment>().HasOne<Order>().WithMany().HasForeignKey(e => e.order_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_shipments_order_id");
+            modelBuilder.Entity<StockMovement>().HasOne<Product>().WithMany().HasForeignKey(e => e.product_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_stock_movements_product_id");
+            modelBuilder.Entity<StockNotificationRequest>().HasOne<Product>().WithMany().HasForeignKey(e => e.product_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_stock_notification_requests_product_id");
+            modelBuilder.Entity<StockReservation>().HasOne<Order>().WithMany().HasForeignKey(e => e.order_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_stock_reservations_order_id");
+            modelBuilder.Entity<StockReservation>().HasOne<Product>().WithMany().HasForeignKey(e => e.product_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_stock_reservations_product_id");
+            modelBuilder.Entity<StoreCreditTransaction>().HasOne<Customer>().WithMany().HasForeignKey(e => e.customer_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_store_credit_transactions_customer_id");
+            modelBuilder.Entity<StoreCreditTransaction>().HasOne<Order>().WithMany().HasForeignKey(e => e.order_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_store_credit_transactions_order_id");
+            modelBuilder.Entity<UserSession>().HasOne<Customer>().WithMany().HasForeignKey(e => e.customer_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_user_sessions_customer_id");
+
+            // ── (3) VERI KANITI OLMAYAN 16 ILISKI - cocuk tablo dev'de BOS ──────────────────
+            // DURUST KAYIT: bunlarin dogrulugu VERIDEN gelmiyor, YAZMA YOLU OKUNARAK dogrulandi.
+            // Her birinin tek yazicisi bir manager'dir ve kimligi token'dan/dogrulanmis bir
+            // DTO'dan alir; sentinel (0) ya da dis sistem referansi kullanan YOK.
+            // Tip uyumu ayrica olculdu (hepsi int -> int).
+            modelBuilder.Entity<CollectionItem>().HasOne<Collection>().WithMany().HasForeignKey(e => e.collection_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_collection_items_collection_id");
+            modelBuilder.Entity<CollectionItem>().HasOne<Product>().WithMany().HasForeignKey(e => e.product_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_collection_items_product_id");
+            modelBuilder.Entity<CouponUsage>().HasOne<Coupon>().WithMany().HasForeignKey(e => e.coupon_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_coupon_usages_coupon_id");
+            modelBuilder.Entity<CouponUsage>().HasOne<Customer>().WithMany().HasForeignKey(e => e.customer_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_coupon_usages_customer_id");
+            modelBuilder.Entity<CouponUsage>().HasOne<Order>().WithMany().HasForeignKey(e => e.order_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_coupon_usages_order_id");
+            modelBuilder.Entity<CustomerDevice>().HasOne<Customer>().WithMany().HasForeignKey(e => e.customer_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_customer_devices_customer_id");
+            modelBuilder.Entity<ProductAttribute>().HasOne<Product>().WithMany().HasForeignKey(e => e.product_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_product_attributes_product_id");
+            modelBuilder.Entity<ProductQuestion>().HasOne<Customer>().WithMany().HasForeignKey(e => e.customer_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_product_questions_customer_id");
+            modelBuilder.Entity<ProductQuestion>().HasOne<Product>().WithMany().HasForeignKey(e => e.product_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_product_questions_product_id");
+            modelBuilder.Entity<ProductReview>().HasOne<Customer>().WithMany().HasForeignKey(e => e.customer_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_product_reviews_customer_id");
+            modelBuilder.Entity<RecentlyViewedProduct>().HasOne<Customer>().WithMany().HasForeignKey(e => e.customer_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_recently_viewed_products_customer_id");
+            modelBuilder.Entity<RecentlyViewedProduct>().HasOne<Product>().WithMany().HasForeignKey(e => e.product_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_recently_viewed_products_product_id");
+            modelBuilder.Entity<ReviewHelpfulVote>().HasOne<Customer>().WithMany().HasForeignKey(e => e.customer_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_review_helpful_votes_customer_id");
+            modelBuilder.Entity<SizeGuideEntry>().HasOne<Category>().WithMany().HasForeignKey(e => e.category_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_size_guide_entries_category_id");
+            modelBuilder.Entity<SubCategory>().HasOne<Category>().WithMany().HasForeignKey(e => e.category_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_sub_categories_category_id");
+            modelBuilder.Entity<WishlistItem>().HasOne<Product>().WithMany().HasForeignKey(e => e.product_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_wishlist_items_product_id");
 
             base.OnModelCreating(modelBuilder);
         }

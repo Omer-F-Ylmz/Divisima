@@ -59,12 +59,18 @@ namespace Divisima.IntegrationTests
             const int callers = 8;                 // 8 x 2 = 16 talep > 10 stok
 
             var pid = await NewProductWithStockAsync(stock);
+            // D-SEMA-FIX: her paralel cagri AYRI ve GERCEK bir siparise ait olmali.
+            // Once uydurma id'ler (7100+i) geciliyordu; FK_stock_reservations_order_id
+            // eklenince kirildi - kurgu uretimle ayni sozlesmeye uyduruldu.
+            var siparisler = new List<int>();
+            await using (var kurulumCtx = NewContext())
+                for (var s = 0; s < callers; s++) siparisler.Add(await GercekSiparisAsync(kurulumCtx));
             var managers = Enumerable.Range(0, callers).Select(_ => NewManager()).ToList();
             try
             {
                 // Her cagri AYRI siparis id ile rezerve etmeye calisir
                 var results = await Task.WhenAll(managers.Select((m, i) =>
-                    m.mgr.ReserveStock(pid, "M", each, orderId: 7100 + i)));
+                    m.mgr.ReserveStock(pid, "M", each, orderId: siparisler[i])));
 
                 var successCount = results.Count(r => r.Item2.Success);
                 var after = await ReadStockAsync(pid);
@@ -119,12 +125,18 @@ namespace Divisima.IntegrationTests
             if (Skipped()) return;
             const int stock = 10;
             var pid = await NewProductWithStockAsync(stock, "M", "L");
+            // D-SEMA-FIX: her paralel cagri AYRI ve GERCEK bir siparise ait olmali.
+            // Once uydurma id'ler (7100+i) geciliyordu; FK_stock_reservations_order_id
+            // eklenince kirildi - kurgu uretimle ayni sozlesmeye uyduruldu.
+            var siparisler = new List<int>();
+            await using (var kurulumCtx = NewContext())
+                for (var s = 0; s < 6; s++) siparisler.Add(await GercekSiparisAsync(kurulumCtx));
             var managers = Enumerable.Range(0, 6).Select(_ => NewManager()).ToList();
             try
             {
                 // 6 eszamanli istek YALNIZ M bedenine
                 var results = await Task.WhenAll(managers.Select((m, i) =>
-                    m.mgr.ReserveStock(pid, "M", 2, orderId: 7200 + i)));
+                    m.mgr.ReserveStock(pid, "M", 2, orderId: siparisler[i])));
                 var successCount = results.Count(r => r.Item2.Success);
 
                 var m2 = await ReadStockAsync(pid, "M");
@@ -157,11 +169,17 @@ namespace Divisima.IntegrationTests
             const int callers = 8;
 
             var pid = await NewProductWithStockAsync(stock);
+            // D-SEMA-FIX: her paralel cagri AYRI ve GERCEK bir siparise ait olmali.
+            // Once uydurma id'ler (7100+i) geciliyordu; FK_stock_reservations_order_id
+            // eklenince kirildi - kurgu uretimle ayni sozlesmeye uyduruldu.
+            var siparisler = new List<int>();
+            await using (var kurulumCtx = NewContext())
+                for (var s = 0; s < callers; s++) siparisler.Add(await GercekSiparisAsync(kurulumCtx));
             var managers = Enumerable.Range(0, callers).Select(_ => NewManager()).ToList();
             try
             {
                 var results = await Task.WhenAll(managers.Select((m, i) =>
-                    m.mgr.ReserveStock(pid, "M", each, orderId: 7300 + i)));
+                    m.mgr.ReserveStock(pid, "M", each, orderId: siparisler[i])));
 
                 var basarili = results.Count(r => r.Item2.Success);
                 var cakisma = results.Count(r => r.Item1 == System.Net.HttpStatusCode.Conflict);
@@ -192,11 +210,17 @@ namespace Divisima.IntegrationTests
             const int callers = 8;
 
             var pid = await NewProductWithStockAsync(stock);
+            // D-SEMA-FIX: her paralel cagri AYRI ve GERCEK bir siparise ait olmali.
+            // Once uydurma id'ler (7100+i) geciliyordu; FK_stock_reservations_order_id
+            // eklenince kirildi - kurgu uretimle ayni sozlesmeye uyduruldu.
+            var siparisler = new List<int>();
+            await using (var kurulumCtx = NewContext())
+                for (var s = 0; s < callers; s++) siparisler.Add(await GercekSiparisAsync(kurulumCtx));
             var managers = Enumerable.Range(0, callers).Select(_ => NewManager()).ToList();
             try
             {
                 var results = await Task.WhenAll(managers.Select((m, i) =>
-                    m.mgr.ReserveStock(pid, "M", each, orderId: 7400 + i)));
+                    m.mgr.ReserveStock(pid, "M", each, orderId: siparisler[i])));
 
                 var kodlar = string.Join(",", results.Select(r => (int)r.Item1));
                 results.Count(r => r.Item2.Success).Should().Be(stock,

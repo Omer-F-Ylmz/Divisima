@@ -138,13 +138,16 @@ namespace Divisima.IntegrationTests
             int requestId;
             await using (var ctx = NewContext())
             {
+                var urunId = await TestVeriKurgusu.GercekUrunAsync(ctx);
                 var req = new StockNotificationRequest
                 {
                     // SPRINT 8 MADDE 10: unsubscribe_token artik ZORUNLU (NOT NULL). Tokensiz bir satir
                     // hicbir zaman abonelikten cikarilamaz - o yuzden kolon opsiyonel BIRAKILMADI ve
                     // dogrudan insert yapan test kurgulari da uretimle ayni sozlesmeye uyuyor.
                     unsubscribe_token = Divisima.Core.Utilities.Security.UnsubscribeToken.Yeni(),
-                    product_id = 1,
+                    // D-SEMA-FIX: product_id artik GERCEK bir urune isaret etmeli
+                    // (FK_stock_notification_requests_product_id). Uydurma id uretimde olusamaz.
+                    product_id = urunId,
                     size = "M",
                     email = $"stok-{Guid.NewGuid():N}@divisima.test",
                     is_notified = false,
@@ -181,13 +184,16 @@ namespace Divisima.IntegrationTests
             int subId;
             await using (var ctx = NewContext())
             {
+                var urunId = await TestVeriKurgusu.GercekUrunAsync(ctx);
                 var sub = new PriceDropSubscription
                 {
                     // SPRINT 8 MADDE 10: unsubscribe_token artik ZORUNLU (NOT NULL). Tokensiz bir satir
                     // hicbir zaman abonelikten cikarilamaz - o yuzden kolon opsiyonel BIRAKILMADI ve
                     // dogrudan insert yapan test kurgulari da uretimle ayni sozlesmeye uyuyor.
                     unsubscribe_token = Divisima.Core.Utilities.Security.UnsubscribeToken.Yeni(),
-                    product_id = 7,
+                    // D-SEMA-FIX: product_id artik GERCEK bir urune isaret etmeli
+                    // (FK_price_drop_subscriptions_product_id). Uydurma id uretimde olusamaz.
+                    product_id = urunId,
                     email = $"fiyat-{Guid.NewGuid():N}@divisima.test",
                     subscribed_price = 250m,
                     is_notified = false,
@@ -222,9 +228,11 @@ namespace Divisima.IntegrationTests
             if (Skipped()) return;
             var email = $"abone-{Guid.NewGuid():N}@divisima.test";
 
-            static StockNotificationRequest Kayit(string email, bool bildirildi) => new()
+            // D-SEMA-FIX: urun id ARTIK PARAMETRE - kayitlarin GERCEK bir urune baglanmasi
+            // gerekiyor (FK_stock_notification_requests_product_id).
+            static StockNotificationRequest Kayit(int urunId, string email, bool bildirildi) => new()
             {
-                product_id = 42,
+                product_id = urunId,
                 size = "L",
                 email = email,
                 is_notified = bildirildi,
@@ -237,10 +245,14 @@ namespace Divisima.IntegrationTests
                 unsubscribe_token = Divisima.Core.Utilities.Security.UnsubscribeToken.Yeni()
             };
 
+            int urunId;
+            await using (var kur = NewContext())
+                urunId = await TestVeriKurgusu.GercekUrunAsync(kur);
+
             int ilkId;
             await using (var ctx = NewContext())
             {
-                var ilk = Kayit(email, false);
+                var ilk = Kayit(urunId, email, false);
                 ctx.Set<StockNotificationRequest>().Add(ilk);
                 await ctx.SaveChangesAsync();
                 ilkId = ilk.id;
@@ -249,7 +261,7 @@ namespace Divisima.IntegrationTests
             var ikinciDeneme = async () =>
             {
                 await using var ctx = NewContext();
-                ctx.Set<StockNotificationRequest>().Add(Kayit(email, false));
+                ctx.Set<StockNotificationRequest>().Add(Kayit(urunId, email, false));
                 await ctx.SaveChangesAsync();
             };
             await ikinciDeneme.Should().ThrowAsync<DbUpdateException>(
@@ -265,7 +277,7 @@ namespace Divisima.IntegrationTests
             }
             await using (var ctx = NewContext())
             {
-                ctx.Set<StockNotificationRequest>().Add(Kayit(email, false));
+                ctx.Set<StockNotificationRequest>().Add(Kayit(urunId, email, false));
                 await ctx.SaveChangesAsync();
             }
 
