@@ -2954,3 +2954,83 @@ GO
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260824134356_UcEksikReferans'
+)
+BEGIN
+
+    DECLARE @ihlal TABLE (iliski NVARCHAR(200), adet INT);
+
+    INSERT INTO @ihlal SELECT N'invoice_items.invoice_id', COUNT(*) FROM [invoice_items] c WHERE c.[invoice_id] IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [invoices] p WHERE p.[id] = c.[invoice_id]);
+    INSERT INTO @ihlal SELECT N'invoice_items.product_id', COUNT(*) FROM [invoice_items] c WHERE c.[product_id] IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [products] p WHERE p.[id] = c.[product_id]);
+    INSERT INTO @ihlal SELECT N'review_helpful_votes.review_id', COUNT(*) FROM [review_helpful_votes] c WHERE c.[review_id] IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [product_reviews] p WHERE p.[id] = c.[review_id]);
+
+    DELETE FROM @ihlal WHERE adet = 0;
+
+    IF EXISTS (SELECT 1 FROM @ihlal)
+    BEGIN
+        DECLARE @liste NVARCHAR(1500) = N'';
+        SELECT @liste = LEFT(@liste + iliski + N'=' + CAST(adet AS NVARCHAR(20)) + N'  ', 1500) FROM @ihlal;
+        DECLARE @msg NVARCHAR(2048) =
+            N'REFERANS BUTUNLUGU KURULAMAZ - YETIM SATIR(LAR) VAR: ' + @liste +
+            N'| Bu migration SATIR SILMEZ. Her satir ELLE incelenmeli: ya ebeveyn kaydi geri '   +
+            N'getirilmeli ya da cocuk satir bilincli olarak silinmeli. Karar operatorundur.';
+        RAISERROR (@msg, 16, 1);
+    END
+
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260824134356_UcEksikReferans'
+)
+BEGIN
+    CREATE INDEX [IX_invoice_items_product_id] ON [invoice_items] ([product_id]);
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260824134356_UcEksikReferans'
+)
+BEGIN
+    ALTER TABLE [invoice_items] ADD CONSTRAINT [FK_invoice_items_invoice_id] FOREIGN KEY ([invoice_id]) REFERENCES [invoices] ([id]) ON DELETE NO ACTION;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260824134356_UcEksikReferans'
+)
+BEGIN
+    ALTER TABLE [invoice_items] ADD CONSTRAINT [FK_invoice_items_product_id] FOREIGN KEY ([product_id]) REFERENCES [products] ([id]) ON DELETE NO ACTION;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260824134356_UcEksikReferans'
+)
+BEGIN
+    ALTER TABLE [review_helpful_votes] ADD CONSTRAINT [FK_review_helpful_votes_review_id] FOREIGN KEY ([review_id]) REFERENCES [product_reviews] ([id]) ON DELETE NO ACTION;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260824134356_UcEksikReferans'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20260824134356_UcEksikReferans', N'8.0.30');
+END;
+GO
+
+COMMIT;
+GO
+

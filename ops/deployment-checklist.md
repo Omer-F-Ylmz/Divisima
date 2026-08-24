@@ -35,7 +35,7 @@ sonucu verir — ortamda .NET araç zinciri varsa (a), yoksa (b):
       (`CREATE DATABASE Divisima COLLATE Turkish_CI_AS`) — Latin1 kurulumda kimlik
       karşılaştırmaları sessizce yanlış çalışır (CLAUDE.md bölüm 6c)
 - [ ] Şema kurulduktan **sonra** uygulama başlatıldı (AdminSeeder ilk admini o anda oluşturur)
-- [ ] Kurulum sonrası doğrulandı: `SELECT COUNT(*) FROM sys.foreign_keys` → **53** ve
+- [ ] Kurulum sonrası doğrulandı: `SELECT COUNT(*) FROM sys.foreign_keys` → **56** ve
       `sys.tables` → **45** (+ `__EFMigrationsHistory`)
 - [ ] Uygulamanın çalışma zamanı DB kullanıcısı **DDL yetkisiz** (aşağıdaki "Zorunlu adımlar")
       — migration'ı koşan hesap AYRI ve yalnızca dağıtım anında kullanılır

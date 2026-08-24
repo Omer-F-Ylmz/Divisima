@@ -168,7 +168,7 @@ SELECT (SELECT COUNT(*) FROM sys.tables WHERE is_ms_shipped = 0),
             // VAKUM KIRICI: script GERCEKTEN bir sey kurmus olmali. Bos bir script de
             // "iki kez kosunca hata vermez" testini gecerdi.
             ilk.tablo.Should().BeGreaterThan(40, "script semayi GERCEKTEN kurmali");
-            ilk.fk.Should().Be(53, "karar verilen FK kumesi");
+            ilk.fk.Should().Be(56, "karar verilen FK kumesi");
             ilk.indeks.Should().BeGreaterThan(60);
 
             // ASIL OLCUM: ayni script IKINCI kez - istisna FIRLARSA test kirmizi olur.
@@ -307,6 +307,34 @@ JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id 
             var_.Item2.Success.Should().BeTrue($"gecerli kategori KABUL edilmeli: {var_.Item2.Message}");
         }
 
+        // ── 3c) MIGRATION ARACLARI UYGULAMA CONFIG'INDEN BAGIMSIZ ──────────────────────
+        // OLCULEN ONCE-DURUM: tasarim zamani fabrikasi YOKKEN `dotnet ef ...` DbContext'i
+        // elde etmek icin Program.cs'in HOST'unu calistiriyordu - yani fail-fast blogunu da.
+        // Sema ile HICBIR ILGISI OLMAYAN eksik bir JWT anahtari migration komutlarini
+        // dusuruyordu. IKI YERDE birebir yasandi: (a) yeni CI kayma kapisi `format-check`
+        // job'inda exit 1 verdi (o job'da secret YOK), (b) felaket kurtarmada runbook'un
+        // onerdigi `dotnet ef database update` tam uretim config'i sart kosuyordu.
+        [Fact]
+        public void TASARIM_ZAMANI_FABRIKASI_UYGULAMA_CONFIGI_OLMADAN_CONTEXT_URETIR()
+        {
+            var fabrika = new Divisima.Dal.DivisimaDesignTimeDbContextFactory();
+
+            // ASIL OLCUM: hicbir yapilandirma ENJEKTE EDILMEDEN context uretilebilmeli.
+            using var ctx = fabrika.CreateDbContext(Array.Empty<string>());
+            ctx.Should().NotBeNull("fabrika uygulama host'una BAGIMLI OLMAMALI");
+
+            // VAKUM KIRICI: uretilen context GERCEKTEN Divisima modelini tasimali - bos ya da
+            // yanlis bir context de yukaridaki assert'i gecerdi.
+            ctx.Model.FindEntityType(typeof(Divisima.Entity.Entities.ProductStock))
+              .Should().NotBeNull("model YUKLENMIS olmali");
+            ctx.Model.GetEntityTypes().Count().Should().BeGreaterThan(40, "tam model beklenir");
+
+            // CIFT-ANLAM KIRICI: fabrika SQL Server saglayicisini secmis olmali. Provider
+            // secilmemis bir context de yukaridaki iki assert'i gecer ama migration araclari
+            // ise yaramaz.
+            ctx.Database.ProviderName.Should().Be("Microsoft.EntityFrameworkCore.SqlServer");
+        }
+
         // ── 4) ARTEFAKT SOZLESMESI: dosya URETILMIS, elle bakim BITTI ──────────────────
         [Fact]
         public void SEMA_DOSYASI_URETILMIS_ARTEFAKT_ve_MIGRATIONLARLA_SENKRON()
@@ -358,6 +386,8 @@ JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id 
             "coupon_usages.customer_id -> customers.id",
             "coupon_usages.order_id -> orders.id",
             "customer_devices.customer_id -> customers.id",
+            "invoice_items.invoice_id -> invoices.id",
+            "invoice_items.product_id -> products.id",
             "invoices.customer_id -> customers.id",
             "invoices.order_id -> orders.id",
             "loyalty_transactions.customer_id -> customers.id",
@@ -388,6 +418,7 @@ JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id 
             "return_requests.order_id -> orders.id",
             "return_requests.product_id -> products.id",
             "review_helpful_votes.customer_id -> customers.id",
+            "review_helpful_votes.review_id -> product_reviews.id",
             "security_events.customer_id -> customers.id",
             "shipments.order_id -> orders.id",
             "size_guide_entries.category_id -> categories.id",

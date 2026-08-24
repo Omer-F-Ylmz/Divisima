@@ -1079,6 +1079,28 @@ namespace Divisima.DataAccess.Concrete.Context
             modelBuilder.Entity<SubCategory>().HasOne<Category>().WithMany().HasForeignKey(e => e.category_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_sub_categories_category_id");
             modelBuilder.Entity<WishlistItem>().HasOne<Product>().WithMany().HasForeignKey(e => e.product_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_wishlist_items_product_id");
 
+            // ── (4) ESKI SEMA DOSYASININ HIC TANIMLAMADIGI UC GERCEK ILISKI ────────────────
+            // D-SEMA olcumu, dosyanin yalniz FAZLA FK tanimlamadigini; GERCEK olan bazilarini
+            // da ATLADIGINI gosterdi. Kok sebep yine ureteç: FK'lari "<x>_id -> <x>s(id)"
+            // kuralindan cikariyordu, yani `review_id` icin olmayan bir `reviews` tablosunu
+            // ariyor ve BULAMAYINCA SESSIZCE atliyordu. `invoice_items` ise hic kapsanmamisti.
+            // Kullanici karari: ucu de EKLENSIN.
+            //   invoice_items.invoice_id -> invoices.id : fatura kalemi FATURASIZ olamaz.
+            //     Yazma yolu okundu: InvoiceManager once faturayi yazar (satir 168), SONRA
+            //     `ii.invoice_id = invoice.id` atar (172) - id her zaman GERCEK.
+            //     VERI KANITI VAR: 27 satir, yetim 0.
+            //   invoice_items.product_id -> products.id : kalem `order_items.product_id`den
+            //     gelir. VERI KANITI VAR: 27 satir, yetim 0.
+            //   review_helpful_votes.review_id -> product_reviews.id : ProductReviewManager
+            //     .VoteHelpful yorumu ONCE arar ve yoksa 404 doner (satir 138), yani id
+            //     dogrulanmis gelir. Tablo dev'de BOS - kanit YAZMA YOLUNDAN.
+            // NOT: products.seller_id / order_items.seller_id BILEREK EKLENMEDI - satici
+            // modulu kapali (Seller:RegistrationEnabled=false, sellers 0 satir) ve iki FK
+            // modul acilirken G4 on kosuluyla BIRLIKTE eklenecek (bkz. KARARLAR).
+            modelBuilder.Entity<InvoiceItem>().HasOne<Invoice>().WithMany().HasForeignKey(e => e.invoice_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_invoice_items_invoice_id");
+            modelBuilder.Entity<InvoiceItem>().HasOne<Product>().WithMany().HasForeignKey(e => e.product_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_invoice_items_product_id");
+            modelBuilder.Entity<ReviewHelpfulVote>().HasOne<ProductReview>().WithMany().HasForeignKey(e => e.review_id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("FK_review_helpful_votes_review_id");
+
             base.OnModelCreating(modelBuilder);
         }
     }

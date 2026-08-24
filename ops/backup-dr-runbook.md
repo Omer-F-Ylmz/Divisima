@@ -46,9 +46,36 @@ dotnet ef migrations add <Ad> --project Divisima.Dal --startup-project Divisima.
 dotnet ef database update --project Divisima.Dal --startup-project Divisima.API
 # Geri alma:  dotnet ef database update <OncekiMigration>
 ```
+
+#### SEMA ISLEMLERI UYGULAMA CONFIG'I GEREKTIRMEZ (D-SEMA-FIX)
+
+**Kurtarma sirasinda migration komutlarini kosmak icin uygulamanin secret'larina IHTIYACINIZ
+YOKTUR.** Yalnizca veritabani baglantisi gerekir ve o da tek bir ortam degiskeniyle verilir:
+
+```bash
+export ConnectionStrings__DivisimaDb="Server=<sunucu>;Database=Divisima;User Id=<ddl_yetkili>;Password=<...>;TrustServerCertificate=True;"
+dotnet ef database update --project Divisima.Dal --startup-project Divisima.API
+```
+
+`Divisima.Dal/DivisimaDesignTimeDbContextFactory` bunu saglar; baglanti dizgesini su sirayla
+cozer: **(1)** `ConnectionStrings__DivisimaDb` ortam degiskeni -> **(2)**
+`Divisima.API/appsettings.Development.json` -> **(3)** `Divisima.API/appsettings.json`
+(`CHANGE_ME` yer tutucusu GECERLI SAYILMAZ) -> **(4)** bilerek BAGLANILAMAZ bir yer tutucu.
+Dorduncu basamak yalnizca baglanmayan komutlar (`migrations add`, `migrations script`,
+`has-pending-model-changes`) icindir; `database update` oraya duserse **gurultulu patlar** -
+sessizce yanlis bir veritabanina YAZMAZ.
+
+**NEDEN BOYLE BIR NOT VAR - OLCULDU:** fabrika eklenmeden ONCE `dotnet ef ...` komutlari
+DbContext'i elde etmek icin baslangic projesinin HOST'unu calistiriyor, dolayisiyla
+`Program.cs`'in fail-fast blogunu da tetikliyordu. Yani bir **SEMA** islemi, uygulamanin TAM
+URETIM CONFIG'INI - `TokenOptions:SecurityKey` dahil - sart kosuyordu. Ayricalikli bir
+bastion'da sema kurtarmaya calisan operator, JWT anahtariyla hicbir ilgisi olmayan bir is icin
+`FATAL: Config - TokenOptions:SecurityKey eksik` ile karsilasirdi. Bu bir CI adiminda ortaya
+cikti ama asil bedeli **tam da bu runbook'un anlattigi kurtarma yolunda** olurdu.
+
 > **SEMANIN TEK DOGRULUK KAYNAGI `Divisima.Dal/Migrations`'dir** (D-SEMA karari).
-> Bu depoda 11 migration vardir; `InitialCreate` en eskisidir. (Bu satir uzun sure
-> "Bu projede henuz migration yok" diyordu - on bir migration BAYATLAMISTI.)
+> Bu depoda 12 migration vardir; `InitialCreate` en eskisidir. (Bu satir uzun sure
+> "Bu projede henuz migration yok" diyordu - on iki migration BAYATLAMISTI.)
 >
 > **.NET araci olmayan bir ortamda** (felaket kurtarma, ayricalikli bir bastion) sema
 > `database/mssql/01_schema.sql` ile kurulur. O dosya URETILMIS bir artefakttir
