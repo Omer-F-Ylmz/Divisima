@@ -147,6 +147,35 @@ jobs:
             --blame-hang --blame-hang-timeout 8m --blame-hang-dump-type none \
             2>&1 | tee test-output.txt
 
+      # === RETRY GORUNURLUGU (D3 karari) ===========================================
+      # SORU: `model` kilidi yeniden denemesi (SqlException 1807) bu kosumda ATESLEDI MI?
+      # OLCULDU ki bu bilgi YESIL bir kosumda HICBIR anonim kanaldan okunamiyor:
+      #   GET /actions/jobs/{id}/logs -> HTTP 403 ,  GET /actions/runs/{id}/logs -> HTTP 403
+      #   TESHIS adimi yalniz `if: failure()` kosuyor, yesilde hic calismaz
+      # Annotation'lar ise ANONIM OKUNABILIYOR (bu depoda `warning` seviyelileri zaten
+      # okuyoruz), bu yuzden ozet oraya basiliyor. Boylece "yesil cunku 1807 hic gelmedi"
+      # ile "yesil cunku retry calisti" AYIRT EDILEBILIR olur.
+      #
+      # ADIM JOB'I KIRMAZ: eslesme olmasa da cikis kodu 0 (`|| true` + `exit 0`).
+      # `continue-on-error` KULLANILMADI - o bayrak, deponun kuralina gore adimin
+      # annotation'dan okunmasini gerektirir; burada adim ZATEN her zaman basarili.
+      - name: TestDbKurulum - 1807 yeniden deneme ozeti (annotation)
+        if: always()
+        run: |
+          F=test-output.txt
+          if [ ! -f "$F" ]; then
+            echo "::warning::TestDbKurulum: cikti dosyasi yok - 1807 yeniden deneme sayisi OLCULEMEDI"
+            exit 0
+          fi
+          N=$(grep -ac "\[TestDbKurulum\] 1807" "$F" || true)
+          N=${N:-0}
+          if [ "$N" -gt 0 ]; then
+            echo "::warning::TestDbKurulum: 'model' kilidi yeniden denemesi (SQL 1807) $N kez ATESLEDI - retry GEREKTI ve kurtardi."
+          else
+            echo "::warning::TestDbKurulum: 1807 yeniden denemesi bu kosumda HIC ATESLEMEDI (0) - retry devrede, gerekmedi."
+          fi
+          exit 0
+
       # Aciklayici yorum: TESHIS - kirmizi durumda hata ozetini run Summary sayfasina yazar.
       # Public repoda Summary anonim GORUNUR (log indirme yetki ister). Boylece her kirmizi
       # kendi sebebini soyler ve log erisimi olmadan da teshis edilebilir.

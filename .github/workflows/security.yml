@@ -266,6 +266,27 @@ jobs:
             --blame-hang --blame-hang-timeout 8m --blame-hang-dump-type none \
             2>&1 | tee test-output.txt
 
+      # === RETRY GORUNURLUGU (D3 karari) - gerekcesi ci.yml'daki ikiziyle AYNI ======
+      # `model` kilidi yeniden denemesi (SqlException 1807) YESIL bir kosumda hicbir anonim
+      # kanaldan okunamiyor (job/run log uclari HTTP 403; TESHIS yalniz `if: failure()`).
+      # Annotation ANONIM okunabildigi icin ozet oraya basilir. ADIM JOB'I KIRMAZ.
+      - name: TestDbKurulum - 1807 yeniden deneme ozeti (annotation)
+        if: always()
+        run: |
+          F=test-output.txt
+          if [ ! -f "$F" ]; then
+            echo "::warning::TestDbKurulum: cikti dosyasi yok - 1807 yeniden deneme sayisi OLCULEMEDI"
+            exit 0
+          fi
+          N=$(grep -ac "\[TestDbKurulum\] 1807" "$F" || true)
+          N=${N:-0}
+          if [ "$N" -gt 0 ]; then
+            echo "::warning::TestDbKurulum: 'model' kilidi yeniden denemesi (SQL 1807) $N kez ATESLEDI - retry GEREKTI ve kurtardi."
+          else
+            echo "::warning::TestDbKurulum: 1807 yeniden denemesi bu kosumda HIC ATESLEMEDI (0) - retry devrede, gerekmedi."
+          fi
+          exit 0
+
       # Aciklayici yorum: TESHIS - kirmizi durumda hata ozetini run Summary sayfasina yazar.
       # Public repoda Summary anonim GORUNUR (log indirme yetki ister).
       - name: TESHIS - basarisiz test ozeti (Summary)

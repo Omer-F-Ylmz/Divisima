@@ -4826,6 +4826,33 @@ kosum ciktisinda `[TestDbKurulum] 1807 (...) - yeniden deneniyor` satiri belirir
 Ucunde de TAM 1 pin kirmizi / 4 yesil (lokalize). Hepsi geri alindi, `[MUTASYON]` izi
 depoda **0 dosya**.
 
+### PUSH RAPORU `84b0275` - HER IKI WORKFLOW TAMAMEN YESIL
+
+Push `10d794d..84b0275`. Adim bazinda + annotation duzeyinde dogrulandi.
+`CI - Build & Test` (`build-and-test` + `format-check`) ve `Security CI`
+(`tests` + `codeql` + `secret-scan` + `dependency-scan`) - **alti job da SUCCESS**,
+hicbirinde **failure seviyeli annotation YOK**. Bes sinifi dusuren
+"Could not obtain exclusive lock on database 'model'" satiri KAYBOLDU.
+
+**RETRY CI'DA ATESLENDI MI - BUGUN ANONIM OLARAK OKUNAMIYOR (olculdu, varsayilmadi).**
+Yeniden deneme satiri (`[TestDbKurulum] 1807 (...) - yeniden deneniyor`) kosum ciktisina
+basiliyor, ama:
+
+```
+GET /actions/jobs/{id}/logs   -> HTTP 403 (anonim)
+GET /actions/runs/{id}/logs   -> HTTP 403 (anonim)
+TESHIS adimi                  -> yalniz `if: failure()` kosuyor; YESIL run'da hic calismaz
+```
+
+Yani yesil bir kosumda bu satir hicbir anonim kanaldan gorulemiyor. **Bu kosum icin durust
+ifade: "retry DEVREDE; ATESLEYIP ATESLEMEDIGI OLCULEMEDI"** - "1807 hic gelmedi" DE denemez,
+cunku o da okunamiyor. Kanitlanan tek sey belirtinin (bes sinifin dusmesi) KAYBOLDUGU.
+
+**ACIK - KARAR BEKLIYOR:** kanali gorunur kilmak tek adimlik bir workflow degisikligidir -
+`test-output.txt` icinde bu satir aranip `::warning::` olarak basilirsa anonim okunabilir
+(annotation'lar anonim okunuyor; `warning` seviyeli olanlari bu depoda zaten okuyoruz).
+Kapsam disi oldugu icin YAPILMADI.
+
 ## ACIK KALAN (D5)
 
 - **Canli Redis turu OLCULMEDI** - dagitik kilit, blacklist, idempotency'nin Redis yolu ve
@@ -4833,6 +4860,303 @@ depoda **0 dosya**.
 - Fail-fast davranisi belgelendi ama **Redis kesintisi = deploy blokaji** sonucu bir URUN
   karari olarak yeniden degerlendirilebilir (acil durumda `Redis:Enabled=false` + TEK INSTANCE
   kacis yolu runbook'a yazildi).
+
+# DALGA D - D3 (GERCEK OLCEK PROVASI) - YALNIZ OLCUM
+
+Kod DEGISMEDI (`git status` temiz). Olcum dev veritabaninda yapildi, seed sonunda TAMAMEN
+silindi ve silindigi OLCUMLE kanitlandi.
+
+## OLCUM DUZENEGI ve SINIRLARI (once yazildi)
+
+- **k6 BU MAKINEDE YOK** (olculdu). `ops/load-test/k6-smoke.js` kosulamadi; yuk turu
+  **"OLCULMEDI -> staging"** olarak kaydedilir - D5'in canli Redis kalemiyle AYNI RAFTA.
+  Yerine elle harness: 30 tekrarli HTTP + `Stopwatch` (p50/p95) + yanit boyutu.
+- **Sorgu sayimi EF komut logundan.** `appsettings.json` `Microsoft.EntityFrameworkCore`i
+  `Warning`e kisiyor; olcum icin ortam degiskeniyle acildi
+  (`Serilog__MinimumLevel__Override__Microsoft.EntityFrameworkCore.Database.Command=Information`).
+  Sayim, log dosyasinin BAYT OFSETI isaretlenip aradaki `Executed DbCommand` satirlari
+  sayilarak yapildi (mutlak sayim acilis tohumlamasini da katardi).
+- **RATE LIMIT OLCUM ICIN YUKSELTILDI** (`RateLimit__GlobalPermitLimit=100000` vb.). 30
+  tekrarli tur global kovayi (100/dk) yakiyordu ve ilk turda **429** alindi. Olculen sey rate
+  limit DEGIL; bu bir olcum artefaktidir ve bilincli olarak kayitta. Yan kazanc: D5'te
+  merkezilestirilen `RateLimitPolitikasi` sayesinde tek ayar iki yolu da etkiledi.
+- **Arka plan isleri kapatildi** (`BackgroundJobs__Enabled=false`) - dakikalik outbox isi
+  sorgu sayimini kirletmesin. Bu, ayni dalgada eklenen bayragin ilk pratik kullanimi.
+- **GORSEL URETILMEDI** (kullanici sarti): D1 az once temizlendi, tekrar kirletilmedi.
+  Kosum sonrasi `Divisima.API/wwwroot/uploads/products` = **0 dosya**.
+
+## SEED (isaretli, geri alinabilir)
+
+Marker: `products.brand='D3OLCEK'`, `categories.slug LIKE 'd3olcek-%'`,
+`orders.order_number LIKE 'D3OLCEK-%'`.
+
+```
+kategori 8 · urun 400 (toplam katalog 403) · stok satiri 1400
+stoksuz urun 40 (%10) · indirimli urun 100 (%25) · beden/urun 2..5 (XS..XL)
+siparis 40 · siparis kalemi 80   (siparis toplamlari KALEMLERDEN turetildi)
+```
+
+## ONCE / SONRA (30 tekrar, ayni makine, ayni surec)
+
+```
+UC              ONCE (3 urun)                          SONRA (403 urun / 1400 stok / 40 siparis)
+                sorgu  p50      p95      bayt          sorgu  p50      p95      bayt
+filter s=1        -      -        -        -             4,0   20,1ms   23,4ms      417
+filter s=24     4,0   23,5ms   26,7ms      927           4,0   28,6ms   30,6ms    6.778
+filter s=60     4,0   25,5ms   31,3ms      927           4,0   42,7ms   47,7ms   16.763
+search          1,0   19,4ms   20,9ms      606           1,0   19,7ms   22,8ms    6.017
+admin getlist   3,0   23,6ms   26,2ms      928           3,0   43,6ms   46,5ms   27.848
+dashboard       3,0   22,7ms   27,5ms      173           3,0   22,8ms   27,0ms      177
+my-orders       1,0   18,1ms   20,6ms       74           1,0   18,4ms   20,7ms    5.136
+```
+
+**DALGA 3'UN YAPI PINLERI OLCEKTE DE TUTUYOR - SORGU SAYISI SATIR SAYISINDAN BAGIMSIZ.**
+`filter` size=1/24/60 -> **4/4/4** (403 urunle); `my-orders` 0 sipariste 1 sorgu, 40
+sipariste **yine 1**; `admin getlist` 3; `dashboard` 3. Liste uclari kalem basina ek sorgu
+ATMIYOR - "N+1 yok" iddiasi 3 uruncuk bir veride degil, 403 uruncuk bir veride de gecerli.
+
+**SURE PAYLOAD'A BAGLI, KATALOG BOYUTUNA DEGIL:** en net kanit `filter s=1` -> 403 urunluk
+katalogda **20,1 ms** (3 urunlukteki s=24 ile ayni buyukluk). Buyuyen tek sey donen govde.
+
+## EKSIK INDEKS - DALGA 3'UN ACIK SORUSU HALA ACIK (durust kayit)
+
+Dalga 3 sunu yazmisti: *"Eksik indeks onerisi: SIFIR (sinir: DMV gercek planlardan beslenir,
+62 uruncuk veride SQL Server hicbir indeksi onermeye deger bulmamis olabilir)."*
+403 urunle tekrar olculdu:
+
+```
+sys.dm_db_missing_index_details (bu DB)        -> 0 oneri
+sys.dm_db_missing_index_details (TUM DB'ler)   -> 0 oneri
+SQL Server acilisi 12:32 (saatlerdir ayakta, DMV sifirlanmis degil)
+```
+
+**"0 ONERI" BURADA KANIT DEGIL - VE BUNU OLCTUM.** DMV'nin canli oldugunu gostermek icin
+KASITLI olarak indekssiz esitlik sorgulari kosuldu (`products.color_hex`,
+`product_stocks.reserved_quantity`, iki tablolu join) -> **YINE 0 oneri**. Yani bu veri
+hacminde SQL Server, indekssiz bir tarama icin bile oneri URETMIYOR; dolayisiyla "oneri yok"
+ile "indeks gerekmiyor" AYNI SEY DEGIL.
+
+**SEBEP OLCULDU** (`sys.dm_exec_query_stats`): uc sorgularinin tamami **kosum basina 10-18
+mantiksal okuma** yapiyor. 403 satirlik `products` ve 1407 satirlik `product_stocks` yalnizca
+birkac sayfa; tam tarama zaten ~18 sayfa okumak demek ve hicbir indeks bunu yenemez.
+
+**SONUC: esik 400 urunun COK USTUNDE.** Dalga 3'un kalemi kapanmadi, yalnizca SINIRI
+KESINLESTI. Korlemesine indeks EKLENMEDI (kullanici sarti).
+
+## STOREFRONT GERCEK HACIMDE - YENI BULGU (ISLEV-KIRAN, DUZELTILMEDI)
+
+Temiz sayfa yuklemesi (arama yapmadan, tarayicida olculdu):
+
+```
+ilk yukleme API istegi : 2   (/api/category/getlist + /api/product/filter)
+bellege giren urun     : 24     <- VERITABANINDA 403
+"Daha Fazla Yukle"     : ana sayfada YOK (0 tiklama)
+kategori rotalari      : 0 EK ISTEK  (#/kategori/yeni, /elbise, /elbise/gunluk, /elbise/abiye)
+kategori dagilimi      : 8 kategorinin HER BIRINDE 3 urun   <- DB'de her birinde ~50
+sayfa agirligi         : 173 KB (7 kaynak)
+```
+
+**KOK SEBEP KAYNAKTA DOGRULANDI** (`frontend/api-bridge.js:211` `loadCatalog`):
+`{ page: 1, size: CATALOG_PAGE_SIZE }` - `CATALOG_PAGE_SIZE = 24`, **sayfa 2 HIC istenmiyor**
+ve `replaceProducts(mapped)` bellekteki katalogu bu 24 urunle DEGISTIRIYOR. Kategori
+sayfalari, filtreler ve "Daha Fazla Yukle" hep bu 24 urun uzerinde ISTEMCI TARAFINDA calisiyor.
+
+**URETIMDEKI ANLAMI:** gercek bir katalogla musteri, urunlerin **yalnizca ilk 24'unu**
+gezebilir; kalan **379'una (%94) gezinerek ULASILAMAZ**. Tek kacis yolu arama - o GERCEKTEN
+API'ye gidiyor (`/api/search/products`, 1 istek).
+
+**3 URUNLUK VERIDE GORUNMEZDI** - D3'un varlik sebebi tam olarak budur.
+
+**DUZELTILMEDI** (ev kurali: kapsam disi bulgu duzeltilmez, karar kullanicinindir).
+Aday cozumler: (i) `loadCatalog`a gercek sayfalama baglamak ("Daha Fazla Yukle" bittiginde
+sonraki sayfayi API'den cekmek), (ii) kategori rotasinin `category_id` ile SUNUCUYA filtre
+gondermesi (bugun istemci tarafinda suzuyor), (iii) sonsuz kaydirma. Ucu de storefront isi;
+backend ZATEN sayfali (`total_count`/`total_pages` donuyor, Dalga 3'te eklendi).
+
+## TEMIZLIK - KANITLI
+
+**FK SILME SIRASINI GERCEKTEN DAYATIYOR (canli kanit):** urunler stoklardan ONCE silinmeye
+calisildi -> **SqlException 547**, kisit adi `FK_product_stocks_product_id` (D2'de eklenen FK).
+Yani D2'nin koydugu koruma canli calisiyor.
+
+Dogru sirayla silindi ve zemin BIREBIR geri geldi:
+
+```
+silinen: order_items 80 · orders 40 · product_stocks 1400 · products 400 · categories 8
+SONRA  : products 3 (zemin 3) · product_stocks 7 (zemin 7) · categories 2 (zemin 2)
+         orders 54 (zemin 54)
+ARTIK  : D3OLCEK urun 0 · d3olcek kategori 0 · D3OLCEK siparis 0
+YETIM  : yetim stok satiri 0 · yetim siparis kalemi 0
+DEPO   : git status TEMIZ · D3OLCEK/d3_seed/statik.ps1 izi 0 dosya
+GORSEL : wwwroot/uploads/products 0 dosya (D1 temizligi korundu)
+PORT   : 5000 ve 5173 BOS (iki sunucu da durduruldu)
+```
+
+**IKI OLCUM HESABI SILINMEDI - BILINCLI:** `d3.admin.*` / `d3.musteri.*` hesaplarinin
+**6 riza kaydi** var ve `consent_records`ta FK YOK (bkz. D-SEMA karari). Silmek, bakim
+migration'larimizin IKI KEZ yaptigi hatayi - yetim riza kaydi uretmeyi - tekrarlardi.
+Ustelik uretimin kendi yolu hesap silme degil ANONIMLESTIRMEDIR. Hesaplar dev veritabaninda
+duran diger onlarca test hesabiyla ayni statude birakildi.
+
+# D3-FIX - KATALOG SAYFALAMASI (kullanici karari: SIMDI DUZELT)
+
+Bulgu launch'i bloke ediyordu (%94 erisilemez katalog) ve backend ZATEN sayfaliydi; eksik
+olan yalnizca istemciydi.
+
+**DURUST KAYIT - SEED IKI KEZ KURULDU:** ilk D3 turunun sonunda seed silinmisti (o turun
+sarti oydu). Duzeltmenin GERCEK HACIMDE olculmesi gerektigi icin **ayni isaretli seed
+YENIDEN kuruldu**, duzeltme onunla surulda, sonra tekrar temizlendi. Ikinci temizlik de
+FK kanitiyla birlikte asagida.
+
+## UC KALEM (hepsi `frontend/api-bridge.js`; index.html'e DOKUNULMADI)
+
+**1) GERCEK SAYFALAMA.** `sonrakiSayfayiCek(kategoriId)` - sunucunun bildirdigi
+`total_pages` okunur, `page: istenen` (kaydedilen sayfa + 1) ile SONRAKI sayfa cekilir.
+"Daha Fazla Yukle" dugmesi: index.html'in kendi dugmesi yalnizca bellekteki listeyi
+ilerletir ve bellek bitince KAYBOLUR; bellek bittigi ama sunucuda sayfa KALDIGI anda
+dugme yeniden konur ve o dugme GERCEK bir API sayfasi ceker. Hata SESSIZ DEGIL - kullanici
+"daha fazla" deyip hicbir sey olmadiysa toast ile ogrenir.
+
+**2) SAYFALAR BIRIKIR, BELLEK EZILMEZ.** `appendProducts` KIMLIGE gore tekillestirerek
+ekler. `replaceProducts` KORUNDU ama yalnizca ILK yuklemede kullanilir (mock katalogu
+temizlemek icin). Boylece kullanici bir kategoriye gidip GERI DONDUGUNDE liste sifirlanmaz -
+olculdu: 72 -> 72.
+
+**3) KATEGORI ROTASI SUNUCUYA `category_id` GONDERIR.** `aktifKategoriId()` slug'i
+`window.divisimaCategoryIdBySlug` uzerinden GERCEK kimlige cevirir (o harita ZATEN vardi ve
+yorumu "kategori sayfasi gercek id ile sorgulayabilsin" diyordu - hazirlanmis ama HIC
+kullanilmamisti). Karsiligi OLMAYAN rota icin **0** doner ve tum katalog sayfalanir;
+uydurma kimlik GONDERILMEZ.
+
+### YAN DUZELTME - UC AYRI SLUG UZAYI VARDI (olculdu)
+
+```
+index.html gezinme rotalari : yeni · elbise · ust · alt · dis ...   (SABIT taksonomi)
+veritabani kategori slug'i  : elbise · e4a-kategori · d3olcek-1 ...
+urunun `cat` degeri         : slugify(category_name) -> "d3olcek-kategori-1"
+```
+
+Yani urunun `cat`'i ile veritabani slug'i AYRISIYORDU. Iki sonucu vardi: (a) kategori rotasi
+urunleri suzemiyordu, (b) `registerCategoryLabels` etiketi `cat_<db-slug>` altina yaziyor
+ama urun `cat_<slugify-ad>` ile ariyordu - E1'de bir kez duzeltilen **"ham anahtar basimi"**
+(`cat_e4a-kategori`) adi slug'indan FARKLI olan HER kategori icin geri geliyordu.
+Basit adlarda (Elbise -> elbise) ikisi tesadufen ortustugu icin bugune kadar gorunmedi.
+`categorySlugOf` artik **veritabani slug'ini ONCE** deniyor; ad tabanli yedek KORUNDU.
+
+**KALAN SINIR (durust kayit, DUZELTILMEDI):** index.html'in gezinme taksonomisi SABITTIR ve
+veritabaniyla yalnizca `elbise` uzerinden kesisiyor. Olculdu: `#/kategori/d3olcek-3` router
+tarafindan **`#/kategori/tumu`ya YENIDEN YAZILIYOR** - yani veritabaninda var olan ama navda
+olmayan bir kategoriye ROTA YOK. Sunucu tarafli kategori filtresi ancak IKI TARAFTA DA olan
+rotalar icin devreye girer. "Kategori menusunun veritabanindan uretilmesi" AYRI bir istir.
+
+## OLCUM - AYNI HACIMDE (403 urun), DUZELTME ONCESI -> SONRASI
+
+```
+                                   ONCE                     SONRA
+ilk yukleme API istegi             2                        2            (degismedi)
+ilk yuklemede bellege giren urun   24                       24           (degismedi)
+sayfa agirligi                     173 KB                   180 KB
+"Daha Fazla" ile ulasilabilen      24  (dugme kayboluyor)   403          <- TAMAMI
+bunun icin gereken filter istegi   -                        17           (403/24 ~ 17 sayfa)
+kategori rotasi ek istek           0                        1            (category_id ile)
+geri donuste liste                 -                        72 -> 72     (SIFIRLANMIYOR)
+urunun `cat` degeri                d3olcek-kategori-1       d3olcek-1    (DB slug'i)
+```
+
+**ILK YUKLEME MALIYETI DEGISMEDI** - duzeltme tamamen EK. Kullanici daha fazlasini
+istemedikce tek bir fazladan istek bile atilmiyor.
+
+**DALGA 3'UN YAPI PINI KORUNDU - SAYFA ARTSA DA SORGU SAYISI SABIT:**
+
+```
+filter sayfa 1  -> 4,0 sorgu/istek   p50 20,5 ms   6.785 bayt
+filter sayfa 9  -> 4,0 sorgu/istek   p50 31,1 ms   6.791 bayt
+filter sayfa 17 -> 4,0 sorgu/istek   p50 31,8 ms   5.352 bayt
+kategori filtresi-> 4,0 sorgu/istek  p50 21,1 ms     388 bayt
+```
+
+## PINLER
+
+**Davranis (SUNUCU, `StorefrontCatalogContractTests`e EKLENDI - yeni veritabani ACILMADI):**
+- `Filter_IKINCI_SAYFA_FARKLI_URUNLER_Doner_ve_TOPLAM_SAYFA_TUTARLI` - vakum kirici (ilk
+  sayfa dolu, toplam > 1 sayfa) + **cift-anlam kirici**: iki sayfanin kesisimi BOS olmali
+  ("her sayfa ilk N'i donduren" bir uygulama da 200 + dolu liste doner).
+- `Filter_KATEGORI_FILTRESINI_SUNUCUDA_Uygular` - vakum kirici (filtresiz katalog birden
+  fazla kategori icermeli) + cift-anlam kirici (filtreli toplam, filtresizden KUCUK).
+- `Filter_ZENGINLESTIRME_SAYFA_2_DE_AYNI_ALANLARI_Doldurur` - Dalga 3'un iddiasi sayfa 2'de de.
+
+**Kaynak sozlesmesi (ISTEMCI, `KatalogSayfalamaSozlesmeTests` - VERITABANI ACMAZ):**
+- `ISTEMCI_IKINCI_SAYFAYI_GERCEKTEN_ISTER` (vakum kirici: katalog ucu birden fazla yerden
+  cagriliyor olmali) · `ISTEMCI_SAYFALARI_BIRIKTIRIR_BELLEGI_EZMEZ` (cift-anlam kirici:
+  `replaceProducts` HALA var olmali ama sonraki-sayfa yolunda KULLANILMAMALI) ·
+  `KATEGORI_ROTASI_SUNUCUYA_KATEGORI_KIMLIGI_Gonderir` · `URUN_KATEGORI_SLUGU_VERITABANI_SLUGUNDAN_Turer`.
+
+**Yeni sinif KASITLI OLARAK VERITABANI ACMIYOR** - 47. katilimcinin bes sinifi dusurdugu
+CI kirmizisi (10d794d) daha bu dalgada yasandi; ayni hatayi tekrarlamamak icin istemci
+pinleri yalnizca kaynak metnini okuyor.
+
+**PIN SINIRI (Dalga 4 / Dalga A ile AYNI):** depoda JS/DOM kosucusu YOK; istemci tarafi
+KAYNAK SOZLESMESI ile tutuluyor, davranis kaniti yukaridaki tarayici olcumleridir.
+**KIRILAN PIN YOK.**
+
+## DIS KONTROLU + 5. KONTROL
+
+**DIS:** 6 assert ters (IKI ayri sinif) -> **6 AYRI ISIMLI KIRMIZI**. Geri alindi, 11/11 yesil.
+
+**5. KONTROL - UC URETIM MUTASYONU** (her birinde yeni kuralin (a)/(b)/(c) adimlari):
+
+| Mutasyon | Kirilan pin | Uretilen once-durum |
+|---|---|---|
+| M1 `page: istenen` -> `page: 1` | `ISTEMCI_IKINCI_SAYFAYI_GERCEKTEN_ISTER` | sayfa 2 hic istenmiyor - katalogun %94'u erisilemez |
+| M2 sayfalama yolunda `appendProducts` -> `replaceProducts` | `ISTEMCI_SAYFALARI_BIRIKTIRIR_BELLEGI_EZMEZ` | her sayfa bellegi eziyor, geri donuste liste sifirlaniyor |
+| M3 (BACKEND) `dto.page = 1` | `Filter_IKINCI_SAYFA_FARKLI_URUNLER_...` | sunucu her sayfada ILK N'i donduruyor |
+
+Ucunde de TAM 1 pin kirmizi (lokalize). Hepsi geri alindi; `[MUTASYON]` ve `[SENTETIK]`
+izi depoda **0 dosya**.
+
+**YENI KURAL ILK GUNUNDE IS GORDU:** M3'un ilk turunda build **2 hata** verdi (calisan
+`Divisima.API.exe` DLL'i kilitliyordu) ve test ESKI ikililerle **YESIL** dedi. Kural olmasa
+"mutasyon lokalize" diye YANLIS rapor yazilacakti; (b) ve (c) adimlari sayesinde once
+"MUTASYON UYGULANMADI" suphesi elendi, surec durduruldu ve tur TEKRARLANDI.
+
+## RETRY GORUNURLUGU - CI ADIMI (kullanici karari)
+
+`ci.yml` ve `security.yml`'a **`if: always()`** bir adim eklendi: `test-output.txt` icinde
+`[TestDbKurulum] 1807` aranir ve sonuc **`::warning::`** olarak basilir. Annotation'lar
+ANONIM okunabildigi icin "yesil cunku 1807 hic gelmedi" ile "yesil cunku retry calisti"
+artik AYIRT EDILEBILIR.
+
+**ADIM JOB'I KIRMAZ:** eslesme olmasa da cikis kodu 0 (`|| true` + `exit 0`).
+`continue-on-error` KULLANILMADI - o bayrak deponun kuralina gore adimin annotation'dan
+okunmasini gerektirir; burada adim zaten her zaman basarili.
+
+**§7 GEREGI CALISTIRILARAK DOGRULANDI** (YAML'dan cikarilip kosuldu, uc senaryo):
+
+```
+A) cikti dosyasi YOK       -> "::warning::... OLCULEMEDI"                     exit 0
+B) dosya var, 1807 YOK     -> "::warning::... HIC ATESLEMEDI (0)"             exit 0
+C) sentetik 3 satir        -> "::warning::... 3 kez ATESLEDI"                 exit 0
+```
+
+**UCTAN UCA da dogrulandi:** bir teste GECICI olarak tam bicimli sentetik satir konuldu,
+suit `tee test-output.txt` ile kosuldu, adim gercek cikti uzerinde **"1 kez ATESLEDI"**
+dedi. Boylece zincirin son halkasi (`Console.Error` -> `test-output.txt`) da kanitlandi.
+Sentetik satir GERI ALINDI (`[SENTETIK]` izi 0) ve temiz kosumda adim "0" diyor.
+
+## TEMIZLIK (ikinci kez) - KANITLI
+
+```
+FK kanit : urunler stoklardan ONCE silinmeye calisildi -> SQL 547 / FK_product_stocks_product_id
+silinen  : order_items 80 · orders 40 · product_stocks 1400 · products 400 · categories 8
+zemin    : products 3 · product_stocks 7 · categories 2 · orders 54     (BIREBIR)
+artik    : D3OLCEK 0 · yetim stok 0 · yetim kalem 0
+portlar  : 5000 ve 5173 BOS
+```
+
+## YEREL DOGRULAMA
+
+315/315 `Category=Sql` · tam suitte **503 basarili / 506** (kirilan 3'un UCU DE Docker'li
+`OrderEndpointTests`) · Release 0 hata · whitespace + style **exit 0**.
 
 ## SIRA
 
@@ -4872,7 +5196,18 @@ depoda **0 dosya**.
    D5: canli Redis turu OLCULMEDI (Docker/Redis bu makinede YOK - staging'e ertelendi), ama
    rate limit AYRISMASI duzeltildi: kova tanimlari TEK KAYNAKTAN, iki yol da her zaman
    devrede, cifte sayim OLMADIGI uctan uca olculdu.
-   **SIRADAKI: D3 (gercek olcek provasi) ve D6 (yedek/geri donus tatbikati).**
+   **D3 (GERCEK OLCEK PROVASI) TAMAMLANDI - YALNIZ OLCUM, KOD DEGISMEDI.** 400 urunluk
+   isaretli seed kuruldu, olculdu, TAMAMEN silindi (silinme kanitli, yetim 0).
+   Dalga 3'un YAPI pinleri olcekte de TUTUYOR (sorgu sayisi satir sayisindan bagimsiz).
+   **YENI BULGU (ISLEV-KIRAN, DUZELTILMEDI): storefront katalogun yalnizca ILK 24 URUNUNU
+   cekiyor; kalan %94'e gezinerek ULASILAMIYOR.** Eksik indeks kalemi KAPANMADI - 403 urunde
+   DMV'nin canliligi bile gosterilemedi (sinir kesinlesti, esik cok daha yukarida).
+   **BULGU AYNI DALGADA DUZELTILDI (kullanici karari: SIMDI DUZELT) - bkz. "D3-FIX".**
+   Gercek sayfalama + kategori rotasinda sunucu tarafli `category_id` + slug uzaylarinin
+   hizalanmasi; ayni hacimde olculdu: **24 -> 403 urune ulasilabilir**, ilk yukleme maliyeti
+   DEGISMEDI. Ayrica retry gorunurlugu icin iki workflow'a `::warning::` adimi eklendi
+   (calistirilarak dogrulandi). Ayrinti "DALGA D - D3" ve "D3-FIX" bolumlerinde.
+   **SIRADAKI: D6 (yedek/geri donus tatbikati).**
 1. **TEKNIK DEFTERDE ACIK KALEM KALMADI - TEK ISTISNA SUPHELI #14** (surum okuyucusu
    kirilganligi, genel) ve o da **LAUNCH SONRASI**. #15, #17 ve **#18** KAPANDI; #16 BILINCLI
    olarak bos birakildi; siparis #33 hem odeme hem envanter tarafinda TEMIZLENDI.
@@ -4920,6 +5255,21 @@ depoda **0 dosya**.
   ve kupon limitleri guvende; ama bu siparisler musterinin "Siparislerim" ekraninda SONSUZA
   KADAR "Onay bekliyor" duruyor ve onlari iptale ceken bir arka plan isi YOK. Aday: 24-48 saat
   sonra otomatik iptal + bildirim. **POLITIKA URUN KARARIDIR, kullanici sonra verecek.**
+  **YENI KALEM (D3 - kullanici karari): EKSIK INDEKS ESIGI, GERCEK HACIMDE TEKRAR BAKILACAK.**
+  Dalga 3 "62 uruncuk veride DMV oneri uretmemis olabilir" diye durust bir sinir koymustu.
+  D3'te 403 urunle tekrar olculdu ve sinir KAPANMADI, yalnizca KESINLESTI: DMV yine 0 oneri
+  verdi ve **DMV'nin canli oldugu bile gosterilemedi** - KASITLI indekssiz esitlik sorgulari
+  da oneri uretmedi. Sebep olculdu: uc sorgulari kosum basina 10-18 MANTIKSAL OKUMA yapiyor;
+  403 satirlik tablo birkac sayfa, hicbir indeks bunu yenemez. Yani esik 400'un COK USTUNDE.
+  **KORLEMESINE INDEKS EKLENMEZ** (kullanici sarti). Gercek katalog hacmi olustugunda
+  (ya da bilincli olarak cok daha buyuk bir seed'le) `sys.dm_db_missing_index_*` ve
+  `sys.dm_exec_query_stats` yeniden okunur.
+  **YENI KALEM (D3 - olculdu, DUZELTILMEDI): GEZINME TAKSONOMISI VERITABANINDAN URETILMIYOR.**
+  index.html'in kategori menusu SABIT (`yeni/elbise/ust/alt/dis...`) ve veritabaniyla yalnizca
+  `elbise` uzerinden kesisiyor. Olculdu: `#/kategori/d3olcek-3` router tarafindan
+  `#/kategori/tumu`ya YENIDEN YAZILIYOR - yani veritabaninda var olan ama navda olmayan bir
+  kategoriye ROTA YOK. D3-FIX'in sunucu tarafli kategori filtresi ancak IKI TARAFTA DA olan
+  rotalarda devreye girer. Menunun `/api/category/getlist`ten uretilmesi AYRI bir is.
   **YENI KALEM (Dalga 3 / P4 - kullanici karari): ISTEMCI TARAFI ONBELLEK.**
   Olculdu: hesap sekmeleri arasi her gecis yeniden cekiyor; AYNI siparis detayini kapatip acmak
   2 istek daha (order/get + order/timeline). Tazelik acisindan savunulabilir bir tercih, ama

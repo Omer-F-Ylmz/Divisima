@@ -254,8 +254,144 @@ namespace Divisima.IntegrationTests
         }
 
         // ── Zarf tipleri ────────────────────────────────────────────────────────────────
+        // ══ D3 (GERCEK OLCEK PROVASI) - SAYFALAMA SOZLESMESI ════════════════════════════
+        //
+        // OLCULEN ZARAR (403 urunluk katalogla, tarayicida): storefront `loadCatalog` HER ZAMAN
+        // { page:1, size:24 } cekiyor, sayfa 2'yi HIC istemiyordu ve bellegi o 24 urunle
+        // DEGISTIRIYORDU. Musteri katalogun ilk 24 urununu gezebiliyor, kalan %94'e GEZINEREK
+        // ULASAMIYORDU. Istemci duzeltildi; burada SUNUCU SOZLESMESI pinlenir - istemcinin
+        // dayandigi sey sessizce degisirse vitrin bozulmadan ONCE kirmizi gorelim.
+
+        private async Task<int> EkUrunlerAsync(int adet, int? kategoriId = null)
+        {
+            await using var ctx = NewContext();
+            var kid = kategoriId ?? _categoryId;
+            for (var i = 0; i < adet; i++)
+            {
+                ctx.Products.Add(new Product
+                {
+                    name = $"Sayfalama Urun {Guid.NewGuid():N}",
+                    brand = "Divisima",
+                    category_id = kid,
+                    price = 100m + i,
+                    description = "sayfalama sozlesmesi",
+                    color_hex = "#202020",
+                    product_type = 0,
+                    is_active = true,
+                    created_at = DateTime.Now
+                });
+            }
+            await ctx.SaveChangesAsync();
+            return kid;
+        }
+
+        // ── D3-1) IKINCI SAYFA GERCEKTEN FARKLI URUNLER DONER ────────────────────────────
+        // Istemcinin yeni "Daha Fazla Yukle" akisi TAM OLARAK buna dayaniyor.
+        [Fact]
+        public async Task Filter_IKINCI_SAYFA_FARKLI_URUNLER_Doner_ve_TOPLAM_SAYFA_TUTARLI()
+        {
+            if (Skipped()) return;
+            await EkUrunlerAsync(9);   // tohumdaki 1 urunle birlikte 10 -> size 4 ile 3 sayfa
+            var anon = _factory!.CreateClient();
+
+            var s1 = await anon.PostAsJsonAsync("/api/product/filter", FullFilter(page: 1, size: 4));
+            s1.StatusCode.Should().Be(HttpStatusCode.OK);
+            var p1 = await s1.Content.ReadFromJsonAsync<FilterEnvelope>();
+
+            // VAKUM KIRICI: ilk sayfa GERCEKTEN dolu olmali, yoksa "farkli" iddiasi bedava dogru olurdu.
+            p1!.data!.items.Should().NotBeNullOrEmpty("ilk sayfa dolu olmali");
+            p1.data.total_count.Should().BeGreaterThan(4, "sayfalamayi anlamli kilacak kadar urun olmali");
+            p1.data.total_pages.Should().BeGreaterThan(1, "birden fazla sayfa olmali");
+
+            var s2 = await anon.PostAsJsonAsync("/api/product/filter", FullFilter(page: 2, size: 4));
+            s2.StatusCode.Should().Be(HttpStatusCode.OK);
+            var p2 = await s2.Content.ReadFromJsonAsync<FilterEnvelope>();
+            p2!.data!.items.Should().NotBeNullOrEmpty("ikinci sayfa da dolu olmali");
+
+            // CIFT-ANLAM KIRICI: "her sayfa ilk N'i donduren" bir uygulama da 200 doner ve
+            // dolu liste verir - ama AYNI urunleri. Kesisim BOS olmali.
+            var id1 = p1.data.items!.Select(x => x.id).ToHashSet();
+            var id2 = p2.data.items!.Select(x => x.id).ToHashSet();
+            id1.Overlaps(id2).Should().BeFalse(
+                "ikinci sayfa BIREBIR farkli urunler dondurmeli - aksi halde istemcinin sayfalamasi ayni urunu tekrar tekrar ceker");
+
+            p1.data.total_count.Should().Be(p2.data.total_count, "toplam kayit sayisi sayfalar arasi DEGISMEMELI");
+        }
+
+        // ── D3-2) KATEGORI FILTRESI SUNUCUDA UYGULANIR ───────────────────────────────────
+        // Istemci artik kategori rotasinda `category_id` gonderiyor (onceden ana sayfanin
+        // 24 urunu ICINDEN istemci tarafinda suzuyordu - kategori basina 3 urun gorunuyordu).
+        [Fact]
+        public async Task Filter_KATEGORI_FILTRESINI_SUNUCUDA_Uygular()
+        {
+            if (Skipped()) return;
+            int digerKategoriId;
+            await using (var ctx = NewContext())
+            {
+                var c = new Category
+                {
+                    name = "Ikinci Kategori",
+                    slug = $"ikinci-{Guid.NewGuid():N}",
+                    vat_rate = 0.10m,
+                    is_active = true,
+                    created_at = DateTime.Now
+                };
+                ctx.Set<Category>().Add(c);
+                await ctx.SaveChangesAsync();
+                digerKategoriId = c.id;
+            }
+            await EkUrunlerAsync(5, digerKategoriId);
+            var anon = _factory!.CreateClient();
+
+            // VAKUM KIRICI: filtresiz cagri IKI kategoriyi de goruyor olmali.
+            var hepsi = await anon.PostAsJsonAsync("/api/product/filter", FullFilter(page: 1, size: 50));
+            var h = await hepsi.Content.ReadFromJsonAsync<FilterEnvelope>();
+            h!.data!.items!.Select(x => x.category_id).Distinct().Should().HaveCountGreaterThan(1,
+                "filtresiz katalog birden fazla kategori icermeli - yoksa filtre iddiasi olculemez");
+
+            var resp = await anon.PostAsJsonAsync("/api/product/filter",
+                new { page = 1, size = 50, sort = "new", sizes = Array.Empty<string>(), colors = Array.Empty<string>(), category_id = digerKategoriId });
+            resp.StatusCode.Should().Be(HttpStatusCode.OK);
+            var f = await resp.Content.ReadFromJsonAsync<FilterEnvelope>();
+
+            f!.data!.items.Should().NotBeNullOrEmpty("kategori filtresi SONUC dondurmeli (vakum kirici)");
+            f.data.items!.Should().OnlyContain(x => x.category_id == digerKategoriId,
+                "kategori filtresi SUNUCUDA uygulanmali - istemci tarafi suzmeye birakilamaz");
+
+            // CIFT-ANLAM KIRICI: filtre GERCEKTEN daraltmali; "hepsini don" uygulamasi gecemez.
+            f.data.total_count.Should().BeLessThan(h.data.total_count,
+                "filtreli toplam, filtresiz toplamdan KUCUK olmali");
+        }
+
+        // ── D3-3) ZENGINLESTIRME SAYFA 2'DE DE CALISIR (Dalga 3 yapi pini, olcekte) ──────
+        // Dalga 3'un iddiasi: "liste ucu kalem basina EK SORGU atmaz ve alanlari doldurur".
+        // Istemci artik sayfa 2+ cektigi icin bu iddia ORADA da gecerli olmali.
+        [Fact]
+        public async Task Filter_ZENGINLESTIRME_SAYFA_2_DE_AYNI_ALANLARI_Doldurur()
+        {
+            if (Skipped()) return;
+            await EkUrunlerAsync(9);
+            var anon = _factory!.CreateClient();
+
+            var s2 = await anon.PostAsJsonAsync("/api/product/filter", FullFilter(page: 2, size: 4));
+            s2.StatusCode.Should().Be(HttpStatusCode.OK);
+            var p2 = await s2.Content.ReadFromJsonAsync<FilterEnvelope>();
+            p2!.data!.items.Should().NotBeNullOrEmpty("ikinci sayfa dolu olmali (vakum kirici)");
+
+            p2.data.items!.Should().OnlyContain(x => !string.IsNullOrWhiteSpace(x.category_name),
+                "kategori adi SAYFA 2'de de dolmali - zenginlestirme yalniz ilk sayfaya ozel olamaz");
+            p2.data.items!.Should().OnlyContain(x => x.category_id > 0,
+                "kategori kimligi SAYFA 2'de de gelmeli");
+        }
+
         private sealed class FilterEnvelope { public FilterPage? data { get; set; } }
-        private sealed class FilterPage { public List<FilterRow>? items { get; set; } }
+        private sealed class FilterPage
+        {
+            public List<FilterRow>? items { get; set; }
+            public int total_count { get; set; }
+            public int total_pages { get; set; }
+            public int page { get; set; }
+        }
         private sealed class FilterRow
         {
             public int id { get; set; }

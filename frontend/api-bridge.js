@@ -84,10 +84,22 @@
   //   - kategori: category_id + /api/category/getlist ile çözülür (tam çözüm)
   //   - stok/beden: detay ucundan (aşağıda enrichVisible) - kısmi, N+1 sınırlı
   // Kalıcı düzeltme backend'de; raporda ŞÜPHELİ olarak duruyor.
+  // D3 (gercek olcek provasi) DUZELTMESI - SLUG UZAYLARI AYRISIYORDU.
+  // OLCULDU (403 urunluk katalogla): urunun `cat` degeri `slugify(category_name)` ile
+  // uretiliyordu, oysa rota ve etiket tarafi VERITABANI SLUG'ini kullaniyor:
+  //     kategori adi "D3OLCEK Kategori 1" -> slugify(ad) = "d3olcek-kategori-1"
+  //     veritabani slug'i                                = "d3olcek-1"
+  // Ikisi ESLESMIYORDU. Sonuclari: (a) kategori rotasi urunleri suzemiyor,
+  // (b) `registerCategoryLabels` etiketi `cat_<db-slug>` altina yaziyor ama urun
+  // `cat_<slugify-ad>` ile ariyor -> E1'de bir kez duzeltilen "ham anahtar basimi"
+  // (`cat_e4a-kategori`) adi slug'indan FARKLI olan HER kategori icin geri geliyordu.
+  // Basit adlarda (Elbise -> elbise) ikisi tesadufen ortustugu icin bugune kadar gorunmedi.
+  // ARTIK VERITABANI SLUG'I ONCELIKLI - tek dogruluk kaynagi kategori satirinin kendisi.
   function categorySlugOf(p) {
-    if (p.category_name) return slugify(p.category_name);
     var c = CATEGORY_BY_ID[p.category_id];
-    if (c) return c.slug || slugify(c.name);
+    if (c && c.slug) return c.slug;
+    if (c && c.name) return slugify(c.name);
+    if (p.category_name) return slugify(p.category_name);
     return "tumu";
   }
 
@@ -114,6 +126,42 @@
     window.PRODUCTS.length = 0;
     Array.prototype.push.apply(window.PRODUCTS, mapped);
   }
+
+  // ── D3: GERCEK SAYFALAMA ALTYAPISI ─────────────────────────────────────────
+  // OLCULEN ZARAR (403 urunluk katalog, tarayicida): `loadCatalog` HER ZAMAN
+  // { page:1, size:24 } cekiyor ve `replaceProducts` bellegi bu 24 urunle DEGISTIRIYORDU.
+  // Ikinci sayfa HIC istenmiyordu; kategori rotalari ve "Daha Fazla Yukle" tamamen bu 24
+  // urun uzerinde ISTEMCI TARAFINDA calisiyordu. Sonuc: musteri katalogun ilk 24 urununu
+  // gezebiliyor, kalan %94'e GEZINEREK ULASAMIYORDU (tek kacis arama).
+  // 3 urunluk gelistirme verisinde GORUNMEZ bir kusurdu.
+  //
+  // Backend ZATEN sayfali (Dalga 3: items + total_count + page + size + total_pages);
+  // eksik olan yalnizca istemciydi.
+
+  // SAYFALAR BIRIKIR - EZMEZ. Kimlige gore tekillestirilir ki ayni urun iki kez girmesin
+  // ve kullanici bir kategoriye gidip GERI DONDUGUNDE liste SIFIRLANMASIN.
+  function appendProducts(mapped) {
+    if (typeof window.PRODUCTS === "undefined") { window.PRODUCTS = []; }
+    var varOlan = {};
+    window.PRODUCTS.forEach(function (p) { varOlan[p.id] = true; });
+    var yeni = mapped.filter(function (p) { return !varOlan[p.id]; });
+    Array.prototype.push.apply(window.PRODUCTS, yeni);
+    return yeni.length;
+  }
+
+  function pageMeta(res) {
+    var d = unwrap(res) || {};
+    return {
+      sayfa: Number(d.page || d.Page || 1) || 1,
+      toplamSayfa: Number(d.total_pages || d.TotalPages || 1) || 1,
+      toplamKayit: Number(d.total_count || d.TotalCount || 0) || 0
+    };
+  }
+
+  // Sayfalama durumu FILTRE BASINA tutulur: "tum katalogun 3. sayfasi" ile
+  // "5 numarali kategorinin 3. sayfasi" AYRI seylerdir.
+  var katalogSayfaDurumu = {};
+  function filtreImzasi(f) { return "kategori:" + (((f && f.category_id) || 0)); }
 
   function rerender() {
     try {
@@ -218,6 +266,10 @@
       );
       var res = await api.products.filter(payload);
       var list = pageItems(res);
+      // D3: sayfalama durumu KAYDEDILIR - "daha var mi" sorusu ancak boyle yanitlanir.
+      var m = pageMeta(res);
+      katalogSayfaDurumu[filtreImzasi(payload)] =
+        { sayfa: m.sayfa, toplamSayfa: m.toplamSayfa, toplamKayit: m.toplamKayit };
       if (!list.length) {
         replaceProducts([]);           // mock KALMAZ
         showCatalogState("Katalog şu an boş", "Henüz yayınlanmış ürün yok. Yönetim panelinden ürün ekleyince burada görünür.", false);
@@ -244,6 +296,99 @@
     }
   }
   window.divisimaReloadCatalog = loadCatalog;
+
+  // ── D3: SONRAKI SAYFAYI GERCEKTEN API'DEN CEK ──────────────────────────────
+  // Donen deger EKLENEN urun sayisidir (0 = alinacak sayfa kalmadi).
+  async function sonrakiSayfayiCek(kategoriId) {
+    var filtre = kategoriId ? { category_id: kategoriId } : {};
+    var imza = filtreImzasi(filtre);
+    var d = katalogSayfaDurumu[imza];
+    if (d && d.sayfa >= d.toplamSayfa) return 0;         // sayfa bitti
+    var istenen = d ? d.sayfa + 1 : 1;
+    var payload = Object.assign(
+      { page: istenen, size: CATALOG_PAGE_SIZE, sort: "new", sizes: [], colors: [] },
+      filtre
+    );
+    try {
+      var res = await api.products.filter(payload);
+      var m = pageMeta(res);
+      katalogSayfaDurumu[imza] = { sayfa: m.sayfa, toplamSayfa: m.toplamSayfa, toplamKayit: m.toplamKayit };
+      var eklenen = appendProducts(pageItems(res).map(mapProduct));
+      if (eklenen) rerender();
+      return eklenen;
+    } catch (e) {
+      // SESSIZ DEGIL: kullanici "daha fazla" dedi ve bir sey olmadiysa bunu OGRENMELI.
+      notify("Daha fazla ürün yüklenemedi.");
+      console.warn("Divisima: sonraki katalog sayfasi alinamadi", e);
+      return 0;
+    }
+  }
+  window.divisimaSonrakiSayfa = sonrakiSayfayiCek;
+
+  // Aktif kategori rotasinin GERCEK veritabani id'si (yoksa 0 = tum katalog).
+  // index.html'in gezinme taksonomisi SABITTIR ve veritabaniyla birebir ORTUSMEZ
+  // (olculdu: nav sluglari yeni/elbise/ust/alt/dis..., DB sluglari elbise + d3olcek-*).
+  // Karsiligi OLMAYAN bir rota icin sunucuya gonderilecek bir kategori de yoktur -
+  // o durumda tum katalog sayfalanir. Uydurma id gonderilmez.
+  function aktifKategoriId() {
+    try {
+      var st = window.catState;
+      if (!st || !st.cat || st.cat === "tumu" || st.cat === "yeni") return 0;
+      var harita = window.divisimaCategoryIdBySlug || {};
+      return harita[st.cat] || 0;
+    } catch (e) { return 0; }
+  }
+
+  // Kategori rotasina ILK girildiginde o kategorinin sayfasi SUNUCUDAN cekilir.
+  // Onceden hicbir istek atilmiyordu: kategori sayfasi, ana sayfanin 24 urunu icinden
+  // tesadufen o kategoriye dusenleri gosteriyordu (olculdu: kategori basina 3 urun).
+  var kategoriIlkYuklemesi = {};
+  function kategoriSayfasiniHazirla() {
+    var kid = aktifKategoriId();
+    if (!kid || kategoriIlkYuklemesi[kid]) return;
+    kategoriIlkYuklemesi[kid] = true;
+    sonrakiSayfayiCek(kid);
+  }
+
+  // "Daha Fazla Yukle" dugmesi: index.html'in kendi dugmesi YALNIZ bellekteki listeyi
+  // ilerletir ve bellek bitince KAYBOLUR. Bellekteki kalan bittiginde ama sunucuda sayfa
+  // VARSA, dugmeyi biz yeniden koyuyoruz ve o dugme GERCEK bir API sayfasi cekiyor.
+  function sayfalamaDugmesiniTazele() {
+    try {
+      var sarmal = document.getElementById("loadMoreWrap");
+      if (!sarmal) return;
+      if (sarmal.querySelector("button")) return;        // yerel kalan var - index.html'in dugmesi duruyor
+      var kid = aktifKategoriId();
+      var d = katalogSayfaDurumu[filtreImzasi(kid ? { category_id: kid } : {})];
+      if (!d || d.sayfa >= d.toplamSayfa) return;        // sunucuda da sayfa kalmadi
+      var kalan = Math.max(0, d.toplamKayit - (window.PRODUCTS || []).length);
+      var etiket = (typeof window.t === "function" ? window.t("load_more") : "Daha Fazla Yükle");
+      sarmal.innerHTML = '<button class="load-more" id="loadMoreApiBtn">' + etiket +
+        (kalan ? " (" + kalan + ")" : "") + "</button>";
+      var b = document.getElementById("loadMoreApiBtn");
+      if (b) b.onclick = async function () {
+        b.disabled = true;
+        var eklenen = await sonrakiSayfayiCek(kid);
+        if (eklenen && window.catState) window.catState.shown += eklenen;
+        if (typeof window.renderCatGrid === "function") window.renderCatGrid();
+        b.disabled = false;
+      };
+    } catch (e) { console.warn("Divisima: sayfalama dugmesi tazelenemedi", e); }
+  }
+
+  // renderCatGrid SARMALANIR (index.html'e dokunulmaz - deponun yerlesik idiyomu).
+  function sayfalamayiBagla() {
+    if (typeof window.renderCatGrid !== "function" || window.renderCatGrid.__d3sayfalama) return;
+    var orij = window.renderCatGrid;
+    var sarmal = function () {
+      var r = orij.apply(this, arguments);
+      kategoriSayfasiniHazirla();
+      sayfalamaDugmesiniTazele();
+      return r;
+    };
+    sarmal.__d3sayfalama = true;
+    window.renderCatGrid = sarmal;
+  }
 
   // ── Ürün detayı (gerçek API) ───────────────────────────────────────────────
   // Liste DTO'sunda açıklama yok; detay ucu description + beden/stok taşır.
@@ -2058,6 +2203,12 @@
     // category_name döndürmüyor), yükleme sırası ters olursa tüm ürünler "tumu" olur.
     await loadCategories();
     await loadCatalog();
+
+    // D3: gercek sayfalama. `renderCatGrid` KATALOG YUKLENDIKTEN SONRA sarmalanir -
+    // index.html o fonksiyonu kendi kurulumunda tanimliyor ve daha once sarmalamak
+    // tanimlanmamis bir fonksiyonu sarmalamak olurdu (sessizce etkisiz kalirdi).
+    sayfalamayiBagla();
+    sayfalamaDugmesiniTazele();
 
     // KATALOG SONRASI YENIDEN CIZIM (E3 elle dogrulamasinda OLCULDU):
     // Hesabim ekranindaki "Favorilerim" ve "Kayitli Kartlar" sekmeleri index.html in
