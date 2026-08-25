@@ -285,5 +285,70 @@ namespace Divisima.IntegrationTests
                 m.loyalty_points.Should().Be(400, "puan YALNIZ BIR KEZ harcanmis olmali");
             }
         }
+
+        // ── 6) GUVENLIK-FIX-4 / #22(a): FILTREDE DE CAPRAZ KULLANICI AYRISIR ────────────
+        //
+        // OLCULEN ONCE-DURUM (canli, /api/order/place, iki GERCEK hesap):
+        //   A + anahtar K -> 201 siparis 180
+        //   B + AYNI K    -> 201 "Idempotency-Replayed: true", GOVDEDE 180
+        //   B'nin siparis sayisi -> 0     (B'nin istegi SESSIZCE dustu)
+        // Kok sebep: filtre kapsami `User.Identity.Name` okuyordu ve o DAIMA null - yani
+        // HER kimlikli cagiran "anon" kapsamina dusuyordu. D4 bunu MIDDLEWARE icin
+        // duzeltmisti; FILTRE atlanmisti. Artik ikisi de `IdempotencyKimligi.Coz`ten okur.
+        [Fact]
+        public async Task FILTREDE_CAPRAZ_KULLANICI_AYRISIR_A_NIN_ANAHTARI_B_YI_ETKILEMEZ()
+        {
+            if (Skipped()) return;
+            var a = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+            var b = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+
+            await using (var ctx = NewContext())
+            {
+                foreach (var eposta in new[] { a.Email, b.Email })
+                {
+                    var m = await ctx.Set<Customer>().SingleAsync(x => x.email == eposta);
+                    m.loyalty_points = 500;
+                }
+
+                await ctx.SaveChangesAsync();
+            }
+
+            var anahtar = "gf4-" + Guid.NewGuid().ToString("N");
+
+            var aYanit = await PuanHarcaAsync(a.Client, anahtar);
+            ((int)aYanit.StatusCode).Should().BeInRange(200, 299,
+                $"on kosul: A'nin istegi islenmeli: {await aYanit.Content.ReadAsStringAsync()}");
+
+            var bYanit = await PuanHarcaAsync(b.Client, anahtar);
+            ((int)bYanit.StatusCode).Should().BeInRange(200, 299,
+                "B'nin istegi KENDI kapsaminda islenmeli - A'nin anahtari B'yi DUSURMEMELI");
+            bYanit.Headers.Contains("Idempotency-Replayed").Should().BeFalse(
+                "B, A'nin yanitini REPLAY olarak ALMAMALI");
+
+            // ASIL KANIT: B'nin islemi GERCEKTEN uygulanmis olmali (sessizce dusmemis).
+            await using (var son = NewContext())
+            {
+                var mB = await son.Set<Customer>().AsNoTracking().SingleAsync(x => x.email == b.Email);
+                mB.loyalty_points.Should().Be(400, "B'nin puani GERCEKTEN harcanmis olmali");
+            }
+
+            // CIFT-ANLAM KIRICI: kullanici kapsami korumayi KALDIRMADI - AYNI kullanici
+            // AYNI anahtarla tekrar denerse HALA replay alir ve islem TEKRARLANMAZ.
+            var aTekrar = await PuanHarcaAsync(a.Client, anahtar);
+            aTekrar.Headers.Contains("Idempotency-Replayed").Should().BeTrue(
+                "ayni kullanici + ayni anahtar HALA replay olmali");
+            await using (var son = NewContext())
+            {
+                var mA = await son.Set<Customer>().AsNoTracking().SingleAsync(x => x.email == a.Email);
+                mA.loyalty_points.Should().Be(400, "A'nin puani YALNIZ BIR KEZ harcanmis olmali");
+            }
+        }
+
+        private static async Task<HttpResponseMessage> PuanHarcaAsync(HttpClient c, string anahtar)
+        {
+            var istek = new HttpRequestMessage(HttpMethod.Post, "/api/loyalty/redeem/100");
+            istek.Headers.Add("Idempotency-Key", anahtar);
+            return await c.SendAsync(istek);
+        }
     }
 }

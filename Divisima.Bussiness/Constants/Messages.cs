@@ -339,5 +339,17 @@ namespace Divisima.Core.Utilities.Constants
         // A3 HIBRIT: misafir siparisi YALNIZ kapida odeme ile alinir. Online secilirse uc
         // REDDEDER - sessizce COD.a dusurmek musteriye SORMADAN odeme yontemini degistirmek olurdu.
         public static string GuestOnlyCashOnDelivery = "Misafir siparişinde yalnızca kapıda ödeme kullanılabilir. Kartla ödemek için üye girişi yapın.";
+
+        // ══ GUVENLIK-FIX-4 ═══════════════════════════════════════════════════════════════
+        // MISAFIR SIPARIS GUARD'I - GOVDE BILEREK NOTR VE TEK TIP. Adresin kayitli olup
+        // olmadigini IMA ETMEZ ve `GuestEmailExists` (409) ile karistirilamaz; aksi halde
+        // guard'in kendisi yeni bir enumeration kanali olurdu.
+        public static string GuestTooManyOpenOrders = "Bu istek şu anda işleme alınamıyor. Lütfen daha sonra tekrar deneyin.";
+
+        // IDEMPOTENCY - ayni anahtar FARKLI govde ile kullanildi. Istek SOZDIZIMSEL olarak
+        // gecerlidir (400 degil) ve cakisan bir kaynak durumu yoktur (409 degil): anahtarin
+        // yeniden kullanilmasi ISLENEMEZ bir semantik durumdur -> 422.
+        public static string IdempotencyBodyMismatch = "Bu Idempotency-Key farklı bir istek gövdesiyle kullanılmış. Yeni bir istek için yeni bir anahtar üretin.";
+        public static string IdempotencyInFlight = "Bu istek işleniyor, lütfen tekrar deneyin.";
     }
 }

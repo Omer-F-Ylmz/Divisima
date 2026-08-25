@@ -1,15 +1,21 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
 using Divisima.Bussiness.Abstract;
 using Divisima.Core.Security.Hashing;
 using Divisima.Core.Utilities.Constants;
+using Divisima.Core.Utilities.Enums;
+using Divisima.Core.Utilities.Orders;
 using Divisima.Core.Utilities.Results;
 using Divisima.Core.Utilities.Sanitization;
+using Divisima.Core.Utilities.Text;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Guest;
 using Divisima.Entity.Dtos.Order;
 using Divisima.Entity.Entities;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Divisima.Bussiness.Concrete
@@ -25,15 +31,35 @@ namespace Divisima.Bussiness.Concrete
         // YENI bir kod yolu ACILMADI - var olan ANONIM ucun ta kendisi cagriliyor.
         private readonly IAuthService _authService;
         private readonly ILogger<GuestCheckoutManager> _logger;
+        // GUVENLIK-FIX-4: cop misafir siparisi guard'i icin - acik siparis sayimi ve esik.
+        private readonly IOrderDal _orderDal;
+        private readonly IConfiguration _configuration;
+
+        public const string EsikAnahtari = "GuestCheckout:MaxOpenOrdersPerMailbox";
+        public const int VarsayilanEsik = 3;
+
+        // "ACIK" = iptal edilebilen, yani operatorun HALA ugrastigi durumlar. Elle yazilmaz,
+        // DURUM MAKINESINDEN turetilir: `Cancelled`a hala gecebilen her durum aciktir.
+        // `from == to` no-op oldugu icin `Cancelled` ACIKCA disarida birakilir (kendisine
+        // gecis "gecerli" sayilir ama terminaldir). Sonuc: Pending, Confirmed, Preparing.
+        public static readonly byte[] AcikDurumlar = Enum.GetValues(typeof(OrderStatusEnum))
+            .Cast<OrderStatusEnum>()
+            .Where(d => d != OrderStatusEnum.Cancelled
+                        && OrderStatusMachine.IsValidTransition(d, OrderStatusEnum.Cancelled))
+            .Select(d => (byte)d)
+            .ToArray();
 
         public GuestCheckoutManager(ICustomerDal customerDal, IAddressDal addressDal, IOrderService orderService,
-            IAuthService authService, ILogger<GuestCheckoutManager> logger)
+            IAuthService authService, ILogger<GuestCheckoutManager> logger, IOrderDal orderDal,
+            IConfiguration configuration)
         {
             _customerDal = customerDal;
             _addressDal = addressDal;
             _orderService = orderService;
             _authService = authService;
             _logger = logger;
+            _orderDal = orderDal;
+            _configuration = configuration;
         }
 
         public async Task<(HttpStatusCode, Result)> PlaceGuestOrder(GuestCheckoutDto dto)
@@ -58,6 +84,73 @@ namespace Divisima.Bussiness.Concrete
             var existing = await _customerDal.GetAsync(c => c.email == email);
             if (existing != null)
                 return (HttpStatusCode.Conflict, new ErrorResult(Messages.GuestEmailExists));
+
+            // ══ GUVENLIK-FIX-4 - COP MISAFIR SIPARISI GUARD'I ═══════════════════════════════
+            //
+            // SIRA KRITIK: guard BURADA - musteri satiri / adres / dogrulama maili / siparis /
+            // stok rezervasyonunun HICBIRI daha yazilmadi. Reddedilen istek HICBIR yan etki
+            // birakmaz. Guard'i asagi almak, tam da engellemeye calistigi cop kaydi ONCE
+            // yazip sonra reddetmek olurdu.
+            //
+            // 409 KONTROLUNDEN SONRA - BILINCLI: "bu e-posta kayitli" daha OZEL bir cevaptir
+            // ve o dalin semantigi DEGISMEZ (kabul edilen risk, GUVENLIK DALGASI 2 / #1).
+            //
+            // ══ SPEC DUZELTMESI - OLCUMLE ═══════════════════════════════════════════════════
+            // Ilk tasarim "Pending + odenmemis, SAKLANAN e-posta basina" idi. Ikisi de olcumle
+            // curudu:
+            //   (1) Misafir COD siparisi `Pending` DOGMUYOR - `Confirmed(1)` dogar
+            //       (is_online_payment_done=0). Tum veritabaninda "Pending + odenmemis misafir
+            //       COD siparisi" = 0 SATIR. Yani o yuklem HIC ATESLEMEZDI.
+            //   (2) SAKLANAN e-posta basina acik siparis sayisi YAPISAL OLARAK en fazla 1'dir -
+            //       ikinci siparis zaten yukaridaki 409'a takilir (olculdu: 5 e-postanin
+            //       hepsinde n=1). Yani o gruplama anahtari da esigi HIC dolduramazdi.
+            // GERCEK VEKTOR OLCULDU: `+etiket` varyanti 409'u ASIYOR ve AYNI fiziksel kutuya
+            // yigiliyor (kurban@x -> 201, kurban+a@x -> 201), buyuk harf varyanti ise ZATEN
+            // 409 aliyor (Dalga 1 kanoniklestirmesi tutuyor). Bu yuzden sayac ekseni KANONIK
+            // POSTA KUTUSU'dur. Kanoniklestirme YALNIZ SAYACTA - hesap kimligi, musteri satiri
+            // ve 409 semantigi DEGISMEZ (bkz. PostaKutusu dosyasinin basi).
+            //
+            // "ACIK" TANIMI DURUM MAKINESINDEN TURETILIR, ELLE YAZILMAZ: iptal edilebilen -
+            // yani operatorun hala ugrastigi - her durum aciktir. `Shipped` DISARIDA cunku
+            // yalniz `Delivered`a gidebilir (mal fiziksel olarak cikmistir, yeni siparisi
+            // engellemek o maruziyeti geri almaz); `Delivered`/`Cancelled` terminaldir.
+            // Makine degisirse bu kume KENDILIGINDEN degisir.
+            var esik = _configuration.GetValue<int?>(EsikAnahtari) ?? VarsayilanEsik;
+            if (esik < 1) esik = VarsayilanEsik;
+
+            var kanonikKutu = PostaKutusu.Kanonik(email);
+            var at = kanonikKutu.IndexOf('@');
+            if (at > 0)
+            {
+                // SQL tarafi KABA SUZGEC (indeksten yararlanan sabit onek/sonek), kesin karar
+                // C#'ta ORDINAL karsilastirmayla verilir - collation'a bagli yanlis pozitif
+                // riski boylece sayacin DISINDA kalir.
+                var yerelArti = kanonikKutu.Substring(0, at) + "+";
+                var alanSonu = kanonikKutu.Substring(at);
+                var adaylar = await _customerDal.GetListNoTrackingAsync(
+                    c => c.email == kanonikKutu || (c.email.StartsWith(yerelArti) && c.email.EndsWith(alanSonu)));
+
+                var kimlikler = adaylar
+                    .Where(c => string.Equals(PostaKutusu.Kanonik(c.email), kanonikKutu, StringComparison.Ordinal))
+                    .Select(c => c.id)
+                    .ToList();
+
+                if (kimlikler.Count > 0)
+                {
+                    var acikSiparisler = await _orderDal.GetListNoTrackingAsync(
+                        o => kimlikler.Contains(o.customer_id)
+                             && !o.is_online_payment_done
+                             && AcikDurumlar.Contains(o.status));
+
+                    if (acikSiparisler.Count >= esik)
+                    {
+                        _logger.LogWarning("MISAFIR SIPARIS GUARD'I: kanonik kutuda {Sayi} acik "
+                            + "odenmemis siparis var (esik {Esik}) - yeni misafir siparisi reddedildi.",
+                            acikSiparisler.Count, esik);
+                        return (HttpStatusCode.TooManyRequests, new ErrorResult(Messages.GuestTooManyOpenOrders));
+                    }
+                }
+            }
 
             // Açıklayıcı yorum: Misafir müşteri oluştur - rastgele güçlü şifre (müşteri bilmez; sonradan şifre-sıfırlama ile talep edebilir)
             var randomPassword = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));

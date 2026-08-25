@@ -216,6 +216,24 @@ Bedeli: `refresh_token` (httpOnly, path `/api/auth`) **her alt alan adına** gö
       kullanıcıların refresh token'ını alır)
 - [ ] Üçüncü taraf bir servise alt alan adı devredilmez (`*.divisima.com` wildcard
       yönlendirmesi verilmez)
+
+**YENİ BİR ALT ALAN ADI AÇILMADAN ÖNCE (GÜVENLİK-FIX-4 / Dalga-2 #7):**
+
+`Cookies:Domain = .divisima.com` **bugün var olanları değil, TÜM alt alan adlarını** kapsar —
+yarın açılacak `staging.`, `blog.`, `cdn.`, `docs.` de otomatik olarak dahildir. Yani çerez
+kapsamı bir kez verilen değil, **her yeni alt alan adında yeniden değerlendirilmesi gereken**
+bir karardır.
+
+- [ ] Yeni alt alan adı açılırken çerez kapsamı **yeniden değerlendirildi**: bu ada
+      `refresh_token` ve `csrf_token` gitmesi **gerekiyor mu**? Gerekmiyorsa ya ayrı bir
+      kayıt alanı (`divisima-cdn.com` gibi) kullanılır ya da `Cookies:Domain` daraltılır
+- [ ] **Az güvenilir / üçüncü taraf içerik bu alan adının alt alan adına KONMAZ** —
+      barındırılan blog/durum sayfası/pazarlama aracı/müşteri yüklemesi gibi içerikler dahil.
+      Böyle bir alt alandaki tek bir XSS, `.divisima.com` kapsamındaki çerezlere erişir
+      (`csrf_token` JS'ten okunabilir; `refresh_token` httpOnly ama aynı kapsamdaki bir
+      sayfadan `/api/auth/*`'a giden isteklere **otomatik eklenir**)
+- [ ] Statik varlıklar için ayrı bir alan adı kullanılıyorsa, o alan adı `divisima.com`'un
+      **alt alanı değil** (aksi halde CDN sağlayıcısı çerez kapsamına girer)
 ## Zorunlu adımlar
 - [ ] `Iyzico:BaseUrl` = `https://api.iyzipay.com` (sandbox değil)
 - [ ] `Webhook:AllowedIps` = Iyzico production IP aralıkları

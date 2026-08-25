@@ -2,11 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Json;
+using Divisima.Bussiness.Concrete;
 using Divisima.Bussiness.Events;
 using Divisima.Bussiness.Outbox;
 using Divisima.Core.Utilities.Enums;
 using Divisima.Core.Utilities.Mail;
+using Divisima.Core.Utilities.Orders;
 using Divisima.DataAccess.Concrete.Context;
 using Divisima.DataAccess.Concrete.EntityFramework;
 using Divisima.Entity.Entities;
@@ -44,6 +47,9 @@ namespace Divisima.IntegrationTests
         private const byte KapidaOdeme = 1;
         private const byte OnlineOdeme = 0;
         private const byte HavaleOdeme = 2;
+        // GUVENLIK-FIX-4: AYIRT EDICI esik - `GuestCheckoutManager.VarsayilanEsik` (3) DEGIL.
+        // Ayar okunmasaydi ucuncu istek 201 gecerdi; 429 almasi ayarin OKUNDUGUNUN kanitidir.
+        private const int TestEsigi = 2;
 
         private static string ConnStr
         {
@@ -73,6 +79,10 @@ namespace Divisima.IntegrationTests
             {
                 TestHostConfig.Apply(builder);
                 builder.UseSetting("Storefront:BaseUrl", VitrinTabani);
+                // GUVENLIK-FIX-4: esik AYIRT EDICI bir degere cekilir (2), varsayilan 3 DEGIL.
+                // Boylece "esik yapilandirmadan okunuyor" iddiasi DAVRANISLA kanitlanir:
+                // ayar okunmasaydi ucuncu istek 201 gecerdi. (RateLimitTekKaynakTests kalibi.)
+                builder.UseSetting(GuestCheckoutManager.EsikAnahtari, TestEsigi.ToString());
                 builder.ConfigureServices(services =>
                 {
                     var d = services.SingleOrDefault(x => x.ServiceType == typeof(DbContextOptions<DivisimaDbContext>));
@@ -279,6 +289,272 @@ namespace Divisima.IntegrationTests
                 return Yakalanan.LastOrDefault(m =>
                     (m.Subject ?? "").Contains(konuParcasi) &&
                     string.Equals(m.To, alici, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // ══ GUVENLIK-FIX-4 / SUPHELI #22 - IDEMPOTENCY GOVDE BAGI ve BAYT-BIREBIR REPLAY ══
+        //
+        // OLCULEN ONCE-DURUM (canli, /api/guest-checkout/place):
+        //   anahtar K + govde(E2) -> 201 siparis 179
+        //   anahtar K + govde(E3) -> 201 "Idempotency-Replayed: true", GOVDEDE 179
+        //   E3 icin musteri 0, siparis 0        (istek SESSIZCE dustu)
+        //   ve replay govdesi {"Data":179,...} iken orijinal {"data":179,...} idi.
+        [Fact]
+        public async Task IDEMPOTENCY_AYNI_ANAHTAR_FARKLI_GOVDE_422_Doner_ve_IKINCI_SIPARIS_OLUSMAZ()
+        {
+            if (Skipped()) return;
+            var (urunId, beden) = await UrunHazirlaAsync();
+            var damga = Guid.NewGuid().ToString("N").Substring(0, 10);
+            var ilkEposta = $"gf4a-{damga}@example.com";
+            var farkliEposta = $"gf4b-{damga}@example.com";
+            var anahtar = "gf4-" + Guid.NewGuid().ToString("N");
+
+            var ilk = await MisafirIstekAsync(anahtar, MisafirGovdesi(ilkEposta, urunId, beden, KapidaOdeme));
+            ilk.StatusCode.Should().Be(HttpStatusCode.Created,
+                $"on kosul: ilk istek islenmeli. Govde: {await ilk.Content.ReadAsStringAsync()}");
+
+            var ikinci = await MisafirIstekAsync(anahtar, MisafirGovdesi(farkliEposta, urunId, beden, KapidaOdeme));
+
+            ikinci.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity,
+                "ayni anahtar FARKLI govdeyle kullanildiginda istek ISLENMEZ ve BASKASININ yaniti REPLAY EDILMEZ");
+            ikinci.Headers.Contains("Idempotency-Replayed").Should().BeFalse(
+                "422 bir replay DEGILDIR - istemci baskasinin sonucunu almamali");
+
+            // CIFT-ANLAM KIRICI: 422 KOZMETIK DEGIL - istek SESSIZCE de DUSMEMELI,
+            // yani ikinci e-posta icin hicbir sey olusmamali AMA istemci bunu OGRENMELI.
+            (await MusteriSayisiAsync(farkliEposta)).Should().Be(0,
+                "farkli govdeli istek ISLENMEMELI - ikinci musteri olusmamali");
+            (await MusteriSayisiAsync(ilkEposta)).Should().Be(1,
+                "ilk istek etkilenmemeli");
+        }
+
+        [Fact]
+        public async Task IDEMPOTENCY_AYNI_GOVDE_REPLAY_GOVDESI_ORIJINALLE_BAYT_BIREBIR()
+        {
+            if (Skipped()) return;
+            var (urunId, beden) = await UrunHazirlaAsync();
+            var eposta = $"gf4c-{Guid.NewGuid():N}@example.com";
+            var anahtar = "gf4-" + Guid.NewGuid().ToString("N");
+            var govde = MisafirGovdesi(eposta, urunId, beden, KapidaOdeme);
+
+            var ilk = await MisafirIstekAsync(anahtar, govde);
+            ilk.StatusCode.Should().Be(HttpStatusCode.Created);
+            var ilkGovde = await ilk.Content.ReadAsStringAsync();
+
+            var ikinci = await MisafirIstekAsync(anahtar, govde);
+            var ikinciGovde = await ikinci.Content.ReadAsStringAsync();
+
+            ikinci.Headers.Contains("Idempotency-Replayed").Should().BeTrue("ayni govde REPLAY almali");
+            ikinci.StatusCode.Should().Be(ilk.StatusCode, "replay ILK yanitin durum kodunu tasimali");
+
+            // ASIL OLCUM: bicim hakkinda hicbir varsayim YOK - baytlar BIREBIR ayni olmali.
+            // (Once: orijinal camelCase "data", replay PascalCase "Data".)
+            string.Equals(ikinciGovde, ilkGovde, StringComparison.Ordinal).Should().BeTrue(
+                "ORDINAL karsilastirma: buyuk/kucuk harf farki bile KABUL EDILEMEZ");
+
+            // CIFT-ANLAM KIRICI: replay KOZMETIK DEGIL - ikinci siparis OLUSMAMIS olmali.
+            (await SiparisSayisiAsync(eposta)).Should().Be(1, "cift siparis ENGELLENMIS olmali");
+        }
+
+        // ══ GUVENLIK-FIX-4 / DALGA-2 #2 - COP MISAFIR SIPARISI GUARD'I ════════════════════
+        //
+        // SPEC OLCUMLE DUZELTILDI: "Pending + SAKLANAN e-posta basina" yuklemi HIC
+        // ATESLEMEZDI (misafir COD siparisi Confirmed dogar; ayni saklanan e-postaya ikinci
+        // siparis zaten 409 alir -> n<=1). GERCEK VEKTOR: `+etiket` varyanti 409'u asip AYNI
+        // fiziksel kutuya yigiliyor. Sayac ekseni KANONIK POSTA KUTUSU.
+        [Fact]
+        public async Task MISAFIR_GUARD_ESIK_ALTI_201_ESIKTE_429_KANONIK_KUTU_EKSENINDE()
+        {
+            if (Skipped()) return;
+            var (urunId, beden) = await UrunHazirlaAsync();
+            var yerel = "gf4guard-" + Guid.NewGuid().ToString("N").Substring(0, 10);
+
+            // Esik altindaki her istek ISLENIR (vakum kirici: guard "her seyi reddet" DEGIL).
+            for (var i = 0; i < TestEsigi; i++)
+            {
+                var varyant = i == 0 ? $"{yerel}@example.com" : $"{yerel}+{i}@example.com";
+                var yanit = await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                    MisafirGovdesi(varyant, urunId, beden, KapidaOdeme));
+                yanit.StatusCode.Should().Be(HttpStatusCode.Created,
+                    $"esik altindaki {i + 1}. istek islenmeli. Govde: {await yanit.Content.ReadAsStringAsync()}");
+            }
+
+            // ESIKTE: AYNI kanonik kutuya bir varyant daha -> 429.
+            // ESIK YAPILANDIRMADAN OKUNUYOR: test host'u AYIRT EDICI bir deger veriyor
+            // (varsayilan 3 DEGIL); ayar okunmasaydi bu istek 201 gecerdi.
+            var esikte = await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesi($"{yerel}+{TestEsigi}@example.com", urunId, beden, KapidaOdeme));
+
+            esikte.StatusCode.Should().Be(HttpStatusCode.TooManyRequests,
+                $"kanonik kutuda {TestEsigi} acik siparis varken yenisi REDDEDILMELI");
+            TestEsigi.Should().NotBe(GuestCheckoutManager.VarsayilanEsik,
+                "test esigi varsayilandan FARKLI olmali - yoksa 'yapilandirmadan okunuyor' iddiasi kanitlanmaz");
+
+            var govde = await esikte.Content.ReadAsStringAsync();
+            govde.Should().NotContain("kayıtlı",
+                "429 govdesi NOTR olmali - adresin kayit durumunu IMA ETMEMELI (409 ile karismamali)");
+        }
+
+        [Fact]
+        public async Task MISAFIR_GUARD_REDDINDE_HICBIR_YAN_ETKI_OLUSMAZ()
+        {
+            if (Skipped()) return;
+            var (urunId, beden) = await UrunHazirlaAsync();
+            var yerel = "gf4yan-" + Guid.NewGuid().ToString("N").Substring(0, 10);
+
+            for (var i = 0; i < TestEsigi; i++)
+            {
+                var varyant = i == 0 ? $"{yerel}@example.com" : $"{yerel}+{i}@example.com";
+                (await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                    MisafirGovdesi(varyant, urunId, beden, KapidaOdeme))).StatusCode
+                    .Should().Be(HttpStatusCode.Created);
+            }
+
+            var oncesi = await KutuSayaclariAsync(yerel);
+            oncesi.Musteri.Should().Be(TestEsigi, "on kosul: esik GERCEKTEN dolmus olmali");
+
+            var reddedilen = $"{yerel}+{TestEsigi}@example.com";
+            (await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesi(reddedilen, urunId, beden, KapidaOdeme))).StatusCode
+                .Should().Be(HttpStatusCode.TooManyRequests);
+
+            var sonrasi = await KutuSayaclariAsync(yerel);
+            sonrasi.Should().BeEquivalentTo(oncesi,
+                "guard TUM yan etkilerden ONCE calisir - reddedilen istek musteri/adres/siparis/"
+                + "rezervasyon/outbox satiri BIRAKMAMALI");
+            (await MusteriSayisiAsync(reddedilen)).Should().Be(0,
+                "reddedilen adres icin musteri satiri HIC olusmamali");
+        }
+
+        // CIFT-ANLAM KIRICI: guard 409'u EZMEDI. "Her seyi 429'a cevir" YANLIS duzeltmedir -
+        // hesap ele gecirme korumasi (kabul edilen risk, GUVENLIK DALGASI 2 / #1) DURUYOR.
+        [Fact]
+        public async Task MISAFIR_GUARD_409_SEMANTIGINI_DEGISTIRMEZ()
+        {
+            if (Skipped()) return;
+            var (urunId, beden) = await UrunHazirlaAsync();
+            var eposta = $"gf4dokuz-{Guid.NewGuid():N}@example.com";
+
+            (await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesi(eposta, urunId, beden, KapidaOdeme))).StatusCode
+                .Should().Be(HttpStatusCode.Created);
+
+            (await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesi(eposta, urunId, beden, KapidaOdeme))).StatusCode
+                .Should().Be(HttpStatusCode.Conflict, "AYNI SAKLANAN adres HALA 409 almali");
+
+            (await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesi(eposta.ToUpperInvariant(), urunId, beden, KapidaOdeme))).StatusCode
+                .Should().Be(HttpStatusCode.Conflict,
+                    "BUYUK HARF varyanti HALA 409 almali - Dalga 1 kanoniklestirmesi korunuyor");
+        }
+
+        // ══ GUVENLIK DALGASI 2 / #1 - KABUL EDILEN RISK: 409 YOLU HICBIR SATIR YAZMAZ ═════
+        //
+        // Kod DEGISMEDI (409 + "giris yapin" kalir). Bu pin, kabul edilen riskin SINIRINI
+        // sabitler: enumeration kanali aciktir AMA o yanit hicbir yan etki URETMEZ - yani
+        // kanal bir kaynak tuketimi/taciz vektorune DONUSEMEZ.
+        [Fact]
+        public async Task KAYITLI_EPOSTAYA_MISAFIR_SIPARISI_409_ve_HICBIR_SATIR_YAZMAZ()
+        {
+            if (Skipped()) return;
+            var (urunId, beden) = await UrunHazirlaAsync();
+            var yerel = "gf4kabul-" + Guid.NewGuid().ToString("N").Substring(0, 10);
+            var eposta = $"{yerel}@example.com";
+
+            (await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesi(eposta, urunId, beden, KapidaOdeme))).StatusCode
+                .Should().Be(HttpStatusCode.Created, "on kosul: hesap GERCEKTEN olusmali");
+
+            var oncesi = await KutuSayaclariAsync(yerel);
+
+            var ikinci = await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesi(eposta, urunId, beden, KapidaOdeme));
+            ikinci.StatusCode.Should().Be(HttpStatusCode.Conflict);
+
+            var sonrasi = await KutuSayaclariAsync(yerel);
+            sonrasi.Should().BeEquivalentTo(oncesi,
+                "409 yolu musteri/adres/siparis/rezervasyon/outbox satiri YAZMAMALI");
+        }
+
+        // "ACIK" kume ELLE YAZILMAZ - durum makinesinden turetilir. Makine degisirse bu pin
+        // de kendiliginde degisir; sabit bir liste yazsaydik makine ile SESSIZCE ayrisirdi.
+        // VERITABANI ACMAZ.
+        [Fact]
+        public void ACIK_DURUM_KUMESI_DURUM_MAKINESINDEN_TURETILIR_ELLE_YAZILMAZ()
+        {
+            var beklenen = Enum.GetValues(typeof(OrderStatusEnum))
+                .Cast<OrderStatusEnum>()
+                .Where(d => d != OrderStatusEnum.Cancelled
+                            && OrderStatusMachine.IsValidTransition(d, OrderStatusEnum.Cancelled))
+                .Select(d => (byte)d)
+                .ToArray();
+
+            GuestCheckoutManager.AcikDurumlar.Should().BeEquivalentTo(beklenen);
+
+            // CIFT-ANLAM KIRICI: kume ne BOS ne de HER SEY. Kapanmis durumlar DISARIDA olmali -
+            // Shipped yalniz Delivered'a gider (iptal edilemez), Delivered/Cancelled terminal.
+            GuestCheckoutManager.AcikDurumlar.Should().Contain((byte)OrderStatusEnum.Pending);
+            GuestCheckoutManager.AcikDurumlar.Should().Contain((byte)OrderStatusEnum.Confirmed);
+            GuestCheckoutManager.AcikDurumlar.Should().Contain((byte)OrderStatusEnum.Preparing);
+            GuestCheckoutManager.AcikDurumlar.Should().NotContain((byte)OrderStatusEnum.Shipped);
+            GuestCheckoutManager.AcikDurumlar.Should().NotContain((byte)OrderStatusEnum.Delivered);
+            GuestCheckoutManager.AcikDurumlar.Should().NotContain((byte)OrderStatusEnum.Cancelled);
+        }
+
+        private async Task<HttpResponseMessage> MisafirIstekAsync(string anahtar, object govde)
+        {
+            var istek = new HttpRequestMessage(HttpMethod.Post, "/api/guest-checkout/place")
+            {
+                Content = JsonContent.Create(govde)
+            };
+            istek.Headers.Add("Idempotency-Key", anahtar);
+            return await _factory!.CreateClient().SendAsync(istek);
+        }
+
+        private static async Task<int> MusteriSayisiAsync(string eposta)
+        {
+            await using var ctx = NewContext();
+            var kanonik = eposta.Trim().ToLowerInvariant();
+            return await ctx.Set<Customer>().AsNoTracking().CountAsync(c => c.email == kanonik);
+        }
+
+        private static async Task<int> SiparisSayisiAsync(string eposta)
+        {
+            await using var ctx = NewContext();
+            var kanonik = eposta.Trim().ToLowerInvariant();
+            var musteri = await ctx.Set<Customer>().AsNoTracking().FirstAsync(c => c.email == kanonik);
+            return await ctx.Set<Order>().AsNoTracking().CountAsync(o => o.customer_id == musteri.id);
+        }
+
+        // Bir KANONIK KUTUYA ait tum yan etki sayaclari. `yerel` benzersiz bir onek oldugu
+        // icin baska testlerin verisiyle karismaz.
+        private static async Task<KutuSayaclari> KutuSayaclariAsync(string yerel)
+        {
+            await using var ctx = NewContext();
+            var kimlikler = await ctx.Set<Customer>().AsNoTracking()
+                .Where(c => c.email.StartsWith(yerel)).Select(c => c.id).ToListAsync();
+            var siparisler = await ctx.Set<Order>().AsNoTracking()
+                .Where(o => kimlikler.Contains(o.customer_id)).Select(o => o.id).ToListAsync();
+
+            return new KutuSayaclari
+            {
+                Musteri = kimlikler.Count,
+                Adres = await ctx.Set<Address>().AsNoTracking().CountAsync(a => kimlikler.Contains(a.customer_id)),
+                Siparis = siparisler.Count,
+                Rezervasyon = await ctx.Set<StockReservation>().AsNoTracking()
+                    .CountAsync(r => siparisler.Contains(r.order_id)),
+                Outbox = await ctx.Set<OutboxMessage>().AsNoTracking()
+                    .CountAsync(m => m.payload.Contains(yerel))
+            };
+        }
+
+        private sealed class KutuSayaclari
+        {
+            public int Musteri { get; set; }
+            public int Adres { get; set; }
+            public int Siparis { get; set; }
+            public int Rezervasyon { get; set; }
+            public int Outbox { get; set; }
         }
 
         private static object MisafirGovdesi(string eposta, int urunId, string beden, byte yontem) => new

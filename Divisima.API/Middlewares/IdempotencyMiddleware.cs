@@ -77,8 +77,12 @@ namespace Divisima.API.Middlewares
             // yani capraz-kullanici cakismasi kapanmis GORUNUR ama KAPANMAZDI (bu test
             // yazilirken birebir goruldu: B hala 409 aliyordu).
             // CurrentUserService de musteri id'sini AYNI claim'den okuyor - tek kaynak.
-            var kullanici = context.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-                            ?? "anon";
+            //
+            // GUVENLIK-FIX-4 / #22(a): bu cozunurluk artik `IdempotencyKimligi.Coz`ten gelir.
+            // Gerekce olculdu: FILTRE ayni isi `Identity.Name` ile yapiyordu ve o DAIMA null
+            // oldugu icin orada kullanici ayrimi HIC YOKTU. Iki mekanizma AYNI kapsami
+            // uretmek zorundadir; ayrisirsa biri korur digeri korumaz ve fark GORUNMEZ.
+            var kullanici = IdempotencyKimligi.Coz(context.User);
             var cacheKey = $"idem:{context.Request.Method}:{context.Request.Path}:{kullanici}:{key}";
 
             // ATOMIK set-if-not-exists (SETNX): eszamanli AYNI-key isteklerden yalniz BIRI true alir (anahtari o ekledi),
