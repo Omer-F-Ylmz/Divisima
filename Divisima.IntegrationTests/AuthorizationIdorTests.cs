@@ -32,6 +32,13 @@ namespace Divisima.IntegrationTests
     public class AuthorizationIdorTests : IAsyncLifetime
     {
         private const string DbName = "DivisimaAuthIdorTest";
+
+        // DUSUK ENTROPILI SABIT (depo kalibi: SifrePolitikasiTests / LaunchFixMailZinciriTests).
+        // Sifre politikasini KARSILAR (>=8, buyuk, kucuk, rakam) ama Shannon entropisi 1.30 ile
+        // gitleaks `generic-api-key` esiginin (3.5) COK ALTINDA. Gerekce CLAUDE.md bolum 1:
+        // ayni sinif `secret-scan` kirmizisi bu depoda UC KEZ odendi ve ucunde de bedel
+        // URETIM KODU DEGIL, TEST/KANIT YAZMA ANIYDI.
+        private const string YeniGecerliSifre = "Aaaaaa11";
         private static readonly string? ExplicitConn = Environment.GetEnvironmentVariable("DIVISIMA_TEST_SQL");
 
         private static string ConnStr
@@ -45,6 +52,23 @@ namespace Divisima.IntegrationTests
             }
         }
 
+        // ═══ FIX-1A - PIN KANALI DEGISTIRILDI: BU HOST AUDIT INTERCEPTOR'I TASIR ═══════════════
+        //
+        // VAKUM KANITI (FAZ 1 / FIX-1A adim 0.d'de OLCULDU, varsayilmadi):
+        // `Program.cs:182` DbContext'i `.AddInterceptors(sp.GetRequiredService<AuditInterceptor>())`
+        // ile kaydediyor. Test fabrikalari ise `DbContextOptions<DivisimaDbContext>` kaydini
+        // KALDIRIP duz `UseSqlServer(ConnStr)` ile YENIDEN kuruyor - yani interceptor'i DUSURUYOR.
+        // Bu desen depoda TEK BIR dosyaya ozgu DEGIL: **42 test dosyasi** ayni sekilde yaziyor.
+        // Sonuc: `AuditInterceptor` bugune kadar HICBIR test host'unda kosmadi. F2/F3 pinleri
+        // duz bir fabrikaya yazilsaydi VAKUM PIN olurlardi - denetim kaydi hic uretilmeyecegi
+        // icin "sir alani yok" assert'i BEDAVA yesil kalirdi.
+        //
+        // KAPSAM BILINCLI OLARAK DAR: yalnizca BU sinifin fabrikasi duzeltildi. 42 fabrikayi
+        // birden degistirmek, denetim satiri sayan/beklemeyen testlerde ongorulemeyen yan etki
+        // uretirdi ve bu commit'in kapsami disindadir. Genel duzeltme [HAVALE->FAZ 6].
+        //
+        // `AuditInterceptor` DI kaydi (`Program.cs:169 AddScoped<AuditInterceptor>()`) test
+        // host'unda KALDIRILMIYOR; burada yalnizca DbContext'e yeniden BAGLANIYOR.
         private sealed class IdorFactory : WebApplicationFactory<Program>
         {
             protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -54,7 +78,9 @@ namespace Divisima.IntegrationTests
                 {
                     var d = services.SingleOrDefault(x => x.ServiceType == typeof(DbContextOptions<DivisimaDbContext>));
                     if (d != null) services.Remove(d);
-                    services.AddDbContext<DivisimaDbContext>(o => o.UseSqlServer(ConnStr));
+                    services.AddDbContext<DivisimaDbContext>((sp, o) =>
+                        o.UseSqlServer(ConnStr)
+                         .AddInterceptors(sp.GetRequiredService<Divisima.DataAccess.Interceptors.AuditInterceptor>()));
                 });
             }
         }
@@ -591,13 +617,22 @@ namespace Divisima.IntegrationTests
         // GRUP 5 - Hesap silme ve silinmis hesabin token i
         // =====================================================================
 
-        // KVKK/GDPR SILME - step-up (sifre/2FA) ISTENMEZ, tek Bearer token yeterli (sozlesme pinlenir).
+        // KVKK/GDPR SILME - PII anonimlesir + adres kaskadi calisir.
+        //
+        // ═══ FIX-1A - PIN ADI DUZELTILDI (davranis DEGISMEDI) ══════════════════════════════
+        // Eski ad `DeleteAccount_StepUpISTENMEZ_...` idi ve YANLIS BIR SOZLESME IDDIA EDIYORDU:
+        // uc `[RequireRecentAuth]` TASIYOR (FIX-1A'da iki uc da 10 dk'ya hizalandi). Test
+        // geciyordu cunku `TestAuthHelper` hemen once giris yapiyor ve `auth_time` TAZE;
+        // yani olculen sey "step-up yok" degil, "TAZE token step-up kapisindan gecer".
+        // BU PIN NE OLCMEZ: step-up penceresi DOLDUGUNDA reddedildigini olcmez (bunun icin
+        // 10 dk beklemek ya da jeton uydurmak gerekirdi - ikisi de bu suitin disinda).
+        //
         // Eskiden bu uc HER cagrida 500 doner du: anonimlestirme customers.phone alanina NULL
         // yaziyordu, kolon ise NOT NULL. Ayni tuzak adres defteri kaskadinda da vardi ve yalniz
         // ilki duzeltilseydi 500 oraya kayardi - YARIM SILME (musteri anonim, adresler PII dolu).
         // Bu test ikisini BIRLIKTE dogrular.
         [Fact]
-        public async Task DeleteAccount_StepUpISTENMEZ_PII_Anonimlesir_AdresKaskadiKorunur()
+        public async Task DeleteAccount_STEP_UP_TAZE_TOKENLA_GECER_PII_Anonimlesir_AdresKaskadiKorunur()
         {
             if (Skipped()) return;
 
@@ -681,5 +716,418 @@ namespace Divisima.IntegrationTests
             login.IsSuccessStatusCode.Should().BeFalse("silinmis hesaba giris yapilamamali");
         }
 
+        // =====================================================================
+        // FIX-1A - KVKK & DENETIM IZI EKSENI
+        // =====================================================================
+
+        // F1: IKI SILME UCU TEK UYGULAMAYA INDI. Ayni yardimci IKI rota icin de kosar - amac
+        // tam olarak budur: rotalar ayrisirsa TEK bir mutasyon (M2) IKISINI BIRDEN kirar.
+        //
+        // FAZ 1'de OLCULEN ONCE-DURUM: `/api/auth/account` adres defterine HIC dokunmuyordu
+        // (silme sonrasi `full_name`/`phone`/`full_address` DOLU, `is_active=TRUE`); ustelik
+        // `frontend/api-client.js:258` TAM DA o ucu cagiriyordu. Ayrica IKI UC DE
+        // `customer_devices`a dokunmuyor ve `/api/Account/delete` SecurityEvent yazmiyordu.
+        [Theory]
+        [InlineData("/api/Account/delete")]
+        [InlineData("/api/auth/account")]
+        public async Task SILME_HANGI_UCTAN_GELIRSE_GELSIN_TUM_PII_KANALLARINI_Kapatir(string yol)
+        {
+            if (Skipped()) return;
+
+            // ON KOSUL: adres + cihaz GERCEK uclardan olusturulur (elle satir yazilmaz).
+            var upsert = await A.Client.PostAsJsonAsync("/api/Address/upsert", new AddressRequestDto
+            {
+                customer_id = A.CustomerId,
+                title = "Ev",
+                full_name = "Fix1A Gercek Ad",
+                phone = "5551234567",
+                city = "Bursa",
+                district = "Nilufer",
+                full_address = "Fix1A tam acik adres 45/7",
+                zip_code = "16110",
+                is_default = true
+            });
+            upsert.IsSuccessStatusCode.Should().BeTrue("adres eklenebilmeli");
+
+            var cihazJetonu = $"fix1a-{Guid.NewGuid():N}";
+            var dev = await A.Client.PostAsJsonAsync("/api/Device/register", new { device_token = cihazJetonu, platform = (byte)1 });
+            dev.IsSuccessStatusCode.Should().BeTrue("cihaz kaydedilebilmeli");
+
+            // VAKUM KIRICI: silmeden ONCE her kanal GERCEKTEN dolu/acik olmali - yoksa
+            // asagidaki "kapandi" assert'leri bedava yesil kalirdi.
+            await using (var pre = NewContext())
+            {
+                (await pre.Set<Address>().CountAsync(a => a.customer_id == A.CustomerId && a.is_active))
+                    .Should().BeGreaterThan(0, "silmeden once aktif adres bulunmali");
+                (await pre.Set<CustomerDevice>().CountAsync(d => d.customer_id == A.CustomerId && d.is_active))
+                    .Should().BeGreaterThan(0, "silmeden once aktif cihaz bulunmali");
+                (await pre.Set<UserSession>().CountAsync(s => s.customer_id == A.CustomerId && s.is_active))
+                    .Should().BeGreaterThan(0, "silmeden once aktif oturum bulunmali");
+            }
+            (await A.Client.GetAsync("/api/Account/summary")).StatusCode.Should().Be(HttpStatusCode.OK,
+                "silmeden once hesap canli olmali");
+
+            var del = await A.Client.DeleteAsync(yol);
+            del.StatusCode.Should().Be(HttpStatusCode.OK,
+                $"{yol} silme basarili olmali: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await del.Content.ReadAsStringAsync())}");
+
+            await using var ctx = NewContext();
+
+            // (1) MUSTERI
+            var c = await ctx.Set<Customer>().IgnoreQueryFilters().AsNoTracking().SingleAsync(x => x.id == A.CustomerId);
+            c.is_active.Should().BeFalse("hesap pasiflesmeli");
+            c.email.Should().NotBe(A.Email.ToLowerInvariant(), "e-posta anonimlestirilmeli");
+            c.phone.Should().BeNull("telefon temizlenmeli");
+            // F1 - TEK BICIM: iki uctan hangisi cagrilirsa cagrilsin parola alani BOS DIZI olur.
+            // AuthManager ikizi buraya RASTGELE bir ozet yaziyordu; ikilik bitti.
+            c.password_hash.Should().BeEmpty("parola ozeti TEK BICIMDE (bos dizi) temizlenmeli");
+            c.password_salt.Should().BeEmpty("parola tuzu TEK BICIMDE (bos dizi) temizlenmeli");
+
+            // (2) ADRES DEFTERI - F11 dahil (city/district/zip_code de konum verisidir)
+            var addresses = await ctx.Set<Address>().IgnoreQueryFilters().AsNoTracking()
+                .Where(a => a.customer_id == A.CustomerId).ToListAsync();
+            addresses.Should().NotBeEmpty("kaskadin uzerinde calistigi adres bulunmali");
+            addresses.Should().OnlyContain(a => !a.is_active, "adresler pasiflesmeli");
+            addresses.Should().OnlyContain(a => a.phone == null, "adres telefonlari temizlenmeli");
+            addresses.Should().NotContain(a => a.full_address == "Fix1A tam acik adres 45/7", "adres metni temizlenmeli");
+            addresses.Should().NotContain(a => a.full_name == "Fix1A Gercek Ad", "adres ad-soyadi temizlenmeli");
+            addresses.Should().NotContain(a => a.city == "Bursa", "F11: sehir de konum verisidir, temizlenmeli");
+            addresses.Should().NotContain(a => a.district == "Nilufer", "F11: ilce de konum verisidir, temizlenmeli");
+            addresses.Should().OnlyContain(a => a.zip_code == null, "F11: posta kodu da temizlenmeli");
+
+            // (3) CIHAZ - F10: `is_active=false` YETMEZ, kalici tanimlayici YOK EDILMELI
+            var devices = await ctx.Set<CustomerDevice>().AsNoTracking()
+                .Where(d => d.customer_id == A.CustomerId).ToListAsync();
+            devices.Should().NotBeEmpty("cihaz satiri denetim icin KORUNMALI (silinmemeli)");
+            devices.Should().OnlyContain(d => !d.is_active, "cihaz baglari kapatilmali");
+            devices.Should().NotContain(d => d.device_token == cihazJetonu,
+                "F10: device_token KALICI bir cihaz tanimlayicisidir - deger YOK EDILMELI");
+
+            // (4) OTURUM
+            (await ctx.Set<UserSession>().CountAsync(s => s.customer_id == A.CustomerId && s.is_active))
+                .Should().Be(0, "silme tum oturumlari kapatmali");
+
+            // (5) F12: GUVENLIK DEFTERI - eskiden YALNIZ auth ucu yaziyordu
+            (await ctx.Set<SecurityEvent>().CountAsync(e => e.event_type == "AccountDeleted" && e.customer_id == A.CustomerId))
+                .Should().Be(1, $"F12: {yol} guvenlik defterine TAM 1 iz birakmali");
+
+            // (6) CACHE: silinen hesabin ELDEKI access token'i ANINDA reddedilmeli (TTL beklenmeden)
+            (await A.Client.GetAsync("/api/Account/summary")).StatusCode
+                .Should().Be(HttpStatusCode.Unauthorized, "hesap durumu cache'i dusurulmeli");
+        }
+
+        // F2: DENETIM IZI SIR TASIMAZ ve YALNIZ DEGISEN ALANI TASIR.
+        //
+        // BU PIN INTERCEPTOR'LI HOST'TAN KOSAR (bkz. IdorFactory'deki VAKUM KANITI). Duz bir
+        // test fabrikasinda `AuditInterceptor` HIC calismaz ve bu assert'ler bedava yesil olurdu.
+        //
+        // FAZ 1'de OLCULEN ONCE-DURUM: change-password'un urettigi audit satiri 2154 bayt,
+        // 35 alan; `password_hash.old` ve `password_hash.new` (88'er karakter) FARKLI degerlerle
+        // DOLUYDU, `password_salt` 357 karakterdi.
+        [Fact]
+        public async Task DENETIM_IZI_SIR_ALANI_TASIMAZ_ve_YALNIZ_DEGISEN_ALANI_Tasir()
+        {
+            if (Skipped()) return;
+
+            var chg = await A.Client.PostAsJsonAsync("/api/Account/change-password",
+                new { current_password = TestAuthHelper.TestPassword, new_password = YeniGecerliSifre });
+            chg.StatusCode.Should().Be(HttpStatusCode.OK,
+                $"sifre degisimi basarili olmali: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await chg.Content.ReadAsStringAsync())}");
+
+            await using var ctx = NewContext();
+            var musteriId = A.CustomerId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var satirlar = await ctx.Set<AuditLog>().AsNoTracking()
+                .Where(a => a.table_name == "Customer" && a.entity_id == musteriId && a.changes != null)
+                .ToListAsync();
+
+            // VAKUM KIRICI: interceptor GERCEKTEN kosmus olmali. Bu assert olmadan, denetim
+            // kaydi hic uretilmedigi durumda da asagidaki "sir yok" iddiasi yesil kalirdi.
+            satirlar.Should().NotBeEmpty("AuditInterceptor bu host'ta kosmali ve denetim satiri uretmeli");
+
+            // SIR ALANI LISTESI PIN'IN KENDISINDE - `DenetimGizlilik.SirMi`e SORULMAZ.
+            // GEREKCE (FIX-1A 5. kontrolunde OLCULDU): ilk yazimda pin sir olup olmadigini
+            // uretim sinifina soruyordu. M1 mutasyonu (`password_hash` kara listeden cikarildi)
+            // TAM 0 kirmizi verdi - cunku alan artik "sir degil" sayilinca assert onu ATLIYORDU.
+            // Kendi test ettigi kaynaga soran pin, tam da onemli mutasyonda VAKUMA duser.
+            var sirAlanlari = new[]
+            {
+                "password_hash", "password_salt", "two_factor_secret", "two_factor_code",
+                "email_verification_token", "password_reset_token", "refresh_token", "device_token"
+            };
+
+            // EN GUCLU, KAYNAKTAN TAMAMEN BAGIMSIZ ASSERT: musterinin GERCEK parola ozeti/tuzu
+            // denetim izinde HICBIR bicimde gecmemeli. Liste degisse de bu assert ayakta kalir.
+            var c = await ctx.Set<Customer>().IgnoreQueryFilters().AsNoTracking().SingleAsync(x => x.id == A.CustomerId);
+            var ozetB64 = Convert.ToBase64String(c.password_hash);
+            var tuzB64 = Convert.ToBase64String(c.password_salt);
+            ozetB64.Length.Should().BeGreaterThan(20, "vakum kirici: gercek bir parola ozeti okunmus olmali");
+            foreach (var s in satirlar)
+            {
+                s.changes.Should().NotContain(ozetB64, "GERCEK parola ozeti denetim izinde GECMEMELI");
+                s.changes.Should().NotContain(tuzB64, "GERCEK parola tuzu denetim izinde GECMEMELI");
+            }
+
+            foreach (var s in satirlar)
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(s.changes!);
+                var alanlar = doc.RootElement.EnumerateObject().Select(p => p.Name).ToList();
+
+                // (1) SIR ALANLARI: deger HIC girmez. Alan adi gorunse bile degeri sabit isarettir.
+                foreach (var p in doc.RootElement.EnumerateObject())
+                {
+                    if (!sirAlanlari.Contains(p.Name, StringComparer.OrdinalIgnoreCase)) continue;
+                    p.Value.ValueKind.Should().Be(System.Text.Json.JsonValueKind.Object,
+                        $"'{p.Name}' icin beklenen bicim {{old,new}}");
+                    foreach (var cift in p.Value.EnumerateObject())
+                        cift.Value.GetString().Should().Be(Divisima.Core.Security.DenetimGizlilik.Isaret,
+                            $"'{p.Name}' bir SIR alanidir - degeri (uzunlugu/ozeti/kirpilmisi DAHIL) denetim kaydina GIRMEMELI");
+                }
+
+                // (1b) KAYNAK SOZLESMESI (durust etiket: DAVRANIS DEGIL): uretim kara listesi
+                // yukaridaki adlarin HEPSINI kapsamali. Liste daraltilirsa BU assert kirilir.
+                foreach (var ad in sirAlanlari)
+                    Divisima.Core.Security.DenetimGizlilik.SirMi(ad).Should().BeTrue(
+                        $"'{ad}' uretim kara listesinden CIKARILAMAZ");
+
+                // (2) YALNIZ DEGISEN ALAN: sifre degisimi ad/e-posta/bakiye alanlarina DOKUNMAZ.
+                // Eskiden DAL'in `Update()` cagrisi tum varligi Modified isaretledigi icin 35 alan
+                // yaziliyordu; artik olcut `OriginalValue != CurrentValue`.
+                alanlar.Should().NotContain("email", "sifre degisimi e-postayi degistirmez - payload'da OLMAMALI");
+                alanlar.Should().NotContain("name", "sifre degisimi adi degistirmez - payload'da OLMAMALI");
+                alanlar.Should().NotContain("loyalty_points", "sifre degisimi puani degistirmez - payload'da OLMAMALI");
+                alanlar.Count.Should().BeLessThan(10,
+                    $"tam-varlik payload'i bitmeli (once 35 alandi), bulunan: {string.Join(",", alanlar)}");
+            }
+        }
+
+        // F3: SILMEDEN SONRA O MUSTERININ DENETIM IZINDE PII KALMAZ - AMA SATIR SILINMEZ.
+        // Iz korunur (id/action/entity_id/created_at/user_id + ALAN ADLARI), yalnizca DEGERLER gider.
+        //
+        // FAZ 1'de OLCULEN ONCE-DURUM: silinen hesabin e-postasi 2, adi 3, telefonu 9, acik adres
+        // metni 1 satirda audit_logs'ta KALIYORDU; `DeleteAccount` icinde audit_logs'a dokunan
+        // TEK SATIR YOKTU. Ustelik silme isleminin KENDI audit satiri `old` degerlerinde silinen
+        // PII'yi yeniden kaydediyordu - bu yuzden redaksiyon anonimlestirmeden SONRA kosar.
+        [Fact]
+        public async Task SILME_SONRASI_DENETIM_IZINDE_PII_KALMAZ_ama_SATIR_SILINMEZ()
+        {
+            if (Skipped()) return;
+
+            var acikAdres = $"Fix1A redaksiyon adresi {Guid.NewGuid():N}";
+            var upsert = await A.Client.PostAsJsonAsync("/api/Address/upsert", new AddressRequestDto
+            {
+                customer_id = A.CustomerId,
+                title = "Ev",
+                full_name = "Fix1A Redaksiyon Ad",
+                phone = "5559876543",
+                city = "Izmir",
+                district = "Konak",
+                full_address = acikAdres,
+                is_default = true
+            });
+            upsert.IsSuccessStatusCode.Should().BeTrue("adres eklenebilmeli");
+            // Adresi bir kez GUNCELLE: `Modified` satiri (yani `changes` DOLU olan tur) uretilsin.
+            int adresId;
+            await using (var adrCtx = NewContext())
+                adresId = await adrCtx.Set<Address>().AsNoTracking()
+                    .Where(a => a.customer_id == A.CustomerId).Select(a => a.id).FirstAsync();
+            (await A.Client.PostAsJsonAsync("/api/Address/upsert", new AddressRequestDto
+            {
+                id = adresId,
+                customer_id = A.CustomerId,
+                title = "Ev2",
+                full_name = "Fix1A Redaksiyon Ad",
+                phone = "5559876543",
+                city = "Izmir",
+                district = "Konak",
+                full_address = acikAdres,
+                is_default = true
+            })).IsSuccessStatusCode.Should().BeTrue("adres guncellenebilmeli");
+
+            int oncekiSatir;
+            await using (var pre = NewContext())
+            {
+                var tablolar = Divisima.Core.Security.DenetimGizlilik.RedaksiyonTablolari.ToArray();
+                oncekiSatir = await pre.Set<AuditLog>().CountAsync(a => tablolar.Contains(a.table_name));
+                // VAKUM KIRICI: silmeden ONCE denetim izinde GERCEKTEN redakte edilecek deger olmali.
+                var oncekiler = await pre.Set<AuditLog>().AsNoTracking()
+                    .Where(a => a.table_name == "Address" && a.changes != null).ToListAsync();
+                oncekiler.Should().Contain(a => Divisima.Core.Security.DenetimRedaksiyonu.RedakteEdilmemisDegerVarMi(a.changes),
+                    "silmeden once denetim izinde redakte edilmemis kisisel deger BULUNMALI");
+            }
+
+            (await A.Client.DeleteAsync("/api/Account/delete")).StatusCode.Should().Be(HttpStatusCode.OK);
+
+            await using var ctx = NewContext();
+            var adresIdleri = await ctx.Set<Address>().AsNoTracking()
+                .Where(a => a.customer_id == A.CustomerId)
+                .Select(a => a.id.ToString()).ToListAsync();
+            var oturumIdleri = await ctx.Set<UserSession>().AsNoTracking()
+                .Where(s => s.customer_id == A.CustomerId)
+                .Select(s => s.id.ToString()).ToListAsync();
+            var musteriId = A.CustomerId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+            var izler = await ctx.Set<AuditLog>().AsNoTracking()
+                .Where(a => a.changes != null &&
+                            ((a.table_name == "Customer" && a.entity_id == musteriId)
+                             || (a.table_name == "Address" && adresIdleri.Contains(a.entity_id))
+                             || (a.table_name == "UserSession" && oturumIdleri.Contains(a.entity_id))))
+                .ToListAsync();
+
+            izler.Should().NotBeEmpty("redaksiyon SATIR SILMEZ - iz ayakta kalmali");
+            foreach (var iz in izler)
+            {
+                Divisima.Core.Security.DenetimRedaksiyonu.RedakteEdilmemisDegerVarMi(iz.changes)
+                    .Should().BeFalse($"audit id={iz.id} ({iz.table_name}) redakte edilmemis kisisel deger tasiyor");
+            }
+
+            // Ham metin duzeyinde de kontrol: acik adres ve ad-soyad HICBIR satirda gecmemeli.
+            (await ctx.Set<AuditLog>().CountAsync(a => a.changes != null && a.changes.Contains(acikAdres)))
+                .Should().Be(0, "silinen hesabin acik adresi denetim izinde KALMAMALI");
+            (await ctx.Set<AuditLog>().CountAsync(a => a.changes != null && a.changes.Contains("Fix1A Redaksiyon Ad")))
+                .Should().Be(0, "silinen hesabin ad-soyadi denetim izinde KALMAMALI");
+
+            // CIFT-ANLAM KIRICI: redaksiyon SATIR SILEREK yapilmis olmamali - toplam satir sayisi
+            // AZALMAMALI (silme kendi satirlarini da EKLER, bu yuzden ">= onceki").
+            var tablolar2 = Divisima.Core.Security.DenetimGizlilik.RedaksiyonTablolari.ToArray();
+            (await ctx.Set<AuditLog>().CountAsync(a => tablolar2.Contains(a.table_name)))
+                .Should().BeGreaterThanOrEqualTo(oncekiSatir, "redaksiyon satir SILMEMELI");
+
+            // CIFT-ANLAM KIRICI: iz gercekten korunmus olmali - alan ADLARI duruyor.
+            izler.Should().Contain(i => i.action == "Modified", "action alani korunmali");
+            izler.Should().OnlyContain(i => !string.IsNullOrWhiteSpace(i.entity_id), "entity_id korunmali");
+        }
+
+        // F3 - REDAKSIYONUN IZOLASYONU: yalniz SILINEN musteriye dokunur.
+        //
+        // A silinir, B SILINMEZ. B'nin denetim izi ONCE/SONRA BIREBIR ayni kalmali.
+        // OLCUT SATIR SAYISI DEGIL, `changes` ICERIKLERIDIR: redaksiyon zaten satir silmiyor,
+        // dolayisiyla sayi esitligi ZAYIF bir olcuttur - degeri isaretle degistiren bir tasma
+        // sayiyi hic degistirmeden B'nin PII'sini yok ederdi ve sayi bazli bir pin bunu GORMEZDI.
+        // Karsilastirma ORDINAL ve id bazli (id -> changes haritasi).
+        //
+        // AYNI TEST TEK KOSUMDA IKI YONU DE GORUR (vakum kirici): A'nin PII'si GITMIS,
+        // B'ninki DURUYOR olmali. Yalniz "B bozulmadi" diyen bir pin, redaksiyon HIC
+        // CALISMASA da yesil kalirdi.
+        [Fact]
+        public async Task REDAKSIYON_YALNIZ_SILINEN_MUSTERIYE_DOKUNUR_BASKASININ_IZI_BOZULMAZ()
+        {
+            if (Skipped()) return;
+
+            const string aAdi = "A Silinecek Ad";
+            const string bAdi = "B Korunacak Ad";
+            var bAcikAdres = $"B korunacak adres {Guid.NewGuid():N}";
+            var bCihazJetonu = $"b-cihaz-{Guid.NewGuid():N}";
+
+            // A: denetim izinde PII olussun (profil adi degisimi -> Customer/Modified + `name`)
+            (await A.Client.PutAsJsonAsync("/api/Account/profile", new { name = aAdi, phone = "5550000001" }))
+                .IsSuccessStatusCode.Should().BeTrue("A profil guncellemesi basarili olmali");
+
+            // B: DORT eksende de iz birakir - Customer / Address / CustomerDevice / UserSession
+            (await B.Client.PutAsJsonAsync("/api/Account/profile", new { name = bAdi, phone = "5559990000" }))
+                .IsSuccessStatusCode.Should().BeTrue("B profil guncellemesi basarili olmali");
+            (await B.Client.PostAsJsonAsync("/api/Address/upsert", new AddressRequestDto
+            {
+                customer_id = B.CustomerId,
+                title = "Ev",
+                full_name = bAdi,
+                phone = "5559990000",
+                city = "Antalya",
+                district = "Muratpasa",
+                full_address = bAcikAdres,
+                is_default = true
+            })).IsSuccessStatusCode.Should().BeTrue("B adresi eklenebilmeli");
+            int bAdresId;
+            await using (var bc = NewContext())
+                bAdresId = await bc.Set<Address>().AsNoTracking()
+                    .Where(a => a.customer_id == B.CustomerId).Select(a => a.id).FirstAsync();
+            // Adresi GUNCELLE ki Address/Modified satiri (changes DOLU olan tur) olussun.
+            (await B.Client.PostAsJsonAsync("/api/Address/upsert", new AddressRequestDto
+            {
+                id = bAdresId,
+                customer_id = B.CustomerId,
+                title = "Ev - guncel",
+                full_name = bAdi,
+                phone = "5559990000",
+                city = "Antalya",
+                district = "Muratpasa",
+                full_address = bAcikAdres,
+                is_default = true
+            })).IsSuccessStatusCode.Should().BeTrue("B adresi guncellenebilmeli");
+            (await B.Client.PostAsJsonAsync("/api/Device/register", new { device_token = bCihazJetonu, platform = (byte)1 }))
+                .IsSuccessStatusCode.Should().BeTrue("B cihazi kaydedilebilmeli");
+            // Cihaz uzerinde de Modified satiri olussun.
+            (await B.Client.PostAsJsonAsync("/api/Device/unregister", new { device_token = bCihazJetonu }))
+                .IsSuccessStatusCode.Should().BeTrue("B cihazi pasiflestirilebilmeli");
+
+            // ── ONCE: B'nin denetim izini id -> changes olarak fotografla ────────────────────
+            async Task<Dictionary<int, string>> BIziniOkuAsync()
+            {
+                await using var c = NewContext();
+                var adresler = await c.Set<Address>().AsNoTracking()
+                    .Where(a => a.customer_id == B.CustomerId).Select(a => a.id.ToString()).ToListAsync();
+                var oturumlar = await c.Set<UserSession>().AsNoTracking()
+                    .Where(s => s.customer_id == B.CustomerId).Select(s => s.id.ToString()).ToListAsync();
+                var cihazlar = await c.Set<CustomerDevice>().AsNoTracking()
+                    .Where(d => d.customer_id == B.CustomerId).Select(d => d.id.ToString()).ToListAsync();
+                var bId = B.CustomerId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                return await c.Set<AuditLog>().AsNoTracking()
+                    .Where(a => a.changes != null &&
+                                ((a.table_name == "Customer" && a.entity_id == bId)
+                                 || (a.table_name == "Address" && adresler.Contains(a.entity_id))
+                                 || (a.table_name == "UserSession" && oturumlar.Contains(a.entity_id))
+                                 || (a.table_name == "CustomerDevice" && cihazlar.Contains(a.entity_id))))
+                    .ToDictionaryAsync(a => a.id, a => a.changes!);
+            }
+
+            var bOnce = await BIziniOkuAsync();
+            // VAKUM KIRICI (1): B'nin izi GERCEKTEN dolu ve GERCEKTEN kisisel deger tasiyor olmali.
+            bOnce.Should().NotBeEmpty("B'nin denetim izi silmeden once dolu olmali");
+            bOnce.Values.Should().Contain(v => v.Contains(bAdi, StringComparison.Ordinal),
+                "B'nin adi silmeden once denetim izinde OKUNABILIR olmali");
+            bOnce.Values.Should().Contain(v => Divisima.Core.Security.DenetimRedaksiyonu.RedakteEdilmemisDegerVarMi(v),
+                "B'nin izinde redakte EDILMEMIS kisisel deger bulunmali (yoksa 'bozulmadi' iddiasi bedava olurdu)");
+
+            // ── A SILINIR ────────────────────────────────────────────────────────────────────
+            (await A.Client.DeleteAsync("/api/Account/delete")).StatusCode.Should().Be(HttpStatusCode.OK);
+
+            // ── SONRA: B'nin izi BIREBIR AYNI olmali ─────────────────────────────────────────
+            var bSonra = await BIziniOkuAsync();
+            bSonra.Keys.Should().BeEquivalentTo(bOnce.Keys, "B'nin denetim satirlari ne eklenmeli ne silinmeli");
+            foreach (var kv in bOnce)
+                bSonra[kv.Key].Should().Be(kv.Value,
+                    $"B'nin audit id={kv.Key} satirinin `changes` icerigi A'nin silinmesinden ETKILENMEMELI");
+
+            // B'nin PII'si HALA OKUNABILIR - redaksiyon eksen disina TASMADI.
+            bSonra.Values.Should().Contain(v => v.Contains(bAdi, StringComparison.Ordinal),
+                "B'nin adi A'nin silinmesinden SONRA da denetim izinde okunabilir olmali");
+
+            await using var ctx = NewContext();
+            var b = await ctx.Set<Customer>().IgnoreQueryFilters().AsNoTracking().SingleAsync(x => x.id == B.CustomerId);
+            b.name.Should().Be(bAdi, "B'nin adi bozulmamali");
+            b.email.Should().Be(B.Email.ToLowerInvariant(), "B'nin e-postasi bozulmamali");
+            b.phone.Should().Be("5559990000", "B'nin telefonu bozulmamali");
+            b.is_active.Should().BeTrue("B'nin hesabi acik kalmali");
+
+            // AYNI OLCUT entity=Address ve entity=CustomerDevice icin de gecerli.
+            var bAdres = await ctx.Set<Address>().IgnoreQueryFilters().AsNoTracking().SingleAsync(a => a.id == bAdresId);
+            bAdres.full_name.Should().Be(bAdi, "B'nin adres ad-soyadi bozulmamali");
+            bAdres.full_address.Should().Be(bAcikAdres, "B'nin acik adresi bozulmamali");
+            bAdres.city.Should().Be("Antalya", "B'nin sehri bozulmamali");
+            bAdres.district.Should().Be("Muratpasa", "B'nin ilcesi bozulmamali");
+            bAdres.phone.Should().Be("5559990000", "B'nin adres telefonu bozulmamali");
+            bAdres.is_active.Should().BeTrue("B'nin adresi pasiflestirilmemeli");
+
+            var bCihaz = await ctx.Set<CustomerDevice>().AsNoTracking()
+                .SingleAsync(d => d.customer_id == B.CustomerId);
+            bCihaz.device_token.Should().Be(bCihazJetonu, "B'nin cihaz jetonu YOK EDILMEMELI");
+
+            // ── VAKUM KIRICI (2): AYNI KOSUMDA A'nin PII'si GITMIS olmali ────────────────────
+            var aId = A.CustomerId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var aIzler = await ctx.Set<AuditLog>().AsNoTracking()
+                .Where(a => a.table_name == "Customer" && a.entity_id == aId && a.changes != null).ToListAsync();
+            aIzler.Should().NotBeEmpty("A'nin denetim izi ayakta kalmali (satir silinmez)");
+            aIzler.Should().OnlyContain(a => !a.changes!.Contains(aAdi, StringComparison.Ordinal),
+                "A'nin adi denetim izinden GITMIS olmali - redaksiyon GERCEKTEN kosmus olmali");
+        }
     }
 }

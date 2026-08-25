@@ -27,7 +27,6 @@ namespace Divisima.Bussiness.Concrete
         private readonly ITokenHelper _tokenHelper;
         private readonly IMailService _mailService;
         private readonly ISecurityEventService _securityEvents;
-        private readonly ICacheService _cache;
         // LAUNCH-FIX A1(c): dogrulama / sifre sifirlama maillerindeki TIKLANABILIR baglantinin
         // tek kaynagi. Gerekce IMailLinkBuilder'in basinda yazili.
         private readonly IMailLinkBuilder _links;
@@ -53,12 +52,11 @@ namespace Divisima.Bussiness.Concrete
         private readonly Divisima.Bussiness.Outbox.IOutboxService _outboxService;
 
         public AuthManager(ICustomerDal customerDal, IUserSessionDal userSessionDal, ITokenHelper tokenHelper, IMailService mailService, ISecurityEventService securityEvents,
-            IReferralService referralService, IConsentRecordDal consentDal, ICacheService cache,
+            IReferralService referralService, IConsentRecordDal consentDal,
             IMailLinkBuilder links, Divisima.Bussiness.Outbox.IOutboxService outboxService)
         {
             _outboxService = outboxService;
             _links = links;
-            _cache = cache;
             _referralService = referralService;
             _consentDal = consentDal;
             _customerDal = customerDal;
@@ -623,51 +621,18 @@ namespace Divisima.Bussiness.Concrete
             return (HttpStatusCode.OK, new SuccessResult(Messages.LogoutSuccess));
         }
 
-        // Açıklayıcı yorum: Hesap silme (KVKK/GDPR unutulma hakkı). Kişisel veriyi anonimleştirir,
-        // hesabı pasifleştirir, tüm oturumları kapatır. Sipariş geçmişi (yasal saklama) korunur ama
-        // kimlik bilgisi anonimleştirilir. Tam silme yerine anonimleştirme: yasal kayıt bütünlüğü + gizlilik.
-        public async Task<(HttpStatusCode, Result)> DeleteAccount(int customerId)
-        {
-            var customer = await _customerDal.GetAsync(c => c.id == customerId);
-            if (customer == null)
-                return (HttpStatusCode.NotFound, new ErrorResult(Messages.LoginFailed));
-
-            // Açıklayıcı yorum: Kişisel veriyi anonimleştir (geri döndürülemez) - TÜM PII temizlenir (KVKK/GDPR).
-            // Sipariş/fatura FK bütünlüğü için hard-delete yerine anonimleştirme.
-            customer.name = "Silinmiş Kullanıcı";
-            customer.email = $"deleted-{Guid.NewGuid():N}@anonymized.local";
-            // NOT NULL TUZAGI (AccountManager.DeleteAccount ile ayni): customers.phone NOT NULL.
-            // null yazmak silme ucunu 500 ile dusuruyordu. Anonim yer tutucu yazilir.
-            customer.phone = null;
-            customer.address = null;
-            customer.city = null;
-            customer.birthdate = null;
-            customer.referral_code = null;
-            customer.two_factor_secret = null;
-            customer.two_factor_enabled = false;
-            customer.two_factor_code = null;
-            customer.password_reset_token = null;
-            customer.email_verification_token = null;
-            customer.notify_email = false;
-            customer.notify_sms = false;
-            customer.notify_push = false;
-            HashingHelper.CreatePasswordHash(Guid.NewGuid().ToString(), out var h, out var salt);
-            customer.password_hash = h;
-            customer.password_salt = salt;
-            customer.is_active = false;
-            await _customerDal.UpdateAsync(customer);
-
-            // Açıklayıcı yorum: Tüm oturumları kapat
-            var sessions = await _userSessionDal.GetListAsync(us => us.customer_id == customerId && us.is_active);
-            foreach (var s in sessions) { s.is_active = false; await _userSessionDal.UpdateAsync(s); }
-
-            // Hesap durumu cache'ini düşür - silinen hesabın access token'ı bir sonraki istekte
-            // TokenBlacklistMiddleware tarafından reddedilsin (TTL beklenmesin).
-            _cache.Remove(CacheKeys.CustomerActive(customerId));
-
-            await _securityEvents.LogAsync("AccountDeleted", "Warning", customerId, null, null, "Kullanıcı hesabını sildi (anonimleştirildi)");
-            return (HttpStatusCode.OK, new SuccessResult(Messages.AccountDeleted));
-        }
+        // ═══ FIX-1A / F1 - `DeleteAccount` GOVDESI BURADAN KALDIRILDI ══════════════════════════
+        // Burada `AccountManager.DeleteAccount`in IKINCI BIR KOPYASI duruyordu ve ayrisiyordu:
+        // adres defterine HIC DOKUNMUYORDU (`IAddressDal` bu sinifa enjekte bile edilmemis),
+        // e-postayi farkli bir kalipla anonimlestiriyor ve parola alanina rastgele bir ozet
+        // yaziyordu. FAZ 1'de OLCULDU: bu uctan silinen hesabin adresi `full_name`/`phone`/
+        // `full_address` DOLU ve `is_active=TRUE` kaliyordu - ustelik `frontend/api-client.js`
+        // TAM DA bu ucu (`/api/auth/account`) cagiriyordu.
+        //
+        // Cozum ikinci kopyayi DUZELTMEK degil KALDIRMAK oldu (bu depoda ayni sinif hata
+        // defalarca isirdi). Uc `AuthController` uzerinden `IAccountService.DeleteAccount`e
+        // delege ediyor; ROTA DEGISMEDI. `IAuthService.DeleteAccount` de kaldirildi - derleme,
+        // baska cagri yeri OLMADIGININ kanitidir (Sprint 8 madde 11 kalibi).
 
         // Açıklayıcı yorum: Veri dışa aktarma (GDPR taşınabilirlik). Kullanıcının kişisel verisini döndürür.
         public async Task<(HttpStatusCode, Result)> ExportMyData(int customerId)

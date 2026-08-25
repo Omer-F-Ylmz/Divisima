@@ -47,9 +47,15 @@ namespace Divisima.API.Controllers
         private const string RefreshPath = "/api/auth";
         private const string CsrfPath = "/";
 
-        public AuthController(IAuthService authService, IWebHostEnvironment env, IConfiguration config)
+        // FIX-1A / F1: hesap silme TEK uygulamada (AccountManager). Bu controller yalnizca
+        // ROTAYI korur ve oraya delege eder - ikinci bir govde TASIMAZ.
+        private readonly IAccountService _accountService;
+
+        public AuthController(IAuthService authService, IAccountService accountService,
+            IWebHostEnvironment env, IConfiguration config)
         {
             _authService = authService;
+            _accountService = accountService;
             _env = env;
             _config = config;
         }
@@ -120,6 +126,15 @@ namespace Divisima.API.Controllers
 
 
 
+        // FIX-1A / F1: bu uc `AccountManager.DeleteAccount`e DELEGE EDER - ikinci bir govde YOK.
+        // FAZ 1'de olculdu ki buradaki eski govde adres defterine HIC dokunmuyordu ve
+        // `frontend/api-client.js:258` TAM DA bu ucu cagiriyor; rota bu yuzden KALDIRILMADI,
+        // yalnizca davranis `/api/Account/delete` ile BIRLESTIRILDI.
+        //
+        // STEP-UP PENCERESI IKI UCTA DA 10 DK'YA HIZALANDI (once burada 10, digerinde 30 idi).
+        // Geri alinamaz bir KVKK islemi icin iki ROTA AYNI isi yapiyorsa ayni kapiyi da
+        // istemelidir; aksi halde konsolidasyon yarim kalir ve gevsek olan rota tercih edilir.
+        // Yeni bir deger UYDURULMADI - iki mevcut sozlesmenin SIKI olani secildi.
         [HttpDelete("account")]
         [RequireUserType(UserTypeEnum.Customer)]
         [Divisima.Core.Security.Authorization.RequireRecentAuth(10)]
@@ -127,7 +142,7 @@ namespace Divisima.API.Controllers
         public async Task<IActionResult> DeleteAccount()
         {
             var customerId = int.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id) ? id : 0;
-            var r = await _authService.DeleteAccount(customerId);
+            var r = await _accountService.DeleteAccount(customerId);
             return StatusCode((int)r.Item1, r.Item2);
         }
 

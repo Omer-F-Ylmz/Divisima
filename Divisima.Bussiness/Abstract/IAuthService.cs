@@ -24,7 +24,6 @@ namespace Divisima.Bussiness.Abstract
         Task<(HttpStatusCode, Result)> Logout(int customerId, string? refreshToken);
 
         // Açıklayıcı yorum: GDPR/KVKK - hesap silme (unutulma hakkı) + veri dışa aktarma (taşınabilirlik)
-        Task<(HttpStatusCode, Result)> DeleteAccount(int customerId);
         Task<(HttpStatusCode, Result)> ExportMyData(int customerId);
 
     }

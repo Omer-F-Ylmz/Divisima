@@ -143,6 +143,15 @@ dolayısıyla Redis'i uygulamadan **önce** ayağa kaldırın.
 
 - [ ] Redis erişilebilir ve `Redis:Connection` doğru (uygulama açılmıyorsa önce burayı bakın —
       hata mesajı `redis` kelimesini içerir, şema/JWT ile ilgisi yoktur)
+- [ ] **`RateLimit` BÖLÜMÜNÜN AYAR DOSYASINDA GERÇEKTEN VAR OLDUĞU doğrulandı.**
+      FAZ 1'de ÖLÇÜLDÜ: bu bölüm `appsettings.json` ve `appsettings.Development.json`
+      dosyalarının **HİÇBİRİNDE YOK**; yalnız `appsettings.Development.example.json` içinde
+      örnek olarak duruyor. Bölüm yoksa `RateLimitPolitikasi.Olustur` sessizce **KOD
+      VARSAYILANINA** düşer (auth 10 / payment 10 / global 100) ve aşağıdaki "eşikler
+      ayarlandı" maddesi **KARŞILIKSIZ** kalır — kimse bir şey ayarlamamıştır, yalnızca
+      varsayılan yürürlüktedir. Belirti sessizdir: yanlış bir değer değil, **hiç değer
+      olmaması** durumu. D5, iki yolun ayrışmasını kapattı; bu madde ayarın VAR OLDUĞUNU
+      kapatır. [HAVALE→FAZ 8]
 - [ ] `RateLimit:AuthPermitLimit` / `PaymentPermitLimit` / `GlobalPermitLimit` prod trafiğine
       göre ayarlandı. **Bu ayarlar artık HER İKİ yolda da okunur** (D5 öncesinde Redis yolu
       kaynakta sabit 5/10/100 kullanıyordu ve ayarları HİÇ okumuyordu)
@@ -241,7 +250,9 @@ bir karardır.
 - [ ] DB kullanıcısı en az yetki (SELECT/INSERT/UPDATE; DDL/DROP yok)
 - [ ] `dotnet list package --vulnerable` temiz
 - [ ] Serilog SIEM sink aktif (bkz. serilog-siem.md)
-- [ ] Rate limit eşikleri prod trafiğine göre ayarlandı
+- [ ] Rate limit eşikleri prod trafiğine göre ayarlandı **ve `RateLimit` bölümü ayar
+      dosyasında GERÇEKTEN VAR** (yoksa kod varsayılanı yürürlüktedir; ayrıntı yukarıdaki
+      "Redis ve rate limit" bölümünde)
 
 ## Launch sonrası (bloke etmez)
 - [ ] `og:image` için gerçek **1200×630** marka görseli hazırlanınca `frontend/index.html`'de

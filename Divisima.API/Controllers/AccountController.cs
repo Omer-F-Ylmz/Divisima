@@ -53,8 +53,11 @@ namespace Divisima.API.Controllers
             return StatusCode((int)r.Item1, r.Item2);
         }
 
+        // FIX-1A / F1: pencere 30 -> 10 dk. Ayni isi yapan `/api/auth/account` ucu ZATEN 10
+        // istiyordu; iki rota tek uygulamada birlestigine gore kapi da tek olmali - yoksa
+        // saldirgan gevsek olani secer. Yeni deger uydurulmadi, iki sozlesmenin SIKI olani alindi.
         [HttpDelete("delete")]
-        [RequireRecentAuth(30)]   // KVKK hesap silme GERİ ALINAMAZ -> son 30 dk içinde giriş yapılmış olmalı (step-up auth)
+        [RequireRecentAuth(10)]   // KVKK hesap silme GERİ ALINAMAZ -> son 10 dk içinde giriş yapılmış olmalı (step-up auth)
         [SwaggerOperation(Summary = "Hesabı sil (GDPR)", Description = "Kişisel verileri anonimleştirir + hesabı kapatır. Geri alınamaz. Yakın zamanda giriş gerektirir.")]
         public async Task<IActionResult> Delete()
         {
