@@ -275,7 +275,23 @@ e-postası, fatura, sadakat puanı ve iade bildirimleri **sessizce** birikir. Hi
 üretilmez, `failed-jobs` listesi **boş kalır** (mesajlar `Pending` durumundadır, `Failed`
 değil), yani operatörün baktığı yer de sessizdir.
 
+> **BAYRAĞIN ANLAMI GENİŞLEDİ (FLAKE-FIX).** Yukarıdaki paragraf bayrağın **eski** anlamıyla
+> yazılmıştı (yalnız Hangfire *sunucusu* + recurring kayıtları). Bugün `false`, o düğümde
+> **Hangfire'ın TAMAMINI** kapatır: **depolama yapılandırması** (`AddHangfire` /
+> `UseSqlServerStorage`), **arka plan sunucusu**, **`/hangfire` panosu** ve **recurring iş
+> kayıtları**. Bayrağı `false` olan bir düğüm Hangfire için SQL'e **hiç bağlanmaz**
+> (ölçüldü: `/hangfire` → **404**, `HangFire` şeması oluşturulmaz).
+>
+> **ÇOK ÖRNEKLİ DAĞITIMDA BUNUN SONUCU VAR:** web düğümlerini `false`, worker düğümünü
+> `true` yapan bir kurulumda **pano YALNIZCA worker düğümünde bulunur** — web düğümünün
+> `/hangfire` adresi 404 döner. Bu bir arıza değil, bayrağın tanımıdır; panoyu arayan
+> operatör **worker düğümüne** bakmalıdır. (Zaten pano tarayıcıdan erişilemez — tek kimlik
+> şeması `JwtBearer`; operatörün gerçek yüzeyi `GET /api/dashboard/failed-jobs`'tur ve o uç
+> **Hangfire'dan bağımsızdır**, outbox tablosunu doğrudan okur.)
+
 - [ ] `BackgroundJobs:Enabled` **verilmedi** ya da açıkça `true` (env/appsettings tarandı)
+- [ ] **Çok örnekli kurulumda: en az BİR düğümde `true`** — hepsi `false` ise hiçbir arka
+      plan işi koşmaz ve outbox sessizce birikir
 - [ ] **Yayın sonrası davranışla doğrulandı:** gerçek bir sipariş verildikten ~2 dakika
       sonra `outbox_messages` içinde o siparişin mesajı `status = 1 (Processed)` oldu.
       **Bayrak yanlışsa bu satır `status = 0`'da takılı kalır** — konfigürasyona bakmak

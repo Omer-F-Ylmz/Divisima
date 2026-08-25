@@ -393,11 +393,6 @@ builder.Services.AddApiVersioning(o =>
 }).AddApiExplorer(o => { o.GroupNameFormat = "'v'VVV"; o.SubstituteApiVersionInUrl = true; });
 
 // B8: Hangfire (SQL Server storage)
-builder.Services.AddHangfire(cfg => cfg
-    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
-    .UseSimpleAssemblyNameTypeSerializer()
-    .UseRecommendedSerializerSettings()
-    .UseSqlServerStorage(builder.Configuration.GetConnectionString("DivisimaDb")));
 // DALGA D - ARKA PLAN ISLERI TEST HOST'LARINDA KAPATILABILIR OLMALI.
 //
 // OLCULEN ZARAR (CI kirmizisi cd51a52): `AddHangfireServer()` ve asagidaki `RecurringJob`
@@ -413,9 +408,45 @@ builder.Services.AddHangfire(cfg => cfg
 //
 // Bayrak varsayilani TRUE: uretim ve gelistirme davranisi DEGISMEZ. Yalnizca TestHostConfig
 // false veriyor.
+//
+// ══ FLAKE-FIX - BAYRAK ARTIK DEPOLAMA YAPILANDIRMASINI DA KAPSIYOR ═════════════════════
+//
+// OLCULEN ZARAR: bayrak `false` iken `AddHangfireServer()` ve recurring kayitlar
+// kapaniyordu AMA `AddHangfire(... UseSqlServerStorage ...)` KOSULSUZDU - yani test host'u
+// Hangfire icin SQL'e YINE BAGLANIYORDU. Adi olan flake'in kok sebebi buydu ve mesaji
+// GUVENLIK-FIX-4 dalgasinda ILK KEZ yakalandi:
+//
+//   RefreshCookieContractTests.Cerez_Secure_HER_ORTAMDA_ISARETLI_OrtamGuardi_YOK
+//   Autofac.Core.DependencyResolutionException : An exception was thrown while activating
+//     λ:Hangfire.IGlobalConfiguration.
+//   ---- System.InvalidOperationException : Timeout expired. The timeout period elapsed
+//        prior to obtaining a connection from the pool ... max pool size was reached.
+//
+// O test PRODUCTION ortamli IKINCI bir host aciyor; tam suit paralel kosarken iki host'un
+// Hangfire baglantilari SQL havuzunu tuketiyordu. Mekanizma YARIS DEGIL HAVUZ TUKENMESIYDI
+// (`model` kilidi/1807 ILGISIZ - o kosumda hic ateslemedi).
+//
+// COZUM: bayrak `false` iken Hangfire'a ait HICBIR DI kaydi yapilmaz. Boylece
+// `IGlobalConfiguration` AKTIVE EDILEMEZ ve havuz tukenmesi YAPISAL OLARAK olusamaz -
+// "daha az olasi" degil, IMKANSIZ.
+//
+// DASHBOARD DA AYNI BAYRAGA BAGLANDI - ZORUNLU: `UseHangfireDashboard` calisma aninda
+// `JobStorage` cozer; depolama kayitli degilken acilis PATLARDI. URUN DAVRANISI DEGISMEZ:
+// uretim varsayilani `true` (dashboard aynen kayitli) ve bayragi `false` yapan TEK yer
+// TestHostConfig. Operatorun gercek yuzeyi zaten `/hangfire` DEGIL - o, tek kimlik semasi
+// JwtBearer oldugu icin tarayicidan ERISILEMEZ (DALGA C / C4'te olculdu); operator
+// `GET /api/dashboard/failed-jobs` kullanir ve o uc Hangfire'dan BAGIMSIZDIR (outbox
+// tablosunu DOGRUDAN okur - olculdu: DashboardManager.GetFailedJobs -> _outboxDal).
 var arkaPlanIsleri = !bool.TryParse(builder.Configuration["BackgroundJobs:Enabled"], out var bgj) || bgj;
 if (arkaPlanIsleri)
+{
+    builder.Services.AddHangfire(cfg => cfg
+        .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+        .UseSimpleAssemblyNameTypeSerializer()
+        .UseRecommendedSerializerSettings()
+        .UseSqlServerStorage(builder.Configuration.GetConnectionString("DivisimaDb")));
     builder.Services.AddHangfireServer();
+}
 
 // B9: Health checks
 builder.Services.AddHealthChecks()
@@ -622,14 +653,16 @@ app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.Health
 {
     Predicate = check => check.Tags.Contains("ready")
 }).AllowAnonymous();
-app.UseHangfireDashboard("/hangfire", new Hangfire.DashboardOptions
-{
-    Authorization = new[] { new Divisima.API.Services.HangfireAuthorizationFilter() }
-});
-
-// Recurring job kayitlari da ayni bayraga bagli (gerekce yukarida).
+// Dashboard ve recurring job kayitlari AYNI bayraga bagli (gerekce yukarida, AddHangfire'in
+// yaninda). Dashboard'in burada olmasi ZORUNLU: `UseHangfireDashboard` calisma aninda
+// `JobStorage` cozer ve depolama kayitli degilken acilis PATLARDI.
 if (arkaPlanIsleri)
 {
+    app.UseHangfireDashboard("/hangfire", new Hangfire.DashboardOptions
+    {
+        Authorization = new[] { new Divisima.API.Services.HangfireAuthorizationFilter() }
+    });
+
     // B8: Recurring job - Outbox işleyici (dakikada bir)
     RecurringJob.AddOrUpdate<OutboxProcessor>("outbox-processor", p => p.ProcessPendingAsync(), Cron.Minutely);
     // Açıklayıcı yorum: Veri saklama/temizlik - her gün (eski oturum/outbox/log temizliği)

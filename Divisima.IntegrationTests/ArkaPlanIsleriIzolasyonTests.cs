@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Divisima.DataAccess.Concrete.Context;
 using FluentAssertions;
@@ -63,6 +66,12 @@ namespace Divisima.IntegrationTests
         // (gelistirici DivisimaDb'si) baglanmasini engeller, ama kurulmasi da gerekmez.
         private const string KullanilmayanDb = "DivisimaArkaPlanIzolasyon_KULLANILMAZ";
 
+        // FLAKE-FIX: kayitlar AKTIVE EDILMEDEN gozlenir. `GetService<IGlobalConfiguration>()`
+        // cagirmak, kaydin VAR OLDUGU durumda tam da olcmek istedigimiz SQL baglantisini
+        // acardi - yani pin, olctugu zarari KENDI URETIRDI. Bu yuzden `IServiceCollection`
+        // Program.cs'in kayitlarindan SONRA yakalanir ve yalnizca TIP ADLARINA bakilir.
+        private static readonly List<string> YakalananKayitlar = new();
+
         private sealed class IzolasyonFactory : WebApplicationFactory<Program>
         {
             protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -75,6 +84,13 @@ namespace Divisima.IntegrationTests
                     services.AddDbContext<DivisimaDbContext>(o => o.UseSqlServer(
                         $"Server=(localdb)\\MSSQLLocalDB;Initial Catalog={KullanilmayanDb};"
                       + "Trusted_Connection=True;TrustServerCertificate=True;Connect Timeout=3;"));
+
+                    lock (YakalananKayitlar)
+                    {
+                        YakalananKayitlar.Clear();
+                        YakalananKayitlar.AddRange(services
+                            .Select(x => x.ServiceType.FullName ?? x.ServiceType.Name));
+                    }
                 });
             }
         }
@@ -121,6 +137,140 @@ namespace Divisima.IntegrationTests
             var islemci = scope.ServiceProvider.GetService<Divisima.Bussiness.Outbox.OutboxProcessor>();
             islemci.Should().NotBeNull(
                 "bayrak yalnizca ZAMANLAYICIYI kapatir - isleyicinin KENDISI hala kayitli olmali");
+        }
+
+        // ══ FLAKE-FIX / p1 - BAYRAK FALSE ISE HANGFIRE DEPOLAMASI HIC KURULMAZ ═════════════
+        //
+        // OLCULEN ONCE-DURUM: `AddHangfireServer()` bayrakla kapaliydi AMA
+        // `AddHangfire(... UseSqlServerStorage ...)` KOSULSUZDU - yani test host'u Hangfire
+        // icin SQL'e YINE BAGLANIYORDU. Adi olan flake'in kok sebebi buydu:
+        //   Autofac ... activating λ:Hangfire.IGlobalConfiguration
+        //   ---- Timeout expired ... max pool size was reached
+        //
+        // BU PIN DETERMINISTIKTIR: kayitlar AKTIVE EDILMEDEN, `IServiceCollection` uzerinden
+        // TIP ADIYLA gozlenir. `GetService<IGlobalConfiguration>()` cagirmak, kayit VARSA
+        // olcmek istedigimiz SQL baglantisini KENDI ACARDI.
+        [Fact]
+        public void BAYRAK_FALSE_ISE_HANGFIRE_DI_KAYDI_HIC_YOK_DEPOLAMA_KURULMAZ()
+        {
+            List<string> kayitlar;
+            lock (YakalananKayitlar) kayitlar = YakalananKayitlar.ToList();
+
+            // VAKUM KIRICI: yakalama GERCEKTEN calismis olmali. Bos bir listede "Hangfire yok"
+            // iddiasi bedavaya dogru olurdu.
+            kayitlar.Should().HaveCountGreaterThan(100,
+                "Program.cs'in DI kayitlari yakalanmis olmali - yoksa bu tarama vakuma duser");
+
+            var hangfireKayitlari = kayitlar
+                .Where(a => a.StartsWith("Hangfire.", StringComparison.Ordinal))
+                .Distinct()
+                .ToList();
+
+            hangfireKayitlari.Should().BeEmpty(
+                "bayrak false iken Hangfire'a ait HICBIR DI kaydi olmamali - `IGlobalConfiguration` "
+              + "aktive EDILEMEZSE havuz tukenmesi YAPISAL OLARAK olusamaz");
+        }
+
+        // ══ FLAKE-FIX / p2 - HICBIR HANGFIRE CAGRISI BAYRAGIN DISINDA KALMAZ ══════════════
+        //
+        // KAYNAK SOZLESMESI PINI (durust etiket): bayrak TRUE host'u bu suitte AYAGA
+        // KALDIRILAMAZ - o host Hangfire depolamasini kurar, SQL'e baglanir ve GELISTIRICININ
+        // veritabanina recurring job tanimi yazar; yani pinin KENDISI, kaldirmaya calistigimiz
+        // zarari uretirdi. Onun yerine YAPISAL kural pinlenir: Hangfire'a dokunan HER cagri
+        // `if (arkaPlanIsleri)` blogunun ICINDE olmali. Yarin eklenecek bir cagri da yakalanir.
+        //
+        // Bayrak TRUE davranisinin DAVRANIS kaniti raporda: uygulama varsayilan bayrakla
+        // ayaga kaldirildi ve `/hangfire` yanit verdi (depolama kurulmasaydi acilis PATLARDI).
+        [Fact]
+        public void HICBIR_HANGFIRE_CAGRISI_BAYRAGIN_DISINDA_KALMAZ()
+        {
+            var program = ProgramKaynagi();
+
+            // Yorum satirlari AYIKLANIR: bu dosya Hangfire'i ONLARCA KEZ yorumda anıyor
+            // (olculen zarar kayitlari). Kaynak tarayan bir pin, kendi belgeledigi kalibi da
+            // tarar - bu tuzagin bedeli depoda iki kez odendi.
+            var kod = string.Join("\n", program
+                .Split('\n')
+                .Select(s => s.TrimEnd('\r'))
+                .Where(s => !s.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+
+            var bloklar = BayrakBloklari(kod);
+            bloklar.Should().HaveCountGreaterThanOrEqualTo(2,
+                "en az iki `if (arkaPlanIsleri)` blogu olmali (kayit + boru hatti); yoksa tarama vakuma duser");
+
+            var aranan = new[]
+            {
+                "AddHangfire(", "AddHangfireServer(", "UseHangfireDashboard(", "RecurringJob.AddOrUpdate"
+            };
+
+            foreach (var desen in aranan)
+            {
+                var yerler = TumIndeksler(kod, desen).ToList();
+                yerler.Should().NotBeEmpty($"'{desen}' kaynakta GERCEKTEN bulunmali - yoksa assert bedava dogru olur");
+
+                foreach (var yer in yerler)
+                {
+                    bloklar.Any(b => yer > b.Bas && yer < b.Son).Should().BeTrue(
+                        $"'{desen}' cagrisi `if (arkaPlanIsleri)` blogunun ICINDE olmali - disarida kalan "
+                      + "bir Hangfire cagrisi, bayrak false iken SQL'e baglanir ve flake'i geri getirir");
+                }
+            }
+        }
+
+        private static string ProgramKaynagi()
+        {
+            var d = new DirectoryInfo(AppContext.BaseDirectory);
+            while (d != null && !File.Exists(Path.Combine(d.FullName, "docker-compose.yml")))
+                d = d.Parent;
+            if (d == null)
+                throw new InvalidOperationException(
+                    "Depo koku bulunamadi: docker-compose.yml iceren ust dizin yok. "
+                  + "Sessiz skip YOK - bu pin kaynagi okuyamadan yesil kalamaz.");
+
+            var yol = Path.Combine(d.FullName, "Divisima.API", "Program.cs");
+            File.Exists(yol).Should().BeTrue("Program.cs bulunmali");
+            return File.ReadAllText(yol);
+        }
+
+        private static IEnumerable<int> TumIndeksler(string metin, string desen)
+        {
+            var i = metin.IndexOf(desen, StringComparison.Ordinal);
+            while (i >= 0)
+            {
+                yield return i;
+                i = metin.IndexOf(desen, i + 1, StringComparison.Ordinal);
+            }
+        }
+
+        // `if (arkaPlanIsleri)` bloklarinin [bas, son] araliklari. Tek satirlik govde
+        // (susli parantezsiz) KABUL EDILMEZ - o bicimde ikinci bir cagri eklemek sessizce
+        // blogun DISINDA kalirdi.
+        private static List<(int Bas, int Son)> BayrakBloklari(string kod)
+        {
+            var sonuc = new List<(int, int)>();
+            foreach (var i in TumIndeksler(kod, "if (arkaPlanIsleri)"))
+            {
+                var acilis = kod.IndexOf('{', i);
+                if (acilis < 0) continue;
+                // Aradaki metin yalnizca bosluk/yeni satir olmali - aksi halde bu `if` tek
+                // satirlik bir govdeye sahiptir ve blok DEGILDIR.
+                if (kod.Substring(i + "if (arkaPlanIsleri)".Length, acilis - i - "if (arkaPlanIsleri)".Length)
+                       .Any(c => !char.IsWhiteSpace(c)))
+                    continue;
+
+                var derinlik = 0;
+                for (var j = acilis; j < kod.Length; j++)
+                {
+                    if (kod[j] == '{') derinlik++;
+                    else if (kod[j] == '}')
+                    {
+                        derinlik--;
+                        if (derinlik == 0) { sonuc.Add((acilis, j)); break; }
+                    }
+                }
+            }
+
+            return sonuc;
         }
     }
 }
