@@ -87,9 +87,33 @@ varsayılıdır (`AllowedOrigins`, `Storefront:BaseUrl`, `Cookies:Domain=.divisi
 - [ ] `https://divisima.com/sitemap.xml` **200 + XML** döndü (nginx `/api/seo/sitemap`'e
       proxy'ler; `robots.txt` bu adresi gösteriyor)
 - [ ] `https://divisima.com/admin.html` yanıtı `X-Robots-Tag: noindex` taşıyor
+- [ ] `ops/infra/divisima-security-headers.conf` **nginx.conf ile aynı dizine** kuruldu
+      (varsayılan `/etc/nginx/`). Eksikse nginx **açılmaz** — bu bilinçli: sessiz bir
+      başlık boşluğu yerine gürültülü bir hata
+- [ ] `nginx -t` **exit 0** (include yolu ve iki server block sözdizimi doğrulanır)
+- [ ] **Clickjacking (GÜVENLİK-FIX-3 / #4)** — yayın sonrası `curl -sI` ile ÜÇ adres
+      ayrı ayrı kontrol edildi; **üçünde de** `X-Frame-Options: DENY` **ve**
+      `Content-Security-Policy: frame-ancestors 'none'` görünüyor:
+      `https://divisima.com/` · `https://divisima.com/index.html` · `https://divisima.com/admin.html`
+      > **Üçü de ayrı ayrı bakılır, gerekçesi ölçülmüş bir nginx davranışıdır:**
+      > `add_header` bir önceki seviyeden YALNIZCA o seviyede hiç `add_header` yoksa
+      > devralınır. Bu üç adres, kendi `add_header`ını tanımlayan location'lara düşer;
+      > `include` satırı düşerse başlıklar **yalnız onlarda** sessizce kaybolur — yani
+      > sadece `https://divisima.com/robots.txt`e bakan bir doğrulama YEŞİL görünürdü.
+- [ ] **İç dokümanlar kapalı (GÜVENLİK-FIX-3 / #6)** — hepsi **404**:
+      `/API-CONTRACT.md` · `/INTEGRATION.md` · `/SEO-ANALYTICS.md` · `/vendor/README.txt` ·
+      `/test/mobil-erisilebilirlik.js`
+- [ ] **Kapsam fazla geniş değil** — hepsi **200**: `/` · `/index.html` · `/api-bridge.js` ·
+      `/manifest.json` · `/robots.txt` · `/vendor/purify.min.js` ·
+      **`/.well-known/security.txt`** (RFC 9116; gizli-dosya kuralına takılırdı, açık
+      muafiyeti vardır — bu satır o muafiyetin tek doğrudan kanıtıdır)
 
 Yerelde karşılığı `docker compose up` — `frontend` servisi aynı davranışı `:5173`'te verir
-(`ops/infra/frontend-dev.conf`).
+(`ops/infra/frontend-dev.conf`). **İki bilinçli ayrışma vardır** (ikisi de TLS/HSTS'in orada
+bulunmamasıyla aynı gerekçede — yerel düz-HTTP bir geliştirme sunucusu farklı bir tehdit
+modelidir): `/test/` yerelde **açık kalır** (Dalga 4'ün pin boşluğunu telafi eden ölçüm
+betiği tarayıcıya elle yüklenir) ve clickjacking başlığı yerelde **yoktur**. İç doküman /
+gizli dosya / yedek artığı 404'leri **ikisinde de aynıdır**.
 
 ## Yüklenen görsellerin kalıcılığı - DALGA C / C2
 
@@ -131,6 +155,67 @@ dolayısıyla Redis'i uygulamadan **önce** ayağa kaldırın.
 > ölçüldü: iki sayaç aynı bölümleme anahtarıyla ve aynı limitle kilitli adımda ilerler
 > (`RateLimitTekKaynakTests`).
 
+
+## Ters proxy ve gerçek istemci IP'si - GÜVENLİK-FIX-3 / #3
+
+**Rate limit, webhook IP allowlist ve audit IP'nin ÜÇÜ DE `RemoteIpAddress`'e dayanır.**
+Uygulama `X-Forwarded-For`'a **yalnızca güvenilen bir proxy'den geldiyse** güvenir
+(`Program.cs`, `ForwardedHeadersOptions`): `ForwardedHeaders:KnownProxies` **boşsa** ASP.NET'in
+güvenli varsayılanı (`127.0.0.1` + `127.0.0.0/8`) yürürlükte kalır ve keyfi bir XFF başlığı
+**yok sayılır** — yani spoofing kapalıdır, bu doğru taraftır.
+
+Ama sonucu **dağıtımın şekline bağlıdır** ve iki yönlü hata mümkündür:
+
+| Topoloji | `KnownProxies` | Sonuç |
+|---|---|---|
+| nginx API ile **aynı makinede** (`proxy_pass http://127.0.0.1:5000`) | boş bırakılabilir | XFF güvenilir → **istemci başına** kova ✅ |
+| nginx/LB **ayrı makinede/konteynerde** (bulut LB, k8s ingress, compose ağı) | **boş** | XFF yok sayılır → **herkes tek kovada**: auth limiti tüm site için 10/dk ❌ |
+| aynısı | **dolu** | XFF güvenilir → istemci başına kova ✅ |
+
+Depodaki `ops/infra/nginx.conf` **loopback'e** proxy'ler, yani belgelenen topolojide boş
+bırakmak doğrudur (GÜVENLİK DALGASI 2'de ölçüldü: `XFF=9.9.9.9` 10 istekte tükendi,
+`XFF=8.8.8.8` **taze kova** aldı). Farklı bir topolojiye geçen ekip bunu **fark etmez** —
+hata sessizdir, tek belirtisi "rate limit çok erken tetikleniyor" şikâyetidir.
+
+- [ ] Topoloji belirlendi: nginx/LB API ile **aynı makinede mi**? Değilse
+      `ForwardedHeaders:KnownProxies` = proxy/LB'nin IP'leri (`appsettings` **değil**,
+      ortam değişkeni/secret)
+- [ ] Proxy `X-Forwarded-For` ve `X-Forwarded-Proto` başlıklarını **gerçekten ekliyor**
+      (depodaki nginx.conf ekler; başka bir ingress kullanılıyorsa doğrulanır)
+- [ ] **Yayın sonrası doğrulama — bölümleme gerçekten çalışıyor mu:** aynı auth ucuna
+      `X-Forwarded-For: 9.9.9.9` ile limitin bir fazlası kadar istek atılır (**429** beklenir),
+      hemen ardından `X-Forwarded-For: 8.8.8.8` ile bir istek atılır. İkincisi **429 DEĞİLSE**
+      bölümleme çalışıyor demektir. **İkincisi de 429 ise** herkes tek kovadadır →
+      `KnownProxies` doldurulmamıştır
+- [ ] `ForwardLimit = 1` yeterli mi kontrol edildi — **birden fazla** proxy hop'u varsa
+      (CDN → LB → nginx) değer hop sayısına çıkarılmalıdır, aksi halde okunan IP bir
+      önceki proxy'nin IP'sidir
+
+### API portu dışarı açılmaz
+
+- [ ] Üretimde **yalnız nginx** dışarı bakar (443/80). API'nin `5000` portu **public
+      DEĞİL** — aksi halde nginx'in TLS'i, güvenlik başlıkları, rate limit'i ve
+      `/hangfire` kilidi **atlanabilir**
+
+> `docker-compose.yml` bir **üretim artefaktı DEĞİLDİR** — `ASPNETCORE_ENVIRONMENT:
+> Development` yazar ve dosyanın başlığı "yerel geliştirme ortamı" der. Oradaki
+> `5000:5000` ve `5173:80` açılımları **bilinçlidir**: gerçek cihaz turu (Dalga 4, telefon
+> LAN üzerinden) için storefront'un DA API'nin DE LAN'dan erişilebilir olması gerekir.
+> `sqlserver` ve `redis` ise gerekçesiyle `127.0.0.1:`e bağlıdır. Üretim orkestrasyonu
+> ayrı bir artefakttır ve bu dosya o amaçla **kullanılmamalıdır**.
+
+### Çerez kapsamı ve DNS hijyeni - GÜVENLİK DALGASI 2 / #7
+
+`Cookies:Domain = .divisima.com` **bilinçlidir**: storefront (`divisima.com`) ile API
+(`api.divisima.com`) farklı hostlardır ve CSRF double-submit'in çalışması için `csrf_token`
+çerezinin storefront JS'i tarafından okunabilmesi gerekir (Sprint 8 madde 6'da ölçüldü).
+Bedeli: `refresh_token` (httpOnly, path `/api/auth`) **her alt alan adına** gönderilir.
+
+- [ ] Alt alan adları **sahipsiz bırakılmaz** — kullanılmayan `CNAME`/`A` kayıtları silinir
+      (subdomain takeover ile ele geçirilen bir alt alan adı `/api/auth/*` servis ederse
+      kullanıcıların refresh token'ını alır)
+- [ ] Üçüncü taraf bir servise alt alan adı devredilmez (`*.divisima.com` wildcard
+      yönlendirmesi verilmez)
 ## Zorunlu adımlar
 - [ ] `Iyzico:BaseUrl` = `https://api.iyzipay.com` (sandbox değil)
 - [ ] `Webhook:AllowedIps` = Iyzico production IP aralıkları
@@ -158,3 +243,22 @@ bu kayıtlar `DataRetentionJob` tarafından **silinmez** (yalnız `Processed` ol
 - [ ] Yayın sonrası ilk gün panelde bu liste kontrol edildi (boş olması beklenen durumdur)
 - [ ] Log dosyaları: günlük + 100 MB'da parçalanır, 30 dosya saklanır (`Program.cs`).
       Disk planlaması buna göre yapıldı
+
+### `BackgroundJobs:Enabled` - GÜVENLİK-FIX-3 / #8
+
+Bu bayrak **Dalga D'de test izolasyonu için** eklendi (her test host'u kendi Hangfire
+sunucusunu kaldırıp dakikalık outbox işini testlerin kendi drenajıyla yarıştırıyordu) ve
+`TestHostConfig` onu `false` yapar. **Varsayılanı `true`'dur** — ayar hiç yoksa arka plan
+işleri çalışır, yani güvenli taraftadır (`Program.cs`: `!bool.TryParse(...) || bgj`).
+
+Riski budur: üretimde **yanlışlıkla `false`** verilirse uygulama sorunsuz açılır, uçlar
+200 döner, siparişler oluşur — ama `outbox-processor` **hiç koşmaz**: sipariş onay
+e-postası, fatura, sadakat puanı ve iade bildirimleri **sessizce** birikir. Hiçbir hata
+üretilmez, `failed-jobs` listesi **boş kalır** (mesajlar `Pending` durumundadır, `Failed`
+değil), yani operatörün baktığı yer de sessizdir.
+
+- [ ] `BackgroundJobs:Enabled` **verilmedi** ya da açıkça `true` (env/appsettings tarandı)
+- [ ] **Yayın sonrası davranışla doğrulandı:** gerçek bir sipariş verildikten ~2 dakika
+      sonra `outbox_messages` içinde o siparişin mesajı `status = 1 (Processed)` oldu.
+      **Bayrak yanlışsa bu satır `status = 0`'da takılı kalır** — konfigürasyona bakmak
+      yerine sonuca bakmak, bayrağın gerçekten yürürlükte olduğunun tek doğrudan kanıtıdır
