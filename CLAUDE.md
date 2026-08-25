@@ -6222,6 +6222,54 @@ EDILEMEZ ve o istisna OLUSAMAZ (p1 bunu deterministik olarak pinliyor).
   duzeltilmemis bir flake'ti. Artik `Cerez_Secure_...` kirmizisi flake DEGIL, bu duzeltmenin
   BASARISIZLIK KANITIDIR: re-run istenmez, durulur ve olculur.
 
+## PUSH RAPORU `60ecc93` - HER IKI WORKFLOW TAMAMEN YESIL (KAPANIS)
+
+Push `677e9ee..60ecc93` (tek commit -> tek push). Adim bazinda + annotation duzeyinde
+dogrulandi; iki run da dogru commit uzerinde kostu
+(`head_sha` alani `60ecc93`, `event = push`).
+
+**CI - Build & Test (run 32837426216) - TAMAMEN YESIL.**
+`build-and-test`: `.NET 8 kurulumu` / `Bagimliliklari geri yukle` / `Derle (Release)` /
+`SQL Server hazir mi` / **`SQL gerektiren testler (ATLANMAMALI)`** / **`Testler + coverage`** /
+`TestDbKurulum - 1807 yeniden deneme ozeti` / **`Coverage raporunu yukle`** hepsi SUCCESS;
+`TESHIS` skipped.
+`format-check`: **iki ZORUNLU adim** (whitespace + style) ve
+**`Model ile migration'lar SENKRON mu (ZORUNLU)`** SUCCESS.
+
+**Security CI (run 32837426245) - TAMAMEN YESIL.**
+`tests` (`Entegrasyon testleri` DAHIL, TESHIS skipped) / `dependency-scan` (RAPOR + KAPI +
+kullanimdan kalkmis paket) / `codeql` SUCCESS.
+**`secret-scan` -> `Gitleaks (secret taramasi)` SUCCESS** - bolum 7 kurali geregi ADIM
+SONUCUNDAN okundu; "Leaks detected" satiri YOK.
+
+**ANNOTATION: ALTI JOB'IN HICBIRINDE `failure` SEVIYESI YOK.** `format-check` ANNOTATION'DAN
+okundu (job sonucundan DEGIL). Bulunan her annotation `warning` ve HEPSI ONCEDEN VARDI:
+Node.js 20 deprecation, CodeQL Action v3 deprecation, ve
+`Divisima.Core/DataAccess/*` nullable uyarilari. **Bu commit YENI uyari uretmedi.**
+
+**RETRY GORUNURLUGU (ayri, iki job'da da anonim okundu):**
+`TestDbKurulum: 1807 yeniden denemesi bu kosumda HIC ATESLEMEDI (0) - retry devrede,
+gerekmedi.` Yani `model` kilidi bu kosumda HIC ATESLEMEDI; retry duran emniyet agi
+olarak yerinde.
+
+**ASIL SORU - `Cerez_Secure_HER_ORTAMDA_ISARETLI_OrtamGuardi_YOK` KIRILMADI.** Kanit uc
+kanaldan: (1) `Testler + coverage` ve `Entegrasyon testleri` SUCCESS - `set -o pipefail`
+devrede oldugu icin tek bir kirmizi test adimi dusururdu; (2) `TESHIS` adimi IKI JOB'DA DA
+skipped (yalniz `if: failure()` kosar); (3) alti job'da failure seviyeli annotation 0.
+**Bu push'a ozel RE-RUN YASAGI HIC DEVREYE GIRMEDI** - kirmizi olmadi, dolayisiyla
+"duzeltmenin basarisizlik kaniti" durumu dogmadi.
+
+**DURUST SINIR - TEST SAYISI ANONIM KANALDAN TEYIT EDILEMEZ.** 540 rakami okunamaz (job
+log'u 403, Summary imza ister, annotation yalniz `Failed` satiri tasir - dordu de daha once
+olculdu). Kanit ADIMLARIN SUCCESS OLMASIDIR: suit tumuyle kostu ve tek bir test kirilmadi.
+Buradan cikan tek gecerli CIKARIM: yerelde Docker kapali oldugu icin kirilan **3
+`OrderEndpointTests` kosucuda GECTI** - aksi halde adim kirmizi olurdu. Sayinin kendisi
+okunamadi, kosumun temizligi okundu.
+
+**GUVENLIK DALGASI 2 HATTI TAMAMEN KAPANDI:** GUVENLIK-FIX-3 `f800afe` ·
+GUVENLIK-FIX-4 `677e9ee` · FLAKE-FIX `60ecc93` - **ucu de cift yesil**
+(her iki workflow da SUCCESS, failure seviyeli annotation 0).
+
 ## SIRA
 
 0. **KALITE SUPURMESI KAPANDI - LAUNCH'I BLOKE EDEN TEKNIK KALEM KALMADI.**
