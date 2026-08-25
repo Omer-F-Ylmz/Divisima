@@ -197,6 +197,11 @@ namespace Divisima.Bussiness.DependencyResolvers.Autofac
             builder.RegisterType<EfSecurityEventDal>().As<ISecurityEventDal>().InstancePerLifetimeScope();
 
             // ── Denetim kaydı ──
+            // FAZ 0 / K6: kayit KONVANSIYONEL DEGIL, ACIK (bu modulde her servis tek tek
+            // RegisterType<X>().As<IY>() ile kayitli - RegisterAssemblyTypes yok). Bu yuzden
+            // AuditLogManager icin ACIK satir zorunlu; olmazsa controller'in kurucusu
+            // cozulemez ve uc calisma aninda patlar.
+            builder.RegisterType<AuditLogManager>().As<IAuditLogService>().InstancePerLifetimeScope();
             builder.RegisterType<EfAuditLogDal>().As<IAuditLogDal>().InstancePerLifetimeScope();
 
             // ── Favoriler ──

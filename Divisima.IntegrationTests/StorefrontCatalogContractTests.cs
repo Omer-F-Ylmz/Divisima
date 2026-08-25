@@ -422,6 +422,48 @@ namespace Divisima.IntegrationTests
             public List<object>? sub_categories { get; set; }
         }
 
+        // ═══ p-k1b - FAZ 0 / K1: ETAG'IN ILK DAVRANIS PINI ════════════════════════════════
+        //
+        // ETag middleware ILK COMMIT'ten beri var ama HICBIR pin onu olcmuyordu (FAZ 0'da
+        // tarandi: ETag|If-None-Match|304 -> test projesinde 0 eslesme). K1'de listeden olu
+        // "/api/sizeguide" oneki kaldirildi; bu pin hem CALISAN kapsami hem de KAPSAM DISINI
+        // davranisla sabitler - yani onek listesine bir gun "/api/size-guide" eklenirse de
+        // KIRILIR ve o karar BILINCLI verilmek zorunda kalir.
+        //
+        // Bu sinifa eklendi (yeni SQL sinifi ACILMADI - 10d794d dersi): host ve tohum zaten var.
+        [Fact]
+        public async Task ETag_KATALOG_UCUNDA_VAR_ve_304_DONER_SIZE_GUIDE_KAPSAM_DISINDA()
+        {
+            if (Skipped()) return;
+            var anon = _factory!.CreateClient();
+
+            // ── (1) Kapsam ICI: /api/product GET -> ETag VAR ──
+            var ilk = await anon.GetAsync($"/api/product/get/{_productId}");
+            ilk.StatusCode.Should().Be(HttpStatusCode.OK, "tohumlanan urun anonim okunabilmeli");
+            ilk.Headers.ETag.Should().NotBeNull("/api/product oneki ETag kapsaminda");
+            var etag = ilk.Headers.ETag!.ToString();
+            etag.Should().NotBeNullOrWhiteSpace();
+
+            // ── (2) AYNI istege If-None-Match -> 304 + BOS govde ──
+            var istek = new HttpRequestMessage(HttpMethod.Get, $"/api/product/get/{_productId}");
+            istek.Headers.TryAddWithoutValidation("If-None-Match", etag);
+            var ikinci = await anon.SendAsync(istek);
+            ikinci.StatusCode.Should().Be(HttpStatusCode.NotModified,
+                "degismemis icerikte 304 donmeli - ETag'in VARLIK sebebi bu");
+            (await ikinci.Content.ReadAsByteArrayAsync()).Length.Should().Be(0,
+                "304 govde TASIMAMALI - bant genisligi tasarrufu tam da bu");
+
+            // ── (3) CIFT-ANLAM KIRICI: kapsam DISI yol -> 200 ama ETag YOK ──
+            // "her yanita ETag koyan" bir uygulama (1) ve (2)'yi gecerdi; kapsamin DAR oldugu
+            // ancak boyle kanitlanir. K1'de canli olculen once-durumun ta kendisi.
+            var sg = await anon.GetAsync($"/api/size-guide/category/{_categoryId}");
+            ((int)sg.StatusCode).Should().BeLessThan(500,
+                $"size-guide ucu ayakta olmali: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await sg.Content.ReadAsStringAsync())}");
+            sg.Headers.ETag.Should().BeNull(
+                "K1 karari: '/api/sizeguide' OLU onegi KALDIRILDI (duzeltilmedi). size-guide " +
+                "vitrine baglanirsa onek BILINCLI olarak '/api/size-guide' yapilir ve bu pin kirilir");
+        }
+
         private sealed class FilterEnvelope { public FilterPage? data { get; set; } }
         private sealed class FilterPage
         {

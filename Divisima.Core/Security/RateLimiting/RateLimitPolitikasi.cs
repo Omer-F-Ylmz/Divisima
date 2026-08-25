@@ -60,7 +60,58 @@ namespace Divisima.Core.Security.RateLimiting
                 genelLimit: Oku("RateLimit:GlobalPermitLimit", 100));
         }
 
-        // YOL -> KAPSAM/LIMIT secimi. Tek yerde durur ki iki yol ayni yolu ayni kovaya atsin.
+        // ═══ FAZ 0 / K7 - KOVA SECIMININ TEK SAF FONKSIYONU ════════════════════════════════
+        //
+        // OLCULEN ONCE-DURUM: limitler D5'te tek kaynaga indirilmisti ama YOL -> KOVA ESLESMESI
+        // IKI AYRI EL YAZMASIYDI: (a) asagidaki `KapsamSec` dort alt-dizgesi (Redis yolu),
+        // (b) controller'lardaki [EnableRateLimiting] oznitelikleri (yerlesik yol, 6 dosya 9 yer).
+        // Ayrisan uclar (oznitelikte "auth", KapsamSec'te "global"): guest-checkout/place,
+        // price-drop/subscribe|unsubscribe, stocknotification/subscribe|unsubscribe,
+        // seller/auth/login|register, auth/reset-password|resend-verification|verify-2fa|
+        // logout|refresh. Etkin limit min(10,100)=10 oldugu icin GOZLEMLENEBILIR SONUC AYNIYDI;
+        // ayrisan sey kovanin PAYLASIMIYDI.
+        //
+        // COZUM: OZNITELIK TEK KAYNAK. Middleware kovayi ONCE endpoint metadata'sindaki
+        // EnableRateLimitingAttribute.PolicyName'den alir; metadata YOKSA `KapsamSec` YEDEK
+        // kalir. Bu fonksiyon o cozumlemenin SAF halidir - HttpContext almaz, dolayisiyla
+        // birim olarak pinlenebilir (p-k7a/b/c).
+        //
+        // ADIM 0'DA IKI PARCA OLCULDU (FAZ 0):
+        //   (i)  EnableRateLimitingAttribute.PolicyName public okunabiliyor -> DERLEYICI KANITI
+        //        (gecici tani ile derlendi: 0 error CS).
+        //   (ii) Gercek boru hattinda, RedisRateLimit middleware KONUMUNDA endpoint COZULMUS:
+        //          /api/auth/login           endpointNull=False  policy=auth
+        //          /api/guest-checkout/place endpointNull=False  policy=auth
+        //          /api/payment/webhook      endpointNull=False  policy=payment
+        //          /api/product/get/1        endpointNull=False  policy=-
+        //          /api/olmayan-yol          endpointNull=TRUE   policy=-     <- YEDEK SART
+        //        Sebep olculdu: uygulama `app.UseRouting()`i ACIKCA cagirmiyor, yonlendirme
+        //        boru hattinin BASINA ekleniyor (Sprint 8 madde 9 bulgusu). Ayni desen
+        //        IdempotencyMiddleware'de ZATEN kullaniliyor.
+        //
+        // BILINCLI DAVRANIS DEGISIKLIGI: yukarida sayilan uclar dagitik tarafta artik "global"
+        // degil "auth" kovasini PAYLASIR. Etkin limit zaten 10 idi (min); degisen sey paylasimin
+        // SIKILASMASI - ve bu, oznitelik tarafinin ZATEN yaptigi sey.
+        public (string kapsam, int limit) KovaSec(string? policyAdi, string yol)
+        {
+            // 1) OZNITELIK (tek kaynak) - endpoint metadata'sindan geldiyse o kazanir.
+            if (!string.IsNullOrWhiteSpace(policyAdi))
+            {
+                if (string.Equals(policyAdi, AuthKapsami, StringComparison.Ordinal))
+                    return (AuthKapsami, AuthLimiti);
+                if (string.Equals(policyAdi, OdemeKapsami, StringComparison.Ordinal))
+                    return (OdemeKapsami, OdemeLimiti);
+                // TANINMAYAN policy adi: sessizce yutulmaz da uydurulmaz da - yedege duser.
+                // (Yerlesik limiter zaten kendi policy'sini uygular; burada yalnizca DAGITIK
+                //  sayacin hangi kovaya yazacagini seciyoruz.)
+            }
+
+            // 2) YEDEK - endpoint cozulmemis (404 vb.) ya da oznitelik yok.
+            return KapsamSec(yol);
+        }
+
+        // YOL -> KAPSAM/LIMIT secimi. YEDEK yol (bkz. KovaSec). Endpoint metadata'si olmayan
+        // istekler (rota eslesmeyen 404'ler) ve oznitelik tasimayan uclar buradan gecer.
         //
         // KULTURSUZ ESLESME (KALITE SUPURMESI B3 - bedeli odendi): yol bir MAKINE dizgesidir.
         // `ToLower()` KULLANILMAZ - uygulama tr-TR'ye pinli oldugu icin 'I' -> 'ı' (U+0131)

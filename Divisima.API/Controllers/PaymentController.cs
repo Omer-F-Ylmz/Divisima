@@ -16,6 +16,17 @@ namespace Divisima.API.Controllers
     // Açıklayıcı yorum: Ödeme controller'ı. Sahiplik JWT'den doğrulanır; callback+webhook anonim ama imzalı.
     [Route("api/[controller]")]
     [ApiController]
+    // ═══ FAZ 0 / K2 - RATE LIMIT SINIF DUZEYINE TASINDI ════════════════════════════════
+    // ONCE: [EnableRateLimiting("payment")] UC ACTION'DA AYRI AYRI duruyordu (initialize /
+    // callback / webhook). Bugun bosluk YOKTU - ucu de isaretliydi - ama yarin eklenecek bir
+    // 4. action isaretlenmezse YERLESIK yolda "global" (100/dk) kovasina duserdi.
+    // TASIMANIN DAVRANISI DEGISTIRMEDIGI UC AYAKLA OLCULDU (FAZ 0):
+    //   1) Controller'in 3 action'inin 3'u de ZATEN ayni policy'yi tasiyordu - kapsam tam.
+    //   2) Depoda [DisableRateLimiting] HIC kullanilmiyor (0 eslesme) - sinif duzeyi hicbir
+    //      action'i beklenmedik sekilde kapsamaz.
+    //   3) Iki mevcut 429 pini tasimayi bagimsiz dogrular (Callback_PAYMENT_KOVASINDA... ve
+    //      Webhook_PAYMENT_KOVASINDA...); initialize icin pin YOKTU, FAZ 0'da eklendi.
+    [EnableRateLimiting("payment")]
     [SwaggerTag("Güvenli Iyzico ödeme")]
     public class PaymentController : ControllerBase
     {
@@ -32,7 +43,6 @@ namespace Divisima.API.Controllers
             int.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : 0;
 
         [HttpPost("initialize")]
-        [EnableRateLimiting("payment")]
         [RequireUserType(UserTypeEnum.Customer)]
         [SwaggerOperation(Summary = "Ödeme başlat", Description = "Checkout Form başlatır. Kullanıcı yalnızca kendi siparişini ödeyebilir.")]
         public async Task<IActionResult> Initialize([FromBody] PaymentInitRequestDto dto)
@@ -62,7 +72,6 @@ namespace Divisima.API.Controllers
         // bir karar degil kapsam disinda kalmis bir bosluktu; iki yol artik ayni davraniyor.
         [HttpPost("callback")]
         [AllowAnonymous]
-        [EnableRateLimiting("payment")]
         [SwaggerOperation(Summary = "Ödeme callback", Description = "Iyzico callback. İmza + sunucu-sunucu doğrulama ile işlenir; tarayıcı storefront sonuç sayfasına yönlendirilir.")]
         public async Task<IActionResult> Callback([FromForm] PaymentCallbackRequestDto dto)
         {
@@ -140,7 +149,6 @@ namespace Divisima.API.Controllers
         [HttpPost("webhook")]
         [AllowAnonymous]
         [ApiVersionNeutral]
-        [EnableRateLimiting("payment")]
         [SwaggerOperation(Summary = "Ödeme webhook", Description = "Iyzico bant-dışı bildirim (yedek teyit). İmza gelirse doğrulanır; otorite sunucu-sunucu sorgudur. İdempotent.")]
         public async Task<IActionResult> Webhook([FromBody] PaymentCallbackRequestDto dto)
         {

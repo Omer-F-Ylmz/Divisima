@@ -583,6 +583,129 @@ namespace Divisima.IntegrationTests
             kargo.last_checked_at.Should().BeNull("basarisiz sorgu 'kontrol edildi' olarak damgalanmamali");
         }
 
+        // ═══ p-k6a - FAZ 0 / K6: DENETIM UCUNUN YETKI KAPISI ══════════════════════════════
+        //
+        // Uc, is katmanina tasindi (IAuditLogService). Tasima sirasinda yetki ozniteligi
+        // dusseydi denetim kayitlari (audit_logs, uretimde 1500+ satir; kim ne degistirdi
+        // bilgisi) ANONIME acilirdi. Bu pin kapiyi davranisla sabitler.
+        [Fact]
+        public async Task DenetimUcu_ANONIME_401_MUSTERIYE_403_ADMINE_200()
+        {
+            if (Skipped()) return;
+
+            var anon = _factory!.CreateClient();
+            var anonYanit = await anon.GetAsync("/api/auditlog/list");
+            anonYanit.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+                "denetim kaydi ANONIM okunamaz");
+
+            // Deponun admin-kapisi sozlesmesi: kimlikli ama yetkisiz -> 403 (RequireUserType).
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+            var musteriYanit = await musteri.Client.GetAsync("/api/auditlog/list");
+            musteriYanit.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+                "kimlikli ama admin OLMAYAN kullanici 403 almali - deponun RequireUserType sozlesmesi");
+
+            // VAKUM KIRICI: kapi HERKESI reddetmiyor - admin GERCEKTEN girebiliyor.
+            var admin = await AdminIstemciAsync();
+            var adminYanit = await admin.GetAsync("/api/auditlog/list");
+            adminYanit.StatusCode.Should().Be(HttpStatusCode.OK,
+                $"admin denetim kaydini okuyabilmeli: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await adminYanit.Content.ReadAsStringAsync())}");
+        }
+
+        // ═══ p-k6b - FAZ 0 / K6: ZARF SEKLI + tableName FILTRESI ══════════════════════════
+        //
+        // OLCULEN ONCE-DURUM: uc SuccessDataResult<PagedResult<AuditLog>> donuyordu; repository
+        // tipi HTTP'ye sizdigi icin zarf camelCase {items,totalCount,page,size,totalPages}
+        // cikiyordu - oysa deponun DIGER sayfali uclari snake_case {items,total_count,...}
+        // donuyor. Bu, DALGA B / B2'de olculup duzeltilen defektin IKINCI ornegiydi ve orada
+        // bedeli CANLIDA odenmisti (admin siparis listesi hep bos gorunuyordu).
+        //
+        // CIFT-ANLAM KIRICI: yalnizca "total_count var" demek yetmez - eski camelCase alanlarin
+        // ARTIK OLMADIGI da assert edilir; ikisi birden donseydi panel calisirdi ama iki
+        // konvansiyon yasamaya devam ederdi (B2'de birebir bu ayrim yapilmisti).
+        [Fact]
+        public async Task DenetimUcu_SNAKE_CASE_ZARF_Doner_ve_tableName_FILTRESI_CALISIR()
+        {
+            if (Skipped()) return;
+            var admin = await AdminIstemciAsync();
+
+            // KURGU NEDEN ELLE: bu host'ta AuditInterceptor ATESLEMEZ - OLCULDU. DalgaBFactory
+            // DbContextOptions kaydini kaldirip `AddDbContext(o => o.UseSqlServer(ConnStr))` ile
+            // YENIDEN kuruyor ve o kayit `.AddInterceptors(...)` TASIMIYOR (Program.cs'teki
+            // uretim kaydi tasiyor). Yani audit_logs bu suitte BOS kalir. Pinin OLCTUGU sey
+            // interceptor DEGIL, UCUN SOZLESMESI (zarf sekli + DTO alanlari + tableName filtresi);
+            // bu yuzden satirlar dogrudan kuruluyor. Interceptor'in kendi davranisi AYRI bir is.
+            var damga = Guid.NewGuid().ToString("N").Substring(0, 8);
+            var hedefTablo = $"faz0_hedef_{damga}";
+            var digerTablo = $"faz0_diger_{damga}";
+            await using (var seed = NewContext())
+            {
+                for (int i = 0; i < 3; i++)
+                    seed.Set<AuditLog>().Add(new AuditLog
+                    {
+                        table_name = hedefTablo,
+                        entity_id = $"{i}",
+                        action = "Modified",
+                        changes = "{\"alan\":[\"eski\",\"yeni\"]}",
+                        user_id = "faz0",
+                        created_at = DateTime.Now.AddMinutes(-i)
+                    });
+                seed.Set<AuditLog>().Add(new AuditLog
+                {
+                    table_name = digerTablo,
+                    entity_id = "9",
+                    action = "Added",
+                    user_id = "faz0",
+                    created_at = DateTime.Now.AddMinutes(-10)
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            var hepsi = await admin.GetAsync("/api/auditlog/list?page=1&size=5");
+            hepsi.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            using var doc = JsonDocument.Parse(await hepsi.Content.ReadAsStringAsync());
+            var data = doc.RootElement.GetProperty("data");
+
+            var alanlar = data.EnumerateObject().Select(p => p.Name).ToList();
+            alanlar.Should().Contain(new[] { "items", "total_count", "page", "size", "total_pages" },
+                "zarf ProductPagingListResponseDto / AdminOrderPagingListResponseDto ile AYNI konvansiyonda olmali");
+            alanlar.Should().NotContain("totalCount",
+                "B2 defekti: repository tipi PagedResult<T> HTTP'ye SIZMAMALI");
+            alanlar.Should().NotContain("totalPages",
+                "camelCase zarf geri gelemez - iki konvansiyon ayni API'de yasayamaz");
+
+            // VAKUM KIRICI: liste GERCEKTEN dolu (yoksa filtre assert'i bedava dogru olurdu).
+            data.GetProperty("total_count").GetInt32().Should().BeGreaterOrEqualTo(4,
+                "kurgudaki dort denetim satiri listelenmeli");
+            data.GetProperty("items").GetArrayLength().Should().BeGreaterThan(0);
+
+            // Ham entity DISARI CIKMAMALI ama denetim alanlari DTO'da TAM olmali.
+            var ilk = data.GetProperty("items")[0];
+            foreach (var beklenen in new[] { "id", "table_name", "entity_id", "action", "changes", "user_id", "created_at" })
+                ilk.TryGetProperty(beklenen, out _).Should().BeTrue($"'{beklenen}' alani DTO'da olmali");
+
+            // SIRALAMA controller'dan tasindi: created_at DESC (en yeni once).
+            ilk.GetProperty("table_name").GetString().Should().Be(hedefTablo,
+                "en yeni kayit basta olmali - created_at DESC davranisi TASINDI, degismedi");
+
+            // ── tableName FILTRESI: controller'dan tasinan davranis KORUNDU mu ──
+            var filtreli = await admin.GetAsync($"/api/auditlog/list?page=1&size=50&tableName={hedefTablo}");
+            filtreli.StatusCode.Should().Be(HttpStatusCode.OK);
+            using var doc2 = JsonDocument.Parse(await filtreli.Content.ReadAsStringAsync());
+            var data2 = doc2.RootElement.GetProperty("data");
+            data2.GetProperty("total_count").GetInt32().Should().Be(3,
+                "yalniz hedef tablonun UC satiri donmeli");
+            foreach (var satir in data2.GetProperty("items").EnumerateArray())
+                satir.GetProperty("table_name").GetString().Should().Be(hedefTablo,
+                    "tableName ESITLIK filtresi - baska tablo (faz0_diger_*) SIZMAMALI");
+
+            // CIFT-ANLAM KIRICI: filtre GERCEKTEN daraltiyor (her seyi donduren bir uygulama gecmesin).
+            var olmayan = await admin.GetAsync("/api/auditlog/list?page=1&size=50&tableName=olmayan_tablo_xyz");
+            using var doc3 = JsonDocument.Parse(await olmayan.Content.ReadAsStringAsync());
+            doc3.RootElement.GetProperty("data").GetProperty("total_count").GetInt32().Should().Be(0,
+                "eslesmeyen tablo adinda sonuc BOS donmeli - filtre yok sayilmiyor");
+        }
+
         // Outbox at-least-once calisir ve arka plan isi (Cron.Minutely) testte kosmaz;
         // bekleyen mesajlar BURADA, GERCEK isleyiciyle bosaltilir (stub degil).
         private async Task OutboxBosaltAsync()

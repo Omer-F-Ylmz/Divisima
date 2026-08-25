@@ -153,8 +153,10 @@ namespace Divisima.DataAccess.Concrete.Context
                 //
                 // NAVIGATION EKLENMEDI: ProductStock duz bir entity (yalniz product_id tasiyor)
                 // ve oyle kalmali - iliski model duzeyinde navigasyonsuz tanimlanabiliyor.
-                // ProductStock'ta is_active global filtresi YOK (bilincli - satir 796), Product'ta
-                // VAR; FK yalnizca INSERT/DELETE'i DB duzeyinde baglar, sorgulari etkilemez.
+                // ProductStock'ta is_active global filtresi YOK (bilincli - gerekce asagidaki
+                // "B1: Soft-delete global filtre genisletme" blogunda, ALTI entity'lik dislama
+                // listesinde), Product'ta VAR; FK yalnizca INSERT/DELETE'i DB duzeyinde baglar,
+                // sorgulari etkilemez.
                 b.HasOne<Product>()
                  .WithMany()
                  .HasForeignKey(s => s.product_id)
@@ -822,7 +824,40 @@ namespace Divisima.DataAccess.Concrete.Context
             modelBuilder.Entity<ProductReview>().HasIndex(r => new { r.customer_id, r.product_id }).IsUnique().HasFilter("[is_active] = 1");
             modelBuilder.Entity<Address>().HasQueryFilter(e => e.is_active);
             modelBuilder.Entity<Cart>().HasQueryFilter(e => e.is_active);
-            // === B1: Soft-delete global filtre genisletme (operasyonel entityler HARIC: ProductStock/UserSession/CustomerDevice/GiftCard) ===
+            // ═══ B1: Soft-delete global filtre genisletme ══════════════════════════════════
+            //
+            // FAZ 0 / K4 - DISLAMA LISTESI 6'YA TAMAMLANDI (ONCE 4 YAZIYORDU).
+            // Yorum "ProductStock/UserSession/CustomerDevice/GiftCard" diyordu; olculdu ki
+            // is_active TASIYAN ama query filter'i OLMAYAN entity sayisi ALTI - Seller ve
+            // ProductQuestion listede EKSIKTI. Kod DEGISMEDI (olculen guvenlik/veri boslugu
+            // SIFIR: altisinda da pasif satir kritik yuzeylerden gecemiyor); duzelen sey
+            // BELGE BORCU. Her biri icin gerekce - iki tanesinde filtre eklemek AKTIF ZARAR:
+            //
+            //  GiftCard        : is_active IKI anlam tasir - soft-delete VE "tuketildi"
+            //                    (EfGiftCardDal.TryRedeemAsync redeem'de false set eder).
+            //                    Bakiye+redeem okumalarinin IKISI DE zaten `&& g.is_active`.
+            //                    Filtre eklemek tuketilmis karti DENETIMDEN de gizlerdi.
+            //  ProductStock    : dokuz okuma yerinin dokuzunda da `&& s.is_active` var
+            //                    (StockManager, ProductManager, SearchManager, EfProductStockDal,
+            //                    EfProductDal). Capraz not yukarida, ProductStock blogunda.
+            //  UserSession     : *** FILTRE EKLEMEK IKI SEYI BIRDEN BOZAR ***
+            //                    (a) G1 - GetByRefreshTokenAnyStateAsync filtreyi BILEREK
+            //                        kaldiriyor ki DONDURULMUS jetonun yeniden sunulmasi
+            //                        (refresh token hirsizligi sinyali) tespit edilebilsin;
+            //                    (b) DataRetentionJob `!s.is_active && created_at < -90g`
+            //                        satirlarini siler - filtre eklenirse HICBIR SATIR GOREMEZ.
+            //  CustomerDevice  : *** FILTRE EKLEMEK UNIQUE IHLALI URETIR ***
+            //                    RegisterDevice pasif cihazi FILTRESIZ okuyup YENIDEN
+            //                    AKTIFLESTIRIYOR; filtre eklenirse satir gorunmez, kod YENI
+            //                    satir INSERT eder ve device_token UNIQUE indeksi patlar.
+            //                    Push gonderimi zaten `&& d.is_active` - pasife push GITMEZ.
+            //  Seller          : her okuma yeri korumali - login `!seller.is_active` -> 403,
+            //                    uc panel ucunun ucunde de ayni kontrol. Filtre eklense
+            //                    davranis 403 -> 404'e kayardi (null kontrolu var, cokmez).
+            //  ProductQuestion : bayrak YAZ-BIR-KEZ - depoda `is_active = false` yapan HICBIR
+            //                    kod yolu yok, yalniz olusturmada `true`. Pasif soru bugun
+            //                    OLUSAMAZ; dort okumanin dordu de zaten filtreli. Asimetri
+            //                    pratikte BOS. (Bayragin fiilen kullanilmadigi deftere yazildi.)
             modelBuilder.Entity<SubCategory>().HasQueryFilter(e => e.is_active);
             modelBuilder.Entity<ProductAttribute>().HasQueryFilter(e => e.is_active);
             modelBuilder.Entity<ProductReview>().HasQueryFilter(e => e.is_active);

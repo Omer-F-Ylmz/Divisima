@@ -39,9 +39,20 @@ namespace Divisima.API.Middlewares
             var path = context.Request.Path.Value ?? "";
             var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
-            // Yol -> kova secimi TEK KAYNAKTAN (RateLimitPolitikasi). Kultursuz eslesme ve
-            // limit degerleri orada; burada kopyasi TUTULMAZ - ayrisma tam da oyle olusmustu.
-            var (scope, limit) = _politika.KapsamSec(path);
+            // ═══ FAZ 0 / K7 - KOVA SECIMI OZNITELIKTEN TURER, YOL LISTESI YEDEKTIR ═════════
+            // ONCE: yalnizca `KapsamSec(path)` - yani yol->kova eslesmesi controller'lardaki
+            // [EnableRateLimiting] oznitelikleriyle AYRI BIR EL YAZMASIYDI ve ayrisiyordu.
+            // SONRA: policy adi ENDPOINT METADATA'SINDAN okunur (oznitelik = TEK KAYNAK);
+            // metadata yoksa (rota eslesmeyen 404 vb.) `KapsamSec` YEDEK kalir.
+            // ADIM 0'da olculdu: bu middleware KONUMUNDA endpoint COZULMUS oluyor - uygulama
+            // `app.UseRouting()`i acikca cagirmadigi icin yonlendirme boru hattinin BASINDA.
+            // Ayni desenin depodaki precedent'i: IdempotencyMiddleware (GetEndpoint().Metadata).
+            // Karar mantiginin TAMAMI saf fonksiyonda (RateLimitPolitikasi.KovaSec) - burada
+            // kopyasi TUTULMAZ; gerekce ve olcum ciktilari orada.
+            var policyAdi = context.GetEndpoint()?.Metadata
+                ?.GetMetadata<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>()
+                ?.PolicyName;
+            var (scope, limit) = _politika.KovaSec(policyAdi, path);
             var window = _politika.PencereSaniye;
 
             var result = await _limiter.CheckAsync($"{scope}:{ip}", limit, window);

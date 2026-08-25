@@ -415,5 +415,39 @@ namespace Divisima.IntegrationTests
             ((int)onBirinci.StatusCode).Should().Be(429,
                 "callback 'payment' kovasinda (10/dk) - Redis yolundaki /payment/ limitiyle ayni");
         }
+
+        // ═══ p-k2 - FAZ 0 / K2: INITIALIZE DE "payment" KOVASINDA (EKSIK OLAN UCUNCU PIN) ═══
+        //
+        // K2'de [EnableRateLimiting("payment")] uc action'dan SINIF DUZEYINE tasindi. Tasima
+        // oncesi de sonrasi da davranis AYNI olmali; callback ve webhook'un 429 pinleri vardi
+        // ama INITIALIZE'IN PINI YOKTU - yani sinif duzeyine tasima sirasinda o action'in
+        // kapsamdan cikmasi HICBIR TESTLE yakalanamazdi. Bu pin o boslugu kapatir.
+        //
+        // Yukaridaki iki pinin KALIBIYLA BIREBIR: ayni ikinci host (uretim varsayilani
+        // PaymentPermitLimit=10), ayni "ilk on istek ULASIR" cift-anlam kiricisi.
+        // ILK ON ISTEK 401 BEKLENIR: uc [RequireUserType(Customer)] ve istemci anonim -
+        // yani istekler UYGULAMAYA ULASIYOR (rate limit'e takilmiyor), yalnizca yetkisizler.
+        [Fact]
+        public async Task Initialize_PAYMENT_KOVASINDA_OnBirinci_Istek_429()
+        {
+            if (Skipped()) return;
+            var client = NoRedirect(_limitFactory!);
+
+            var kodlar = new List<int>();
+            for (int i = 0; i < 10; i++)
+            {
+                var r = await client.PostAsJsonAsync("/api/payment/initialize", new { order_id = 999999 });
+                kodlar.Add((int)r.StatusCode);
+            }
+
+            kodlar.Should().AllBeEquivalentTo(401,
+                $"ilk on istek uygulamaya ULASMALI (limite takilmadan; anonim oldugu icin 401). " +
+                $"Kodlar: {string.Join(",", kodlar)}");
+
+            var onBirinci = await client.PostAsJsonAsync("/api/payment/initialize", new { order_id = 999999 });
+            ((int)onBirinci.StatusCode).Should().Be(429,
+                "initialize 'payment' kovasinda (10/dk) - K2'de oznitelik SINIF duzeyine tasindi, " +
+                "kapsam korunmali");
+        }
     }
 }

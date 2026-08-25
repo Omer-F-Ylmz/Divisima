@@ -1,3 +1,11 @@
+> **ARSIV — FAZ 0 / K5.** Bu dizin ARSIVDIR: canli PWA dosyalari DEPO KOKUNDE
+> (`frontend/manifest.json`, `frontend/pwa-register.js`, `frontend/service-worker.js`)
+> ve `index.html` onlari oradan yukler. Buradaki manifest.json / offline.html /
+> service-worker.js / sw-register.js kopyalarina HICBIR YERDEN referans yoktu
+> (olculdu: 0 gecis) ve SILINDI. Bu dosya, tarihsel tasarim notu olarak ve
+> `GuvenlikFix3SozlesmeTests` deny-kurali kapsam pini `/pwa/README.md` yolunu
+> aradigi icin KALDI.
+
 # Divisima PWA (Progressive Web App)
 
 Bu dosyalar, mevcut web arayüzünü **tek kod tabanıyla** hem mobilde hem masaüstünde

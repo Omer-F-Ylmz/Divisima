@@ -9,8 +9,28 @@ namespace Divisima.API.Middlewares
     public class ETagMiddleware
     {
         private readonly RequestDelegate _next;
-        // Açıklayıcı yorum: Yalnız bu ön eklerdeki GET'ler ETag'lenir (dar kapsam = düşük risk)
-        private static readonly string[] CacheablePrefixes = { "/api/product", "/api/category", "/api/collection", "/api/sizeguide" };
+
+        // Açıklayıcı yorum: Yalnız bu ön eklerdeki GET'ler ETag'lenir (dar kapsam = düşük risk).
+        //
+        // ═══ FAZ 0 / K1 - OLU ONEK KALDIRILDI ══════════════════════════════════════════
+        // Listede "/api/sizeguide" vardi ve ILK COMMIT'ten (df91863) beri HIC ESLESMIYORDU:
+        // gercek rota "api/size-guide" (SizeGuideController) ve eslesme StartsWithSegments
+        // ile SEGMENT SINIRLI yapiliyor - "sizeguide" ile "size-guide" ayri segmentlerdir.
+        // CANLI OLCULDU (FAZ 0):
+        //     /api/size-guide/category/1  -> 200, ETag YOK,  Cache-Control: no-store...
+        //     /api/product/get/1          -> 200, ETag VAR,  Cache-Control: private, max-age=60
+        //     /api/category/getlist       -> 200, ETag VAR   (If-None-Match ile 304 + 0 bayt)
+        //     /api/product-attribute/...  -> 200, ETag YOK   (segment siniri DOGRU calisiyor)
+        // Onek KALDIRILDI, DUZELTILMEDI - gerekce olcume dayali: SizeGuide'in iki anonim GET'i
+        // de bugun OLU YUZEY (storefront hic cagirmiyor), yani ETag kazanci SIFIR; buna karsilik
+        // oneki duzeltmek o uclarin Cache-Control'unu SecurityHeaders'in "no-store"undan
+        // "private, max-age=60"a GEVSETIRDI (asagida: ETag dali bu basligi EZIYOR).
+        // SIZE-GUIDE VITRINE BAGLANIRSA: onek "/api/size-guide" olarak BILINCLI geri eklenir ve
+        // Cache-Control karari ONUNLA BIRLIKTE verilir. Defterde kayitli.
+        //
+        // YAPISAL KURAL: bu listedeki her onek, gercek bir uca SEGMENT-ESLESMELIDIR.
+        // Olu onek yasak - p-k1a (Faz0SozlesmeTests) yapisal olarak tarar.
+        private static readonly string[] CacheablePrefixes = { "/api/product", "/api/category", "/api/collection" };
 
         public ETagMiddleware(RequestDelegate next) => _next = next;
 
