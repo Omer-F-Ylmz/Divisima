@@ -136,6 +136,11 @@
       sub: "",
       price: Number(p.price) || 0,
       old: p.old_price ? Number(p.old_price) : 0,
+      // VITRIN-FIX-2 / F-D1: yildiz ve yorum sayisi SUNUCUDAN gelir. index.html eskiden
+      // bunlari urunun id'sinden tohumlanan bir PRNG ile UYDURUYORDU. ProductListResponseDto
+      // ve ProductDetailResponseDto ikisi de bu iki alani tasiyor (canli olculdu).
+      rating: Number(p.average_rating) || 0,
+      rvcount: Math.max(0, Math.floor(Number(p.review_count) || 0)),
       cart: Number(p.price) || 0,
       stock: Number(p.total_stock) || 0,   // SPRINT 8 madde 5: liste yolu ARTIK gercek degeri donduruyor
       sizes: (p.sizes && p.sizes.length) ? p.sizes.map(function (s) { return isNaN(+s) ? s : +s; }) : [],
@@ -629,6 +634,10 @@
       var p = (typeof window.byId === "function") ? window.byId(id) : null;
       if (p) {
         if (d.description) p.desc = d.description;
+        // F-D1: detay ucu de average_rating/review_count tasiyor; liste yolundan gelen
+        // degeri TAZELER. Uydurma yok - alan yoksa mevcut deger korunur.
+        if (d.average_rating !== undefined) p.rating = Number(d.average_rating) || 0;
+        if (d.review_count !== undefined) p.rvcount = Math.max(0, Math.floor(Number(d.review_count) || 0));
         if (d.image_url) p.img = api.resolveUrl(d.image_url);
         if (!p.cat || p.cat === "tumu") p.cat = categorySlugOf(d);
         if (d.stocks && d.stocks.length) {
@@ -653,14 +662,39 @@
       return null;
     }
   }
+  // VITRIN-FIX-2 / F-D1: GERCEK yorumlar TEMBEL cekilir. index.html'deki uydurma uretim
+  // kaldirildigi icin yorum METINLERI artik YALNIZCA buradan gelebilir.
+  // Uc ANONIM ve yalniz ONAYLI yorumlari doner: GET /api/productreview/product/{id}.
+  // Onbellek urun basinadir - ayni urunu ikinci kez acmak yeni istek atmaz.
+  var yorumOnbellek = {};
+  async function yorumlariCiz(id) {
+    var p = (typeof window.byId === "function") ? window.byId(id) : null;
+    if (!p) return;
+    if (!yorumOnbellek[id]) {
+      try { yorumOnbellek[id] = unwrap(await api.reviews.forProduct(id)) || []; }
+      catch (e) { console.warn("Divisima: yorumlar alinamadi #" + id, e); yorumOnbellek[id] = []; }
+    }
+    if (!Array.isArray(yorumOnbellek[id])) yorumOnbellek[id] = [];
+    p._rvList = yorumOnbellek[id];
+    // Kullanici bu arada detayi kapatmis ya da baska urune gecmis olabilir - o zaman
+    // baskasinin panelini EZMEYIZ.
+    if (window.detailOpenId !== id) return;
+    var el = document.getElementById("pdReviews");
+    if (!el || typeof window.reviewsSection !== "function") return;
+    var kutu = document.createElement("div");
+    kutu.innerHTML = window.reviewsSection(p);
+    if (kutu.firstChild) el.parentNode.replaceChild(kutu.firstChild, el);
+  }
+
   function wireProductDetail() {
     if (typeof window.openDetail !== "function") return;
     var orig = window.openDetail;
     window.openDetail = function (id) {
-      if (detailCache[id]) return orig.call(window, id);
+      if (detailCache[id]) { orig.call(window, id); yorumlariCiz(id); return; }
       // Önce mevcut (liste) veriyle aç - kullanıcı beklemesin; detay gelince yeniden aç.
       orig.call(window, id);
-      enrichProduct(id).then(function (d) { if (d) orig.call(window, id); });
+      yorumlariCiz(id);
+      enrichProduct(id).then(function (d) { if (d) { orig.call(window, id); yorumlariCiz(id); } });
     };
   }
 
@@ -712,6 +746,7 @@
         var r = await api.auth.login(email, pass);
         var d = unwrap(r) || {};
         window.loggedIn = true;
+        sepetBirlestirmesiniSilahlandir();   // F-A1: bu oturumun ilk senkronu BIRLESTIRME olsun
         if (typeof window.login === "function") window.login(d.name || String(email).split("@")[0]);
         return r;
       },
@@ -721,6 +756,7 @@
       async logout() {
         try { await api.auth.logout(); } finally {
           window.loggedIn = false;
+          sepetBirlestirmesiniSilahlandir();   // F-A1: sonraki giris de birlestirme ile baslar
           if (typeof window.logout === "function") window.logout();
         }
       },
@@ -976,21 +1012,93 @@
     }
   }
 
-  // Sunucu sepetini yerel sepete esitle: yereldeki her kalem SET edilir, sunucuda olup
-  // yerelde olmayan kalem SILINIR. (Sepet kucuk oldugu icin tam esitleme guvenli ve basit.)
+  // VITRIN-FIX-2 / F-A1: GIRISTEN SONRAKI ILK SENKRON ASLA SILMEZ - BIRLESTIRIR.
+  //
+  // OLCULEN ZARAR: eski akista her senkron "yereldeki her kalem SET, sunucuda olup yerelde
+  // OLMAYAN kalem SIL" idi. Kullanici bos bir tarayicida giris yapip sepet cekmecesini
+  // actiginda (renderCart -> senkron) SET dongusu hic donmuyor, SIL dongusu ise sunucudaki
+  // KALICI sepeti tumuyle temizliyordu. Yani baska cihazda/oturumda birakilan sepet, yalnizca
+  // giris yapmakla YOK oluyordu.
+  //
+  // BUGUN: sayfa oturumunun ILK senkronu bir BIRLESTIRMEDIR -
+  //   * once sunucu sepeti okunur (TEK istek),
+  //   * sunucuda olup yerelde olmayan kalem YERELE INER (yerel bossa sunucudan tohumlanir),
+  //   * ayni urun+beden iki tarafta da varsa YEREL ADET KAZANIR (kullanicinin son eylemi),
+  //   * hicbir sey SILINMEZ,
+  //   * rozet/cekmece/ozet guncellenir.
+  // Ayna duzeni (SET + yerelde olmayani sil) ancak BIRLESTIRMEDEN SONRAKI senkronlarda baslar.
+  //
+  // Bayrak neden "giris olayi" degil "ilk senkron"? Cunku ikinci bir giris yolu daha var:
+  // sayfa ACILIRKEN gecerli jetonla gelen kullanici (wireAuth icindeki
+  // `if (api.isLoggedIn()) window.loggedIn = true;`). O yolda hicbir login olayi ATESLENMEZ
+  // ama ilk renderCart yine senkronu tetikler - eski kodda kalici sepeti silen yol da buydu.
+  //
+  // KORUNANLAR: sunucudaki bir kalemin urunu o an KATALOGDA yoksa (PRODUCTS sayfali gelir,
+  // 24'luk sayfalar halinde) yerele indiremeyiz - index.html'deki renderCart, byId(it.id)
+  // bulamadigi kalemi SESSIZCE siler (olculdu: `var p=byId(it.id);if(!p){cart.delete(k);return;}`).
+  // Boyle bir kalemi ayna dongusunun silmesi de veri kaybi olurdu; bu yuzden anahtari
+  // KORUNANLAR kumesine yazilir ve SIL dongusu onu ATLAR.
   var syncing = false;
+  var ilkSenkronYapildi = false;
+  var korunanSunucuAnahtarlari = {};
+
+  function sunucuSepetiniOku(yanit) {
+    var d = unwrap(yanit);
+    if (d && Array.isArray(d.items)) return d.items;
+    if (Array.isArray(d)) return d;
+    return [];
+  }
+
+  // Sunucudan gelen kalemleri yerel sepete BIRLESTIR. Donen deger: yerel sepet degisti mi.
+  function sunucuKalemleriniBirlestir(server) {
+    var degisti = false;
+    if (!window.cart || typeof window.cart.set !== "function") return false;
+    var ck = (typeof window.ckey === "function") ? window.ckey : function (id, size) { return id + "|" + (size || "") + "|"; };
+    var yerel = {};
+    window.cart.forEach(function (it) { yerel[it.id + "|" + (it.size || "")] = true; });
+    for (var i = 0; i < server.length; i++) {
+      var s = server[i];
+      var k = s.product_id + "|" + (s.size || "");
+      if (yerel[k]) continue;                       // CAKISMA: yerel adet kazanir, dokunma
+      var p = (typeof window.byId === "function") ? window.byId(s.product_id) : null;
+      if (!p) { korunanSunucuAnahtarlari[k] = true; continue; }   // katalogda yok -> SILINMESIN
+      var q = Math.floor(Number(s.quantity) || 0);
+      if (!isFinite(q) || q < 1) q = 1;
+      if (q > 99) q = 99;
+      window.cart.set(ck(s.product_id, s.size || "", ""), { id: s.product_id, size: s.size || "", color: null, qty: q });
+      degisti = true;
+    }
+    return degisti;
+  }
+
   async function syncCartToServer() {
     if (syncing || !api.isLoggedIn()) return;
     syncing = true;
     try {
+      // TEK istek. (Eski kod `.items` bos dustugunde ayni ucu IKINCI KEZ cagiriyordu.)
+      var server = [];
+      try { server = sunucuSepetiniOku(await api.cart.get()); } catch (e) { server = []; }
+
+      if (!ilkSenkronYapildi) {
+        ilkSenkronYapildi = true;                   // once isaretle: yeniden giris tek birlestirme
+        var degisti = sunucuKalemleriniBirlestir(server);
+        // Yerel kalemleri sunucuya yaz (SET - silme YOK). Cakismada yerel adet kazanir.
+        var yerelKalemler = cartItemsPayload();
+        for (var a = 0; a < yerelKalemler.length; a++) {
+          await mirror(api.cart.setQuantity(yerelKalemler[a].product_id, yerelKalemler[a].size, yerelKalemler[a].quantity), "esitle");
+        }
+        if (degisti) {
+          // Rozet + kalici depolama + cekmece + odeme ozeti. renderCart sarmalanmis oldugu
+          // icin bir sonraki (ayna) senkronu da kendisi zamanlar - istenen davranis budur.
+          if (typeof window.cartBump === "function") window.cartBump();
+          if (typeof window.renderCart === "function") window.renderCart();
+        }
+        return;                                     // BU GECISTE HICBIR SEY SILINMEZ
+      }
+
       var local = cartItemsPayload();
       var localKey = {};
       local.forEach(function (it) { localKey[it.product_id + "|" + it.size] = it; });
-
-      var server = [];
-      try { server = (unwrap(await api.cart.get()) || {}).items || unwrap(await api.cart.get()) || []; }
-      catch (e) { server = []; }
-      if (!Array.isArray(server)) server = [];
 
       for (var i = 0; i < local.length; i++) {
         await mirror(api.cart.setQuantity(local[i].product_id, local[i].size, local[i].quantity), "esitle");
@@ -998,10 +1106,14 @@
       for (var j = 0; j < server.length; j++) {
         var s = server[j];
         var k = s.product_id + "|" + (s.size || "");
-        if (!localKey[k]) await mirror(api.cart.remove(s.product_id, s.size || ""), "sil");
+        if (localKey[k] || korunanSunucuAnahtarlari[k]) continue;
+        await mirror(api.cart.remove(s.product_id, s.size || ""), "sil");
       }
     } finally { syncing = false; }
   }
+  // Yeni bir oturum (giris ya da cikis) sonrasi birlestirme YENIDEN silahlanir: baska bir
+  // kullanici girerse onun kalici sepeti de silinmek yerine birlestirilmelidir.
+  function sepetBirlestirmesiniSilahlandir() { ilkSenkronYapildi = false; korunanSunucuAnahtarlari = {}; }
   window.divisimaSyncCart = syncCartToServer;
 
   // GOZ-FIX / F-Ö4: odeme ozetini YERINDE tazele. `window.divisimaCheckout` bir SAP degil,

@@ -350,5 +350,135 @@ namespace Divisima.IntegrationTests
             gonder.Should().Contain("Oturumun sona erdi, lütfen tekrar giriş yap.",
                 "401'de kullaniciya NE YAPACAGI soylenmeli");
         }
+
+        // ── P3 (F-D1): YORUM/YILDIZ UYDURULMAZ, YALNIZ GERCEK ALANDAN TURER ─────────────
+        // DURUST ETIKET: bu bir KAYNAK SOZLESMESI pinidir, DAVRANIS pini DEGILDIR. Depoda
+        // JS/DOM kosucusu yok; davranis kaniti VITRIN-FIX-2 raporundaki tarayici olcumudur
+        // (once: 24 urun icin 1630 uydurma yorum iddiasi ve JSON-LD aggregateRating 4.5/8;
+        // sonra: 0 ve aggregateRating YOK - veritabaninda product_reviews 0 satir).
+        [Fact]
+        public void KAYNAK_SOZLESMESI_Yorumlar_PRNG_ile_URETILMEZ_ve_Yildiz_GERCEK_ALANDAN_Turer()
+        {
+            var s = YorumlariAyikla(Index);
+
+            // VAKUM KIRICI 1: `rngOf` dosyada HALA kullaniliyor (fit/renk/kumas yuzeyleri bu
+            // dalganin kapsami DISINDA). Yardimci tumden silinseydi asagidaki iddia BEDAVA
+            // dogru olurdu.
+            Regex.Matches(s, @"rngOf\s*\(").Count.Should().BeGreaterThan(1,
+                "rngOf baska yuzeylerde kullanilmaya devam ediyor - tarama vakuma dusmemeli");
+
+            // VAKUM KIRICI 2: tarama gercekten bir govde okumus olmali.
+            var govde = FonksiyonGovdesi(s, "function reviewsOf(p)");
+            govde.Length.Should().BeGreaterThan(120, "reviewsOf govdesi bos okunmus olamaz");
+
+            // ASIL SOZLESME: yorum verisi tohumlu rastgelelikten TUREMEZ.
+            govde.Should().NotContain("rngOf",
+                "yildiz ve yorum sayisi bir TICARI BEYANDIR - uydurulamaz");
+            govde.Should().NotContain("Math.random", "ayni gerekce");
+
+            // Kaynak SUNUCU: average_rating / review_count (api-bridge.js mapProduct esler).
+            govde.Should().Contain("Number(p.rating)", "ortalama sunucudan gelmeli");
+            govde.Should().Contain("p.rvcount", "yorum sayisi sunucudan gelmeli");
+
+            // UYDURMA HAVUZLARI DEPODAN KALKMIS OLMALI (tanim duzeyinde).
+            s.Should().NotContain("var RV_NAMES=", "uydurma musteri isimleri kaldirildi");
+            s.Should().NotContain("var RV_TR=", "uydurma yorum metinleri kaldirildi");
+            s.Should().NotContain("var RV_EN=", "uydurma yorum metinleri kaldirildi");
+            s.Should().NotContain("var RV_AGO_TR=", "uydurma tarih damgalari kaldirildi");
+
+            // KART YILDIZI: yalniz GERCEK yorum varsa cizilir.
+            s.Should().Contain("(rv.count>0?'<div class=\"card-rate\">",
+                "yorumu olmayan urunun kartinda yildiz blogu HIC cizilmemeli");
+
+            // CIFT-ANLAM KIRICI: eski KOSULSUZ bicim geri gelemez. Bu olmadan "sayiyi
+            // sunucudan al ama blogu yine her kartta ciz" uygulamasi da pinden gecerdi.
+            s.Should().NotContain("'</div><div class=\"card-rate\">'+starsHTML",
+                "her kartta kosulsuz yildiz basan eski bicim geri gelmemeli");
+
+            // "DOGRULANMIS ALICI" ROZETI: ProductReviewResponseDto is_verified_purchase
+            // TASIMIYOR (entity'de var, DTO'da yok - olculdu), dolayisiyla rozet
+            // CIZILEMEZ. reviewCards govdesinde gecmemeli.
+            var kartGovde = FonksiyonGovdesi(s, "function reviewCards(p,limit)");
+            kartGovde.Should().NotContain("rv_verified",
+                "rozet gercek bir alandan gelmiyorsa HIC gosterilmez");
+            kartGovde.Should().NotContain("rv-verify", "ayni gerekce");
+            kartGovde.Should().Contain("o.comment",
+                "yorum metni sunucudan gelen alandan okunmali");
+
+            // DURUST BOS DURUM: yorum yoksa gorunur bir metin yazilir.
+            s.Should().Contain("rv_empty:['Bu ürün için henüz yorum yok.'",
+                "bos durum metni tanimli olmali");
+            var bolumGovde = FonksiyonGovdesi(s, "function reviewsSection(p)");
+            bolumGovde.Should().Contain("t('rv_empty')",
+                "yorum yoksa GORUNUR ve DURUST bir bos durum cizilmeli");
+
+            // KOPRU: gercek alanlar eslenmis ve yorum ucu GERCEKTEN cagriliyor olmali
+            // (tanim + en az bir cagri).
+            var b = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+            b.Should().Contain("rating: Number(p.average_rating) || 0",
+                "liste yolu gercek ortalamayi tasimali");
+            b.Should().Contain("rvcount: Math.max(0, Math.floor(Number(p.review_count) || 0))",
+                "liste yolu gercek yorum sayisini tasimali");
+            b.Should().Contain("api.reviews.forProduct(",
+                "yorum metinleri gercek uctan cekilmeli");
+            Regex.Matches(b, @"yorumlariCiz\s*\(").Count.Should().BeGreaterThan(1,
+                "yukleyici yalniz TANIMLI degil, detay acilisinda CAGRILMIS da olmali");
+        }
+
+        // ── P4 (F-A1): GIRISTEN SONRAKI ILK SENKRON SILMEZ, BIRLESTIRIR ────────────────
+        // DURUST ETIKET: kaynak sozlesmesi pini. Davranis kaniti raporda - kontrollu A/B:
+        // eski kodla sunucu sepeti 2 aktif -> 0 aktif (KALICI SEPET SILINDI), yeni kodla
+        // yerel 0 -> 2 ve sunucu 2 aktif -> 2 aktif.
+        [Fact]
+        public void KAYNAK_SOZLESMESI_IlkSenkron_SILMEZ_Birlestirir_Ayna_SONRA_Baslar()
+        {
+            var s = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+
+            var govde = FonksiyonGovdesi(s, "async function syncCartToServer()");
+            govde.Length.Should().BeGreaterThan(300, "syncCartToServer govdesi bos okunmus olamaz");
+
+            // VAKUM KIRICI: AYNA SILME HALA VAR. Silme tumden kaldirilsaydi "ilk senkron
+            // silmez" iddiasi BEDAVA dogru olurdu - ve sepet kaymasi geri gelirdi.
+            govde.Should().Contain("api.cart.remove(",
+                "birlestirmeden SONRAKI senkronlar yerelde olmayani silmeye devam etmeli");
+
+            // ASIL SOZLESME: ilk gecis ayri bir dal ve o dal silmeye HIC ULASMIYOR.
+            govde.Should().Contain("if (!ilkSenkronYapildi)", "ilk gecis ayri ele alinmali");
+            var ilkDalBas = govde.IndexOf("if (!ilkSenkronYapildi)", StringComparison.Ordinal);
+            var aynaBas = govde.IndexOf("var local = cartItemsPayload();", StringComparison.Ordinal);
+            ilkDalBas.Should().BeGreaterThan(-1);
+            aynaBas.Should().BeGreaterThan(ilkDalBas, "ayna duzeni ilk gecisten SONRA gelmeli");
+            var ilkDal = govde.Substring(ilkDalBas, aynaBas - ilkDalBas);
+            ilkDal.Should().NotContain("api.cart.remove(",
+                "GIRISTEN SONRAKI ILK SENKRON HICBIR SEYI SILMEZ - olculen zarar tam buydu");
+            ilkDal.Should().Contain("return;",
+                "ilk gecis kendi dalinda BITMELI, ayna dongusune AKMAMALI");
+
+            // BIRLESTIRME: sunucu kalemleri yerele iner ve CAKISMADA YEREL KAZANIR.
+            s.Should().Contain("function sunucuKalemleriniBirlestir(", "birlestirici tanimli olmali");
+            var birlestir = FonksiyonGovdesi(s, "function sunucuKalemleriniBirlestir(server)");
+            birlestir.Should().Contain("if (yerel[k]) continue;",
+                "ayni urun+beden iki tarafta da varsa YEREL adet kazanmali");
+            birlestir.Should().Contain("window.cart.set(",
+                "sunucuda olup yerelde olmayan kalem YERELE INMELI");
+
+            // KATALOGDA OLMAYAN URUN: yerele indirilemez (renderCart onu siler), bu yuzden
+            // SILINMEKTEN de korunur. Bu olmadan "asla silmez" ikinci gecisde yalan olurdu.
+            birlestir.Should().Contain("korunanSunucuAnahtarlari[k] = true",
+                "katalogda bulunamayan sunucu kalemi korumaya alinmali");
+            govde.Should().Contain("korunanSunucuAnahtarlari[k]",
+                "ayna dongusu korunan anahtarlari ATLAMALI");
+
+            // CIFT-ANLAM KIRICI: bayrak HEM giriste HEM cikista yeniden silahlanmali.
+            // Yalniz tanim olsaydi (0 cagri) birlestirme yalnizca ilk sayfa yuklemesinde
+            // calisir, ikinci bir kullanicinin girisinde ESKI zarar geri gelirdi.
+            Regex.Matches(s, @"sepetBirlestirmesiniSilahlandir\s*\(\s*\)").Count.Should().BeGreaterThan(2,
+                "tanim + giris + cikis: en az uc gecis olmali");
+
+            // TEK ISTEK: eski kod `.items` bos dustugunde ayni ucu IKINCI KEZ cagiriyordu.
+            Regex.Matches(govde, @"api\.cart\.get\s*\(").Count.Should().Be(1,
+                "sunucu sepeti tur basina TEK kez okunmali");
+        }
+
     }
 }
