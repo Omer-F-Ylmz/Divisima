@@ -7946,3 +7946,112 @@ Iki ayri sonucu var:
 2. Yukaridaki N+1 kaydinda yazili yetim-satir riski buradan doguyor.
 
 Bu turda **DOKUNULMADI**; kalem FAZ 8'e (dagitim/altyapi) havale edildi.
+
+## FIX-1A KAPANIS KAYDI (26 Agustos 2026)
+
+**KANIT SHA: `a244160`** - her iki workflow tamamen yesil, adim + annotation duzeyinde
+dogrulandi.
+
+```
+CI - Build & Test  run 32899208023  event=push  head_sha=a244160  SUCCESS  (6dk04sn)
+Security CI        run 32899208038  event=push  head_sha=a244160  SUCCESS  (3dk45sn)
+
+format-check     10/10 SUCCESS  (whitespace + style + migration SENKRON - ucu de ZORUNLU)
+build-and-test   16 adim: 15 SUCCESS, 1 skipped (TESHIS - yalniz if: failure() kosar)
+tests            13 adim: 12 SUCCESS, 1 skipped (TESHIS)
+codeql 11/11 · dependency-scan 10/10 · secret-scan 5/5
+  Gitleaks (secret taramasi) SUCCESS  <- ADIM SONUCUNDAN (bolum 7); "Leaks detected" 0
+ALTI JOB'DA failure SEVIYELI ANNOTATION: 0
+TestDbKurulum 1807 yeniden denemesi: HIC ATESLEMEDI (0) - iki test job'inda da
+```
+
+**YENI UYARI URETILMEDI - ama kanit AILE DUZEYINDE KAPANMADI.** Toplam 39 == 39 ve dort
+ailenin dordu de birebir esit; buna karsilik `Job|aile|Path` duzeyinde kume farki BOS
+CIKMADI (4 "yeni" / 4 "kaybolan"). `dosya:satir` duzeyine inildi: ikisi de `nullable`
+ailesinde ve yalnizca IKI DOSYA ARASINDA yer degistirmis
+(`IEntityRepository.cs` 20 -> 24, `EfEntityRepositoryBase.cs` 10 -> 6, **toplam 30 sabit**).
+`git diff --name-only d434906..a244160` ile dogrulandi: **her iki dosya da bu commit'te
+DEGISMEDI**. `codeql` job'i iki kosumda da TAM 12 annotation tasiyor -> bu bir ANNOTATION
+YUZEYE-CIKARMA/KIRPMA ARTEFAKTIDIR, yeni uyari DEGIL. Bu commit'in ekledigi iki yeni Core
+dosyasi ve dokuz degisen dosyanin HICBIRI tek bir uyari uretmedi.
+
+**KAPANAN KALEMLER: F1 (+F10 cihaz bagi, +F11 city/district/zip, +F12 SecurityEvent),
+F2 (denetim izi maskeleme), F3 (silmede redaksiyon).**
+
+**BEKLENTI KARSILASTIRMASI (push ONCESI yazilmisti):** ne prompt'un tahmini (komsu
+testler artik audit satiri yaziyor) ne de benim revize beklentim (yeni pinlerin CI
+maliyeti / `model` kilidi baskisi) TUTTU. `AuditInterceptor`in ILK KEZ bir test host'unda
+kosmasi hicbir yan etki uretmedi; `AuthorizationIdorTests` 15 yerine 19 test kosmasina
+ragmen 1807 sifir kez atesledi.
+
+## KALICI KURAL - IZLEYICI / OLCUM ARACI SOZLESMESI (26 Agustos 2026)
+
+**Uzun sure donen bir izleyicinin CIKIS KOSULU, o makinede VARLIGI KANITLANMIS bir araca
+dayanmalidir. Hata yutan bir yedek (`|| echo ...`, `2>/dev/null`, `try/catch`) cikis
+kosulunu BESLEYEMEZ - yutulan hata sonsuz donguye donusur.**
+
+BEDELI ODENDI (`a244160` izleyicisi): cikis kosulu `python` ile JSON ayristiriyordu, bu
+makinede `python` YOK ve `|| echo "?"` devreye girdi. `TAMAM` hep `"?"` oldu, karsilastirma
+HIC eslesmedi ve izleyici, kosumlar bitmis olmasina ragmen ~3 saat dondu. Ustelik ayni
+dongu `grep` ile `run: 2` sayisini DOGRU sayiyordu - ama o deger cikis kosulunda
+KULLANILMIYORDU. Yani sinyal elde vardi, karar yolu bozuktu.
+
+**KURAL:** izleyici baslatilmadan ONCE cikis kosulu, sonucu BILINEN bir girdiyle bir kez
+dogrulanir (or. "bu ifade zaten bitmis bir run icin 'tamam' diyor mu?"). Yedek yol yalniz
+GURULTU icin olabilir, KARAR icin degil.
+
+**CAPRAZ REFERANS - "YAPILMIS GORUNUP CALISMAYAN DUZELTME" AILESI.** Bu, depoda tekrar
+eden bir siniftir; dordu de ayni desendir (kod yazildi, sessizce etkisiz kaldi, ancak
+BAGIMSIZ bir olcum yakaladi):
+- **`Identity.Name`** (D4 / GUVENLIK-FIX-4): idempotency kapsamina "kullanici" eklendi ama
+  JWT o claim'i yazmiyordu -> herkes `"anon"` kovasinda kaldi. Pin yakaladi.
+- **`IDistributedCache`** (D4): `[Idempotency]` filtresi `cache == null` gorup SESSIZCE
+  devre disi kaliyordu; yorumu "in-memory'ye duser" diyordu, YANLISTI.
+- **Mutasyonlarin HIC UYGULANMAMASI** (Dalga D): `powershell -File` yurutme politikasina
+  takildi, uc mutasyon dosyaya inmedi ve testler "hepsi yesil" dedi -> "mutasyon lokalize"
+  diye YANLIS rapor yazilacakti. Kural bu yuzden var: (a) dosyaya indi mi, (b) temiz build,
+  (c) kirmizi yoksa ONCE "uygulanmadi" suphesi.
+- **IZLEYICININ CIKIS KOSULU** (bu kalem).
+Ortak panzehir AYNIDIR: **mekanizmanin CALISTIGINI, sonucu bilinen bir girdiyle BIR KEZ
+gozle.** "Kod orada" kanit degildir.
+
+## KALICI KURAL - ANNOTATION KARSILASTIRMASI (26 Agustos 2026)
+
+**"Bu commit yeni uyari uretmedi" iddiasi AILE/SAYI duzeyinde KAPANMAZ.**
+
+Toplam ve aile dagilimi esit olabilir ama kume farki BOS OLMAYABILIR. Kume farki bos
+degilse **`dosya:satir` duzeyine inilir** ve farkin dustugu dosyanin bu commit araliginda
+degisip degismedigi **`git diff --name-only <onceki>..<yeni> -- <dosya>`** ile dogrulanir.
+
+- Dosya DEGISMISSE -> gercekten yeni uyaridir, raporlanir.
+- Dosya DEGISMEMISSE -> annotation yuzeye-cikarma/kirpma artefaktidir (GitHub check-run
+  basina annotation sayisini sinirlar; hangi ornegin yuzeye ciktigi kosumdan kosuma
+  degisebilir). Bu durumda "yeni uyari yok" denir ama **NEDEN** de yazilir.
+
+Bu adim `a244160` turunda YANLIS bir "yeni uyari" raporunu ONLEDI: fark 4/4 gorunuyordu,
+inceleyince iki DOKUNULMAMIS dosya arasindaki yer degistirme cikti.
+
+## FIX-1B DEVIR LISTESI (tek yerde, kaybolmasin)
+
+- **F4 + F8 ZINCIRI (asil is).** F4: erisim jetonu iptali YOK -
+  `ITokenBlacklist.RevokeAsync` uretimde SIFIR cagri; logout / change-password / G1 zincir
+  iptali sonrasi access token 15 dk daha calisiyor. F8: step-up (`RequireRecentAuth`)
+  refresh ile SINIRSIZ tazeleniyor - calinmis bir refresh cerezi geri alinamaz hesap
+  silmeye yetiyor. Ikisi ayni zincirin iki ucu.
+- **KARA LISTE AD-TAM-ESLESMESINDEN DESEN BAZLIYA.** Bugun `DenetimGizlilik.SirAlanlari`
+  bir AD FOTOGRAFIDIR; `*token*` / `*secret*` / `*hash*` / `*salt*` desenlerine cevrilmeli.
+  Yani adi listede OLMAYAN yeni bir sir alani VARSAYILAN OLARAK redakte edilmeli ve bunu
+  gosteren bir pin yazilmali (bugun tersi: listede yoksa CIPLAK yazilir).
+- **`refresh_token` / `device_token`in YAZMA ANINDAKI maskesi DAVRANISLA pinlenecek.**
+  FIX-1A'da bu ikisi yalniz liste-uyeligi + F3 (silme sonrasi redaksiyon) tarafinda kapali;
+  yazma anindaki maske `Customer` satirlari uzerinden pinlendi, `UserSession`/
+  `CustomerDevice` uzerinden DEGIL.
+- **`KisiselAlanlar` ve `RedaksiyonTablolari` da AD/TABLO FOTOGRAFIDIR** - sir listesiyle
+  AYNI kirilganlik. FAZ 4/5 yeni bir PII yuzeyi getirdiginde (or. yeni bir iletisim ya da
+  fatura-disi kisisel alan) SESSIZCE kapsam disi kalirlar. Kural haline gelmeli.
+- **GERIYE DONUK YOL YOK - SIRA BAGIMLILIGI.** Redaksiyon YALNIZ silme aninda kosuyor.
+  FIX-1A canliya CIKMADAN once silinen bir hesabin PII'si `audit_logs`ta KALICIDIR (dev
+  veritabaninda FAZ 1'in sildigi hesaplarda MEVCUT - olculdu). Yani uretimde ILK GERCEK
+  KVKK silmesinden ONCE bu surumun canlida olmasi gerekir; aksi halde o silme yarim kalir
+  ve geriye donuk bir telafi yolu YOKTUR. `ops/deployment-checklist.md`'ye madde olarak
+  da eklendi.

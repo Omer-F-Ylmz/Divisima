@@ -253,6 +253,13 @@ bir karardır.
 - [ ] Rate limit eşikleri prod trafiğine göre ayarlandı **ve `RateLimit` bölümü ayar
       dosyasında GERÇEKTEN VAR** (yoksa kod varsayılanı yürürlüktedir; ayrıntı yukarıdaki
       "Redis ve rate limit" bölümünde)
+- [ ] **KVKK denetim izi redaksiyonu (FIX-1A) canlıda — İLK GERÇEK HESAP SİLMESİNDEN ÖNCE.**
+      **SIRA BAĞIMLILIĞIDIR, GERİYE DÖNÜK YOLU YOKTUR.** Redaksiyon yalnızca *silme anında*
+      koşar: bu sürüm canlıya çıkmadan önce silinen bir hesabın adı/e-postası/telefonu ve
+      açık adresi `audit_logs.changes` içinde **kalıcı olarak** kalır ve sonradan temizleyen
+      bir yol yoktur (dev veritabanında FAZ 1'in sildiği hesaplarda mevcut — ölçüldü).
+      Doğrulama: `AccountManager.DenetimIziniRedakteEtAsync` yayınlanan sürümde var mı, ve
+      yayın sonrası ilk silmede o müşterinin `audit_logs` satırları `[REDACTED]` taşıyor mu.
 
 ## Launch sonrası (bloke etmez)
 - [ ] `og:image` için gerçek **1200×630** marka görseli hazırlanınca `frontend/index.html`'de
