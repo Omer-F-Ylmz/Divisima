@@ -216,5 +216,139 @@ namespace Divisima.IntegrationTests
             // gerekcesiz sekilde yukari kayardi.
             s.Should().Contain("(gizli?0:mn.offsetHeight)+'px'");
         }
+
+        // ══ GOZ-FIX EK - IKI KAYNAK SOZLESMESI PINI ═══════════════════════════════════════
+        //
+        // DURUST ETIKET: asagidaki IKI pin KAYNAK SOZLESMESI pinidir, DAVRANIS pini DEGILDIR.
+        // Depoda JS/DOM kosucusu YOK (sinifin basindaki sinir notu aynen gecerli), bu yuzden
+        // "izgarada uydurma sayi gorunmuyor" ya da "sayfa asagi atlamiyor" CI'da dogrulanamaz.
+        // Burada tutulan sey, o davranisi ureten KAYNAK KOSULUNUN yerinde durmasidir; davranis
+        // kaniti GOZ-FIX raporundaki tarayici once/sonra olcumleridir:
+        //   F-G1: 60 beden satirinin 53'u gercekten FARKLI ve 8'i "0" iken gercekte stok VAR
+        //         -> duzeltmeden sonra 0/60 ve 0; "Son N urun!" gosteren kart 6 -> 0.
+        //   F-Ö2: scrollY 0 -> 648 ve GORUNUR HATA YOK -> duzeltmeden sonra scrollY 0 -> 0 ve
+        //         siparis numarasini iceren Turkce hata EKRANDA.
+        //
+        // Yorumlar taranmadan ONCE ayiklanir: bu depoda bir pinin KENDI belgeledigi kalibi
+        // bulup yanlis kirmizi vermesinin bedeli iki kez odendi (Dalga B ve Dalga D kayitlari).
+
+        // Blok yorumlari ve TAM SATIR `//` yorumlarini atar. Satir ici `//` KASITLI OLARAK
+        // dokunulmadan birakilir - JS'te "http://" gibi dizgeleri kesmek kaynagi bozardi.
+        private static string YorumlariAyikla(string s)
+        {
+            var bloksuz = Regex.Replace(s, @"/\*[\s\S]*?\*/", " ");
+            var satirlar = new List<string>();
+            foreach (var satir in bloksuz.Split('\n'))
+                if (!satir.TrimStart().StartsWith("//", StringComparison.Ordinal))
+                    satirlar.Add(satir);
+            return string.Join("\n", satirlar);
+        }
+
+        // Imzadan baslayip susli parantez esleyerek fonksiyon govdesini cikarir.
+        private static string FonksiyonGovdesi(string kaynak, string imza)
+        {
+            var bas = kaynak.IndexOf(imza, StringComparison.Ordinal);
+            bas.Should().BeGreaterThan(-1, $"pinlenen fonksiyon kaynakta bulunmali: {imza}");
+            var i = kaynak.IndexOf('{', bas);
+            i.Should().BeGreaterThan(-1, "fonksiyon govdesi acilmali");
+            int derinlik = 0, j = i;
+            for (; j < kaynak.Length; j++)
+            {
+                if (kaynak[j] == '{') derinlik++;
+                else if (kaynak[j] == '}' && --derinlik == 0) break;
+            }
+            derinlik.Should().Be(0, "susli parantezler eslesmeli");
+            return kaynak.Substring(i, j - i + 1);
+        }
+
+        // ── P1 (F-G1): IZGARA STOGU UYDURULMAZ, KITLIK IDDIASI GERCEK SAYIDAN TURER ───────
+        [Fact]
+        public void KAYNAK_SOZLESMESI_IzgaraStogu_PRNG_ile_URETILMEZ_ve_KitlikMetni_GERCEK_STOKTAN_Turer()
+        {
+            var ham = Index;
+            var s = YorumlariAyikla(ham);
+
+            // VAKUM KIRICI 1: tarama gercekten bir govde okumus olmali.
+            var govde = FonksiyonGovdesi(s, "function sizeStockOf(p)");
+            govde.Length.Should().BeGreaterThan(80, "sizeStockOf govdesi bos okunmus olamaz");
+
+            // VAKUM KIRICI 2: `rngOf` dosyada HALA kullaniliyor olmali (yorumlar, renk/degerlendirme
+            // uretimi). Yardimci tumden silinseydi asagidaki iddia BEDAVA dogru olurdu.
+            Regex.Matches(s, @"rngOf\s*\(").Count.Should().BeGreaterThan(1,
+                "rngOf baska yerlerde kullanilmaya devam ediyor - tarama vakuma dusmemeli");
+
+            // ASIL SOZLESME: beden stogu tohumlu rastgelelikten TUREMEZ.
+            govde.Should().NotContain("rngOf",
+                "beden bazli stok UYDURULMAZ; bilinmiyorsa BOS harita donulur ve urun toplami " +
+                "sunucunun verdigi total_stock'tan (p.stock) okunur");
+            govde.Should().NotContain("Math.random",
+                "ayni gerekce: rastgelelik envanter sayisi uretemez");
+
+            // Bilinmeyen kirilim BOS harita ile temsil edilir (cagiranlar 'anahtar yok' = kisit yok).
+            govde.Should().Contain("return {};",
+                "bilinmeyen beden kirilimi BOS harita ile temsil edilmeli");
+
+            // stockOf, BOS haritayi 0 sayip urunu yanlislikla 'Tukendi' gostermemeli.
+            var stokGovde = FonksiyonGovdesi(s, "function stockOf(p)");
+            stokGovde.Should().Contain("Number(p.stock)",
+                "kirilim bilinmiyorsa sunucunun verdigi toplam kullanilmali");
+
+            // KITLIK IDDIASI: yalniz stok BILINIYORSA yazilir.
+            s.Should().Contain("_stokBilinir=isFinite(Number(p.stock))",
+                "'Son N urun!' bir TICARI IDDIADIR - sunucudan gercek sayi gelmediyse gosterilmez");
+            s.Should().Contain("lowS=(!sold&&_stokBilinir&&_gercekToplam<=5)?_gercekToplam:0",
+                "kitlik sayisi GERCEK toplamdan turemeli");
+
+            // CIFT-ANLAM KIRICI: eski, kosulsuz bicim GERI GELEMEZ. Bu olmadan "stokBilinir
+            // degiskenini tanimla ama kullanma" gibi bir uygulama da pinden gecerdi.
+            s.Should().NotContain("lowS=(!sold&&stockOf(p)<=5)?stockOf(p):0",
+                "stok bilinmese de kitlik yazan eski bicim geri gelmemeli");
+        }
+
+        // ── P2 (F-Ö2): GORUNUR ICERIK YOKSA KAYDIRMA YOK, GORUNUR HATA VAR ───────────────
+        [Fact]
+        public void KAYNAK_SOZLESMESI_OdemeGomme_GORUNUR_ICERIK_YOKSA_Kaydirmaz_ve_GORUNUR_HATA_Yazar()
+        {
+            var s = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+
+            // VAKUM KIRICI: kaydirma OZELLIGI hala var - sadece silinmis olsaydi asagidaki
+            // "kosullu" iddiasi anlamsiz sekilde dogru cikardi.
+            s.Should().Contain("scrollIntoView",
+                "gercek form geldiginde kaydirma davranisi KORUNMALI");
+
+            var govde = FonksiyonGovdesi(s, "function embedCheckoutForm(html)");
+            govde.Length.Should().BeGreaterThan(200, "embedCheckoutForm govdesi bos okunmus olamaz");
+
+            // ASIL SOZLESME: kaydirma KOSULLU ve kosul kaydirmadan ONCE geliyor.
+            govde.Should().Contain("getBoundingClientRect().height > 0",
+                "bos (0 px) bir host'a kaydirma yapilmamali - olculdu: scrollY 0 -> 648 ve " +
+                "ekranda hicbir sey yoktu");
+            var kosulYeri = govde.IndexOf("getBoundingClientRect().height > 0", StringComparison.Ordinal);
+            var kaydirmaYeri = govde.IndexOf("scrollIntoView", StringComparison.Ordinal);
+            kosulYeri.Should().BeLessThan(kaydirmaYeri,
+                "kosul kaydirmadan ONCE gelmeli - sonra gelen bir kontrol atlamayi engellemez");
+
+            // GORUNUR ICERIK OLCUTU tanimli ve odeme yolunda CAGRILIYOR olmali.
+            Regex.Matches(s, @"odemeFormuGorunurMu\s*\(").Count.Should().BeGreaterThan(1,
+                "olcut yalniz TANIMLI degil, submitOrder icinde CAGRILMIS da olmali " +
+                "(tanim + en az bir cagri)");
+
+            var gonder = FonksiyonGovdesi(s, "async function submitOrder()");
+            gonder.Should().Contain("if (!odemeFormuGorunurMu(pay.checkout_form_content))",
+                "gorunur icerik yoksa gomme yoluna HIC girilmemeli");
+
+            // SESSIZ BASARISIZLIK YASAK: kullaniciya GORUNUR metin yazilmali.
+            gonder.Should().Contain("checkoutHatasiYaz(",
+                "hata ekrandaki #coErr alanina yazilmali - konsol son kullanicida SESSIZDIR");
+            gonder.Should().Contain("ÖDENMEMİŞ",
+                "kullaniciya siparisin ODENMEDIGI acikca soylenmeli");
+
+            // CIFT-ANLAM KIRICI: 401 dali AYRI ve eylem iceren bir metin vermeli; aksi halde
+            // "her hataya ayni genel metni yaz" uygulamasi da bu pinden gecerdi.
+            gonder.Should().Contain("e.status === 401",
+                "oturum bitmesi ayri ele alinmali");
+            gonder.Should().Contain("Oturumun sona erdi, lütfen tekrar giriş yap.",
+                "401'de kullaniciya NE YAPACAGI soylenmeli");
+        }
     }
 }

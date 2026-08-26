@@ -373,6 +373,24 @@
   // kullanici yanlis sayfada oldugunu ANLAYAMIYORDU ve arama motoru ayni icerigi birden
   // cok adreste goruyordu. Artik uygulamanin KENDI 404'une dusuyor (show404 zaten var).
   function taksonomiRotasiniBagla() {
+    // GOZ-FIX / F-G2: BAYRAK HER ROTA GIRISINDE SIFIRLANIR.
+    // Eskiden `sonKategoriBulunamadi` YALNIZCA showCategory sarmalayicisinin icinde
+    // sifirlaniyordu; kategori olmayan hicbir rota (#/giris, #/odeme, #/hesabim, #/sozlesme,
+    // #/) onu temizlemiyordu ve setDocTitle sarmalayicisi DOGRU basligi 404 ile eziyordu.
+    // OLCULDU: taze yuklemede #/giris -> "Sayfa Bulunamadı"; gecerli bir kategori
+    // ziyaret edilince duzeliyor; TEK bir bozuk kategoriden sonra TUM rotalar yeniden
+    // "Sayfa Bulunamadı" oluyordu. Router her rota degerlendirmesinin BASINDA calisir,
+    // yani bayrak yalnizca o turdaki kategori-404 yolunda TRUE kalabilir.
+    if (typeof window.router === "function" && !window.router.__taksonomi) {
+      var _router = window.router;
+      var sarmalR = function () {
+        sonKategoriBulunamadi = false;
+        return _router.apply(this, arguments);
+      };
+      sarmalR.__taksonomi = true;
+      window.router = sarmalR;
+    }
+
     if (typeof window.showCategory === "function" && !window.showCategory.__taksonomi) {
       var _showCategory = window.showCategory;
       var sarmal = function (cat, sub) {
@@ -494,7 +512,12 @@
       return mapped;
     } catch (e) {
       replaceProducts([]);             // mock KALMAZ - yalan vitrin gösterilmez
-      showCatalogState("Ürünlere ulaşılamadı", (e && e.message) ? e.message : "Sunucuya bağlanılamadı.", true);
+      // GOZ-FIX / F-Ö3: SAGLAYICI/TARAYICI METNI KULLANICIYA SIZMAZ. `e.message` burada
+      // tarayicinin kendi dizgesi olabiliyor ("Failed to fetch", "NetworkError...") ve
+      // musteriye Ingilizce teknik metin gosteriyordu. Ayrinti konsola, kullaniciya Turkce
+      // ve EYLEM ICEREN metin.
+      console.warn("Divisima: katalog alınamadı (ayrıntı)", e && e.message);
+      showCatalogState("Ürünler yüklenemedi", "Lütfen tekrar dene.", true);
       console.warn("Divisima: katalog alınamadı", e);
       return [];
     }
@@ -868,14 +891,26 @@
   // musteri bunu ancak checkout'ta anlar. Ornek (olculdu): bedeni secilmemis bir giyim
   // kalemi sunucuda "stok yetersiz" ile reddediliyor - beden satiri "" ile eslesmiyor.
   var lastMirrorWarn = 0;
+  // GOZ-FIX / F-Ö1: artik BASARIYI DONDURUR (true/false). Cagiran, sunucuya yazilamamis bir
+  // kalemi yerelde "eklendi" gibi BIRAKMAMAK icin bu degeri kullanir.
   function mirror(promise, adim) {
-    return promise.catch(function (e) {
+    return promise.then(function () { return true; }).catch(function (e) {
       console.warn("Divisima: sepet aynalama basarisiz (" + adim + ")", e && e.message);
       var now = Date.now();
       if (now - lastMirrorWarn > 4000) {   // ust uste toast yagmuru olmasin
         lastMirrorWarn = now;
-        notify("Sepet sunucuya yazılamadı: " + (e && e.message ? e.message : "bilinmeyen hata"));
+        // 401 = oturum gercekten bitti (api-client BIR KEZ refresh denedi, o da dustu).
+        // Eski metin "Sepet sunucuya yazılamadı: İstek başarısız (401)" idi ve toast onu
+        // BASINA "✓" koyarak gosteriyordu - basarisizlik BASARI gibi gorunuyordu (olculdu).
+        // GOZ-FIX / F-Ö1: iyimser "✓ ... sepete eklendi" mesaji toast SIRASINDA (_toastQ)
+        // bekliyor olabilir; duzeltmeyi sona eklemek kullaniciya ONCE "eklendi" dedirtir
+        // (olculdu: 4 saniye boyunca ekranda yalniz basari mesaji vardi). Bekleyen iyimser
+        // mesajlar DUSURULUR ve duzeltme mesaji hemen sonraki adimda gosterilir.
+        try { if (Array.isArray(window._toastQ)) window._toastQ.length = 0; } catch (_t) {}
+        if (e && e.status === 401) notify("Oturumun sona erdi, lütfen tekrar giriş yap.");
+        else notify("Sepet sunucuya yazılamadı. İnternet bağlantını kontrol edip tekrar dene.");
       }
+      return false;
     });
   }
 
@@ -891,7 +926,20 @@
         var key = null, entry = null;
         window.cart.forEach(function (v, k) { if (v.id === id && (v.size || "") === (size || "")) { key = k; entry = v; } });
         var q = entry ? Math.floor(entry.qty) : (qty || 1);
-        mirror(api.cart.setQuantity(id, size || "", q), "ekle");
+        // GOZ-FIX / F-Ö1: yazma BASARISIZSA yerel ekleme GERI ALINIR.
+        // OLCULDU (oturum olu): cart/add 401 -> auth/refresh 401 iken rozet 2 -> 3 oluyor,
+        // toast "✓ ... yazılamadı" diyordu; kullanici urunun sepette oldugunu saniyordu ama
+        // sunucuda YOKTU. Onceki adet saklanir; yazma dusserse o hale donulur.
+        var oncekiAdet = entry ? entry.qty - (qty || 1) : 0;
+        mirror(api.cart.setQuantity(id, size || "", q), "ekle").then(function (ok) {
+          if (ok) return;
+          try {
+            if (oncekiAdet > 0) { var it = window.cart.get(key); if (it) it.qty = oncekiAdet; }
+            else if (key) window.cart.delete(key);
+            if (typeof window.cartBump === "function") window.cartBump();
+            if (typeof window.renderCart === "function") window.renderCart();
+          } catch (e) { console.warn("Divisima: yerel sepet geri alinamadi", e); }
+        });
       };
       window.addToCart.__divisimaWrapped = true;
     }
@@ -904,11 +952,27 @@
       var syncTimer = null;
       window.renderCart = function () {
         origRender.apply(window, arguments);
+        // GOZ-FIX / F-Ö4: ODEME OZETI BAYAT KALMAZ. Rozet, cekmece ve ozet AYNI kaynaktan
+        // (yerel `cart` Map) besleniyor; ama ozet yalnizca rota girisinde ciziliyordu.
+        // Kullanici #/odeme'deyken sepeti degistirirse (or. cekmeceden kalem silerse)
+        // ozet eski tutari gostermeye devam ediyordu. Sepet her degistiginde ve odeme
+        // sayfasi ACIKKEN ozet yeniden hesaplanir.
+        odemeOzetiniTazele();
         if (!api.isLoggedIn()) return;
         clearTimeout(syncTimer);
         syncTimer = setTimeout(syncCartToServer, 250);   // hizli tiklamalarda tek istek
       };
       window.renderCart.__divisimaWrapped = true;
+    }
+
+    // GOZ-FIX / F-Ö4: sekme yeniden gorunur oldugunda da ozet tazelenir - kullanici baska
+    // sekmede sepetini degistirmis olabilir ya da sayfa arka planda bayatlamis olabilir.
+    if (!window.__divisimaOzetGorunurlukBagli) {
+      window.__divisimaOzetGorunurlukBagli = true;
+      document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState !== "visible") return;
+        odemeOzetiniTazele();
+      });
     }
   }
 
@@ -939,6 +1003,39 @@
     } finally { syncing = false; }
   }
   window.divisimaSyncCart = syncCartToServer;
+
+  // GOZ-FIX / F-Ö4: odeme ozetini YERINDE tazele. `window.divisimaCheckout` bir SAP degil,
+  // E2'den kalan reddeden bir stub'dir (bilerek) - onu cagirmak yakalanmamis bir promise
+  // reddi uretirdi. Dogru yuzey: uye yolunda drawCheckout(), misafir yolunda
+  // misafirCheckoutCiz(). Ikisi de YEREL sepetten hesaplar, EK ISTEK ATMAZ.
+  function odemeOzetiniTazele() {
+    try {
+      var h = String(location.hash || "");
+      if (h.indexOf("#/odeme") !== 0 || h.indexOf("sonuc") >= 0) return;
+      var view = document.getElementById("checkoutView");
+      if (!view || view.offsetParent === null) return;
+      if (api.isLoggedIn()) {
+        if (document.getElementById("coSubmit")) drawCheckout();
+      } else if (document.getElementById("mgGonder")) {
+        misafirDegerleriOku();     // kullanicinin yazdiklari KAYBOLMASIN
+        misafirCheckoutCiz(view);
+      }
+    } catch (e) { console.warn("Divisima: ödeme özeti tazelenemedi", e); }
+  }
+
+  // GOZ-FIX / F-Ö5: "Sepeti Bosalt" - sunucu tarafi. YENI BACKEND UCU ACILMADI; mevcut
+  // DELETE /api/cart/clear kullaniliyor. Anonim kullanicida sunucu sepeti zaten yoktur,
+  // yerel temizlik index.html tarafinda yapilmis olur.
+  window.divisimaClearServerCart = async function () {
+    if (!api.isLoggedIn()) return true;
+    try { await api.cart.clear(); return true; }
+    catch (e) {
+      // Uc dusserse SESSIZ KALINMAZ: yerel bosaldi ama sunucu bosalmadiysa kullanici bilmeli.
+      if (e && e.status === 401) notify("Oturumun sona erdi, lütfen tekrar giriş yap.");
+      else notify("Sepet sunucuda boşaltılamadı. Tekrar dene.");
+      return false;
+    }
+  };
 
   // ── Checkout paneli (MOCK ekranin yerine) ──────────────────────────────────
   // ══ A3 HIBRIT - MISAFIR CHECKOUT (YALNIZ KAPIDA ODEME) ══════════════════════════════════
@@ -1002,14 +1099,16 @@
       misafirAlan("mgPosta", "Posta kodu", misafirState.posta) +
       "</div>" +
 
+      // GOZ-FIX / F-G4: ONCEDEN IKI SECENEK DE `disabled` IDI - "Kapıda ödeme" bile SOLUK
+      // gorunuyordu ve ekran "hiçbir şey seçemiyorum" hissi veriyordu (olculdu: iki radyo da
+      // disabled=true, yalnizca gonder dugmesi etkindi). Simdi: kapida odeme ETKIN + SECILI;
+      // kart secenegi TIKLANABILIR ama secilince nedeni soylenip girise yonlendiriliyor.
       '<div class="co-block" style="margin-top:18px"><h3>Ödeme yöntemi</h3>' +
-      '<label class="saved-item" style="display:block"><input type="radio" name="mgOdeme" checked disabled> ' +
+      '<label class="saved-item" style="display:block"><input type="radio" name="mgOdeme" id="mgOdemeKapida" value="cod" checked> ' +
       "<b>Kapıda ödeme</b></label>" +
-      // KART SECENEGI KAPALI VE NEDENI GORUNUR - sessizce gizlemek, kullaniciya neden
-      // secemedigini soylememek olurdu.
-      '<label class="saved-item" style="display:block;opacity:.55"><input type="radio" name="mgOdeme" disabled> ' +
+      '<label class="saved-item" style="display:block"><input type="radio" name="mgOdeme" id="mgOdemeKart" value="card"> ' +
       "Kredi/banka kartı</label>" +
-      '<p class="muted" style="font-size:12.5px;margin:8px 0 0">Kartla ödeme için ' +
+      '<p class="muted" id="mgOdemeNot" style="font-size:12.5px;margin:8px 0 0">Kartla ödeme için ' +
       '<a href="#/giris">üye girişi</a> yapman gerekiyor. Misafir siparişleri kapıda ödeme ile alınır.</p>' +
       "</div>" +
 
@@ -1026,6 +1125,22 @@
 
     var btn = document.getElementById("mgGonder");
     if (btn) btn.onclick = misafirSiparisGonder;
+
+    // GOZ-FIX / F-G4: kart secenegi TIKLANABILIR; secilince sebep soylenir, secim kapida
+    // odemeye geri doner ve kullanici girise yonlendirilir. "Sessizce disabled" yerine
+    // "secilebilir ama neden olmadigini soyleyen" davranis.
+    var kart = document.getElementById("mgOdemeKart");
+    var kapida = document.getElementById("mgOdemeKapida");
+    var not = document.getElementById("mgOdemeNot");
+    if (kart) {
+      kart.onchange = function () {
+        if (!kart.checked) return;
+        if (kapida) kapida.checked = true;
+        if (not) { not.style.color = "#a32d2d"; not.style.fontWeight = "600"; }
+        notify("Kartla ödeme için üye girişi gerekiyor. Misafir siparişleri kapıda ödeme ile alınır.");
+        setTimeout(function () { location.hash = "#/giris"; }, 1400);
+      };
+    }
   }
 
   function misafirDegerleriOku() {
@@ -1189,6 +1304,12 @@
       r.onchange = function () { checkoutState.method = r.value; };
     });
     document.getElementById("coSubmit").onclick = submitOrder;
+    // GOZ-FIX / F-Ö2 + F-Ö4 BIRLIKTE CALISSIN: ozet tazeleme (F-Ö4) checkout HTML'ini
+    // yeniden kuruyor ve submitOrder'in yazdigi GORUNUR hatayi SILIYORDU (olculdu: mesaj
+    // yazildi, sepet aynalamasi renderCart'i tetikledi, drawCheckout yeniden cizdi, coErr
+    // BOSALDI). Hata metni state'te tutulur ve her cizimden sonra geri konur.
+    var _e = document.getElementById("coErr");
+    if (_e && sonCheckoutHatasi) _e.textContent = sonCheckoutHatasi;
   }
 
   function toggleAddrForm() {
@@ -1244,13 +1365,22 @@
     }
   }
 
+  // GOZ-FIX / F-Ö2: gosterilen son checkout hatasi. drawCheckout her yeniden cizimde bunu
+  // geri koyar; aksi halde F-Ö4'un ozet tazelemesi mesaji siliyordu.
+  var sonCheckoutHatasi = "";
+  function checkoutHatasiYaz(mesaj) {
+    sonCheckoutHatasi = mesaj || "";
+    var e = document.getElementById("coErr");
+    if (e) e.textContent = sonCheckoutHatasi;
+  }
+
   async function submitOrder() {
     var err = document.getElementById("coErr");
     var btn = document.getElementById("coSubmit");
-    err.textContent = "";
+    checkoutHatasiYaz("");
     var items = cartItemsPayload();
-    if (!items.length) { err.textContent = "Sepet boş."; return; }
-    if (!checkoutState.addrId && checkoutState.addresses.length) { err.textContent = "Adres seç."; return; }
+    if (!items.length) { checkoutHatasiYaz("Sepet boş."); return; }
+    if (!checkoutState.addrId && checkoutState.addresses.length) { checkoutHatasiYaz("Adres seç."); return; }
 
     // BEDENSIZ GIYIM KALEMI: sunucu stok satirini beden ile bulur, "" hicbir satirla
     // eslesmez ve siparis "stok yetersiz" ile duser. Kullaniciyi checkout'un ortasinda
@@ -1262,7 +1392,7 @@
       var adlar = bedensiz.map(function (it) {
         var p = window.byId(it.product_id); return p ? p.name : ("#" + it.product_id);
       }).join(", ");
-      err.textContent = "Beden seçilmemiş ürün var: " + adlar + ". Sepetten beden seçip tekrar dene.";
+      checkoutHatasiYaz("Beden seçilmemiş ürün var: " + adlar + ". Sepetten beden seçip tekrar dene.");
       return;
     }
 
@@ -1294,12 +1424,46 @@
 
       var pay = unwrap(await api.payment.initialize(orderId));
       if (!pay || !pay.checkout_form_content) throw new Error("Ödeme formu alınamadı.");
+
+      // GOZ-FIX / F-Ö2: "GORUNUR BIR SEY GELDI MI" KONTROLU.
+      // OLCULDU: Iyzico mock modunda (Iyzico:UseRealSdk=false) uc HTTP 200 doner ama govde
+      // yalnizca "<!-- Iyzico CF (UseRealSdk=false) -->" - bir HTML YORUMU. Eski kod bunu
+      // truthy gorup gomuyor, host 0 px kaliyor ve scrollIntoView sayfayi asagi atiyordu:
+      // kullanici icin "dugmeye bastim, sayfa zipladi, HICBIR SEY olmadi" (siparis ise
+      // Pending olarak asili kaliyor - bu sabah 7 Pending siparisin sebebi budur).
+      if (!odemeFormuGorunurMu(pay.checkout_form_content)) {
+        checkoutHatasiYaz(
+          "Ödeme sağlayıcısı şu an ödeme formunu döndürmedi (test/mock modu olabilir). " +
+          "Siparişin " + orderId + " numarasıyla ÖDENMEMİŞ olarak duruyor. " +
+          "Kapıda ödeme ile devam edebilir ya da daha sonra tekrar deneyebilirsin.");
+        notify("Ödeme formu gelmedi. Siparişin ödenmemiş olarak duruyor.");
+        return;
+      }
       embedCheckoutForm(pay.checkout_form_content);
     } catch (e) {
-      err.textContent = e.message || "Sipariş oluşturulamadı";
+      // GOZ-FIX / F-Ö2: 401 = oturum gercekten bitti (api-client zaten BIR KEZ refresh
+      // dener; buraya dusuyorsa o da basarisiz olmustur - olculdu: cart/add 401 ->
+      // auth/refresh 401). Teknik mesaj yerine ne yapmasi gerektigi soylenir.
+      if (e && e.status === 401) {
+        checkoutHatasiYaz("Oturumun sona erdi, lütfen tekrar giriş yap.");
+        notify("Oturumun sona erdi, lütfen tekrar giriş yap.");
+        setTimeout(function () { location.hash = "#/giris"; }, 1200);
+      } else {
+        checkoutHatasiYaz(e && e.message ? e.message : "Sipariş oluşturulamadı");
+      }
     } finally {
+      // Dugme HER durumda eski haline doner - asili kalmaz.
       btn.disabled = false; btn.textContent = "Siparişi tamamla";
     }
+  }
+
+  // GOZ-FIX / F-Ö2: gelen govde GERCEKTEN cizilebilir bir sey tasiyor mu?
+  // Iyzico'nun gercek Checkout Form'u <script> tasir; mock yalnizca bir HTML YORUMU dondurur.
+  // Yorumlar ve bosluk ayiklandiktan sonra geriye bir sey kalmiyorsa "form gelmedi" demektir.
+  function odemeFormuGorunurMu(html) {
+    if (!html) return false;
+    var s = String(html).replace(/<!--[\s\S]*?-->/g, "").trim();
+    return s.length > 0;
   }
 
   // Iyzico Checkout Form HTML'i <script> icerir. innerHTML ile eklenen script
@@ -1324,7 +1488,12 @@
         host.appendChild(node.cloneNode(true));
       }
     });
-    host.scrollIntoView({ behavior: "smooth", block: "start" });
+    // GOZ-FIX / F-Ö2: BOS bir host'a kaydirma YAPILMAZ. Eskiden kosulsuzdu ve mock modda
+    // 0 px yuksekligindeki host'a kaydiriyordu - olculdu: scrollY 0 -> 648, ekranda hicbir
+    // sey yok. Kaydirma yalnizca gercekten cizilmis bir form varsa anlamlidir.
+    if (host.getBoundingClientRect().height > 0) {
+      host.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }
   window.divisimaEmbedCheckoutForm = embedCheckoutForm;
 
