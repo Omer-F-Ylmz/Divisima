@@ -1283,7 +1283,7 @@
         city: d.il, district: d.ilce, full_address: d.adres, zip_code: d.posta,
         coupon_code: "",              // non-nullable string - eksikse 400 (E2 dersi)
         payment_method: 1,            // A3: misafirde YALNIZ kapida odeme
-        request_id: "mg-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10),
+        request_id: checkoutIstekIdAl(),   // MFIX-1/F-M3f: OTURUM basina (her tikta YENI degil)
         items: kalemler
       });
       var siparisId = unwrap(r);
@@ -1486,10 +1486,54 @@
     if (e) e.textContent = sonCheckoutHatasi;
   }
 
+  // ══ MFIX-1 / F-M3f: REQUEST_ID CHECKOUT OTURUMU BASINA ═══════════════════════════
+  // OLCULDU: sunucu idempotency'si CALISIYOR (ayni request_id ikinci kez gonderilince
+  // 200 + "Bu siparis zaten olusturulmus" + AYNI id) ama istemci HER TIKTA
+  // crypto.randomUUID() ile YENI anahtar uretiyordu -> koruma YAPISAL OLARAK ULASILAMAZ.
+  // Zinciri tamamlayan sey: "odeme formu donmedi" dali return ediyor, finally dugmeyi
+  // geri aciyor ve mesaj "tekrar deneyebilirsin" diyor - ama SIPARIS ZATEN OLUSTU.
+  // Omer'in turunda TEK denemeden ALTI Pending siparis cikti (dort saniyede uc tanesi).
+  // Artik anahtar OTURUM basina: sepet icerigi degisince ve BASARILI siparisten sonra
+  // yenilenir; arada kac kez tiklanirsa tiklansin AYNI anahtar gider.
+  var _checkoutIstekId = null;
+  var _checkoutSepetImzasi = null;
+  function sepetImzasi() {
+    try {
+      return (cartItemsPayload() || []).map(function (i) {
+        return i.product_id + "|" + (i.size || "") + "|" + i.quantity;
+      }).sort().join(",");
+    } catch (e) { return ""; }
+  }
+  function checkoutIstekIdYenile() { _checkoutIstekId = null; }
+  function checkoutIstekIdSepeteGoreTazele() {
+    var imza = sepetImzasi();
+    if (imza !== _checkoutSepetImzasi) { _checkoutSepetImzasi = imza; checkoutIstekIdYenile(); }
+  }
+  function checkoutIstekIdAl() {
+    if (!_checkoutIstekId) {
+      _checkoutIstekId = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : ("co-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10));
+    }
+    return _checkoutIstekId;
+  }
+
+  // MFIX-1 / F-M8: siparis numarasi UYDURULMAZ. order_number varsa O basilir; yoksa ne
+  // oldugu DURUSTCE yazilir ve id yalnizca referans olarak gecer (bugun siparis olusturma
+  // uclari YALNIZ sayisal id donuyor - MFIX-B'de order_number eklenecek).
+  function siparisNoMetni(order, orderId) {
+    var no = (order && order.order_number) ? String(order.order_number).trim() : "";
+    if (no) return no;
+    var ref = orderId || (order && order.id) || "-";
+    return "e-postanla paylaşılacak (referans: " + ref + ")";
+  }
+
   async function submitOrder() {
     var err = document.getElementById("coErr");
     var btn = document.getElementById("coSubmit");
     checkoutHatasiYaz("");
+    checkoutIstekIdSepeteGoreTazele();   // MFIX-1/F-M3f: sepet degistiyse YENI anahtar
+    var _zatenVarMesaji = "";            // MFIX-1/F-M3f: catch dalinda da gorulsun
     var items = cartItemsPayload();
     if (!items.length) { checkoutHatasiYaz("Sepet boş."); return; }
     if (!checkoutState.addrId && checkoutState.addresses.length) { checkoutHatasiYaz("Adres seç."); return; }
@@ -1513,17 +1557,29 @@
       // Sunucu sepetini de esitle (siparis kalemleri govdeden gidiyor ama sepet tutarli kalsin)
       await syncCartToServer();
 
-      var order = unwrap(await api.orders.place({
+      var _zarf = await api.orders.place({
         customer_id: 1,                       // sunucu token'dan EZER; validator > 0 istiyor
-        request_id: (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
+        request_id: checkoutIstekIdAl(),   // MFIX-1/F-M3f: OTURUM basina (her tikta YENI degil)
         address_id: checkoutState.addrId || null,
         coupon_code: checkoutState.coupon ? checkoutState.coupon.code : "",   // non-nullable
         use_store_credit: checkoutState.useCredit > 0 ? checkoutState.credit : 0,
         payment_method: checkoutState.method === "cod" ? 1 : 0,
         items: items
-      }));
+      });
+      var order = unwrap(_zarf);
+
+      // MFIX-1 / F-M3f: sunucu AYNI request_id icin 200 + "zaten olusturulmus" doner.
+      // Kullaniciya YENI siparis olusmadigi ACIKCA soylenir; akis normal devam eder
+      // (kart yolunda odeme baslatma tekrar denenir - kullanicinin istedigi sey budur).
+      var zatenVar = !!(_zarf && typeof _zarf.message === "string" && /zaten olu/i.test(_zarf.message));
 
       var orderId = (order && order.id) ? order.id : order;   // uc siparis id'sini dogrudan donuyor
+      if (zatenVar) {
+        var _no = String(orderId);
+        try { var _o = unwrap(await api.orders.get(orderId)); if (_o && _o.order_number) _no = _o.order_number; } catch (e) {}
+        _zatenVarMesaji = "Bu sipariş zaten oluşturulmuştu (sipariş no: " + _no + "). YENİ bir sipariş oluşturulmadı.";
+        checkoutHatasiYaz(_zatenVarMesaji);
+      }
       try { sessionStorage.setItem("divisima_last_order", String(orderId)); } catch (e) {}
 
       if (checkoutState.method === "cod") {
@@ -1544,9 +1600,14 @@
       // kullanici icin "dugmeye bastim, sayfa zipladi, HICBIR SEY olmadi" (siparis ise
       // Pending olarak asili kaliyor - bu sabah 7 Pending siparisin sebebi budur).
       if (!odemeFormuGorunurMu(pay.checkout_form_content)) {
+        // MFIX-1 / F-M8: burada SAYISAL ID basiliyordu ("Siparisin 207 numarasiyla...") -
+        // o bir siparis NUMARASI degil veritabani kimligidir. Gercek order_number cekilir;
+        // gelmezse UYDURULMAZ, durustce referans olarak yazilir.
+        var _n2 = orderId;
+        try { var _o2 = unwrap(await api.orders.get(orderId)); if (_o2 && _o2.order_number) _n2 = _o2.order_number; } catch (e2) {}
         checkoutHatasiYaz(
           "Ödeme sağlayıcısı şu an ödeme formunu döndürmedi (test/mock modu olabilir). " +
-          "Siparişin " + orderId + " numarasıyla ÖDENMEMİŞ olarak duruyor. " +
+          "Siparişin " + _n2 + " numarasıyla ÖDENMEMİŞ olarak duruyor. " +
           "Kapıda ödeme ile devam edebilir ya da daha sonra tekrar deneyebilirsin.");
         notify("Ödeme formu gelmedi. Siparişin ödenmemiş olarak duruyor.");
         return;
@@ -1560,6 +1621,12 @@
         checkoutHatasiYaz("Oturumun sona erdi, lütfen tekrar giriş yap.");
         notify("Oturumun sona erdi, lütfen tekrar giriş yap.");
         setTimeout(function () { location.hash = "#/giris"; }, 1200);
+      } else if (_zatenVarMesaji) {
+        // MFIX-1 / F-M3f: siparis ZATEN vardi ve odeme baslatma da dustu. Kullaniciya
+        // ONCE "yeni siparis olusmadi" bilgisi verilir - saglayicinin teknik metni
+        // ("zaten bekleyen bir odeme var") tek basina birakilirsa kullanici yine
+        // tekrar dener ve neden bir sey olmadigini ANLAMAZ.
+        checkoutHatasiYaz(_zatenVarMesaji + " Ödeme şu an başlatılamıyor; kapıda ödeme ile devam edebilir ya da daha sonra tekrar deneyebilirsin.");
       } else {
         checkoutHatasiYaz(e && e.message ? e.message : "Sipariş oluşturulamadı");
       }
@@ -1617,6 +1684,12 @@
     var status = params.status || "";
     var ok = status === "success" || status === "cod";
 
+    // MFIX-1 / F-M3f: siparis TAMAMLANDI (COD ve misafir yollari da buraya duser) ->
+    // bir sonraki checkout icin YENI anahtar. Kart yolunda embed sirasinda YENILENMEZ:
+    // kullanici geri donup tekrar basarsa sunucu "zaten olusturulmus" demeli, YENI
+    // siparis DEGIL.
+    if (ok) checkoutIstekIdYenile();
+
     view.innerHTML = '<div class="wrap" style="padding:40px 0;max-width:640px"><p class="muted">Yükleniyor…</p></div>';
 
     var order = null;
@@ -1644,7 +1717,7 @@
 
       ozet = '<div class="panel" style="text-align:left"><h3>Sipariş özeti</h3>' +
         '<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0"><span>Sipariş no</span><span>' +
-        esc(String(order.order_number || order.id || orderId)) + "</span></div>" +
+        esc(siparisNoMetni(order, orderId)) + "</span></div>" +
         kalemler +
         '<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0"><span>Kargo</span><span>' +
         money(order.shipping_cost) + "</span></div>" +
@@ -1667,11 +1740,12 @@
     // Misafir oldugunu URL soyluyor (guest=1); tahmin edilmiyor.
     var misafirMi = String(params.guest || "") === "1";
     if (misafirMi) {
-      ozet = '<div class="panel" style="text-align:left"><h3>Sipariş no</h3>' +
-        '<p style="font-size:15px;font-weight:600;margin:6px 0 12px">#' + orderId + "</p>" +
-        '<p class="muted" style="font-size:13px;margin:0">Sipariş bilgilerin e-postana gönderildi. ' +
-        "Siparişini takip edebilmek için hesabına bir şifre belirle: e-postandaki doğrulama " +
-        'bağlantısına tıkla, sonra Giriş ekranındaki "Şifremi unuttum" adımıyla şifreni oluştur.</p></div>';
+      // MFIX-1 / F-M8: "#<id>" bir SIPARIS NUMARASI DEGIL, veritabani kimligi. Misafir
+      // order/get'i cagiramadigi icin (uc [RequireUserType(Customer)]; anonim GET 401 -
+      // olculdu) gercek order_number ELDE YOK. UYDURULMAZ: ne oldugu DURUSTCE yazilir ve
+      // id yalnizca KUCUK BIR REFERANS olarak gosterilir. Gercek numara MFIX-B'de siparis
+      // yanitina eklenince buraya baglanacak.
+      ozet = '<div class="panel" style="text-align:left"><h3>Sipariş kaydın alındı</h3><p class="muted" style="font-size:13px;margin:6px 0 10px">Sipariş numaran e-postanla paylaşılacak.</p><p class="muted" style="font-size:12px;margin:0 0 12px">Referans: ' + orderId + '</p><p class="muted" style="font-size:13px;margin:0">Siparişini takip edebilmek için hesabına bir şifre belirle: e-postandaki doğrulama bağlantısına tıkla, sonra Giriş ekranındaki "Şifremi unuttum" adımıyla şifreni oluştur.</p></div>';
     }
 
     view.innerHTML =
@@ -1732,6 +1806,40 @@
       };
       window.router.__divisimaWrapped = true;
     }
+
+    // ══ MFIX-1 / F-M3a: MOCK ADIMLI CHECKOUT ARTIK HICBIR YOLDAN CIZILEMEZ ══════════
+    // OLCULDU: index.html'in kendi mock checkout'u (renderCheckout) ile bizim gercek
+    // cizicimiz AYNI kaba (#checkoutView) yaziyor ve tercih ROTAYA degil CIZIM SIRASINA
+    // bagliydi. Mock'u DORT DIS yol geri getiriyordu - kupon uygula, kupon kaldir, para
+    // birimi, DIL - ve biz onu GERI ALAMIYORDUK (odemeOzetiniTazele yalniz #coSubmit /
+    // #mgGonder arar, mock ikisini de icermez). Mock CANLI KART FORMU tasiyor ve coFinish()
+    // sunucuya HICBIR istek atmadan "Siparisin alindi" deyip sepeti bosaltiyordu.
+    // Depo idiyomu: api-bridge index.html'in fonksiyonunu SARMALAYIP EZER (router, addToCart,
+    // renderCart, logout ayni kalipta). Boylece DORT yol da TEK noktadan kapanir ve
+    // ADDR/CARDS/couponUI gibi index.html'in BASKA yuzeylerde kullandigi parcalara
+    // DOKUNULMAZ (on olcum haritasi: onlarin mock DISINDA tuketicileri VAR).
+    if (typeof window.renderCheckout === "function" && !window.renderCheckout.__divisimaGercek) {
+      var gercekCizim = function () {
+        var yol = location.hash.replace(/^#\/?/, "").split("?")[0].split("/")[0];
+        if (yol !== "odeme") return;      // checkout disinda cizim YOK
+        renderRealCheckout();
+      };
+      gercekCizim.__divisimaGercek = true;
+      window.renderCheckout = gercekCizim;
+    }
+    // showCheckout YALNIZ gorunumu acar; cizimi router'in ardindan kosan handle() yapar
+    // (aksi halde her gezinmede IKI kez cizilirdi).
+    if (typeof window.showCheckout === "function" && !window.showCheckout.__divisimaGercek) {
+      var gercekGoster = function () { if (typeof window.setView === "function") window.setView("checkout"); };
+      gercekGoster.__divisimaGercek = true;
+      window.showCheckout = gercekGoster;
+    }
+
+    // MFIX-1 / F-M3a: cekmecede SUNUCU ile dogrulanan kupon checkout'a TASINIR.
+    window.divisimaSetCheckoutCoupon = function (code, d) {
+      if (!code || !d) { checkoutState.coupon = null; return; }
+      checkoutState.coupon = Object.assign({ code: code }, d);
+    };
     window.addEventListener("hashchange", function () { setTimeout(handle, 0); });
     setTimeout(handle, 0);   // ilk yuklemede zaten #/odeme'deysek
   }
@@ -1959,7 +2067,7 @@
         return;
       }
       el.innerHTML = '<div class="acc-tiles">' + liste.map(function (r) {
-        return '<div class="acc-tile"><div class="at-head"><b>Sipariş #' + esc(String(r.order_id || "")) + "</b>" +
+        return '<div class="acc-tile"><div class="at-head"><b>Sipariş ' + esc(String(r.order_number || ("#" + (r.order_id || "")))) + "</b>" +
           '<span class="at-def">' + esc(iadeDurumEtiket(r.status_name)) + "</span></div>" +
           "<p>" + esc(urunAdi(r.product_id, r.product_name)) + " · " + esc(r.size || "") +
           " · " + (r.quantity || 1) + " adet</p>" +

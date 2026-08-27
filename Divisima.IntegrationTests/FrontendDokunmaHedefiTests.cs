@@ -480,5 +480,187 @@ namespace Divisima.IntegrationTests
                 "sunucu sepeti tur basina TEK kez okunmali");
         }
 
+
+        // ── P5 (MFIX-1 / F-M3a + F-M3b): MOCK CHECKOUT DIRILEMEZ, TEK GERCEK CHECKOUT ──
+        // DURUST ETIKET: KAYNAK SOZLESMESI pinidir, DAVRANIS pini DEGILDIR (depoda JS/DOM
+        // kosucusu yok). Davranis kaniti MFIX-1 raporundaki REPRO-1 ve REPRO-3 tarayici
+        // olcumleridir: kupon uygulandiginda ve dil degistirildiginde mock ARTIK GELMIYOR
+        // (coSteps=false, coSubmit=true) ve girisli kullanici "Continuing as guest" GORMUYOR.
+        [Fact]
+        public void KAYNAK_SOZLESMESI_MockCheckout_Dirilemez_ve_TekGercekCheckout()
+        {
+            var b = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+            var s = YorumlariAyikla(Index);
+
+            // VAKUM KIRICI 1: GERCEK cizici HALA VAR. Mock'u etkisizlestirmenin dogru yolu
+            // gercegi de silmek DEGILDIR; silinseydi asagidaki iddia BEDAVA dogru olurdu.
+            b.Should().Contain("async function renderRealCheckout()",
+                "gercek checkout cizicisi yerinde durmali");
+            b.Should().Contain("function misafirCheckoutCiz(",
+                "gercek MISAFIR cizicisi yerinde durmali");
+
+            // VAKUM KIRICI 2: index.html'in DIRILIS YOLLARI HALA ORADA. Duzeltme
+            // "cagiranlari sil" DEGIL "hedefi etkisizlestir"; cagiranlar silinseydi pin
+            // yanlis bir mekanizmayi savunurdu.
+            Regex.Matches(s, @"renderCheckout\s*\(\s*\)").Count.Should().BeGreaterThan(3,
+                "kupon/para birimi/dil yollari hala renderCheckout cagiriyor olmali");
+
+            // ASIL SOZLESME: api-bridge index.html'in cizicisini SARMALAYIP EZIYOR.
+            b.Should().Contain("window.renderCheckout = gercekCizim",
+                "mock cizici gercek cizimle EZILMELI");
+            b.Should().Contain("window.showCheckout = gercekGoster",
+                "showCheckout de EZILMELI - router yolu da kapanmali");
+            b.Should().Contain("gercekCizim.__divisimaGercek = true",
+                "cift sarmalamayi engelleyen bayrak bulunmali");
+
+            // Ezen fonksiyon GERCEKTEN gercek cizimi cagirmali (bos bir stub olmamali).
+            var cizimGovde = FonksiyonGovdesi(b, "var gercekCizim = function ()");
+            cizimGovde.Should().Contain("renderRealCheckout()",
+                "ezen cizici GERCEK checkout'u cagirmali");
+
+            // CIFT-ANLAM KIRICI 1: cizim YALNIZ odeme rotasinda yapilmali. Kosul olmasaydi
+            // kupon/dil degisimi BASKA sayfalarda da checkout cizerdi.
+            cizimGovde.Should().Contain("\"odeme\"",
+                "cizim yalnizca #/odeme rotasinda yapilmali");
+
+            // CIFT-ANLAM KIRICI 2: showCheckout CIZMEMELI - cizimi router'in ardindan kosan
+            // handle() yapar. Ikisi de cizseydi her gezinmede IKI kez cizilirdi.
+            var gosterGovde = FonksiyonGovdesi(b, "var gercekGoster = function ()");
+            gosterGovde.Should().NotContain("renderRealCheckout",
+                "showCheckout yalniz gorunumu acar, CIZMEZ (cift cizim olmasin)");
+            gosterGovde.Should().Contain("setView",
+                "showCheckout gorunumu acmali");
+
+            // Cekmecede sunucu-dogrulamali kupon CHECKOUT'A TASINMALI.
+            b.Should().Contain("window.divisimaSetCheckoutCoupon = function",
+                "cekmece kuponu checkout'a tasiyan koprü tanimli olmali");
+
+            // ── IKINCI SAVUNMA HATTI (L3 cift-kor denetcisi buldu) ──────────────────
+            // api-bridge `defer` ile yuklenir; index.html'in inline script'i acilista
+            // KOSULSUZ router() cagirir. Yani sayfa DOGRUDAN #/odeme ile acilirsa ezme
+            // HENUZ OLMAMIS olur ve orijinal govde mock'u cizerdi (canli kart formu +
+            // coFinish dahil). api-bridge hic yuklenmezse mock KALICI canli kalirdi.
+            // Bu yuzden mock KAYNAKTA da etkisizlestirildi: govde ERKEN DONER.
+            s.Should().Contain("<script src=\"/api-bridge.js\" defer>",
+                "yukleme sirasi varsayimi degisirse bu pin yeniden dusunulmeli");
+            var mockGovde = FonksiyonGovdesi(s, "function renderCheckout()");
+            // NOT (5. KONTROL YAKALADI): duz IndexOf("return;") YETMEZ - mock govdesinde
+            // BASKA bir return daha var (bos sepet dali) ve erken donus kaldirilsa bile o
+            // eslesirdi, yani pin ZAAFLIYDI. Ayrica regex'te ters bolu kacisi bu depoda
+            // yazim zincirinde KAYBOLABILIYOR (CLAUDE.md dersi). Bu yuzden kacissiz ve
+            // KOMSULUK tabanli olculur: notr yer tutucudan SONRAKI satir kosulsuz return
+            // olmali. Mutasyon return'u yorumlarsa YorumlariAyikla o satiri SILER ve
+            // komsuluk BOZULUR -> pin kirmizi olur.
+            var mockSatirlari = mockGovde.Split('\n');
+            var yerTutucuSatiri = -1;
+            for (var i = 0; i < mockSatirlari.Length; i++)
+            {
+                if (mockSatirlari[i].Contains("Ödeme hazırlanıyor"))
+                {
+                    yerTutucuSatiri = i;
+                    break;
+                }
+            }
+            yerTutucuSatiri.Should().BeGreaterThan(-1,
+                "mock govdesi notr yer tutucuyu yazmali - api-bridge yuklenmeden ONCE de mock CIZMEMELI");
+            (yerTutucuSatiri + 1).Should().BeLessThan(mockSatirlari.Length,
+                "yer tutucudan sonra en az bir satir olmali");
+            mockSatirlari[yerTutucuSatiri + 1].Trim().Should().Be("return;",
+                "yer tutucudan HEMEN SONRAKI satir KOSULSUZ return olmali (erken donus)");
+            var erkenDonus = yerTutucuSatiri;
+
+            // VAKUM KIRICI: mock uretici HALA govdede (silinmedi, ERISILEMEZ kilindi).
+            // Silinseydi "erken donus mock'tan once" iddiasi BEDAVA dogru olurdu.
+            var mockUreticiSatiri = -1;
+            for (var i = 0; i < mockSatirlari.Length; i++)
+            {
+                if (mockSatirlari[i].Contains("coStepBar()"))
+                {
+                    mockUreticiSatiri = i;
+                    break;
+                }
+            }
+            mockUreticiSatiri.Should().BeGreaterThan(-1,
+                "mock uretici govdede duruyor olmali (sokum degil, erisilemezlik)");
+            erkenDonus.Should().BeLessThan(mockUreticiSatiri,
+                "erken donus mock URETIMINDEN ONCE gelmeli");
+        }
+
+        // ── P6 (MFIX-1 / F-M3f + F-M3a): REQUEST_ID OTURUM BASINA, SAHTE KUPON TABLOSU YOK ──
+        // DURUST ETIKET: KAYNAK SOZLESMESI pinidir. Davranis kaniti REPRO-2: tek oturumda
+        // uc tik -> TEK siparis (218); yeniden yuklenen oturumda 1. tik YENI siparis (219),
+        // 2. tik "zaten olusturulmustu" ve YENI siparis YOK. DB ile dogrulandi.
+        [Fact]
+        public void KAYNAK_SOZLESMESI_RequestId_OturumBasina_ve_SahteKuponTablosu_Yok()
+        {
+            var b = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+            var s = YorumlariAyikla(Index);
+
+            // ── REQUEST_ID ───────────────────────────────────────────────────────────
+            // ASIL SOZLESME: IKI siparis yolu da (uye + misafir) AYNI oturum anahtarini alir.
+            Regex.Matches(b, @"request_id:\s*checkoutIstekIdAl\(\)").Count.Should().Be(2,
+                "uye ve misafir yollarinin IKISI de oturum anahtarini kullanmali");
+
+            // CIFT-ANLAM KIRICI: tik basina uretim GERI GELEMEZ. Eski bicim request_id
+            // satirinda dogrudan crypto.randomUUID()/Date.now() cagiriyordu.
+            Regex.Matches(b, @"request_id:\s*\(window\.crypto").Count.Should().Be(0,
+                "tik basina anahtar ureten eski bicim geri gelmemeli");
+            Regex.Matches(b, @"request_id:\s*""mg-""").Count.Should().Be(0,
+                "misafir yolundaki tik basina uretim de geri gelmemeli");
+
+            // Yardimcilar TANIMLI ve CAGRILMIS olmali (yalniz tanim = olu kod).
+            b.Should().Contain("function checkoutIstekIdAl()", "anahtar uretici tanimli olmali");
+            b.Should().Contain("function checkoutIstekIdYenile()", "yenileyici tanimli olmali");
+            b.Should().Contain("function checkoutIstekIdSepeteGoreTazele()", "sepet tazeleyici tanimli olmali");
+            Regex.Matches(b, @"checkoutIstekIdSepeteGoreTazele\s*\(\s*\)").Count.Should().BeGreaterThan(1,
+                "tanim + checkout gonderiminde cagri: en az iki gecis");
+            Regex.Matches(b, @"checkoutIstekIdYenile\s*\(\s*\)").Count.Should().BeGreaterThan(2,
+                "tanim + sepet degisiminde + BASARILI sipariste: en az uc gecis");
+
+            // BASARILI sipariste yenileme SART - yoksa anahtar sonsuza kadar donar ve
+            // musteri IKINCI bir siparis VEREMEZ.
+            b.Should().Contain("if (ok) checkoutIstekIdYenile();",
+                "siparis tamamlandiginda anahtar yenilenmeli");
+
+            // Sunucunun "zaten olusturulmus" yaniti kullaniciya ACIKCA soylenmeli.
+            b.Should().Contain("zaten olu", "replay yaniti tespit edilmeli");
+            b.Should().Contain("YENİ bir sipariş oluşturulmadı",
+                "kullaniciya yeni siparis olusmadigi soylenmeli");
+
+            // ── SAHTE KUPON TABLOSU [YOKLUK] ─────────────────────────────────────────
+            var ham = Oku("frontend/index.html") + "\n" + Oku("frontend/api-bridge.js");
+            foreach (var kod in new[] { "HOSGELDIN", "STIL20", "KARGOBEDAVA", "NAKIT250" })
+                Regex.Matches(ham, Regex.Escape(kod)).Count.Should().Be(0,
+                    $"uydurma kupon kodu '{kod}' frontend'de HIC gecmemeli (tablo, i18n reklami ve bulten vaadi dahil)");
+
+            // YOKLUK IDDIASININ NEGATIF KONTROLU: tarama gercekten calisiyor olmali.
+            Regex.Matches(ham, "cp_apply").Count.Should().BeGreaterThan(0,
+                "tarama vakuma dusmemeli - bilinen bir dizge BULUNMALI");
+
+            // Yerel sahte tablo ve onu okuyan fonksiyon SOKULDU.
+            Regex.Matches(s, @"var COUPONS\s*=").Count.Should().Be(0,
+                "yerel sahte kupon tablosu kaldirilmis olmali");
+            Regex.Matches(s, @"function applyCoupon\s*\(").Count.Should().Be(0,
+                "yerel tabloyu sorgulayan applyCoupon kaldirilmis olmali");
+
+            // VAKUM KIRICI: kupon OZELLIGI silinmedi - kutu ve kaldirma HALA VAR.
+            s.Should().Contain("function couponUI()", "cekmece kupon kutusu yerinde durmali");
+            s.Should().Contain("function removeCoupon()", "kupon kaldirma yerinde durmali");
+
+            // ASIL SOZLESME: dogrulama SUNUCUDAN.
+            var uygulaGovde = FonksiyonGovdesi(s, "async function couponApplyFrom(scope)");
+            uygulaGovde.Should().Contain("window.divisimaValidateCoupon",
+                "kupon dogrulamasi SUNUCU ucuna gitmeli");
+            uygulaGovde.Should().Contain("d.discount_amount",
+                "indirim tutari SUNUCUNUN dondurdugu deger olmali");
+
+            // CIFT-ANLAM KIRICI: sunucu reddederse yerel bir indirim UYGULANMAMALI.
+            // NOT: kaynak SIKISTIRILMIS (bosluksuz). Bosluga duyarli bir assert kendi
+            // bicimlendirme varsayimini olcerdi - regex bosluga TOLERANSLI.
+            Regex.IsMatch(uygulaGovde, @"if\s*\(\s*!d\s*\)").Should().BeTrue(
+                "sunucu reddinde erken donulmeli");
+            uygulaGovde.Should().Contain("cp_invalid",
+                "reddedilen kod icin GORUNUR hata mesaji olmali");
+        }
     }
 }
