@@ -557,6 +557,68 @@ namespace Divisima.IntegrationTests
             public int Outbox { get; set; }
         }
 
+        // ── P13 (MFIX-B / K3) ────────────────────────────────────────────────────────────
+        // OLCULEN ONCE-DURUM (canli, ESKI ikili): POST /api/order/place -> {"data":224,...}
+        // yani `data` CIPLAK INT idi. Istemci musteriye gosterecek GERCEK siparis numarasini
+        // elde edemiyordu: uye yolunda order_number icin IKINCI bir /api/order/get cagrisi
+        // yapiliyor, MISAFIR yolunda ise o uc Customer'a kilitli (anonim 401) oldugu icin
+        // numara HIC alinamiyor ve ekranda veritabani kimligi "Referans: 224" gosteriliyordu.
+        [Fact]
+        public async Task Place_Yaniti_Id_ve_OrderNumber_Tasir()
+        {
+            if (Skipped()) return;
+            var (urunId, beden) = await UrunHazirlaAsync();
+
+            // ── MISAFIR YOLU (K3'un asil kazanani: order_number BASKA yerden alinamaz) ──
+            var eposta = $"p13-{Guid.NewGuid():N}@example.com";
+            var mr = await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesi(eposta, urunId, beden, KapidaOdeme));
+            var mGovde = await mr.Content.ReadAsStringAsync();
+            mr.StatusCode.Should().Be(HttpStatusCode.Created, $"misafir siparisi olusmali. Govde: {mGovde}");
+
+            var mData = (await mr.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>()).GetProperty("data");
+            var mId = mData.GetProperty("id").GetInt32();
+            var mNo = mData.GetProperty("order_number").GetString();
+
+            await using (var ctx = NewContext())
+            {
+                var s = await ctx.Set<Order>().AsNoTracking().FirstAsync(o => o.id == mId);
+                mNo.Should().Be(s.order_number, "yanittaki numara VERITABANINDAKI numara ile BIREBIR olmali");
+                // CIFT-ANLAM KIRICI: numara, kimligin metne cevrilmis hali DEGIL.
+                mNo.Should().NotBe(mId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    "order_number bir SIPARIS NUMARASIDIR, veritabani kimligi degil");
+                mNo.Should().StartWith("DVS", "uretilen numara bicimi korunmali");
+            }
+
+            // ── UYE YOLU: ayni sozlesme (istemci artik ikinci bir orders.get cagirmiyor) ──
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+            var adresId = await AdresHazirlaAsync(musteri.Client, musteri.CustomerId);
+            var ur = await musteri.Client.PostAsJsonAsync("/api/order/place", new
+            {
+                customer_id = musteri.CustomerId,
+                address_id = adresId,
+                coupon_code = "",
+                use_store_credit = 0m,
+                payment_method = KapidaOdeme,
+                items = new[] { new { product_id = urunId, size = beden, quantity = 1 } }
+            });
+            var uGovde = await ur.Content.ReadAsStringAsync();
+            ur.StatusCode.Should().Be(HttpStatusCode.Created, $"uye siparisi olusmali. Govde: {uGovde}");
+
+            var uData = (await ur.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>()).GetProperty("data");
+            uData.ValueKind.Should().Be(System.Text.Json.JsonValueKind.Object,
+                "data artik CIPLAK INT degil, { id, order_number } nesnesi");
+            var uId = uData.GetProperty("id").GetInt32();
+            var uNo = uData.GetProperty("order_number").GetString();
+            uId.Should().BeGreaterThan(0, "sayisal kimlik KALDI - payment/initialize ve order/get onu kullanir");
+
+            await using (var ctx = NewContext())
+            {
+                var s = await ctx.Set<Order>().AsNoTracking().FirstAsync(o => o.id == uId);
+                uNo.Should().Be(s.order_number);
+            }
+        }
+
         private static object MisafirGovdesi(string eposta, int urunId, string beden, byte yontem) => new
         {
             guest_name = "Misafir Musteri",

@@ -6,6 +6,7 @@ using Divisima.Core.Utilities.Caching;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Pricing;
 using Divisima.Core.Utilities.Results;
+using Divisima.Core.Utilities.Stock;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Product;
 using Divisima.Entity.Entities;
@@ -367,7 +368,19 @@ namespace Divisima.Bussiness.Concrete
 
             // Açıklayıcı yorum: Bedenleri ayrı yükle (nav property yok - kompozisyon serviste)
             var stocks = await _productStockDal.GetListAsync(s => s.product_id == id && s.is_active);
-            data.stocks = stocks.Select(s => new ProductStockDto { size = s.size, stock_quantity = s.stock_quantity }).ToList();
+            // MFIX-B / K1: ANONIM UCLARDA stock_quantity SATILABILIR adedi tasir (fiziksel DEGIL).
+            // Fiziksel stok YALNIZ admin ucundan gorunur: GET /api/Stock/{productId} -> ProductStockDetailDto
+            // (fiziksel + rezerve + satilabilir). Gerekce: bu yol daha once FIZIKSEL donuyordu ve ayni
+            // sinifin liste yolu SATILABILIR donuyordu; olculdu (urun 937) detay 33 / liste 26.
+            // Musteri "10 var" gorup 5'ini sepete koyamiyordu. Formul TEK KAYNAK: StokHesabi.Satilabilir.
+            // ProductStockDto DEGISMEDI (E4a karari: reserved_quantity anonim uca ACILMAZ).
+            data.stocks = stocks
+                .Select(s => new ProductStockDto
+                {
+                    size = s.size,
+                    stock_quantity = StokHesabi.Satilabilir(s.stock_quantity, s.reserved_quantity)
+                })
+                .ToList();
 
             // Açıklayıcı yorum: Onaylı yorumlardan puan özeti (frontend reviewsOf)
             var reviews = await _productReviewDal.GetApprovedByProductAsync(id);
@@ -526,8 +539,16 @@ namespace Divisima.Bussiness.Concrete
                 .ToDictionary(
                     g => g.Key,
                     g => (
-                        Toplam: g.Sum(st => Math.Max(0, st.stock_quantity - st.reserved_quantity)),
-                        Bedenler: g.Where(st => st.stock_quantity - st.reserved_quantity > 0)
+                        // MFIX-B / K1: formul artik TEK KAYNAKTAN (StokHesabi) - detay yolu da ayni
+                        // yardimciyi kullaniyor, BU IKI YOL bir daha ayrisamaz.
+                        // KAPSAM SINIRI (denetimde olculdu): anonim stok semantigi UCUNCU bir yerde
+                        // daha var - /api/search/products (SearchManager) ZENGINLESTIRME yapmiyor
+                        // (total_stock 0 doner) ve stok YUKLEMINI `stock_quantity - reserved` ile
+                        // kurarken EfProductDal'in `in_stock` yuklemi FIZIKSEL `stock_quantity > 0`
+                        // kullaniyor. Ikisi PRE-EXISTING ve bu dalganin KAPSAMI DISINDA; burada
+                        // "iki yol" derken YALNIZ ProductManager'in detay ve liste yollari kastedilir.
+                        Toplam: g.Sum(st => StokHesabi.Satilabilir(st.stock_quantity, st.reserved_quantity)),
+                        Bedenler: g.Where(st => StokHesabi.Satilabilir(st.stock_quantity, st.reserved_quantity) > 0)
                                    .Select(st => st.size)
                                    .Distinct()
                                    .ToList()

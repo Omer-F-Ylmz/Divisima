@@ -126,8 +126,12 @@ namespace Divisima.IntegrationTests
             {
                 product_id = p.id,
                 size = "M",
-                stock_quantity = 7,
-                reserved_quantity = 0,
+                // MFIX-B / K1: tohum 7/0 idi ve BU YUZDEN detay asserti VAKUMDU - fiziksel ile
+                // satilabilir AYNI sayiyi (7) veriyordu, yani K1 ONCESI ve SONRASI ayirt EDILEMIYORDU.
+                // Ustelik testin kendi yorumlari "10 fiziksel, 3 rezerve" diyordu: tohumla CELISIYORDU.
+                // Yorumlarin SOYLEDIGI tohum yazildi; satilabilir yine 7, yani liste asserti AYNEN gecerli.
+                stock_quantity = 10,
+                reserved_quantity = 3,
                 is_active = true,
                 created_at = DateTime.Now
             });
@@ -193,6 +197,51 @@ namespace Divisima.IntegrationTests
         // CIFT-ANLAM KIRICI: "sizes dolu" demek yetmez - SATILABILIR bedenin geldigi, rezerve
         // edilmis bedenin GELMEDIGI de olculur. Aksi halde "tum bedenleri dondur" gibi yanlis
         // bir uygulama da testi gecerdi.
+        // ── P14 (MFIX-B / K1) ────────────────────────────────────────────────────────────
+        // OLCULEN ONCE-DURUM (canli, urun 937): DETAY ucu S=12/M=10/L=11 (FIZIKSEL, toplam 33)
+        // donerken LISTE yolu total_stock=26 (SATILABILIR) donuyordu - fark tam olarak 7 rezerve
+        // adet. AYNI SINIFTA IKI STOK TANIMI. Musteri "10 var" gorup 5'ini sepete koyamiyordu
+        // (beden-basi ust sinir bu degerden turuyor).
+        //
+        // FIZIKSEL stok artik YALNIZ admin ucundan gorunur (GET /api/Stock/{id}), anonim uclarda
+        // stock_quantity SATILABILIR adedi tasir. ProductStockDto DEGISMEDI (E4a: reserved_quantity
+        // anonim uca ACILMAZ; ustelik available'i stock_quantity'nin YANINA koymak da rezerveyi
+        // cikarilabilir kilardi).
+        [Fact]
+        public async Task AnonimDetay_Stogu_SATILABILIR_Doner_FizikselDegil()
+        {
+            if (Skipped()) return;
+            var anon = _factory!.CreateClient();
+
+            // VAKUM KIRICI: tohum GERCEKTEN fiziksel != satilabilir olmali, aksi halde iki
+            // sozlesme ayni sayiyi verir ve bu test K1 ONCESI de gecerdi.
+            await using (var ctx = NewContext())
+            {
+                var st = await ctx.ProductStocks.AsNoTracking().SingleAsync(s => s.product_id == _productId);
+                st.stock_quantity.Should().Be(10);
+                st.reserved_quantity.Should().Be(3);
+                st.stock_quantity.Should().NotBe(st.stock_quantity - st.reserved_quantity,
+                    "tohum ayirt edici olmali - fiziksel ile satilabilir FARKLI");
+            }
+
+            var detay = await anon.GetAsync($"/api/product/get/{_productId}");
+            detay.StatusCode.Should().Be(HttpStatusCode.OK);
+            var d = await detay.Content.ReadFromJsonAsync<DetailEnvelope>();
+            var beden = d!.data!.stocks.Should().ContainSingle().Subject;
+
+            beden.stock_quantity.Should().Be(7, "anonim detay SATILABILIR (10-3) donmeli");
+            beden.stock_quantity.Should().NotBe(10, "FIZIKSEL stok anonim uca SIZMAMALI");
+
+            // CIFT-ANLAM KIRICI: iki yol ARTIK AYNI seyi soyluyor. Yalniz "detay 7 dondu" demek
+            // yetmez - liste yolunun da AYNI degeri verdigi gosterilmeli, yoksa formulun tek
+            // kaynaktan geldigi kanitlanmis olmaz.
+            var resp = await anon.PostAsJsonAsync("/api/product/filter", FullFilter());
+            var page = await resp.Content.ReadFromJsonAsync<FilterEnvelope>();
+            var row = page!.data!.items!.First(i => i.id == _productId);
+            row.total_stock.Should().Be(beden.stock_quantity,
+                "liste ve detay ayni formulden (StokHesabi.Satilabilir) beslenmeli");
+        }
+
         [Fact]
         public async Task Filter_ListeYolu_CategoryName_TotalStock_Sizes_DOLDURUR()
         {
@@ -215,13 +264,14 @@ namespace Divisima.IntegrationTests
                 "SATILABILIR stok donmeli (stock_quantity - reserved_quantity). Tohum: 10 fiziksel, 3 rezerve.");
             row.sizes.Should().NotBeEmpty("liste yolu artik musait bedenleri donduruyor");
 
-            // Detay ucu FIZIKSEL stogu (10) donmeye devam eder - iki uc AYRI sorulari yanitliyor.
-            // Bu, "liste yolu detaydan kopyaliyor" gibi bir yanlis okumayi da engeller.
+            // MFIX-B / K1: DETAY UCU DE SATILABILIR DONER (once FIZIKSEL donuyordu - 10).
+            // Iki yol artik AYNI sozlesmeyi tasir; "ayni sinifta iki stok tanimi" kapandi.
+            // Fiziksel stok YALNIZ admin ucundan (GET /api/Stock/{id}) gorunur.
             var detay = await anon.GetAsync($"/api/product/get/{_productId}");
             detay.StatusCode.Should().Be(HttpStatusCode.OK);
             var d = await detay.Content.ReadFromJsonAsync<DetailEnvelope>();
             d!.data!.stocks.Should().ContainSingle().Which.stock_quantity.Should().Be(7,
-                "detay ucu kendi sozlesmesini korur");
+                "anonim detay SATILABILIR (10-3) donmeli; FIZIKSEL 10 SIZMAMALI");
         }
 
         // ── 4) ARAMA PARAMETRE ADI: "query" (q DEGIL) ────────────────────────────────────

@@ -154,6 +154,27 @@ namespace Divisima.Bussiness.Concrete
                     return (HttpStatusCode.BadRequest, new ErrorDataResult<CouponValidateResponseDto>(Messages.CouponFirstOrderOnly));
             }
 
+            // MFIX-B / K2: KULLANICI-BASI LIMIT ONIZLEMEDE DE KONTROL EDILIR.
+            // OLCULEN ASIMETRI: bu kural PlaceOrder'da ZATEN uygulaniyordu ama burada HIC yoktu.
+            // Sonuc DETERMINISTIKTI (yaris degil): hakkini doldurmus musteriye onizleme "gecerli"
+            // deyip indirimi gosteriyor, siparis ise kuponu sessizce dusuruyordu. K2 ile siparis
+            // artik 400 donduguu icin bu asimetri kapatilmazsa checkout KALICI olarak 400 verirdi.
+            //
+            // EKSEN PLACEORDER ILE BIREBIR AYNI (ucuncu bir eksen ACILMADI): siparis SAYIMI +
+            // PaidOrderSpec.PendingGraceMinutes. `coupon_usages` uzerinden saymak UCUNCU bir eksen
+            // olurdu ve H52'de adiyla belgelenen "onizleme gecerli der, siparis reddeder"
+            // tutarsizligini geri getirirdi.
+            if (coupon.per_user_limit > 0)
+            {
+                var userPendingGrace = DateTime.Now.AddMinutes(-PaidOrderSpec.PendingGraceMinutes);
+                var usedByUser = await _orderDal.CountAsync(o =>
+                    o.customer_id == dto.customer_id && o.coupon_code == coupon.code &&
+                    (PaidOrderSpec.PaidStatuses.Contains(o.status)
+                     || (o.status == (byte)OrderStatusEnum.Pending && o.created_at >= userPendingGrace)));
+                if (usedByUser >= coupon.per_user_limit)
+                    return (HttpStatusCode.BadRequest, new ErrorDataResult<CouponValidateResponseDto>(Messages.CouponPerUserLimitReached));
+            }
+
             var response = new CouponValidateResponseDto
             {
                 code = coupon.code,

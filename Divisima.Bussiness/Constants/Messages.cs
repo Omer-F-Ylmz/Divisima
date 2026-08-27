@@ -59,6 +59,10 @@ namespace Divisima.Core.Utilities.Constants
         public static string CouponMinAmountNotMet = "Kupon için minimum sepet tutarına ulaşılmadı.";
         public static string CouponExpired = "Bu kuponun süresi dolmuş.";
         public static string CouponUsageLimitReached = "Bu kupon kullanım limitine ulaşmış.";
+        // MFIX-B / K2: per_user_limit icin karsilik gelen mesaj YOKTU. Kural PlaceOrder'da
+        // ZATEN uygulaniyordu (OrderManager per_user_limit blogu) ama sessizce dusuruluyordu;
+        // onizleme ucu (ValidateCoupon) ise kurali HIC kontrol etmiyordu. Ikisi de bu sabiti kullanir.
+        public static string CouponPerUserLimitReached = "Bu kuponu kullanma hakkını doldurdun.";
 
         // ── Sipariş ──
         public static string OrderPlaced = "Siparişiniz başarıyla oluşturuldu.";

@@ -115,7 +115,12 @@ namespace Divisima.Bussiness.Concrete
             {
                 var duplicate = await _orderDal.GetAsync(o => o.request_id == dto.request_id);
                 if (duplicate != null)
-                    return (HttpStatusCode.OK, new SuccessDataResult<int>(duplicate.id, Messages.OrderAlreadyPlaced));
+                    // MFIX-B / K3: UC DONUS SITESININ UCU DE AYNI DAR DTO'yu doner. Bu dal
+                    // (request_id replay) canlida EN COK gezilen yoldur - sekli digerlerinden
+                    // AYIRMAK, istemcide "bazen nesne bazen sayi" belirsizligi yaratirdi.
+                    return (HttpStatusCode.OK, new SuccessDataResult<OrderPlaceResponseDto>(
+                        new OrderPlaceResponseDto { id = duplicate.id, order_number = duplicate.order_number },
+                        Messages.OrderAlreadyPlaced));
             }
 
             // Açıklayıcı yorum: ADRES SAHİPLİK KONTROLÜ (IDOR engeli) - address_id verildiyse müşteriye AİT olmalı.
@@ -182,23 +187,48 @@ namespace Divisima.Bussiness.Concrete
                 // Açıklayıcı yorum: KUPON DOĞRULAMA - Validate ucundaki TÜM kuralları burada da uygula.
                 // Kritik: doğrudan /api/order/place isteği Validate'i baypas edebilir; süre/limit/ilk-sipariş/tavan
                 // burada kontrol edilmezse süresi dolmuş kupon geçer, tek-kullanımlık kupon sınırsız kullanılır.
-                // Geçersizse kupon UYGULANMAZ (indirim 0) - mevcut min_amount sessiz-yok-sayma davranışıyla tutarlı.
-                bool couponValid = coupon != null
-                    && subtotal >= coupon.min_amount
-                    && !(coupon.expire_date.HasValue && coupon.expire_date.Value < DateTime.Now);
+                //
+                // MFIX-B / K2: SESSIZ YOK SAYMA KALKTI. Onceden gecersiz kupon "UYGULANMAZ (indirim 0)"
+                // ile yutuluyordu; olculdu (once-durum): var olmayan kodla place -> HTTP 201
+                // {"data":224,...}, siparis 224 indirim 0.00 / coupon_code NULL - musteri odeme
+                // ekraninda indirimli tutar gorup FARKLI tutar oduyor ve sebebi HICBIR YERDE yazmiyordu.
+                // Artik RET SEBEBI tasinir ve asagida 400 + O kuralin mesajiyla donulur. Mesajlar
+                // Validate ucuyle AYNI sabitlerden gelir (tek kaynak).
+                //
+                // YAN ETKI - KAPSAM ACIK YAZILIYOR (denetimde olculdu):
+                //   PlaceOrder ICINDE yan etki YOK: bu blok transaction'dan (BeginTransactionAsync)
+                //   ve stok rezervasyonundan (ReserveStock) ONCE kosar; reddedilen istek SIPARIS
+                //   satiri ya da REZERVASYON birakmaz (canli olculdu: iki sayac da degismedi).
+                //   AMA UC DUZEYINDE BIRAKABILIR: /api/guest-checkout/place misafir MUSTERI + ADRES
+                //   satirini ve dogrulama e-postasi outbox mesajini PlaceOrder'a DEVRETMEDEN ONCE
+                //   yazar (GuestCheckoutManager). Yani buradaki ret, o yolda yetim bir musteri
+                //   birakir ve ayni e-posta ikinci denemede 409 alir. Bu sinif PRE-EXISTING'dir
+                //   (stok yetersizliginde de olusur) ama K2 ulasilabilir ret sebeplerini artirdigi
+                //   icin SIKLIGI artar. Kapsam disi - bkz. rapor/SUPHELI.
+                //
+                // SIRA: null -> expire -> min_amount. Uc kosul eskiden TEK bir && ifadesindeydi
+                // (hepsi saglanmaliydi), yani ayrik siralari esdeger; Validate ucundaki oncelikle
+                // (once yok, sonra suresi dolmus) AYNI olsun diye bu sira secildi.
+                if (coupon == null)
+                    return (HttpStatusCode.BadRequest, new ErrorResult(Messages.CouponInvalid));
+
+                string kuponRet =
+                    (coupon.expire_date.HasValue && coupon.expire_date.Value < DateTime.Now) ? Messages.CouponExpired
+                    : subtotal < coupon.min_amount ? Messages.CouponMinAmountNotMet
+                    : null;
 
                 // Açıklayıcı yorum: İlk-sipariş kuponu - tamamlanmış (Pending/Cancelled dışı) siparişi olan müşteri kullanamaz
-                if (couponValid && coupon.first_order_only)
+                if (kuponRet == null && coupon.first_order_only)
                 {
                     // PERFORMANS (H51): EXISTS - satirlari cekmeden "hic tamamlanmis siparisi var mi" sorar.
                     var hasCompleted = await _orderDal.AnyAsync(o =>
                         o.customer_id == dto.customer_id && PaidOrderSpec.PaidStatuses.Contains(o.status));   // H52: merkezi kural
-                    if (hasCompleted) couponValid = false;
+                    if (hasCompleted) kuponRet = Messages.CouponFirstOrderOnly;
                 }
 
                 // Açıklayıcı yorum: KULLANICI-BAŞI LİMİT - bu müşteri bu kuponu kaç kez kullandı (iptal olmayan siparişlerde).
                 // Aksi halde tek-kullanımlık promo kuponu bir kullanıcı tarafından global limite kadar defalarca kullanılırdı.
-                if (couponValid && coupon.per_user_limit > 0)
+                if (kuponRet == null && coupon.per_user_limit > 0)
                 {
                     // KISI-BASI LIMIT FIX (H51): sayim yalniz "!= Cancelled" idi -> ODENMEMIS (Pending) siparis de
                     // musterinin kupon hakkini TUKETIYORDU. Odemesi yarida kalan/basarisiz olan musteri, per_user_limit=1
@@ -209,7 +239,7 @@ namespace Divisima.Bussiness.Concrete
                         o.customer_id == dto.customer_id && o.coupon_code == coupon.code &&
                         (PaidOrderSpec.PaidStatuses.Contains(o.status)
                          || (o.status == (byte)OrderStatusEnum.Pending && o.created_at >= userPendingGrace)));
-                    if (usedByUser >= coupon.per_user_limit) couponValid = false;
+                    if (usedByUser >= coupon.per_user_limit) kuponRet = Messages.CouponPerUserLimitReached;
                 }
 
                 // Açıklayıcı yorum: GLOBAL KULLANIM LİMİTİ - used_count yerine SİPARİŞ SAYISI ile denetlenir (per_user_limit gibi).
@@ -217,7 +247,7 @@ namespace Divisima.Bussiness.Concrete
                 // global limiti aşacak şekilde SINIRSIZ kullanılabiliyordu (usage_limit baypası). (2) İptal edilince used_count
                 // düşmüyordu -> iptal edilen siparişler limiti KALICI şişiriyor, kupon gerçek kullanım olmadan tükeniyordu.
                 // İptal-olmayan siparişleri global sayarak: TÜM ödeme yöntemleri sayılır + iptaller otomatik düşülür (ikisi de çözülür).
-                if (couponValid && coupon.usage_limit > 0)
+                if (kuponRet == null && coupon.usage_limit > 0)
                 {
                     // KAMPANYA SABOTAJI FIX (H50): sayim YALNIZ "!= Cancelled" idi -> ODENMEMIS (Pending)
                     // siparisler de limiti tuketiyordu. Saldirgan usage_limit kadar siparis acip HIC ODEMEZ ->
@@ -231,27 +261,31 @@ namespace Divisima.Bussiness.Concrete
                         o.coupon_code == coupon.code &&
                         (PaidOrderSpec.PaidStatuses.Contains(o.status)
                          || (o.status == (byte)OrderStatusEnum.Pending && o.created_at >= pendingGrace)));
-                    if (globalUses >= coupon.usage_limit) couponValid = false;
+                    if (globalUses >= coupon.usage_limit) kuponRet = Messages.CouponUsageLimitReached;
                 }
 
-                if (couponValid)
+                // MFIX-B / K2: gecersiz kupon ARTIK SESSIZCE YOK SAYILMAZ - 400 + sebep.
+                // TOCTOU KABULU (merkez karari): onizleme ile siparis arasinda kupon gecersizlesirse
+                // checkout 400 ile kirilir. Alternatifi (sessizce kuponsuz devam) musteriye
+                // BEKLEMEDIGI TUTARI odetiyordu; gorunur hata daha durust.
+                if (kuponRet != null)
+                    return (HttpStatusCode.BadRequest, new ErrorResult(kuponRet));
+
+                coupon_code = coupon.code;
+                switch ((DiscountTypeEnum)coupon.discount_type)
                 {
-                    coupon_code = coupon.code;
-                    switch ((DiscountTypeEnum)coupon.discount_type)
-                    {
-                        case DiscountTypeEnum.Percentage:
-                            discount = MoneyHelper.Percentage(subtotal, coupon.value);
-                            // Açıklayıcı yorum: Yüzde indirim TAVANI (max_discount_amount) - yoksa büyük sepette sınırsız indirim
-                            if (coupon.max_discount_amount.HasValue && discount > coupon.max_discount_amount.Value)
-                                discount = coupon.max_discount_amount.Value;
-                            break;
-                        case DiscountTypeEnum.Fixed:
-                            discount = Math.Min(coupon.value, subtotal);
-                            break;
-                        case DiscountTypeEnum.FreeShipping:
-                            freeShipping = true;
-                            break;
-                    }
+                    case DiscountTypeEnum.Percentage:
+                        discount = MoneyHelper.Percentage(subtotal, coupon.value);
+                        // Açıklayıcı yorum: Yüzde indirim TAVANI (max_discount_amount) - yoksa büyük sepette sınırsız indirim
+                        if (coupon.max_discount_amount.HasValue && discount > coupon.max_discount_amount.Value)
+                            discount = coupon.max_discount_amount.Value;
+                        break;
+                    case DiscountTypeEnum.Fixed:
+                        discount = Math.Min(coupon.value, subtotal);
+                        break;
+                    case DiscountTypeEnum.FreeShipping:
+                        freeShipping = true;
+                        break;
                 }
             }
 
@@ -437,7 +471,9 @@ namespace Divisima.Bussiness.Concrete
                 {
                     var winner = await _orderDal.GetAsync(o => o.request_id == dto.request_id);
                     if (winner != null)
-                        return (HttpStatusCode.OK, new SuccessDataResult<int>(winner.id, Messages.OrderAlreadyPlaced));
+                        return (HttpStatusCode.OK, new SuccessDataResult<OrderPlaceResponseDto>(
+                            new OrderPlaceResponseDto { id = winner.id, order_number = winner.order_number },
+                            Messages.OrderAlreadyPlaced));
                 }
                 return (HttpStatusCode.InternalServerError, new ErrorResult(Messages.OrderPlaceFailed));
             }
@@ -446,7 +482,9 @@ namespace Divisima.Bussiness.Concrete
             //    outbox'a tasindi (gerekce ve olculen zarar yukarida, yazim satirinin basinda).
             //    Buraya YENI bir cagri EKLENMEZ: bu noktada atilan her istisna, COMMIT OLMUS bir
             //    siparis icin 500 dondurur.
-            return (HttpStatusCode.Created, new SuccessDataResult<int>(order.id, Messages.OrderPlaced));
+            return (HttpStatusCode.Created, new SuccessDataResult<OrderPlaceResponseDto>(
+                new OrderPlaceResponseDto { id = order.id, order_number = order.order_number },
+                Messages.OrderPlaced));
         }
 
         // Açıklayıcı yorum: Snapshot + snapshot kalemleri (Cafixo OrderSnapshot zinciri, iki timestamp)

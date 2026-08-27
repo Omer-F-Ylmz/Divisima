@@ -309,8 +309,27 @@ async function productForm(pListe){
   let kategoriler=[];
   try{ kategoriler=unwrap(await api.categories.list())||[]; }catch(_){ kategoriler=[]; }
 
-  urunStokSatirlari = (p.stocks&&p.stocks.length)
-    ? p.stocks.map(s=>({size:s.size,stock_quantity:s.stock_quantity}))
+  // MFIX-B / K1 (ZORUNLU): STOK SATIRLARI ARTIK ADMIN UCUNDAN OKUNUR.
+  // Anonim detay ucu (api.products.get) K1'den sonra SATILABILIR adedi donuyor. O degeri forma
+  // koyup "Kaydet" demek fiziksel stogu SESSIZCE satilabilire dusururdu: ProductManager.Update
+  // `mevcut.stock_quantity = s.stock_quantity` ile FIZIKSEL kolona yazar ve reserved_quantity'ye
+  // DOKUNMAZ; rezerve>0 olan her bedende available = stock - reserved kimligi kalici bozulurdu
+  // (or. 937/M fiziksel 10, rezerve 6 -> kaydet -> fiziksel 4, available 0). Dalga B'nin
+  // "tam-varlik map -> sessiz veri kaybi" sinifinin birebir tekrari olurdu.
+  // /api/Stock/{id} admin korumalidir ve FIZIKSEL stogu doner.
+  let adminStok=[];
+  if(duzenle){
+    try{ adminStok=unwrap(await api.stock.byProduct(pListe.id))||[]; }
+    catch(e){
+      // FAIL-CLOSED: stok okunamadiysa forma ANONIM degerler DUSMEZ - form hic acilmaz.
+      el.innerHTML='<div class="panel"><p class="muted">Stok bilgisi alınamadı: '+esc(e.message||"hata")
+        +'. Yanlış stok kaydetmemek için düzenleme formu açılmadı.</p></div>';
+      return;
+    }
+  }
+
+  urunStokSatirlari = (adminStok&&adminStok.length)
+    ? adminStok.map(s=>({size:s.size,stock_quantity:s.stock_quantity}))
     : [{size:"S",stock_quantity:0},{size:"M",stock_quantity:0},{size:"L",stock_quantity:0}];
 
   const tipKod = duzenle ? urunTipiKodu(p.product_type) : 0;

@@ -362,7 +362,9 @@ namespace Divisima.IntegrationTests
                 items = new[] { new { product_id = urunId, size = beden, quantity = 1 } }
             });
             r.StatusCode.Should().Be(HttpStatusCode.Created);
-            var siparisId = (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").GetInt32();
+            // MFIX-B / K3: place yaniti artik { id, order_number } tasiyor (once CIPLAK INT idi).
+            var siparisId = (await r.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("data").GetProperty("id").GetInt32();
 
             // GERCEK ZINCIR KOSULUYOR: gercek publisher + gercek OrderPlacedEmailHandler +
             // HER ZAMAN patlayan mail. Stub bir publisher kullanmak kendi sahtemizi pinlemek olurdu.

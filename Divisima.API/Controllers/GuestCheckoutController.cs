@@ -1,6 +1,9 @@
+using System.Net;
 using Divisima.API.Filters;
 using Divisima.Bussiness.Abstract;
+using Divisima.Core.Utilities.Results;
 using Divisima.Entity.Dtos.Guest;
+using Divisima.Entity.Dtos.Order;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -34,6 +37,11 @@ namespace Divisima.API.Controllers
         [Idempotency]
         [HttpPost("place")]
         [SwaggerOperation(Summary = "Misafir sipariş ver", Description = "Hesap oluşturmadan sipariş verir. E-posta kayıtlıysa giriş yapılması istenir.")]
+        // MFIX-B / K3: bu uc PlaceOrder'a devrettigi icin AYNI dar DTO'yu doner. Misafir icin
+        // KRITIK: /api/order/get anonime KAPALI, yani order_number'i BASKA hicbir yerden alamaz -
+        // sonuc ekrani onceden veritabani kimligini "Referans" diye gosteriyordu.
+        [ProducesResponseType(typeof(SuccessDataResult<OrderPlaceResponseDto>), (int)HttpStatusCode.Created)]
+        [ProducesResponseType(typeof(ErrorResult), (int)HttpStatusCode.BadRequest)]
         public async Task<IActionResult> Place([FromBody] GuestCheckoutDto dto)
         { var r = await _guestCheckoutService.PlaceGuestOrder(dto); return StatusCode((int)r.Item1, r.Item2); }
     }

@@ -684,8 +684,14 @@
             d.stocks.forEach(function (s) { map[s.size] = Number(s.stock_quantity) || 0; });
           }
           p._ss = map;
-          // SINIR (DURUST KAYIT): beden BASINA ust sinir HALA FIZIKSEL - DTO'da available
-          // YOK. Toplam artik dogru, beden bazi MFIX-B'de (H2) kapanir.
+          // MFIX-B / K1: BU SINIR KAPANDI. Yukaridaki "beden BASINA ust sinir HALA FIZIKSEL"
+          // notu artik GECERSIZ - anonim detay ucu stock_quantity alaninda SATILABILIR adedi
+          // donuyor (ProductManager.GetById -> StokHesabi.Satilabilir), dolayisiyla _ss ve ona
+          // bagli beden-basi ust sinir da satilabilirle sinirli. Canli olculdu (urun 937):
+          // _ss {S:11, M:4, L:11} ve addToCart(937,"M",5) -> sepette 4.
+          // DAVRANIS DEGISIKLIGI (durust kayit): kirpma esigi artik BASKALARININ rezervasyonuna
+          // duyarli; sepetteki adet baskasi rezerve ettiginde sessizce dusebilir. Yon DOGRU
+          // (sunucunun CheckStock'u zaten satilabiliri kullaniyor, yani checkout ile TUTARLI).
         }
       }
       detailCache[id] = d;
@@ -792,6 +798,11 @@
   // product_images BOS). Ikinci bir gorsel istegi ATILMADI: kazanci bugun SIFIR.
   function detaydanUrun(d) {
     var p = mapProduct(d);
+    // MFIX-B / K1 (denetimde bulundu): bu toplama MFIX-2/F-M1-H3'un enrichProduct icin
+    // KALDIRDIGI kalibin IKINCI kopyasiydi ve FIZIKSEL topluyordu (or. urun 937: 12+10+11=33,
+    // dogrusu 11+4+11=26). Detay ucu artik SATILABILIR dondugu icin bu ikinci site de
+    // KENDILIGINDEN dogrulandi - ayri bir duzeltme GEREKMEDI. Kayit: "ayni kuralin ikinci
+    // kopyasi" sinifinin bu depodaki bir ornegi daha.
     if (d.stocks && d.stocks.length) {
       var toplam = 0, bedenler = [];
       d.stocks.forEach(function (s) {
@@ -1560,9 +1571,19 @@
         request_id: checkoutIstekIdAl(),   // MFIX-1/F-M3f: OTURUM basina (her tikta YENI degil)
         items: kalemler
       });
-      var siparisId = unwrap(r);
+      // MFIX-B / K3: uc artik { id, order_number } donuyor. ESKI HALI "unwrap(r)"yi DUZ SAYI
+      // varsayiyordu; nesne gelince URL'e "[object Object]" yazardi. Iki bicim de kabul edilir
+      // (uye yolundaki 1850 ile ayni kalip) - eski bir yanit sekli gelse bile kirilmaz.
+      var _y = unwrap(r);
+      var siparisId = (_y && _y.id) ? _y.id : _y;
+      // MISAFIR ICIN KRITIK: /api/order/get anonime KAPALI, yani order_number BASKA hicbir
+      // yerden alinamaz. Yanittan geldiyse URL ile sonuc sayfasina TASINIR; gelmezse
+      // UYDURULMAZ ve sayfa eskisi gibi referans kimligini gosterir.
+      var siparisNo = (_y && _y.order_number) ? String(_y.order_number) : "";
       if (window.cart && window.cart.clear) { window.cart.clear(); if (typeof renderCart === "function") renderCart(); }
-      location.hash = "#/odeme/sonuc?order=" + encodeURIComponent(siparisId) + "&status=success&guest=1";
+      location.hash = "#/odeme/sonuc?order=" + encodeURIComponent(siparisId)
+        + (siparisNo ? "&no=" + encodeURIComponent(siparisNo) : "")
+        + "&status=success&guest=1";
     } catch (e) {
       // Uc "e-posta kayitli" (409) ya da "yalniz kapida odeme" (400) donebilir - ikisi de
       // KULLANICIYA GOSTERILIR; sessizce baska bir yola sapmak yanlis olurdu.
@@ -1847,10 +1868,12 @@
       // (kart yolunda odeme baslatma tekrar denenir - kullanicinin istedigi sey budur).
       var zatenVar = !!(_zarf && typeof _zarf.message === "string" && /zaten olu/i.test(_zarf.message));
 
-      var orderId = (order && order.id) ? order.id : order;   // uc siparis id'sini dogrudan donuyor
+      var orderId = (order && order.id) ? order.id : order;   // MFIX-B/K3 oncesi uc DUZ SAYI donuyordu - iki bicim de kabul
+      // MFIX-B / K3: siparis numarasi ARTIK YANITTAN gelir. Onceden YALNIZ order_number icin
+      // ikinci bir /api/order/get cagrisi yapiliyordu (burada ve odeme formu donmedigi dalda).
+      var orderNo = (order && order.order_number) ? String(order.order_number) : "";
       if (zatenVar) {
-        var _no = String(orderId);
-        try { var _o = unwrap(await api.orders.get(orderId)); if (_o && _o.order_number) _no = _o.order_number; } catch (e) {}
+        var _no = orderNo || String(orderId);
         _zatenVarMesaji = "Bu sipariş zaten oluşturulmuştu (sipariş no: " + _no + "). YENİ bir sipariş oluşturulmadı.";
         checkoutHatasiYaz(_zatenVarMesaji);
       }
@@ -1877,8 +1900,7 @@
         // MFIX-1 / F-M8: burada SAYISAL ID basiliyordu ("Siparisin 207 numarasiyla...") -
         // o bir siparis NUMARASI degil veritabani kimligidir. Gercek order_number cekilir;
         // gelmezse UYDURULMAZ, durustce referans olarak yazilir.
-        var _n2 = orderId;
-        try { var _o2 = unwrap(await api.orders.get(orderId)); if (_o2 && _o2.order_number) _n2 = _o2.order_number; } catch (e2) {}
+        var _n2 = orderNo || orderId;
         checkoutHatasiYaz(
           "Ödeme sağlayıcısı şu an ödeme formunu döndürmedi (test/mock modu olabilir). " +
           "Siparişin " + _n2 + " numarasıyla ÖDENMEMİŞ olarak duruyor. " +
@@ -2038,10 +2060,15 @@
     if (misafirMi) {
       // MFIX-1 / F-M8: "#<id>" bir SIPARIS NUMARASI DEGIL, veritabani kimligi. Misafir
       // order/get'i cagiramadigi icin (uc [RequireUserType(Customer)]; anonim GET 401 -
-      // olculdu) gercek order_number ELDE YOK. UYDURULMAZ: ne oldugu DURUSTCE yazilir ve
-      // id yalnizca KUCUK BIR REFERANS olarak gosterilir. Gercek numara MFIX-B'de siparis
-      // yanitina eklenince buraya baglanacak.
-      ozet = '<div class="panel" style="text-align:left"><h3>Sipariş kaydın alındı</h3><p class="muted" style="font-size:13px;margin:6px 0 10px">Sipariş numaran e-postanla paylaşılacak.</p><p class="muted" style="font-size:12px;margin:0 0 12px">Referans: ' + orderId + '</p><p class="muted" style="font-size:13px;margin:0">Siparişini takip edebilmek için hesabına bir şifre belirle: e-postandaki doğrulama bağlantısına tıkla, sonra Giriş ekranındaki "Şifremi unuttum" adımıyla şifreni oluştur.</p></div>';
+      // olculdu) gercek order_number ELDE YOKTU ve durustce "Referans: <id>" yaziliyordu.
+      // MFIX-B / K3: numara ARTIK siparis yanitindan geliyor ve URL ile buraya tasiniyor.
+      // Gelmezse eski durust hal korunur - UYDURULMAZ.
+      var misafirNo = String(params.no || "").trim();
+      ozet = '<div class="panel" style="text-align:left"><h3>Sipariş kaydın alındı</h3>'
+        + (misafirNo
+            ? '<p class="muted" style="font-size:13px;margin:6px 0 4px">Sipariş numaran:</p><p style="font-weight:600;margin:0 0 12px">' + esc(misafirNo) + '</p>'
+            : '<p class="muted" style="font-size:13px;margin:6px 0 10px">Sipariş numaran e-postanla paylaşılacak.</p><p class="muted" style="font-size:12px;margin:0 0 12px">Referans: ' + orderId + '</p>')
+        + '<p class="muted" style="font-size:13px;margin:0">Siparişini takip edebilmek için hesabına bir şifre belirle: e-postandaki doğrulama bağlantısına tıkla, sonra Giriş ekranındaki "Şifremi unuttum" adımıyla şifreni oluştur.</p></div>';
     }
 
     view.innerHTML =

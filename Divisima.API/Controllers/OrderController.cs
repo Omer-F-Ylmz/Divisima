@@ -33,7 +33,11 @@ namespace Divisima.API.Controllers
         [HttpPost("place")]
         [RequireUserType(UserTypeEnum.Customer)]
         [SwaggerOperation(Summary = "Sipariş oluştur", Description = "Sepeti siparişe çevirir: stok kontrol, indirim, kargo, snapshot. Müşteri yetkisi gerekir.")]
-        [ProducesResponseType(typeof(SuccessDataResult<int>), (int)HttpStatusCode.Created)]
+        // MFIX-B / K3: yanit artik { id, order_number } tasiyor - istemci gercek siparis numarasini
+        // EK BIR CAGRI YAPMADAN gosterebilir (misafir yolunda /api/order/get anonime KAPALI oldugu
+        // icin numara hic alinamiyordu). `id` KALDI: payment/initialize ve order/get onu kullanir.
+        [ProducesResponseType(typeof(SuccessDataResult<OrderPlaceResponseDto>), (int)HttpStatusCode.Created)]
+        // MFIX-B / K2: gecersiz kupon artik SESSIZCE yok sayilmaz, sebebiyle 400 doner.
         [ProducesResponseType(typeof(ErrorResult), (int)HttpStatusCode.BadRequest)]
         public async Task<IActionResult> Place([FromBody] OrderCreateRequestDto dto)
         {
