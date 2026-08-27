@@ -89,8 +89,13 @@ namespace Divisima.IntegrationTests
             // M11 dersi: hedefteki eylem GERCEKTEN kullanilabilir olmali. Misafirin oturumu yok,
             // "Siparislerime git" ona bos/401 verirdi.
             b.Should().Contain("params.guest", "misafir oldugu URL'den OKUNMALI, tahmin edilmemeli");
-            b.Should().Contain("misafirMi ? '<a class=\"btn\" href=\"#/giris\">Şifre belirle</a>'",
-                "misafire CALISAN bir yol gosterilmeli");
+            // PREMIS DEGISIKLIGI (MFIX-3 / F-M2, merkez onayina sunuldu): buton METNI artik
+            // api-bridge'te GOMULU DEGIL, sozlukte (`set_pass`). Assert'in OLCTUGU SEY
+            // DEGISMEDI - "misafire #/giris'e giden CALISAN bir yol gosterilir" - yalnizca
+            // metnin YERI degisti. Anahtarin sozlukte GERCEKTEN bulundugunu
+            // FrontendDokunmaHedefiTests P11 ayrica pinliyor.
+            b.Should().Contain("misafirMi ? '<a class=\"btn\" href=\"#/giris\">' + esc(ceviri(\"set_pass\"))",
+                "misafire CALISAN bir yol gosterilmeli (metin sozlukten gelir)");
         }
     }
 }

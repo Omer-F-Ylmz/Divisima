@@ -80,6 +80,25 @@
     });
   }
 
+  // ── MFIX-3 / F-M2: i18n KOPRUSU ───────────────────────────────────────────
+  // api-bridge'in KULLANICI-GORUNUR dizgeleri index.html'in MEVCUT sozluk mekanizmasina
+  // baglanir. YENI MEKANIZMA ICAT EDILMEDI: sozluk (T / AR) index.html'de, cozucu
+  // window.t(anahtar); applyI18n ve setLang o mekanizmayi zaten suruyor ve setLang
+  // renderAccount/renderCheckout/renderCart/renderFavs'i YENIDEN CIZIYOR - yani
+  // buradaki dizgeler de dil degisiminde tazelenir.
+  // YEDEK metin bilincli: depoda ZATEN kullanilan kalip
+  // (`typeof window.t === "function" ? window.t("load_more") : "Daha Fazla Yukle"`).
+  // Sozluk yuklenmemisse ya da anahtar yoksa ekran BOS/HAM ANAHTAR gostermez.
+  function ceviri(anahtar, yedek) {
+    try {
+      if (typeof window.t === "function") {
+        var v = window.t(anahtar);
+        if (v && v !== anahtar) return v;
+      }
+    } catch (e) {}
+    return yedek !== undefined ? yedek : anahtar;
+  }
+
   // Zarf toleransı: /product/filter "items/total_count" (küçük harf) döner,
   // /search/products ise PagedResult<T> -> camelCase "items/totalCount". İkisi de kabul.
   function pageItems(res) {
@@ -553,7 +572,7 @@
       return eklenen;
     } catch (e) {
       // SESSIZ DEGIL: kullanici "daha fazla" dedi ve bir sey olmadiysa bunu OGRENMELI.
-      notify("Daha fazla ürün yüklenemedi.");
+      notify(ceviri("err_more"));
       console.warn("Divisima: sonraki katalog sayfasi alinamadi", e);
       return 0;
     }
@@ -761,6 +780,54 @@
     } catch (e) { console.warn("Divisima: katalog tazelenemedi", e); }
   }
 
+  // ── MFIX-3 / F-M4: SEPETTEKI URUNLERI KATALOGA TAMAMLA ────────────────────
+  // index.html'in geri yuklemesi artik kalem DUSURMUYOR ve renderCart SILMIYOR; ama
+  // urunu bulunamayan kalem CIZILEMEZ. Ilk sayfa yalniz 24 urun getirdigi icin sepette
+  // baska sayfadan bir urun olabilir. Eksik olanlar TEK TEK cekilip PRODUCTS'a eklenir.
+  // SEPET BOSSA YA DA EKSIK YOKSA HIC ISTEK ATILMAZ (ilk yukleme maliyeti degismez).
+  //
+  // DURUST SINIR: detay ucu `image_url` DONDURMUYOR (canli olculdu: alan listesinde YOK),
+  // bu yuzden boyle tamamlanan bir urun gorselsiz gelir ve frontend kendi yer tutucusunu
+  // cizer - bugun katalogdaki TUM urunler zaten oyle (D1 temizliginden sonra
+  // product_images BOS). Ikinci bir gorsel istegi ATILMADI: kazanci bugun SIFIR.
+  function detaydanUrun(d) {
+    var p = mapProduct(d);
+    if (d.stocks && d.stocks.length) {
+      var toplam = 0, bedenler = [];
+      d.stocks.forEach(function (s) {
+        var q = Number(s.stock_quantity) || 0;
+        toplam += q;
+        if (q > 0 && bedenler.indexOf(String(s.size)) < 0) bedenler.push(String(s.size));
+      });
+      p.stock = toplam;
+      p.sizes = bedenler.map(function (s) { return isNaN(+s) ? s : +s; });
+    }
+    if (d.description) p.desc = d.description;
+    return p;
+  }
+
+  async function sepetUrunleriniTamamla() {
+    try {
+      if (typeof window.cart === "undefined" || !window.cart || !window.cart.size) return;
+      var varOlan = {};
+      (window.PRODUCTS || []).forEach(function (p) { varOlan[p.id] = true; });
+      var eksik = [];
+      window.cart.forEach(function (it) {
+        if (it && it.id && !varOlan[it.id] && eksik.indexOf(it.id) < 0) eksik.push(it.id);
+      });
+      if (!eksik.length) return;
+      var sonuc = await Promise.all(eksik.map(function (id) {
+        return api.products.get(id).then(function (r) { return unwrap(r); }).catch(function () { return null; });
+      }));
+      var mapped = sonuc.filter(Boolean).map(detaydanUrun);
+      if (mapped.length) appendProducts(mapped);
+    } catch (e) {
+      console.warn("Divisima: sepet ürünleri tamamlanamadı", e && e.message);
+    }
+    try { if (typeof window.renderCart === "function") window.renderCart(); } catch (e) {}
+    try { if (typeof window.cartBump === "function") window.cartBump(); } catch (e) {}
+  }
+
   // (c) TESLIMAT SEHRI: GET /api/address (Customer). YALNIZ girisli kullanicida ve
   //     YALNIZ VARSAYILAN adresten. Cikista TEMIZLENIR - eski oturumun sehri sizmasin.
   window.divisimaDelivCity = null;
@@ -772,6 +839,104 @@
       window.divisimaDelivCity = (v && v.city) ? String(v.city) : null;
     } catch (e) { window.divisimaDelivCity = null; }
   }
+  // ── MFIX-3 / F-M5: FAVORILER HESABA OZGU ──────────────────────────────────
+  // OLCULEN ONCE-DURUM: kalp MISAFIRKEN de calisiyor ve favoriyi CIHAZ-GENELI
+  // localStorage anahtarina yaziyordu (canli: misafir kalbi -> yerel anahtar dolu,
+  // wishlist_items TOPLAM=0); ayni cihazda giris yapan BASKA kullanici o favorileri
+  // DEVRALIYORDU ve cikista temizlenmiyordu. Sunucu tarafi (WishlistController) TAM ve
+  // CALISIYOR ama vitrin HIC cagirmiyordu (api-bridge'de "wishlist" gecisi 0).
+  //
+  // SOZLESME KAYNAKTAN OKUNDU (WishlistController.cs):
+  //   POST /api/wishlist/toggle?productId=N   -> Toggle(int productId), [FromBody] YOK
+  //   GET  /api/wishlist                      -> List<ProductListResponseDto>
+  // api-client.wishlist.toggle GOVDE gonderiyor ve CANLI OLCULDU: HTTP 500 (productId 0'a
+  // baglaniyor). Bu dalgada api-client'a YALNIZ resendVerification icin dokunma izni var;
+  // dogru sozlesme BURADAN api._post + api._qs ile cagriliyor, api-client kusuru
+  // KAPSAM DISI BULGU olarak raporlandi.
+  function favSeti() { return (typeof window.favs !== "undefined" && window.favs) ? window.favs : null; }
+
+  // Kalp ikonlari + rozet + cekmece. index.html'in KENDI cizicileri kullanilir; burada
+  // yeni bir favori arayuzu ICAT EDILMEZ.
+  function favEkranlariniTazele() {
+    var s = favSeti();
+    var DOLU = String.fromCharCode(0x2665), BOS = String.fromCharCode(0x2661);
+    try {
+      document.querySelectorAll(".card-fav[data-fav]").forEach(function (b) {
+        var acik = !!(s && s.has(+b.getAttribute("data-fav")));
+        b.classList.toggle("on", acik);
+        b.textContent = acik ? DOLU : BOS;
+      });
+    } catch (e) {}
+    // Urun detayindaki kalp: index.html'in kendi onclick'i toggleFav'dan HEMEN SONRA
+    // `favs.has(id)` okur. Sunucu cagrisi ASENKRON oldugu icin o okuma BAYAT kalir
+    // (olculdu: kart ve rozet guncellendi, #pdLike '@' isaretinde kaldi). Bu yuzden
+    // detay kalbini de BURADAN, sunucu yaniti geldikten sonra tazeliyoruz.
+    try {
+      var lk = document.getElementById("pdLike");
+      var aid = window.detailOpenId;
+      if (lk && aid) {
+        var acikD = !!(s && s.has(+aid));
+        lk.classList.toggle("on", acikD);
+        lk.textContent = acikD ? DOLU : BOS;
+      }
+    } catch (e) {}
+    try { if (typeof window.favBump === "function") window.favBump(); } catch (e) {}
+    try { if (typeof window.renderFavs === "function") window.renderFavs(); } catch (e) {}
+    // Hesabim > Favorilerim sekmesi acikken listeyi de tazele.
+    try {
+      if (location.hash.indexOf("#/hesabim/favorilerim") === 0 && typeof window.renderAccount === "function") {
+        window.renderAccount("favorilerim");
+      }
+    } catch (e) {}
+  }
+
+  // Sunucu favorileri -> yerel `favs` seti. Donen kayitlar KATALOGLA AYNI sekilde
+  // oldugu icin dogrudan mapProduct'tan gecirilip PRODUCTS'a EKLENIR; boylece
+  // index.html'in byId'ye dayanan cizicileri (kart, cekmece, Favorilerim) calisir.
+  async function favorileriSunucudanCek() {
+    var s = favSeti();
+    if (!s) return;
+    if (!api.isLoggedIn()) { s.clear(); favEkranlariniTazele(); return; }
+    try {
+      var liste = unwrap(await api.wishlist.get()) || [];
+      var mapped = liste.map(mapProduct);
+      appendProducts(mapped);
+      s.clear();
+      mapped.forEach(function (p) { s.add(p.id); });
+    } catch (e) {
+      console.warn("Divisima: favoriler alınamadı", e && e.message);
+    }
+    favEkranlariniTazele();
+  }
+
+  // Cikista YEREL GORUNUM temizlenir (sunucudaki kayit DURUR - o hesabin verisidir).
+  function favorileriTemizle() {
+    var s = favSeti();
+    if (s) s.clear();
+    favEkranlariniTazele();
+  }
+
+  function wireFavoriler() {
+    if (typeof window.toggleFav !== "function" || window.toggleFav.__divisimaWrapped) return;
+    var orig = window.toggleFav;
+    window.toggleFav = function (id) {
+      if (!api.isLoggedIn()) {
+        // MISAFIRDE YEREL YAZMA YOK: gorunur Turkce yonlendirme + MEVCUT giris akisi.
+        notify(ceviri("fav_login"));
+        location.hash = "#/giris";
+        return;
+      }
+      // Once SUNUCU, sonra yerel: boylece ekrandaki durum sunucudan AYRISAMAZ.
+      api._post("/api/wishlist/toggle" + api._qs({ productId: id }), {})
+        .then(function () { orig.call(window, id); favEkranlariniTazele(); })
+        .catch(function (e) {
+          notify(ceviri("fav_err"));
+          console.warn("Divisima: favori güncellenemedi", e && e.message);
+        });
+    };
+    window.toggleFav.__divisimaWrapped = true;
+  }
+
   function wireProductDetail() {
     if (typeof window.openDetail !== "function") return;
     var orig = window.openDetail;
@@ -845,6 +1010,7 @@
         window.loggedIn = true;
         sepetBirlestirmesiniSilahlandir();   // F-A1: bu oturumun ilk senkronu BIRLESTIRME olsun
         teslimatSehriniTazele();             // MFIX-2/F-M9: teslimat sehri GERCEK varsayilan adresten
+        favorileriSunucudanCek();            // MFIX-3/F-M5: favoriler HESABA OZGU - sunucudan gelir
         if (typeof window.login === "function") window.login(d.name || String(email).split("@")[0]);
         return r;
       },
@@ -856,6 +1022,7 @@
           window.loggedIn = false;
           sepetBirlestirmesiniSilahlandir();   // F-A1: sonraki giris de birlestirme ile baslar
           window.divisimaDelivCity = null;     // MFIX-2/F-M9: eski oturumun sehri SIZMAZ
+          favorileriTemizle();                 // MFIX-3/F-M5: yerel favori GORUNUMU temizlenir (sunucudaki kayit DURUR)
           if (typeof window.logout === "function") window.logout();
         }
       },
@@ -916,7 +1083,14 @@
     if (typeof window.logout === "function" && !window.logout.__divisimaWrapped) {
       var origLogout = window.logout;
       window.logout = function () {
-        api.auth.logout().catch(function () {}).then(function () { origLogout.call(window); });
+        api.auth.logout().catch(function () {}).then(function () {
+          origLogout.call(window);
+          // MFIX-3/F-M5: hesap menusundeki "Cikis Yap" bu yoldan gecer - yerel favori
+          // GORUNUMU burada da temizlenmeli (sunucudaki kayit DURUR, o hesabin verisidir).
+          // MFIX-3/F-M4: SEPETE DOKUNULMAZ - cikista sepet KORUNUR (kapsam karari).
+          favorileriTemizle();
+          window.divisimaDelivCity = null;
+        });
       };
       window.logout.__divisimaWrapped = true;
     }
@@ -1043,8 +1217,8 @@
         // (olculdu: 4 saniye boyunca ekranda yalniz basari mesaji vardi). Bekleyen iyimser
         // mesajlar DUSURULUR ve duzeltme mesaji hemen sonraki adimda gosterilir.
         try { if (Array.isArray(window._toastQ)) window._toastQ.length = 0; } catch (_t) {}
-        if (e && e.status === 401) notify("Oturumun sona erdi, lütfen tekrar giriş yap.");
-        else notify("Sepet sunucuya yazılamadı. İnternet bağlantını kontrol edip tekrar dene.");
+        if (e && e.status === 401) notify(ceviri("err_session"));
+        else notify(ceviri("err_cart_sync"));
       }
       return false;
     });
@@ -1243,8 +1417,8 @@
     try { await api.cart.clear(); return true; }
     catch (e) {
       // Uc dusserse SESSIZ KALINMAZ: yerel bosaldi ama sunucu bosalmadiysa kullanici bilmeli.
-      if (e && e.status === 401) notify("Oturumun sona erdi, lütfen tekrar giriş yap.");
-      else notify("Sepet sunucuda boşaltılamadı. Tekrar dene.");
+      if (e && e.status === 401) notify(ceviri("err_session"));
+      else notify(ceviri("err_cart_clear"));
       return false;
     }
   };
@@ -1273,7 +1447,7 @@
   function bosSepetEkrani() {
     return '<div class="wrap" style="padding:40px 0"><h2>Ödeme</h2>' +
       '<p class="muted" style="margin:10px 0 16px">Sepetin boş.</p>' +
-      '<a class="btn" href="#/kategori/tumu">Alışverişe başla</a></div>';
+      '<a class="btn" href="#/kategori/tumu">' + esc(ceviri("shop_start")) + "</a></div>";
   }
 
   function misafirAlan(id, etiket, deger, tip) {
@@ -1332,7 +1506,7 @@
       "</div>" +
 
       '<div class="co-nav" style="margin-top:18px">' +
-      '<button class="btn" id="mgGonder">Siparişi tamamla (kapıda ödeme)</button></div>' +
+      '<button class="btn" id="mgGonder">' + esc(ceviri("mg_submit")) + "</button></div>" +
       '<div id="mgErr" style="color:#a32d2d;font-size:13px;margin-top:10px"></div></div>';
 
     var btn = document.getElementById("mgGonder");
@@ -1349,7 +1523,7 @@
         if (!kart.checked) return;
         if (kapida) kapida.checked = true;
         if (not) { not.style.color = "#a32d2d"; not.style.fontWeight = "600"; }
-        notify("Kartla ödeme için üye girişi gerekiyor. Misafir siparişleri kapıda ödeme ile alınır.");
+        notify(ceviri("mg_card_login"));
         setTimeout(function () { location.hash = "#/giris"; }, 1400);
       };
     }
@@ -1376,7 +1550,7 @@
     if (!kalemler.length) { er.textContent = "Sepetin boş."; return; }
 
     var btn = document.getElementById("mgGonder");
-    if (btn) { btn.disabled = true; btn.textContent = "Gönderiliyor…"; }
+    if (btn) { btn.disabled = true; btn.textContent = ceviri("sending"); }
     try {
       var r = await api.orders.placeAsGuest({
         guest_name: d.ad, guest_email: d.eposta, guest_phone: d.telefon,
@@ -1393,7 +1567,7 @@
       // Uc "e-posta kayitli" (409) ya da "yalniz kapida odeme" (400) donebilir - ikisi de
       // KULLANICIYA GOSTERILIR; sessizce baska bir yola sapmak yanlis olurdu.
       er.textContent = e.message || "Sipariş oluşturulamadı.";
-      if (btn) { btn.disabled = false; btn.textContent = "Siparişi tamamla (kapıda ödeme)"; }
+      if (btn) { btn.disabled = false; btn.textContent = ceviri("mg_submit"); }
     }
   }
 
@@ -1501,7 +1675,7 @@
       '<p class="muted" style="font-size:12px;margin-top:8px">Kart bilgilerin bize hiç gelmez; ödeme sağlayıcının kendi sayfasında alınır.</p>' +
       "</div>" +
 
-      '<button class="btn" id="coSubmit" style="width:100%;padding:13px">Siparişi tamamla</button>' +
+      '<button class="btn" id="coSubmit" style="width:100%;padding:13px">' + esc(ceviri("place_order_btn")) + "</button>" +
       '<div id="coErr" style="color:#a32d2d;font-size:13px;margin-top:10px"></div>' +
       '<div id="coPayHost" style="margin-top:16px"></div>' +
       "</div>";
@@ -1652,7 +1826,7 @@
       return;
     }
 
-    btn.disabled = true; btn.textContent = "Gönderiliyor…";
+    btn.disabled = true; btn.textContent = ceviri("sending");
     try {
       // Sunucu sepetini de esitle (siparis kalemleri govdeden gidiyor ama sepet tutarli kalsin)
       await syncCartToServer();
@@ -1709,7 +1883,7 @@
           "Ödeme sağlayıcısı şu an ödeme formunu döndürmedi (test/mock modu olabilir). " +
           "Siparişin " + _n2 + " numarasıyla ÖDENMEMİŞ olarak duruyor. " +
           "Kapıda ödeme ile devam edebilir ya da daha sonra tekrar deneyebilirsin.");
-        notify("Ödeme formu gelmedi. Siparişin ödenmemiş olarak duruyor.");
+        notify(ceviri("err_pay_form"));
         return;
       }
       embedCheckoutForm(pay.checkout_form_content);
@@ -1718,8 +1892,8 @@
       // dener; buraya dusuyorsa o da basarisiz olmustur - olculdu: cart/add 401 ->
       // auth/refresh 401). Teknik mesaj yerine ne yapmasi gerektigi soylenir.
       if (e && e.status === 401) {
-        checkoutHatasiYaz("Oturumun sona erdi, lütfen tekrar giriş yap.");
-        notify("Oturumun sona erdi, lütfen tekrar giriş yap.");
+        checkoutHatasiYaz(ceviri("err_session"));
+        notify(ceviri("err_session"));
         setTimeout(function () { location.hash = "#/giris"; }, 1200);
       } else if (_zatenVarMesaji) {
         // MFIX-1 / F-M3f: siparis ZATEN vardi ve odeme baslatma da dustu. Kullaniciya
@@ -1732,7 +1906,7 @@
       }
     } finally {
       // Dugme HER durumda eski haline doner - asili kalmaz.
-      btn.disabled = false; btn.textContent = "Siparişi tamamla";
+      btn.disabled = false; btn.textContent = ceviri("place_order_btn");
     }
   }
 
@@ -1777,12 +1951,26 @@
   window.divisimaEmbedCheckoutForm = embedCheckoutForm;
 
   // ── Odeme sonuc sayfasi (#/odeme/sonuc?order=..&status=..) ─────────────────
+  // MFIX-3 / DEVIR-3: BASARI AILESI TEK KAYNAKTAN. Iki kod yolu "basarili"yi FARKLI
+  // tanimliyordu: renderPaymentResult "success VEYA cod" derken sekme basligini yazan
+  // setDocTitle sarmalayicisi YALNIZ "success" ariyordu. OLCULEN ZARAR (MFIX-2 ve MFIX-3
+  // R-BASLIK ONCE): basarili bir KAPIDA ODEME sipariste ekran "Siparisin alindi" derken
+  // SEKME BASLIGI "Odeme Tamamlanamadi" diyordu - iki yuzey birbiriyle celisiyordu.
+  // Ayrisma bir kez daha olusmasin diye olcut TEK FONKSIYONDA.
+  function odemeBasariliMi(status) { return status === "success" || status === "cod"; }
+  // Baslik anahtari da TEK KAYNAKTAN: ekran basligi ile sekme basligi AYNI metni gostersin.
+  // (Ilk olcumde ekran "Siparisin alindi" derken sekme "Odemen alindi" diyordu - ayni aile
+  // ama FARKLI metin; kapida odeme bir ODEME degildir.)
+  function odemeSonucBaslikAnahtari(status) {
+    return status === "cod" ? "pay_cod_title" : (odemeBasariliMi(status) ? "pay_ok_title" : "pay_fail_title");
+  }
+
   async function renderPaymentResult(params) {
     var view = document.getElementById("checkoutView");
     if (!view) return;
     var orderId = parseInt(params.order) || 0;
     var status = params.status || "";
-    var ok = status === "success" || status === "cod";
+    var ok = odemeBasariliMi(status);
 
     // MFIX-1 / F-M3f: siparis TAMAMLANDI (COD ve misafir yollari da buraya duser) ->
     // bir sonraki checkout icin YENI anahtar. Kart yolunda embed sirasinda YENILENMEZ:
@@ -1803,10 +1991,10 @@
     var order = null;
     if (orderId) { try { order = unwrap(await api.orders.get(orderId)); } catch (e) { order = null; } }
 
-    var baslik = status === "cod" ? "Siparişin alındı" : (ok ? "Ödemen alındı" : "Ödeme tamamlanamadı");
+    var baslik = ceviri(odemeSonucBaslikAnahtari(status));
     var alt = status === "cod"
-      ? "Kapıda ödeme ile siparişin oluşturuldu."
-      : (ok ? "Siparişin onaylandı ve hazırlanmaya başlıyor." : "Tutar tahsil edilmedi. Kartında bir kesinti olduysa iade edilir.");
+      ? ceviri("pay_cod_sub")
+      : ceviri(ok ? "pay_ok_sub" : "pay_fail_sub");
 
     var ozet = "";
     if (order) {
@@ -1865,9 +2053,9 @@
       '<div style="display:flex;gap:10px;justify-content:center;margin-top:18px">' +
       // A3: misafire "Siparislerime git" GOSTERILMEZ - oturumu yok, o sayfa ona bos/401 verir.
       // Yerine hesabini sahiplenmeye goturen GERCEKTEN calisan yol.
-      (misafirMi ? '<a class="btn" href="#/giris">Şifre belirle</a>'
-                 : '<a class="btn" href="#/hesabim/siparislerim">Siparişlerime git</a>') +
-      (ok ? '<a class="btn ghost" href="#/kategori/tumu">Alışverişe devam</a>'
+      (misafirMi ? '<a class="btn" href="#/giris">' + esc(ceviri("set_pass")) + "</a>"
+                 : '<a class="btn" href="#/hesabim/siparislerim">' + esc(ceviri("go_orders")) + "</a>") +
+      (ok ? '<a class="btn ghost" href="#/kategori/tumu">' + esc(ceviri("shop_continue")) + "</a>"
           : '<a class="btn ghost" href="#/odeme">Tekrar dene</a>') +
       "</div></div>";
 
@@ -1877,9 +2065,14 @@
     }
   }
 
+  // MFIX-3 / F-M2: sayisal siparis durumu ARTIK sozluk anahtarina esleniyor.
+  // Eskiden burada TR literalleri vardi ve EN/AR modunda da Turkce goruntuleniyordu.
+  var SIPARIS_DURUM_ANAHTARI = {
+    0: "st_pending", 1: "od_confirmed", 2: "od_prep", 3: "od_shipped", 4: "od_delivered", 5: "st_cancel"
+  };
   function orderStatusLabel(s) {
-    var m = { 0: "Beklemede", 1: "Onaylandı", 2: "Hazırlanıyor", 3: "Kargoda", 4: "Teslim edildi", 5: "İptal" };
-    return m[s] !== undefined ? m[s] : String(s);
+    var k = SIPARIS_DURUM_ANAHTARI[s];
+    return k ? ceviri(k) : String(s);
   }
 
   // Yonlendirici: #/odeme -> gercek checkout, #/odeme/sonuc -> sonuc sayfasi.
@@ -2011,14 +2204,16 @@
   }
 
   // ── Ortak yardimcilar ──────────────────────────────────────────────────────
-  var DURUM_ETIKET = {
-    "Pending": "Onay bekliyor", "Confirmed": "Onaylandı", "Preparing": "Hazırlanıyor",
-    "Shipped": "Kargoda", "Delivered": "Teslim edildi", "Cancelled": "İptal edildi"
+  // MFIX-3 / F-M2: metin siparis durumu ARTIK sozluk anahtarina esleniyor.
+  var DURUM_ANAHTAR = {
+    "Pending": "st_await", "Confirmed": "od_confirmed", "Preparing": "od_prep",
+    "Shipped": "od_shipped", "Delivered": "od_delivered", "Cancelled": "st_cancelled"
   };
-  function durumEtiket(s) { return DURUM_ETIKET[s] || s || "—"; }
+  function durumEtiket(s) { var k = DURUM_ANAHTAR[s]; return k ? ceviri(k) : (s || "—"); }
   // Iade durumlari AYRI enum (ReturnStatusEnum): Pending/Approved/Rejected/Completed.
-  var IADE_DURUM = { "Pending": "Beklemede", "Approved": "Onaylandı", "Rejected": "Reddedildi", "Completed": "Tamamlandı" };
-  function iadeDurumEtiket(s) { return IADE_DURUM[s] || s || "—"; }
+  // MFIX-3 / F-M2: iade durumu da sozluk anahtarina eslenir.
+  var IADE_ANAHTAR = { "Pending": "st_pending", "Approved": "st_approved", "Rejected": "st_rejected", "Completed": "st_completed" };
+  function iadeDurumEtiket(s) { var k = IADE_ANAHTAR[s]; return k ? ceviri(k) : (s || "—"); }
   // SPRINT 8 MADDE 5: iade satiri ARTIK "product_name" tasiyor (backend doldurdu).
   // Onceden yalniz product_id geliyordu ve ad KATALOGDAN cozuluyordu; bu yalniz fazladan is
   // degil, YANLIS da olabiliyordu - pasiflenmis ya da katalogdan cikmis bir urunun iadesi
@@ -2084,7 +2279,7 @@
   async function sekmeSiparisler(el) {
     try {
       var liste = unwrap(await api.orders.my()) || [];
-      if (!liste.length) { el.innerHTML = bosDurum("Henüz siparişin yok.", "Alışverişe başla", "#/kategori/tumu"); return; }
+      if (!liste.length) { el.innerHTML = bosDurum(ceviri("orders_empty"), ceviri("shop_start"), "#/kategori/tumu"); return; }
       // NOT: my-orders DTO'su KALEM ICERMIYOR (OrderListResponseDto: id, order_number,
       // order_status, total, created_at). Kalemler ve zaman cizelgesi ancak ACILINCA,
       // siparis basina ayri cagriyla getirilir - gereksiz N+1 istegi onlemek icin tembel.
@@ -2095,7 +2290,7 @@
           '<span class="ao-badge">' + esc(durumEtiket(o.order_status)) + "</span></div>" +
           '<div class="ao-body"><div class="ao-meta"><b>' + paraTL(o.total) + "</b></div></div>" +
           '<div class="od-detail" hidden></div>' +
-          '<div class="ao-actions"><button class="ao-btn" data-siparis-ac="' + o.id + '">Detay ve takip</button></div>' +
+          '<div class="ao-actions"><button class="ao-btn" data-siparis-ac="' + o.id + '">' + esc(ceviri("ord_track")) + "</button></div>" +
           "</div>";
       }).join("");
     } catch (e) {
@@ -2154,13 +2349,13 @@
 
       var uygun = iadeUygunlugu({ order_status: d.order_status, delivered_at: d.delivered_at, created_at: d.created_at });
       var iadeBlok = uygun.uygun
-        ? '<button class="ao-btn primary" data-iade-ac="' + orderId + '">İade talebi oluştur</button>'
+        ? '<button class="ao-btn primary" data-iade-ac="' + orderId + '">' + esc(ceviri("ret_create")) + "</button>"
         : '<p class="muted" style="margin:8px 0 0">' + esc(uygun.sebep) + "</p>";
 
       kutu.innerHTML = cizelge + kargoBlok + satirlar +
         '<div class="od-sum"><span>Toplam</span><b>' + paraTL(d.total) + "</b></div>" +
         '<div class="ao-actions" style="margin-top:10px">' +
-        '<button class="ao-btn" data-fatura="' + orderId + '">Faturayı görüntüle</button>' + iadeBlok + "</div>";
+        '<button class="ao-btn" data-fatura="' + orderId + '">' + esc(ceviri("inv_view")) + "</button>" + iadeBlok + "</div>";
     } catch (e) {
       kutu.innerHTML = '<p class="muted">Detay alınamadı: ' + esc(e && e.message ? e.message : "hata") + "</p>";
     }
@@ -2171,7 +2366,7 @@
       var liste = unwrap(await api.returns.my()) || [];
       if (!liste.length) {
         el.innerHTML = bosDurum("Henüz iade talebin yok. Teslim edilmiş bir siparişin detayından iade talebi oluşturabilirsin.",
-          "Siparişlerime git", "#/hesabim/siparislerim");
+          ceviri("go_orders"), "#/hesabim/siparislerim");
         return;
       }
       el.innerHTML = '<div class="acc-tiles">' + liste.map(function (r) {
@@ -2193,7 +2388,7 @@
       el.innerHTML = '<div class="acc-tiles">' + liste.map(function (f) {
         return '<div class="acc-tile"><div class="at-head"><b>' + esc(f.invoice_number || ("#" + f.id)) + "</b></div>" +
           "<p>" + paraTL(f.total) + " · " + trTarih(f.created_at || f.issued_at) + "</p>" +
-          '<div class="ao-actions"><button class="ao-btn" data-fatura="' + (f.order_id || "") + '">Görüntüle</button></div></div>';
+          '<div class="ao-actions"><button class="ao-btn" data-fatura="' + (f.order_id || "") + '">' + esc(ceviri("view_btn")) + "</button></div></div>";
       }).join("") + "</div>";
     } catch (e) {
       el.innerHTML = bosDurum("Faturalar alınamadı: " + (e && e.message ? e.message : "bilinmeyen hata"));
@@ -2279,9 +2474,9 @@
     if (!kutu || kutu.querySelector(".e3-iade-form")) return;
     var d;
     try { d = unwrap(await api.orders.get(orderId)) || {}; }
-    catch (e) { toast("Sipariş bilgisi alınamadı."); return; }
+    catch (e) { toast(ceviri("err_order_info")); return; }
     var kalemler = (d.items || d.order_items || []).filter(function (k) { return !k.is_cancelled; });
-    if (!kalemler.length) { toast("İade edilebilecek kalem bulunamadı."); return; }
+    if (!kalemler.length) { toast(ceviri("err_ret_none")); return; }
 
     var f = document.createElement("div");
     f.className = "e3-iade-form";
@@ -2299,7 +2494,7 @@
       '<label style="display:block;margin-bottom:8px">Tür<select id="e3IadeTur" style="width:100%">' +
       '<option value="0">İade</option><option value="1">Değişim</option></select></label>' +
       '<label style="display:block;margin-bottom:10px">Açıklama (isteğe bağlı)<textarea id="e3IadeAcik" rows="2" style="width:100%"></textarea></label>' +
-      '<button class="ao-btn primary" id="e3IadeGonder">Talebi gönder</button>';
+      '<button class="ao-btn primary" id="e3IadeGonder">' + esc(ceviri("ret_send")) + "</button>";
     kutu.appendChild(f);
 
     f.querySelector("#e3IadeGonder").onclick = async function () {
@@ -2316,7 +2511,7 @@
           return_type: +f.querySelector("#e3IadeTur").value,
           description: f.querySelector("#e3IadeAcik").value.trim()
         });
-        toast("İade talebin alındı.");
+        toast(ceviri("ok_ret_sent"));
         f.innerHTML = '<p class="muted">İade talebin oluşturuldu. Durumunu “İadelerim” sekmesinden takip edebilirsin.</p>';
       } catch (e) {
         btn.disabled = false;
@@ -2352,7 +2547,7 @@
         full_address: f.querySelector("#e3AdTam").value.trim(),
         is_default: f.querySelector("#e3AdVars").checked
       };
-      if (!p.title || !p.city || !p.full_address) { toast("Başlık, il ve açık adres zorunlu."); return; }
+      if (!p.title || !p.city || !p.full_address) { toast(ceviri("err_addr_req")); return; }
       try { await api.address.upsert(p); toast("Adres kaydedildi."); sekmeAdresler(el); }
       catch (e) { toast("Adres kaydedilemedi: " + (e && e.message ? e.message : "hata")); }
     };
@@ -2409,15 +2604,17 @@
         '<span class="muted">' + (stokMu ? "Stok bildirimi" : "Fiyat uyarısı") + " · " + ayrinti + "</span><br>" +
         durum + "</div>" +
         '<button class="btn ghost" data-bildirim-sil="' + s.id + '" data-bildirim-tur="' +
-        (stokMu ? "stock" : "price_drop") + '">Kaldır</button></div>';
+        (stokMu ? "stock" : "price_drop") + '">' + esc(ceviri("remove")) + "</button></div>";
     }).join("");
   }
+  // MFIX-3 / F-M2: hesap menusu etiketleri ARTIK sozluk anahtari (ikinci alan).
+  // OLCULEN ONCE-DURUM: EN modunda 10/10 sekme TURKCE kaliyordu.
+  // SPRINT 8 MADDE 10: bildirim abonelikleri GORULEBILIR ve KAPATILABILIR (bildirimlerim).
   var E3_SEKMELER = [
-    ["ozet", "Özet"], ["siparislerim", "Siparişlerim"], ["iadelerim", "İadelerim"],
-    ["faturalarim", "Faturalarım"], ["adreslerim", "Adreslerim"],
-    // SPRINT 8 MADDE 10: bildirim abonelikleri artik GORULEBILIR ve KAPATILABILIR.
-    ["bildirimlerim", "Bildirimlerim"],
-    ["favorilerim", "Favorilerim"], ["kartlarim", "Kayıtlı Kartlar"], ["bilgilerim", "Hesap Bilgilerim"]
+    ["ozet", "acc_summary"], ["siparislerim", "acc_orders"], ["iadelerim", "acc_returns"],
+    ["faturalarim", "acc_invoices"], ["adreslerim", "acc_addr"],
+    ["bildirimlerim", "acc_notifs"],
+    ["favorilerim", "acc_favs"], ["kartlarim", "acc_cards"], ["bilgilerim", "acc_profile"]
   ];
 
   function wireAccount() {
@@ -2425,13 +2622,14 @@
       tab = tab || "ozet";
       var side = '<div class="acc-side"><div class="acc-user"><div class="acc-ava">' +
         esc((window.userName || "U").charAt(0).toUpperCase()) + '</div><div class="acc-uname"><b>' +
-        esc(window.userName || "—") + "</b><small>Üye</small></div></div><nav class=\"acc-nav\">" +
+        esc(window.userName || "—") + "</b><small>" + esc(ceviri("acc_member")) + "</small></div></div><nav class=\"acc-nav\">" +
         E3_SEKMELER.map(function (x) {
-          return '<a href="#/hesabim/' + x[0] + '" class="acc-link' + (x[0] === tab ? " on" : "") + '">' + esc(x[1]) + "</a>";
-        }).join("") + '<a href="#/" class="acc-link acc-logout" id="accLogout">Çıkış Yap</a></nav></div>';
+          return '<a href="#/hesabim/' + x[0] + '" class="acc-link' + (x[0] === tab ? " on" : "") + '">' + esc(ceviri(x[1])) + "</a>";
+        }).join("") + '<a href="#/" class="acc-link acc-logout" id="accLogout">' + esc(ceviri("acc_logout")) + "</a></nav></div>";
 
-      accountView.innerHTML = '<div class="cat-banner"><div class="wrap"><div class="breadcrumb"><a href="#/">Anasayfa</a> &nbsp;/&nbsp; Hesabım</div>' +
-        '<h1 class="serif">Merhaba, ' + esc((window.userName || "").split(" ")[0] || window.userName || "—") + "</h1></div></div>" +
+      accountView.innerHTML = '<div class="cat-banner"><div class="wrap"><div class="breadcrumb"><a href="#/">' +
+        esc(ceviri("home")) + "</a> &nbsp;/&nbsp; " + esc(ceviri("acc_title")) + "</div>" +
+        '<h1 class="serif">' + esc(ceviri("acc_greet")) + ", " + esc((window.userName || "").split(" ")[0] || window.userName || "—") + "</h1></div></div>" +
         '<section class="wrap acc-grid">' + side + '<div class="acc-content">' + yukleniyor() + "</div></section>";
 
       var lo = document.getElementById("accLogout");
@@ -2465,7 +2663,7 @@
           var bid = +bs.getAttribute("data-bildirim-sil");
           var tur = bs.getAttribute("data-bildirim-tur");
           var cagri = (tur === "stock") ? api.stockNotification.remove(bid) : api.priceDrop.remove(bid);
-          cagri.then(function () { toast("Bildirim aboneliğin kaldırıldı."); sekmeBildirimler(el); })
+          cagri.then(function () { toast(ceviri("ok_notif_rm")); sekmeBildirimler(el); })
             .catch(function (er) { toast("Kaldırılamadı: " + (er && er.message ? er.message : "hata")); });
           return;
         }
@@ -2560,12 +2758,12 @@
       var em = inp ? inp.value.trim() : "";
       if (!em || em.indexOf("@") < 1) { if (inp) { inp.style.borderColor = "#b85c5c"; inp.focus(); } return; }
       var pid = window.__e3NotifyPid, size = window.__e3NotifySize;
-      if (!pid) { toast("Ürün bilgisi bulunamadı."); return; }
+      if (!pid) { toast(ceviri("err_prod_info")); return; }
       e.preventDefault(); e.stopPropagation();
       b.disabled = true;
       api.stockNotification.subscribe(pid, size || "", em).then(function () {
         if (box) box.innerHTML = '<div class="notify-done"><span class="nd-ic">✓</span> Stoğa girince ' + esc(em) + " adresine haber vereceğiz.</div>";
-        toast("Bildirim kaydın alındı.");
+        toast(ceviri("ok_notify_saved"));
       }).catch(function (er) {
         b.disabled = false;
         toast("Kayıt yapılamadı: " + (er && er.message ? er.message : "hata"));
@@ -2597,11 +2795,11 @@
       e.preventDefault(); e.stopPropagation();
       var pid = +pa.getAttribute("data-palert");
       var em = await kullaniciEpostasi();
-      if (!em) { toast("Fiyat uyarısı için giriş yapmalısın."); return; }
-      if (pa.classList.contains("on")) { toast("Bu ürün için zaten fiyat uyarısı kurdun."); return; }
+      if (!em) { toast(ceviri("err_pa_login")); return; }
+      if (pa.classList.contains("on")) { toast(ceviri("err_pa_dup")); return; }
       api.priceDrop.subscribe(pid, em).then(function () {
         pa.classList.add("on");
-        toast("Fiyat düşerse haber vereceğiz.");
+        toast(ceviri("ok_pa_set"));
       }).catch(function (er) {
         toast("Fiyat uyarısı kurulamadı: " + (er && er.message ? er.message : "hata"));
       });
@@ -2661,10 +2859,22 @@
         // AYNI gorunuyor; ustelik sonuc sayfasi paylasilan/yer imlerine eklenen bir adres.
         // Basarili/basarisiz ayrimi da baslikta gorunsun (status parametresi zaten adreste).
         if (location.hash.indexOf("#/odeme/sonuc") === 0) {
-          var basarili = location.hash.indexOf("status=success") >= 0;
-          document.title = (basarili ? "Siparişin Alındı" : "Ödeme Tamamlanamadı") + " · Divisima";
+          // MFIX-3 / DEVIR-3: olcut TEK KAYNAKTAN (odemeBasariliMi) - "cod" da BASARI.
+          // Eskiden burada `indexOf("status=success")` vardi ve kapida odeme BASARISIZ sayiliyordu.
+          var sm = location.hash.match(/[?&]status=([^&]*)/);
+          var durum = sm ? decodeURIComponent(sm[1]) : "";
+          document.title = ceviri(odemeSonucBaslikAnahtari(durum)) + " · Divisima";
         }
       };
+      // MFIX-3 / DEVIR-3: DOGRUDAN ACILIS YARISI. Sayfa dogrudan #/odeme/sonuc ile
+      // acildiginda (paylasilan baglanti, yer imi, saglayici 302 donusu) index.html'in
+      // router'i api-bridge YUKLENMEDEN once kosar ve baslik "Odeme · Divisima" kalir -
+      // B9'un asil gerekcesi tam bu senaryoydu. Sarmalayici kuruldugu an bir kez calistir.
+      // (MFIX-1'de belgelenen `defer` yarisinin ayni sinifi; urun rotasinda da ayni
+      // telafi var - `urunRotasiniTazele`.)
+      if (location.hash.indexOf("#/odeme/sonuc") === 0) {
+        try { window.setDocTitle(); } catch (e) {}
+      }
     }
     // Ilk yukleme + katalog sonrasi tazeleme init() icinde yapiliyor.
   }
@@ -2900,6 +3110,7 @@
     wireUrunRotasi();         // Sprint 8 madde 12: paylasim baglantilarinin basligi
     wireSifreVeDogrulama();   // LAUNCH-FIX A2 + A1(c): sifremi unuttum / sifre-sifirla / dogrula
     wireParaBirimi();         // LAUNCH-FIX A4: tek para birimi TRY
+    wireFavoriler();          // MFIX-3 / F-M5: kalp -> sunucu (misafirde giris yonlendirmesi)
     // Kategoriler ÖNCE: ürün kategorisi category_id üzerinden çözülüyor (liste yolu
     // category_name döndürmüyor), yükleme sırası ters olursa tüm ürünler "tumu" olur.
     await loadCategories();
@@ -2918,6 +3129,16 @@
     // tanimlanmamis bir fonksiyonu sarmalamak olurdu (sessizce etkisiz kalirdi).
     sayfalamayiBagla();
     sayfalamaDugmesiniTazele();
+
+    // MFIX-3 / F-M4: sepet geri yuklemesi KATALOG GELDIKTEN SONRA gercek PRODUCTS'a
+    // karsi bir kez daha kosar (idempotent - ayni anahtarlari yeniden yazar) ve
+    // katalogda olmayan sepet urunleri TEK TEK cekilip eklenir. Sepet bossa istek YOK.
+    try { if (typeof window.sepetiGeriYukle === "function") window.sepetiGeriYukle(); } catch (e) {}
+    await sepetUrunleriniTamamla();
+
+    // MFIX-3 / F-M5: favoriler SUNUCUDAN. Katalogdan SONRA cagrilir - donen kayitlar
+    // PRODUCTS'a eklenir ve index.html'in byId'ye dayanan cizicileri calisir.
+    await favorileriSunucudanCek();
 
     // KATALOG SONRASI YENIDEN CIZIM (E3 elle dogrulamasinda OLCULDU):
     // Hesabim ekranindaki "Favorilerim" ve "Kayitli Kartlar" sekmeleri index.html in

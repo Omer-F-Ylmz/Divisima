@@ -350,8 +350,13 @@ namespace Divisima.IntegrationTests
             // "her hataya ayni genel metni yaz" uygulamasi da bu pinden gecerdi.
             gonder.Should().Contain("e.status === 401",
                 "oturum bitmesi ayri ele alinmali");
-            gonder.Should().Contain("Oturumun sona erdi, lütfen tekrar giriş yap.",
-                "401'de kullaniciya NE YAPACAGI soylenmeli");
+            // PREMIS DEGISIKLIGI (MFIX-3 / F-M2, merkez onayina sunuldu): metin ARTIK
+            // api-bridge'te GOMULU DEGIL, sozlukte. Assert'in OLCTUGU SEY DEGISMEDI -
+            // "401 dalinda kullaniciya eylem iceren AYRI bir metin verilir" - yalnizca
+            // metnin YERI degisti. Anahtarin sozlukte GERCEKTEN bulundugunu P11 ayrica
+            // pinliyor, yani iddia ZAYIFLAMADI, iki pine BOLUNDU.
+            gonder.Should().Contain("ceviri(\"err_session\")",
+                "401'de kullaniciya NE YAPACAGI soylenmeli (metin sozlukten gelir)");
         }
 
         // ── P3 (F-D1): YORUM/YILDIZ UYDURULMAZ, YALNIZ GERCEK ALANDAN TURER ─────────────
@@ -846,6 +851,287 @@ namespace Divisima.IntegrationTests
             // CIFT-ANLAM KIRICI: DIGER kapanis yollari DEGISMEDI.
             s.Should().Contain("function closeModal()", "closeModal yerinde durmali");
             s.Should().Contain("overlay.onclick", "overlay yolu da yerinde durmali");
+        }
+
+        // ── P9 (MFIX-3 / DEVIR-1 + DEVIR-2): UYDURMA OLAY IDDIASI URETILMEZ ──────
+        // DURUST ETIKET: KAYNAK SOZLESMESI pinidir, DAVRANIS pini DEGILDIR (depoda JS/DOM
+        // kosucusu yok). Davranis kaniti R-SK A/B: ONCE canli yakalandi (t=108,6 sn ->
+        // "Deniz Y. - Eskisehir" / "bu urunu satin aldi - 8 dk once"), SONRA 5+ dk gozlemde
+        // SIFIR bildirim.
+        //
+        // OLCUT LITERAL BICIM DEGIL KUSUR SINIFI (MFIX-2'nin M-P8 dersi): "Math.random ile
+        // uretilen kullanici-gorunur iddia" sinifi pinlenir; sosyal kaniti FARKLI bir
+        // bicimde geri koyan bir mutasyon da kirilmali.
+        [Fact]
+        public void KAYNAK_SOZLESMESI_UydurmaOlayIddiasi_ve_SosyalKanit_Uretilmez()
+        {
+            var s = YorumlariAyikla(Index);
+            var b = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+
+            // ── VAKUM KIRICI 1: tarama GERCEKTEN dosya okuyor ────────────────────
+            s.Length.Should().BeGreaterThan(200000, "index.html okunmus olmali");
+            Regex.Matches(s, @"\bfunction\b").Count.Should().BeGreaterThan(300,
+                "tarama calisiyor olmali (negatif kontrol)");
+
+            // ── ASIL SOZLESME: VITRINDE Math.random ile URETILEN HICBIR SEY YOK ──
+            // Sosyal kanit uc ayri yerde Math.random kullaniyordu (havuz secimi, urun
+            // secimi, tekrar araligi). Kusur SINIFI: index.html'de kullanici-gorunur
+            // rastgelelik.
+            Regex.Matches(s, @"Math\.random").Count.Should().Be(0,
+                "index.html'de Math.random KALMAMALI - uydurma iddia uretmenin ana araciydi");
+
+            // ── VAKUM KIRICI 2: rngOf HALA VAR (kapsam disi renk yuzeyi) ─────────
+            // Duzeltme "tum rastgeleligi sil" DEGIL; silinseydi iddia BEDAVA dogru olurdu.
+            Regex.Matches(s, @"\brngOf\b").Count.Should().BeGreaterThan(1,
+                "rngOf kapsam disi yuzeylerde HALA kullaniliyor olmali (vakum kirici)");
+
+            // ── CIFT-ANLAM KIRICI: api-bridge'in MESRU rastgeleligi DURMALI ──────
+            // request_id (idempotency anahtari) Math.random kullanir ve bu DOGRUDUR;
+            // "her rastgeleligi kaldir" YANLIS duzeltmedir.
+            b.Should().Contain("Math.random",
+                "api-bridge'teki request_id yedegi MESRU - kaldirilmamali (cift-anlam kirici)");
+            b.Should().Contain("request_id",
+                "idempotency anahtari yerinde durmali");
+
+            // ── SOSYAL KANIT ARTIKLARI: markup, CSS, JS, i18n ────────────────────
+            foreach (var ad in new[] { "socialProof", "sp-toast", "sp-verified", "spImg",
+                                       "spProd", "spName", "spMeta", "spX", "dvs_sp_off",
+                                       "sp_bought", "sp_ago", "sp_from", "contextPool" })
+            {
+                Regex.Matches(s, Regex.Escape(ad)).Count.Should().Be(0,
+                    "sosyal kanit artigi '" + ad + "' kaynakta HIC gecmemeli (yorumlar ayiklanmis halde)");
+            }
+
+            // ── DEVIR-2: MOCK_ORDERS TOHUMU BOS ─────────────────────────────────
+            // Uydurma siparis numarasi/tarih/durum tasiyan tohum bosaltildi; CIZICI DURUYOR.
+            Regex.IsMatch(s, @"var\s+MOCK_ORDERS\s*=\s*\[\s*\]\s*;").Should().BeTrue(
+                "MOCK_ORDERS tohumu BOS olmali (ADDR/CARDS tedavisi)");
+            Regex.Matches(s, @"DVS-\d{8}").Count.Should().Be(0,
+                "uydurma siparis numarasi kaynakta kalmamali");
+            // CIFT-ANLAM KIRICI: cizici SILINMEDI (silmek renderAccount'u ReferenceError'a
+            // dusururdu) ve bos tohumda DURUST bir bos durum gosteriyor.
+            s.Should().Contain("function accOrders()", "siparis cizici YERINDE durmali");
+            s.Should().Contain("function openReturn(", "iade cizici YERINDE durmali");
+            var accOrders = FonksiyonGovdesi(s, "function accOrders()");
+            accOrders.Should().Contain("MOCK_ORDERS.length",
+                "bos tohumda DURUST bos durum gosterilmeli");
+            accOrders.Should().Contain("orders_empty",
+                "bos durum metni sozlukten gelmeli");
+        }
+
+        // ── P10 (MFIX-3 / F-M4 + F-M5): MISAFIR SEPETI KALICI, FAVORILER HESABA OZGU ──
+        // DURUST ETIKET: KAYNAK SOZLESMESI pinidir. Davranis kaniti A/B olcumleri:
+        //   F-M4 ONCE (ayirt edici deney): dvs_cart'ta mock-id 2 + gercek-id 955 ->
+        //     yenilemeden sonra YALNIZ id 2 kaldi, 955 SILINDI ve dvs_cart yeniden yazildi.
+        //   F-M5 ONCE: misafir kalbi cihaz-geneli anahtara yazdi (wishlist_items TOPLAM=0),
+        //     ardindan giris yapan hesap o favorileri DEVRALDI.
+        [Fact]
+        public void KAYNAK_SOZLESMESI_MisafirSepeti_KatalogSonrasiYuklenir_ve_Favoriler_SunucudanHesabaOzgu()
+        {
+            var s = YorumlariAyikla(Index);
+            var b = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+
+            // ── F-M4 (1): geri yukleme AYRI fonksiyonda ve MOCK KAPISI YOK ───────
+            var geriYukle = FonksiyonGovdesi(s, "function sepetiGeriYukle()");
+            geriYukle.Should().Contain("dvs_cart", "geri yukleme yerel depodan okumali");
+            geriYukle.Replace(" ", "").Should().NotContain("byId(it.id)&&",
+                "katalog-oncesi byId kapisi KALMAMALI - gercek urunleri eliyordu");
+            // VAKUM KIRICI: adet dogrulamasi HALA duruyor (kapinin tamami silinmedi).
+            geriYukle.Should().Contain("isFinite", "adet dogrulamasi korunmali");
+
+            // ── F-M4 (2): renderCart SILMEZ, yalniz CIZMEZ ──────────────────────
+            var renderCart = FonksiyonGovdesi(s, "function renderCart()");
+            renderCart.Replace(" ", "").Should().NotContain("byId(it.id);if(!p){cart.delete(k)",
+                "urunu bulunamayan kalem SILINMEMELI - katalogda olmayan kalem KORUNUR");
+            // CIFT-ANLAM KIRICI: KULLANICI silme yollari DURMALI (hepsini kaldirmak yanlis olurdu).
+            renderCart.Should().Contain("byId(it.id)", "cizim icin urun cozumu HALA yapilmali");
+            s.Should().Contain("cart.delete(_rk)", "kullanicinin 'kaldir' yolu DURMALI");
+
+            // ── F-M4 (3): katalogtan SONRA tamamlama ────────────────────────────
+            b.Should().Contain("function sepetUrunleriniTamamla",
+                "katalogda olmayan sepet urunleri tamamlanmali");
+            var init = FonksiyonGovdesi(b, "async function init()");
+            var iKatalog = init.IndexOf("await loadCatalog()", StringComparison.Ordinal);
+            var iTamamla = init.IndexOf("sepetUrunleriniTamamla", StringComparison.Ordinal);
+            var iGeri = init.IndexOf("sepetiGeriYukle", StringComparison.Ordinal);
+            iKatalog.Should().BeGreaterThan(-1, "init katalogu yuklemeli");
+            iTamamla.Should().BeGreaterThan(iKatalog,
+                "sepet tamamlamasi KATALOGDAN SONRA gelmeli");
+            iGeri.Should().BeGreaterThan(iKatalog,
+                "sepet geri yuklemesi de KATALOGDAN SONRA bir kez daha kosmali");
+
+            // ── F-M5 (1): dvs_favs NE OKUNUR NE YAZILIR ─────────────────────────
+            Regex.Matches(s, "dvs_favs").Count.Should().Be(0,
+                "cihaz-geneli favori anahtari kaynakta HIC gecmemeli (yorumlar ayiklanmis halde)");
+            // CIFT-ANLAM KIRICI: fonksiyon SILINMEDI (cagiranlari ReferenceError'a dusururdu).
+            s.Should().Contain("function saveFavs()", "saveFavs YERINDE durmali");
+            s.Should().Contain("function toggleFav(", "toggleFav YERINDE durmali");
+
+            // ── F-M5 (2): misafirde YEREL YAZMA YOK, GORUNUR yonlendirme VAR ────
+            var wireFav = FonksiyonGovdesi(b, "function wireFavoriler()");
+            wireFav.Should().Contain("api.isLoggedIn()", "misafir/uye ayrimi yapilmali");
+            wireFav.Should().Contain("fav_login", "misafire GORUNUR yonlendirme metni verilmeli");
+            wireFav.Should().Contain("#/giris", "MEVCUT giris akisina yonlendirilmeli");
+            // Sunucu sozlesmesi KAYNAKTAN okundu: Toggle(int productId) - SORGU DIZESI.
+            wireFav.Should().Contain("/api/wishlist/toggle", "sunucu ucu cagrilmali");
+            wireFav.Should().Contain("productId", "uc SORGU DIZESI bekliyor - govde DEGIL");
+            // CIFT-ANLAM KIRICI: yerel durum ancak SUNUCU ONAYLADIKTAN sonra degismeli.
+            var iPost = wireFav.IndexOf("/api/wishlist/toggle", StringComparison.Ordinal);
+            var iOrig = wireFav.IndexOf("orig.call(window, id)", StringComparison.Ordinal);
+            iOrig.Should().BeGreaterThan(iPost,
+                "yerel guncelleme sunucu cagrisindan SONRA gelmeli (ekran sunucudan ayrisamaz)");
+
+            // ── F-M5 (3): liste SUNUCUDAN, cikista GORUNUM temizlenir ──────────
+            b.Should().Contain("api.wishlist.get()", "favori listesi sunucudan gelmeli");
+            b.Should().Contain("function favorileriTemizle", "cikista gorunum temizlenmeli");
+            var logout = FonksiyonGovdesi(b, "async logout()");
+            logout.Should().Contain("favorileriTemizle", "cikista favori gorunumu temizlenmeli");
+            // CIFT-ANLAM KIRICI: cikista SEPETE DOKUNULMAZ (kapsam karari).
+            logout.Should().NotContain("dvs_cart", "cikista sepet KORUNMALI");
+        }
+
+        // ── P11 (MFIX-3): MFIX-2 REGRESYON SINIFI + TEK KAYNAK OLCUTLER ──────────
+        // GEREKCE: MFIX-2'nin mock-checkout sokumu, `wireCheckout` ile birlikte KOMSU IKI
+        // FONKSIYONU DA goturdu (setAnnShip, refreshPrices) ama CAGRI YERLERI kaldi.
+        // CANLI OLCULDU (MFIX-3): applyI18n() / setLang() / setCur() UCU DE istisna
+        // firlatiyordu - yani DIL DEGISTIRME BOZUKTU ve duyuru seridi BOS kaliyordu.
+        // Hicbir pin bunu yakalamiyordu; bu pin O SINIFI kapatir.
+        //
+        // KAPSAM SINIRI (durust): tarama, cerceve GIRIS NOKTALARININ govdeleriyle
+        // sinirlidir - genel bir "tanimsiz global" analizi DEGILDIR. Bu dort fonksiyon
+        // secildi cunku regresyonun gectigi yol tam olarak buydu ve icerdikleri cagri
+        // kumesi OLCULDU (disarida yalniz JS anahtar sozcukleri kaldi).
+        [Fact]
+        public void KAYNAK_SOZLESMESI_CerceveGirisNoktalari_TANIMSIZ_FONKSIYON_CAGIRMAZ_ve_Olcutler_TEK_KAYNAK()
+        {
+            var s = YorumlariAyikla(Index);
+            var b = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+
+            // Tanimli fonksiyon adlari (index.html)
+            var tanimli = new HashSet<string>(StringComparer.Ordinal);
+            foreach (Match m in Regex.Matches(s, @"function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\("))
+                tanimli.Add(m.Groups[1].Value);
+            // VAKUM KIRICI: tarama gercekten calisti.
+            tanimli.Count.Should().BeGreaterThan(150, "index.html'de coklu fonksiyon tanimi bulunmali");
+
+            // JS anahtar sozcukleri (cagri gibi gorunurler). Liste OLCULDU: dort govdede
+            // bunlarin disinda cerceve-disi tanimlayici YOK.
+            var anahtarSozcuk = new HashSet<string>(StringComparer.Ordinal)
+            { "function", "if", "for", "while", "switch", "catch", "return", "typeof", "new", "do" };
+
+            var girisNoktalari = new[]
+            {
+                "function applyI18n()", "function setLang(l)",
+                "function setCur(code)", "function refreshPrices()"
+            };
+            foreach (var imza in girisNoktalari)
+            {
+                var govde = FonksiyonGovdesi(s, imza);
+                govde.Length.Should().BeGreaterThan(40, imza + " govdesi bos okunmus olamaz");
+                foreach (Match c in Regex.Matches(govde, @"(?<![.$\w])([A-Za-z_$][A-Za-z0-9_$]*)\s*\("))
+                {
+                    var ad = c.Groups[1].Value;
+                    if (anahtarSozcuk.Contains(ad)) continue;
+                    tanimli.Contains(ad).Should().BeTrue(
+                        "'" + imza + "' icinde cagrilan '" + ad + "' index.html'de TANIMLI olmali - " +
+                        "MFIX-2'de tam bu sinif bir regresyon uretti (setAnnShip / refreshPrices)");
+                }
+            }
+
+            // ── DEVIR-3: ODEME BASARI OLCUTU TEK KAYNAK ────────────────────────
+            b.Should().Contain("function odemeBasariliMi(",
+                "basari olcutu TEK fonksiyonda olmali");
+            Regex.Matches(b, @"odemeBasariliMi\(").Count.Should().BeGreaterThan(1,
+                "olcut tanimlanmis VE kullanilmis olmali");
+            // Baslik ANAHTARI da tek kaynaktan: ekran ve sekme AYNI metni gostermeli.
+            b.Should().Contain("function odemeSonucBaslikAnahtari(",
+                "baslik anahtari TEK fonksiyonda olmali");
+            Regex.Matches(b, @"odemeSonucBaslikAnahtari\(").Count.Should().BeGreaterThan(2,
+                "baslik anahtari HEM ekran HEM sekme tarafinda kullanilmali (tanim + iki cagri)");
+            // CIFT-ANLAM KIRICI: eski, yalniz "success" arayan bicim GERI GELEMEZ.
+            b.Should().NotContain("indexOf(\"status=success\")",
+                "sekme basligi artik yalniz 'success' aramamali - kapida odeme de BASARIDIR");
+
+            // ── F-M3g: resendVerification SORGU DIZESI kullanir ────────────────
+            var c2 = Oku("frontend/api-client.js");
+            c2.Replace(" ", "").Should().Contain(
+                "resendVerification(email){returnapi._post(\"/api/auth/resend-verification\"+api._qs",
+                "uc [FromQuery] bekliyor - govde ile cagrildiginda CANLI 400 olculdu");
+            // VAKUM KIRICI: kardes uc (verifyEmail) ZATEN ayni kalibi kullaniyor.
+            c2.Should().Contain("/api/auth/verify-email\" + api._qs",
+                "kalip depoda zaten var (vakum kirici)");
+
+            // ── F-M2: api-bridge'in KULLANDIGI HER ANAHTAR SOZLUKTE OLMALI ─────
+            // Bilincli karar: ceviri() cagrilarina YEDEK METIN konmadi; yanlis/eksik bir
+            // anahtar ekranda HAM ANAHTAR gosterirdi. Bunu calisma anina birakmak yerine
+            // KIRMIZI BIR TESTE bagladik.
+            var tBlok = SozlukBlogu(Index, "var T={", "var AR={");
+            var arBlok = SozlukBlogu(Index, "var AR={", "function t(k)");
+            var tAnahtar = SozlukAnahtarlari(tBlok, @"\[");
+            var arAnahtar = SozlukAnahtarlari(arBlok, "'");
+            tAnahtar.Count.Should().BeGreaterThan(500, "T sozlugu okunmus olmali (vakum kirici)");
+            arAnahtar.Count.Should().BeGreaterThan(500, "AR sozlugu okunmus olmali (vakum kirici)");
+
+            var kullanilan = new HashSet<string>(StringComparer.Ordinal);
+            foreach (Match m in Regex.Matches(b, @"ceviri\(([^;]{0,240}?)\)"))
+                foreach (Match q in Regex.Matches(m.Groups[1].Value, "\"([a-z][a-z0-9_]*)\""))
+                    kullanilan.Add(q.Groups[1].Value);
+            foreach (var blokAdi in new[] { "var SIPARIS_DURUM_ANAHTARI", "var DURUM_ANAHTAR", "var IADE_ANAHTAR" })
+            {
+                var blok = FonksiyonGovdesi(b, blokAdi);   // susli parantez govdesi
+                foreach (Match q in Regex.Matches(blok, ":\\s*\"([a-z][a-z0-9_]*)\""))
+                    kullanilan.Add(q.Groups[1].Value);
+            }
+            foreach (Match q in Regex.Matches(b, "\\[\"[a-z]+\",\\s*\"([a-z][a-z0-9_]*)\"\\]"))
+                kullanilan.Add(q.Groups[1].Value);
+            // `ceviri(status === "cod" ? ...)` icindeki "cod" bir SOZLUK ANAHTARI DEGIL,
+            // sunucudan gelen durum degeridir; taramanin TEK istisnasi budur.
+            kullanilan.Remove("cod");
+
+            kullanilan.Count.Should().BeGreaterThan(30,
+                "api-bridge coklu sozluk anahtari kullaniyor olmali (vakum kirici)");
+            foreach (var k in kullanilan)
+            {
+                tAnahtar.Contains(k).Should().BeTrue(
+                    "api-bridge'in kullandigi '" + k + "' anahtari T sozlugunde OLMALI");
+                arAnahtar.Contains(k).Should().BeTrue(
+                    "api-bridge'in kullandigi '" + k + "' anahtari AR sozlugunde OLMALI");
+            }
+
+            // ── F-M2 EK: AR sozlugu T ile TAM ORTUSMELI ────────────────────────
+            // MTUR'da olculen iki eksik anahtar ('sort_price-asc' / 'sort_price-desc')
+            // AD-TABANLI taramalarda TIRE yuzunden gozden kaciyordu; burada tire de kapsamda.
+            var eksik = new List<string>();
+            foreach (var k in tAnahtar) if (!arAnahtar.Contains(k)) eksik.Add(k);
+            eksik.Should().BeEmpty("AR sozlugu T ile TAM ortusmeli (tireli anahtarlar DAHIL)");
+        }
+
+        // Sozluk blogunu (basi/sonu isaretleriyle) cikarir.
+        private static string SozlukBlogu(string kaynak, string bas, string son)
+        {
+            var i = kaynak.IndexOf(bas, StringComparison.Ordinal);
+            i.Should().BeGreaterThan(-1, "sozluk basi bulunmali: " + bas);
+            var j = kaynak.IndexOf(son, i, StringComparison.Ordinal);
+            j.Should().BeGreaterThan(i, "sozluk sonu bulunmali: " + son);
+            return kaynak.Substring(i, j - i);
+        }
+
+        // Sozluk anahtarlari: `ad:` ve `'tireli-ad':` bicimlerinin IKISI DE.
+        // Multiline SART: sozluk girdileri SATIR BASINDA da baslayabiliyor (yalniz `,`/`{`
+        // ardindan degil) - ilk yazimda bu unutuldu ve pin YANLIS kirmizi verdi.
+        // Yorumlar ONCE ayiklanir: aciklama metnindeki "kelime:" kaliplari anahtar sanilirdi.
+        // `degerAcici`: T sozlugunde deger DIZI ile ("[") , AR'da TEK TIRNAK ile baslar.
+        // Bu SART, cunku deger METINLERI de "kelime:" kalibi tasiyabiliyor - ornegin
+        // `sort_prefix:['Sirala:','Sort:']` icindeki 'Sort:' anahtar sanilip pin YANLIS
+        // kirmizi verdi (ilk kosumda birebir yasandi: Sort/Colour/Size/Currency).
+        private static HashSet<string> SozlukAnahtarlari(string blok, string degerAcici)
+        {
+            var temiz = YorumlariAyikla(blok);
+            var kume = new HashSet<string>(StringComparer.Ordinal);
+            var desen = @"(?:^|[,{])\s*'?([A-Za-z_][A-Za-z0-9_\-]*)'?\s*:\s*" + degerAcici;
+            foreach (Match m in Regex.Matches(temiz, desen, RegexOptions.Multiline))
+                kume.Add(m.Groups[1].Value);
+            return kume;
         }
     }
 }

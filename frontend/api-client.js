@@ -252,7 +252,12 @@
           finally { api.setAccessToken(null); api.setRefreshToken(null); }
         },
         async verifyEmail(token) { return api._get("/api/auth/verify-email" + api._qs({ token })); },
-        async resendVerification(email) { return api._post("/api/auth/resend-verification", { email }); },
+        // MFIX-3 / F-M3g: uc `ResendVerification([FromQuery] string email)` - GOVDE DEGIL
+        // SORGU DIZESI bagliyor (AuthController.cs). Govdeyle cagrildiginda CANLI OLCULDU:
+        // HTTP 400 "The email field is required."; sorgu dizesiyle 200. Misafir checkout'un
+        // hesap SAHIPLENME zincirinin ILK halkasi bu uctu ve KIRIKTI.
+        // Kalip verifyEmail ile AYNI (o da _qs kullaniyor).
+        async resendVerification(email) { return api._post("/api/auth/resend-verification" + api._qs({ email }), {}); },
         async forgotPassword(email) { return api._post("/api/auth/forgot-password", { email }); },
         async resetPassword(payload) { return api._post("/api/auth/reset-password", payload); },
         async deleteAccount() { return api._del("/api/auth/account"); },   // GDPR anonimleştirme
