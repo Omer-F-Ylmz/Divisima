@@ -355,7 +355,11 @@
       const api = this;
       return {
         get() { return api._get("/api/wishlist"); },
-        toggle(productId) { return api._post("/api/wishlist/toggle", { product_id: productId }); },
+        // MFIX-3b/(4): SORGU DIZESI - GOVDE DEGIL. Sozlesme kaynaktan okundu
+        // (WishlistController.Toggle(int productId); [FromBody] YOK). Eski govde bicimi
+        // CANLI OLCULDU: productId 0'a baglaniyor ve uc HTTP 500 donuyordu.
+        // Kalip verifyEmail/resendVerification ile AYNI (_qs).
+        toggle(productId) { return api._post("/api/wishlist/toggle" + api._qs({ productId }), {}); },
       };
     }
 

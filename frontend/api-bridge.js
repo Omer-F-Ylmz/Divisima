@@ -67,8 +67,12 @@
   })();
 
   // ── Yardımcılar ──
-  function notify(msg) {
-    try { if (typeof window.toast === "function") window.toast(msg); else console.log("Divisima:", msg); } catch (e) {}
+  // MFIX-3b/(3): notify AYNI IMZAYI tasir - notify(mesaj, tip). Tip index.html'in
+  // toast(msg, tip) sozlesmesine AYNEN gecer; verilmezse orada "info" varsayilir
+  // ("ok" DEGIL - tipsiz cagrinin onay isareti basmasi sinif olarak olu bir kusurdur,
+  // T1 ekraninda canli olculdu).
+  function notify(msg, tip) {
+    try { if (typeof window.toast === "function") window.toast(msg, tip); else console.log("Divisima:", msg); } catch (e) {}
   }
   function unwrap(r) { return (r && r.data !== undefined) ? r.data : r; }
 
@@ -245,7 +249,7 @@
       '<div style="font-size:32px;margin-bottom:10px">◍</div>' +
       '<div style="font-weight:600;color:#1a1a1a;margin-bottom:6px"></div>' +
       '<div style="font-size:13px"></div>' +
-      (withRetry ? '<button id="dvsRetry" style="margin-top:14px;padding:9px 16px;border:1px solid #e8e4de;border-radius:8px;background:#fff;cursor:pointer">Tekrar dene</button>' : "") +
+      (withRetry ? '<button id="dvsRetry" style="margin-top:14px;padding:9px 16px;border:1px solid #e8e4de;border-radius:8px;background:#fff;cursor:pointer">' + ceviri("b_tekrar_dene_btn") + '</button>' : "") +
       "</div>";
     ["grid", "grid2", "catGrid"].forEach(function (id) {
       var el = document.getElementById(id);
@@ -404,9 +408,9 @@
     // Eskiden `sonKategoriBulunamadi` YALNIZCA showCategory sarmalayicisinin icinde
     // sifirlaniyordu; kategori olmayan hicbir rota (#/giris, #/odeme, #/hesabim, #/sozlesme,
     // #/) onu temizlemiyordu ve setDocTitle sarmalayicisi DOGRU basligi 404 ile eziyordu.
-    // OLCULDU: taze yuklemede #/giris -> "Sayfa Bulunamadı"; gecerli bir kategori
+    // OLCULDU: taze yuklemede #/giris -> ceviri("b_sayfa_bulunamadi"); gecerli bir kategori
     // ziyaret edilince duzeliyor; TEK bir bozuk kategoriden sonra TUM rotalar yeniden
-    // "Sayfa Bulunamadı" oluyordu. Router her rota degerlendirmesinin BASINDA calisir,
+    // ceviri("b_sayfa_bulunamadi") oluyordu. Router her rota degerlendirmesinin BASINDA calisir,
     // yani bayrak yalnizca o turdaki kategori-404 yolunda TRUE kalabilir.
     if (typeof window.router === "function" && !window.router.__taksonomi) {
       var _router = window.router;
@@ -442,7 +446,7 @@
         _setDocTitle.apply(this, arguments);
         if (sonKategoriBulunamadi) {
           var en = (typeof window.lang !== "undefined" && window.lang === "en");
-          document.title = (en ? "Page Not Found" : "Sayfa Bulunamadı") + " · Divisima";
+          document.title = (en ? "Page Not Found" : ceviri("b_sayfa_bulunamadi")) + " · Divisima";
         }
       };
       sarmalT.__taksonomi = true;
@@ -521,7 +525,7 @@
         { sayfa: m.sayfa, toplamSayfa: m.toplamSayfa, toplamKayit: m.toplamKayit };
       if (!list.length) {
         replaceProducts([]);           // mock KALMAZ
-        showCatalogState("Katalog şu an boş", "Henüz yayınlanmış ürün yok. Yönetim panelinden ürün ekleyince burada görünür.", false);
+        showCatalogState(ceviri("b_katalog_bos"), ceviri("b_katalog_bos_alt"), false);
         console.log("Divisima: API 0 ürün döndü - boş katalog durumu gösteriliyor");
         return [];
       }
@@ -544,7 +548,7 @@
       // musteriye Ingilizce teknik metin gosteriyordu. Ayrinti konsola, kullaniciya Turkce
       // ve EYLEM ICEREN metin.
       console.warn("Divisima: katalog alınamadı (ayrıntı)", e && e.message);
-      showCatalogState("Ürünler yüklenemedi", "Lütfen tekrar dene.", true);
+      showCatalogState(ceviri("b_urunler_yuklenemedi"), ceviri("b_tekrar_dene"), true);
       console.warn("Divisima: katalog alınamadı", e);
       return [];
     }
@@ -572,7 +576,7 @@
       return eklenen;
     } catch (e) {
       // SESSIZ DEGIL: kullanici "daha fazla" dedi ve bir sey olmadiysa bunu OGRENMELI.
-      notify(ceviri("err_more"));
+      notify(ceviri("err_more"),'err');
       console.warn("Divisima: sonraki katalog sayfasi alinamadi", e);
       return 0;
     }
@@ -660,7 +664,12 @@
         // degeri TAZELER. Uydurma yok - alan yoksa mevcut deger korunur.
         if (d.average_rating !== undefined) p.rating = Number(d.average_rating) || 0;
         if (d.review_count !== undefined) p.rvcount = Math.max(0, Math.floor(Number(d.review_count) || 0));
-        if (d.image_url) p.img = api.resolveUrl(d.image_url);
+        /* MFIX-3b/(6): OLU DAL SOKULDU. `if (d.image_url)` hicbir zaman girmiyordu -
+           anonim detay ucu (ProductDetailResponseDto) image_url ALANI DONDURMUYOR
+           (canli alan listesi MFIX-3'te olculdu). Guard'li oldugu icin zarar yoktu ama
+           okuyucuya "detaydan gorsel gelebilir" diye YANLIS bir sozlesme vaat ediyordu.
+           Gorsel gerekirse dogru yol AYRI bir uctur (product-image/product/{id}) ve o
+           AYRI BIR KARARDIR - burada sessizce ikinci bir istek ACILMAZ. */
         if (!p.cat || p.cat === "tumu") p.cat = categorySlugOf(d);
         if (d.stocks && d.stocks.length) {
           // MFIX-2 / F-M1-H3: ONCE (olculdu, urun 937) detay acilinca liste 29 -> 35 EZILIYORDU.
@@ -933,15 +942,21 @@
     window.toggleFav = function (id) {
       if (!api.isLoggedIn()) {
         // MISAFIRDE YEREL YAZMA YOK: gorunur Turkce yonlendirme + MEVCUT giris akisi.
-        notify(ceviri("fav_login"));
+        notify(ceviri("fav_login"),'info');
         location.hash = "#/giris";
         return;
       }
       // Once SUNUCU, sonra yerel: boylece ekrandaki durum sunucudan AYRISAMAZ.
-      api._post("/api/wishlist/toggle" + api._qs({ productId: id }), {})
+      // MFIX-3b/(4): TEK SOZLESME. Onceki dalgada api-client'a dokunma izni YOKTU ve
+      // dogru sozlesme burada ELLE kuruluyordu (_post + _qs). api-client duzeltildigi
+      // icin o gecici kopya KALDIRILDI - artik TEK yazici api-client'in kendi uyesi.
+      // En dar dokunus bu yon: iki yerde iki ayri el yazmasi birakmak, sozlesmenin
+      // yarin yine ayrismasi demekti (bu depoda "ayni kuralin ikinci kopyasi" sinifinin
+      // bedeli alti kez odendi).
+      api.wishlist.toggle(id)
         .then(function () { orig.call(window, id); favEkranlariniTazele(); })
         .catch(function (e) {
-          notify(ceviri("fav_err"));
+          notify(ceviri("fav_err"),'err');
           console.warn("Divisima: favori güncellenemedi", e && e.message);
         });
     };
@@ -1058,8 +1073,8 @@
         try {
           await window.divisimaAuth.login((em.value || "").trim(), pw.value || "");
         } catch (e) {
-          if (er) er.textContent = e.message || "Giriş başarısız";
-          else notify(e.message || "Giriş başarısız");
+          if (er) er.textContent = e.message || ceviri("b_giris_basarisiz");
+          else notify(e.message || ceviri("b_giris_basarisiz"),'err');
         }
       };
     }
@@ -1083,8 +1098,8 @@
           });
           showVerifyPrompt(email);
         } catch (e) {
-          if (er) er.textContent = e.message || "Kayıt başarısız";
-          else notify(e.message || "Kayıt başarısız");
+          if (er) er.textContent = e.message || ceviri("b_kayit_basarisiz");
+          else notify(e.message || ceviri("b_kayit_basarisiz"),'err');
         }
       };
     }
@@ -1121,12 +1136,12 @@
       host.appendChild(box);
     }
     box.innerHTML =
-      '<div style="font-weight:600;margin-bottom:6px">E-postanı doğrula</div>' +
+      '<div style="font-weight:600;margin-bottom:6px">' + ceviri("b_epostani_dogrula") + '</div>' +
       '<div id="dvsVerifyMsg" style="font-size:13px;color:#6b6b6b;margin-bottom:10px"></div>' +
-      '<input id="dvsVerifyToken" placeholder="Doğrulama kodu" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px">' +
+      '<input id="dvsVerifyToken" placeholder=ceviri("b_dogrulama_kodu") style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px">' +
       '<div style="display:flex;gap:8px;margin-top:10px">' +
-      '<button id="dvsVerifyGo" style="padding:9px 16px;border:none;border-radius:8px;background:#111;color:#fff;cursor:pointer">Doğrula</button>' +
-      '<button id="dvsVerifyResend" style="padding:9px 16px;border:1px solid #e8e4de;border-radius:8px;background:#fff;cursor:pointer">Tekrar gönder</button>' +
+      '<button id="dvsVerifyGo" style="padding:9px 16px;border:none;border-radius:8px;background:#111;color:#fff;cursor:pointer">' + ceviri("b_dogrula_btn") + '</button>' +
+      '<button id="dvsVerifyResend" style="padding:9px 16px;border:1px solid #e8e4de;border-radius:8px;background:#fff;cursor:pointer">' + ceviri("b_tekrar_gonder_btn") + '</button>' +
       "</div>" +
       '<div id="dvsVerifyErr" style="color:#a32d2d;font-size:12px;margin-top:8px"></div>';
     // GÜVENLİK-FIX (G2): kayıt ucu artık "bu adres kayıtlı mı" sorusunu YANITLAMIYOR - var olan
@@ -1134,27 +1149,27 @@
     // eskiden "doğrulama kodu gönderildi" diyordu ve zaten hesabı olan kullanıcıya YALAN olurdu.
     // Ne olduğunu kullanıcı e-postadan öğrenir (yeni hesap -> kod; var olan hesap -> "giriş yap").
     document.getElementById("dvsVerifyMsg").textContent =
-      email + " adresine bir e-posta gönderdik. Yeni hesap açıldıysa içindeki doğrulama kodunu " +
-      "aşağıya gir; bu adresle zaten bir hesabın varsa e-posta ne yapman gerektiğini anlatıyor.";
+      email + ceviri("b_verify_sent_1") +
+      ceviri("b_verify_sent_2");
 
     document.getElementById("dvsVerifyGo").onclick = async function () {
       var errEl = document.getElementById("dvsVerifyErr");
       errEl.textContent = "";
       var tok = (document.getElementById("dvsVerifyToken").value || "").trim();
-      if (!tok) { errEl.textContent = "Kodu gir."; return; }
+      if (!tok) { errEl.textContent = ceviri("b_kodu_gir"); return; }
       try {
         await api.auth.verifyEmail(tok);
         box.remove();
-        notify("E-posta doğrulandı, giriş yapabilirsin.");
-      } catch (e) { errEl.textContent = e.message || "Doğrulama başarısız"; }
+        notify(ceviri("b_eposta_dogrulandi_giris"),'ok');
+      } catch (e) { errEl.textContent = e.message || ceviri("b_dogrulama_basarisiz"); }
     };
     document.getElementById("dvsVerifyResend").onclick = async function () {
       var errEl = document.getElementById("dvsVerifyErr");
       errEl.textContent = "";
       // GÜVENLİK-FIX (G2b): uç artık üç ayrı yanıt değil TEK yanıt dönüyor (varlık sızdırmıyor),
       // bu yüzden istemci de "gönderildi" diye kesin konuşamaz - adres kayıtlı olmayabilir.
-      try { await api.auth.resendVerification(email); notify("Bu adres kayıtlıysa kod tekrar gönderildi."); }
-      catch (e) { errEl.textContent = e.message || "Gönderilemedi"; }
+      try { await api.auth.resendVerification(email); notify(ceviri("b_kod_tekrar_gonderildi"),'info'); }
+      catch (e) { errEl.textContent = e.message || ceviri("b_gonderilemedi"); }
     };
   }
   window.divisimaShowVerify = showVerifyPrompt;
@@ -1178,7 +1193,7 @@
   // tl()'i HIC kullanmiyordu (olculdu: 0 cagri) ve vitrin ile odeme paneli ayrisabiliyordu.
   function money(n) {
     if (typeof window.tl === "function") { try { return window.tl(Number(n || 0)); } catch (_) { } }
-    try { return Number(n || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " TL"; }
+    try { return Number(n || 0).toLocaleString((typeof window.dvsLocale === "function") ? window.dvsLocale() : "tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " TL"; }
     catch (e) { return (Number(n || 0)).toFixed(2) + " TL"; }
   }
 
@@ -1228,8 +1243,17 @@
         // (olculdu: 4 saniye boyunca ekranda yalniz basari mesaji vardi). Bekleyen iyimser
         // mesajlar DUSURULUR ve duzeltme mesaji hemen sonraki adimda gosterilir.
         try { if (Array.isArray(window._toastQ)) window._toastQ.length = 0; } catch (_t) {}
-        if (e && e.status === 401) notify(ceviri("err_session"));
-        else notify(ceviri("err_cart_sync"));
+        // MFIX-3b / T1 (2): HATA METNI ARTIK GERCEK SEBEBI SOYLER.
+        // OLCULDU (kabul turu + kurgu tekrari): sunucu 400 ile "Yetersiz stok. İstenen
+        // adet mevcut değil." derken kullaniciya "Internet baglantini kontrol et"
+        // gosteriliyordu - YANLIS TESHIS, yani bir DURUSTLUK kusuru. Gercek sebep zaten
+        // elimizde: api-client _parse, sunucunun {message} alanini tasiyan bir Error
+        // firlatiyor (err.message) ve HTTP durumunu ekliyor (err.status).
+        // AYRIM: e.status VARSA sunucu yanit VERMISTIR -> onun sebebi yazilir.
+        // e.status YOKSA istek aga hic cikamamistir -> ancak O ZAMAN baglanti metni.
+        if (e && e.status === 401) notify(ceviri("err_session"), 'err');
+        else if (e && e.status) notify(ceviri("err_cart_sync_reason").replace("{sebep}", String(e.message || e.status)), 'err');
+        else notify(ceviri("err_cart_offline"), 'err');
       }
       return false;
     });
@@ -1280,6 +1304,16 @@
         // sayfasi ACIKKEN ozet yeniden hesaplanir.
         odemeOzetiniTazele();
         if (!api.isLoggedIn()) return;
+        // MFIX-3b / T1 (1): SALT YENIDEN CIZIM SUNUCUYA YAZMAZ.
+        // OLCULDU: setLang -> renderCart() cagiriyor; bu sarmalayici sepet HIC DEGISMEDIGI
+        // halde her seferinde GET /api/cart + her kalem icin POST /api/cart/add gonderiyordu
+        // (dil degisimi basina 5 istek). Stok o arada dustuyse ayni yazma 400 aliyor ve
+        // kullanici sebepsiz bir hata mesaji goruyor - kabul turunda birebir bu yasandi.
+        // Cozum SINIF DUZEYINDE: yalnizca SETLANG degil, HER salt-cizim yolu (para birimi,
+        // sekme gorunurlugu, tema) artik yazma tetiklemez. Olcut sepetin IMZASI:
+        // imza degismediyse sunucuda degisecek bir sey de YOKTUR.
+        // ILK SENKRON (birlestirme) BU KAPIDAN MUAFTIR - o, sunucudan OKUMAK icin gerekli.
+        if (ilkSenkronYapildi && sepetImzasi() === sonSenkronImzasi) return;
         clearTimeout(syncTimer);
         syncTimer = setTimeout(syncCartToServer, 250);   // hizli tiklamalarda tek istek
       };
@@ -1326,6 +1360,16 @@
   var syncing = false;
   var ilkSenkronYapildi = false;
   var korunanSunucuAnahtarlari = {};
+  // MFIX-3b / T1 (1): son BASARIYLA senkronlanan sepetin imzasi. Yalniz sepet ICERIGINDEN
+  // turer (urun + beden + adet), siralamadan bagimsizdir. Yazma BASARISIZ olduysa imza
+  // GUNCELLENMEZ - boylece bir sonraki gercek degisiklikte yeniden denenir.
+  var sonSenkronImzasi = null;
+  function sepetImzasi() {
+    if (!window.cart || typeof window.cart.forEach !== "function") return "";
+    var p = [];
+    window.cart.forEach(function (it) { p.push(it.id + "|" + (it.size || "") + "|" + Math.floor(it.qty)); });
+    return p.sort().join(";");
+  }
 
   function sunucuSepetiniOku(yanit) {
     var d = unwrap(yanit);
@@ -1385,6 +1429,19 @@
       var localKey = {};
       local.forEach(function (it) { localKey[it.product_id + "|" + it.size] = it; });
 
+      // MFIX-3b / T1 (1): SEPET DURUMU BASINA TEK DENEME.
+      // Ilk yazimda imzayi YALNIZ tum yazmalar basariliyken kaydediyordum; R-T1 OLCUMU
+      // BUNU CURUTTU: sepette KALICI olarak reddedilen bir kalem varsa (adet > satilabilir)
+      // imza HIC kaydedilmiyor ve her salt-cizim yeniden deniyordu - yani dil degisimi
+      // gene 5 istek atip AYNI hatayi tekrar tekrar gosteriyordu (olculdu: 3 dil degisimi
+      // = 15 istek, 3 kez ayni toast). Ayni istek ayni sonucu verecegi icin bu YENIDEN
+      // DENEME DEGIL, GURULTU. Imza artik DENEME sonrasi HER DURUMDA kaydedilir:
+      //   * sepet GERCEKTEN degisirse imza degisir ve yeni durum icin yeniden denenir,
+      //   * salt-cizim (dil/para/sekme) hicbir sey tetiklemez,
+      //   * kalici hatanin gercek telafisi checkout'tur - orada TAM liste sunucuya
+      //     yeniden gonderilir (bu dosyanin kendi notu, mirror blogunun basinda).
+      var turImzasi = sepetImzasi();
+
       for (var i = 0; i < local.length; i++) {
         await mirror(api.cart.setQuantity(local[i].product_id, local[i].size, local[i].quantity), "esitle");
       }
@@ -1394,6 +1451,7 @@
         if (localKey[k] || korunanSunucuAnahtarlari[k]) continue;
         await mirror(api.cart.remove(s.product_id, s.size || ""), "sil");
       }
+      sonSenkronImzasi = turImzasi;
     } finally { syncing = false; }
   }
   // Yeni bir oturum (giris ya da cikis) sonrasi birlestirme YENIDEN silahlanir: baska bir
@@ -1428,8 +1486,8 @@
     try { await api.cart.clear(); return true; }
     catch (e) {
       // Uc dusserse SESSIZ KALINMAZ: yerel bosaldi ama sunucu bosalmadiysa kullanici bilmeli.
-      if (e && e.status === 401) notify(ceviri("err_session"));
-      else notify(ceviri("err_cart_clear"));
+      if (e && e.status === 401) notify(ceviri("err_session"),'err');
+      else notify(ceviri("err_cart_clear"),'err');
       return false;
     }
   };
@@ -1456,8 +1514,8 @@
   var misafirState = { ad: "", eposta: "", telefon: "", il: "", ilce: "", adres: "", posta: "" };
 
   function bosSepetEkrani() {
-    return '<div class="wrap" style="padding:40px 0"><h2>Ödeme</h2>' +
-      '<p class="muted" style="margin:10px 0 16px">Sepetin boş.</p>' +
+    return '<div class="wrap" style="padding:40px 0"><h2>' + ceviri("b_h_odeme") + '</h2>' +
+      '<p class="muted" style="margin:10px 0 16px">' + ceviri("b_sepetin_bos") + '</p>' +
       '<a class="btn" href="#/kategori/tumu">' + esc(ceviri("shop_start")) + "</a></div>";
   }
 
@@ -1478,42 +1536,42 @@
     var kargo = toplam >= 2000 ? 0 : 49.9;
 
     view.innerHTML =
-      '<div class="wrap" style="padding:28px 0"><h2>Ödeme</h2>' +
+      '<div class="wrap" style="padding:28px 0"><h2>' + ceviri("b_h_odeme") + '</h2>' +
       // co_guest_t / co_guest_s: index.html'de ZATEN CEVIRILI, blogu olu kalmisti.
       '<div class="co-guest" style="margin:12px 0 18px"><div><b>' +
-        esc(typeof t === "function" ? t("co_guest_t") : "Misafir olarak devam ediyorsun") + "</b><span>" +
+        esc(typeof t === "function" ? t("co_guest_t") : ceviri("b_misafir_devam")) + "</b><span>" +
         esc(typeof t === "function" ? t("co_guest_s") : "Sipariş bilgilerin e-postana gönderilecek.") +
         '</span></div><a href="#/giris" class="co-guest-link">' +
         esc(typeof t === "function" ? t("co_guest_login") : "Üye girişi yap") + "</a></div>" +
 
-      '<div class="co-block"><h3>İletişim ve teslimat</h3>' +
-      misafirAlan("mgAd", "Ad Soyad", misafirState.ad) +
+      '<div class="co-block"><h3>' + ceviri("b_h_iletisim_teslimat") + '</h3>' +
+      misafirAlan("mgAd", ceviri("b_ad_soyad"), misafirState.ad) +
       misafirAlan("mgMail", "E-posta", misafirState.eposta, "email") +
-      misafirAlan("mgTel", "Telefon", misafirState.telefon, "tel") +
-      misafirAlan("mgIl", "İl", misafirState.il) +
-      misafirAlan("mgIlce", "İlçe", misafirState.ilce) +
-      misafirAlan("mgAdres", "Açık adres", misafirState.adres) +
-      misafirAlan("mgPosta", "Posta kodu", misafirState.posta) +
+      misafirAlan("mgTel", ceviri("b_telefon"), misafirState.telefon, "tel") +
+      misafirAlan("mgIl", ceviri("b_il"), misafirState.il) +
+      misafirAlan("mgIlce", ceviri("b_ilce"), misafirState.ilce) +
+      misafirAlan("mgAdres", ceviri("b_acik_adres"), misafirState.adres) +
+      misafirAlan("mgPosta", ceviri("b_posta_kodu"), misafirState.posta) +
       "</div>" +
 
       // GOZ-FIX / F-G4: ONCEDEN IKI SECENEK DE `disabled` IDI - "Kapıda ödeme" bile SOLUK
       // gorunuyordu ve ekran "hiçbir şey seçemiyorum" hissi veriyordu (olculdu: iki radyo da
       // disabled=true, yalnizca gonder dugmesi etkindi). Simdi: kapida odeme ETKIN + SECILI;
       // kart secenegi TIKLANABILIR ama secilince nedeni soylenip girise yonlendiriliyor.
-      '<div class="co-block" style="margin-top:18px"><h3>Ödeme yöntemi</h3>' +
+      '<div class="co-block" style="margin-top:18px"><h3>' + ceviri("b_h_odeme_yontemi") + '</h3>' +
       '<label class="saved-item" style="display:block"><input type="radio" name="mgOdeme" id="mgOdemeKapida" value="cod" checked> ' +
-      "<b>Kapıda ödeme</b></label>" +
+      "<b>" + ceviri("b_kapida_odeme") + "</b></label>" +
       '<label class="saved-item" style="display:block"><input type="radio" name="mgOdeme" id="mgOdemeKart" value="card"> ' +
-      "Kredi/banka kartı</label>" +
-      '<p class="muted" id="mgOdemeNot" style="font-size:12.5px;margin:8px 0 0">Kartla ödeme için ' +
-      '<a href="#/giris">üye girişi</a> yapman gerekiyor. Misafir siparişleri kapıda ödeme ile alınır.</p>' +
+      ceviri("b_kart") + "</label>" +
+      '<p class="muted" id="mgOdemeNot" style="font-size:12.5px;margin:8px 0 0">' + ceviri("b_kartla_odeme_icin") +
+      '<a href="#/giris">' + ceviri("b_uye_girisi_link") + '</a>' + ceviri("b_misafir_kapida_not") + '</p>' +
       "</div>" +
 
-      '<div class="co-block" style="margin-top:18px"><h3>Sipariş özeti</h3>' +
-      '<div class="od-sum"><span>Ara toplam</span><b>' + money(toplam) + "</b></div>" +
-      '<div class="od-sum"><span>Kargo' + (kargo === 0 ? " (ücretsiz)" : "") + "</span><b>" + money(kargo) + "</b></div>" +
-      '<div class="od-sum"><span>Toplam</span><b>' + money(toplam + kargo) + "</b></div>" +
-      '<p class="muted" style="font-size:12px;margin:8px 0 0">Kargo tutarı tahminidir; kesin tutar sipariş sonrası hesaplanır.</p>' +
+      '<div class="co-block" style="margin-top:18px"><h3>' + ceviri("b_h_siparis_ozeti") + '</h3>' +
+      '<div class="od-sum"><span>' + ceviri("b_ara_toplam") + '</span><b>' + money(toplam) + "</b></div>" +
+      '<div class="od-sum"><span>' + ceviri("b_kargo") + (kargo === 0 ? ceviri("b_ucretsiz") : "") + "</span><b>" + money(kargo) + "</b></div>" +
+      '<div class="od-sum"><span>' + ceviri("b_toplam") + '</span><b>' + money(toplam + kargo) + "</b></div>" +
+      '<p class="muted" style="font-size:12px;margin:8px 0 0">' + ceviri("b_kargo_tahmini") + '</p>' +
       "</div>" +
 
       '<div class="co-nav" style="margin-top:18px">' +
@@ -1534,7 +1592,7 @@
         if (!kart.checked) return;
         if (kapida) kapida.checked = true;
         if (not) { not.style.color = "#a32d2d"; not.style.fontWeight = "600"; }
-        notify(ceviri("mg_card_login"));
+        notify(ceviri("mg_card_login"),'info');
         setTimeout(function () { location.hash = "#/giris"; }, 1400);
       };
     }
@@ -1553,12 +1611,12 @@
     var er = document.getElementById("mgErr");
     if (er) er.textContent = "";
     var d = misafirDegerleriOku();
-    if (!d.ad) { er.textContent = "Ad Soyad gir."; return; }
-    if (!d.eposta || d.eposta.indexOf("@") < 0) { er.textContent = "Geçerli bir e-posta gir."; return; }
-    if (!d.adres) { er.textContent = "Açık adres gir."; return; }
+    if (!d.ad) { er.textContent = ceviri("b_ad_soyad_gir"); return; }
+    if (!d.eposta || d.eposta.indexOf("@") < 0) { er.textContent = ceviri("b_gecerli_eposta"); return; }
+    if (!d.adres) { er.textContent = ceviri("b_acik_adres_gir"); return; }
 
     var kalemler = cartItemsPayload();
-    if (!kalemler.length) { er.textContent = "Sepetin boş."; return; }
+    if (!kalemler.length) { er.textContent = ceviri("b_sepetin_bos"); return; }
 
     var btn = document.getElementById("mgGonder");
     if (btn) { btn.disabled = true; btn.textContent = ceviri("sending"); }
@@ -1587,7 +1645,7 @@
     } catch (e) {
       // Uc "e-posta kayitli" (409) ya da "yalniz kapida odeme" (400) donebilir - ikisi de
       // KULLANICIYA GOSTERILIR; sessizce baska bir yola sapmak yanlis olurdu.
-      er.textContent = e.message || "Sipariş oluşturulamadı.";
+      er.textContent = e.message || ceviri("b_siparis_olusturulamadi");
       if (btn) { btn.disabled = false; btn.textContent = ceviri("mg_submit"); }
     }
   }
@@ -1613,7 +1671,7 @@
       return;
     }
 
-    view.innerHTML = '<div class="wrap" style="padding:28px 0"><p class="muted">Ödeme hazırlanıyor…</p></div>';
+    view.innerHTML = '<div class="wrap" style="padding:28px 0"><p class="muted">' + ceviri("b_odeme_hazirlaniyor") + '</p></div>';
 
     // Adresler + magaza kredisi paralel
     var addrs = [], credit = 0;
@@ -1651,49 +1709,49 @@
 
     var addrOpts = checkoutState.addresses.map(function (a) {
       return '<option value="' + a.id + '"' + (a.id === checkoutState.addrId ? " selected" : "") + ">" +
-        esc(a.title || a.full_name || ("Adres #" + a.id)) + " · " + esc(a.city || "") + "</option>";
+        esc(a.title || a.full_name || (ceviri("b_adres_diyez") + a.id)) + " · " + esc(a.city || "") + "</option>";
     }).join("");
 
     view.innerHTML =
       '<div class="wrap" style="padding:28px 0;max-width:720px">' +
-      "<h2>Ödeme</h2>" +
+      "<h2>" + ceviri("b_h_odeme") + "</h2>" +
 
       '<div class="panel" style="margin-top:16px"><h3>Teslimat adresi</h3>' +
       (checkoutState.addresses.length
         ? '<select id="coAddr" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px">' + addrOpts + "</select>"
-        : '<p class="muted" style="font-size:13px">Kayıtlı adresin yok, aşağıdan ekle.</p>') +
-      '<button class="btn ghost sm" id="coNewAddr" style="margin-top:10px">+ Yeni adres</button>' +
+        : '<p class="muted" style="font-size:13px">' + ceviri("b_adres_yok_ekle") + '</p>') +
+      '<button class="btn ghost sm" id="coNewAddr" style="margin-top:10px">' + ceviri("b_yeni_adres") + '</button>' +
       '<div id="coAddrForm" style="display:none;margin-top:12px"></div>' +
       "</div>" +
 
-      '<div class="panel"><h3>Sipariş özeti</h3>' + items.join("") +
+      '<div class="panel"><h3>' + ceviri("b_h_siparis_ozeti") + '</h3>' + items.join("") +
       '<div style="border-top:1px solid #e8e4de;margin-top:10px;padding-top:10px;font-size:13px">' +
-      '<div style="display:flex;justify-content:space-between"><span>Ara toplam</span><span>' + money(sub) + "</span></div>" +
+      '<div style="display:flex;justify-content:space-between"><span>' + ceviri("b_ara_toplam") + '</span><span>' + money(sub) + "</span></div>" +
       (disc > 0 ? '<div style="display:flex;justify-content:space-between;color:#0f6e56"><span>Kupon indirimi</span><span>-' + money(disc) + "</span></div>" : "") +
-      '<div style="display:flex;justify-content:space-between"><span>Kargo' + (ship === 0 ? " (ücretsiz)" : "") + "</span><span>" + money(ship) + "</span></div>" +
-      (credUse > 0 ? '<div style="display:flex;justify-content:space-between;color:#0f6e56"><span>Mağaza kredisi</span><span>-' + money(credUse) + "</span></div>" : "") +
-      '<div style="display:flex;justify-content:space-between;font-weight:600;font-size:15px;margin-top:8px"><span>Toplam</span><span id="coTotal">' + money(total) + "</span></div>" +
+      '<div style="display:flex;justify-content:space-between"><span>' + ceviri("b_kargo") + (ship === 0 ? ceviri("b_ucretsiz") : "") + "</span><span>" + money(ship) + "</span></div>" +
+      (credUse > 0 ? '<div style="display:flex;justify-content:space-between;color:#0f6e56"><span>' + ceviri("b_magaza_kredisi") + '</span><span>-' + money(credUse) + "</span></div>" : "") +
+      '<div style="display:flex;justify-content:space-between;font-weight:600;font-size:15px;margin-top:8px"><span>' + ceviri("b_toplam") + '</span><span id="coTotal">' + money(total) + "</span></div>" +
       "</div></div>" +
 
-      '<div class="panel"><h3>Kupon</h3>' +
-      '<div style="display:flex;gap:8px"><input id="coCoupon" placeholder="Kupon kodu" style="flex:1;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px" value="' +
+      '<div class="panel"><h3>' + ceviri("b_kupon") + '</h3>' +
+      '<div style="display:flex;gap:8px"><input id="coCoupon" placeholder=ceviri("b_kupon_kodu") style="flex:1;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px" value="' +
       (checkoutState.coupon ? esc(checkoutState.coupon.code) : "") + '">' +
       '<button class="btn ghost" id="coCouponGo">Uygula</button></div>' +
       '<div id="coCouponMsg" style="font-size:12px;margin-top:6px"></div></div>' +
 
       (checkoutState.credit > 0
-        ? '<div class="panel"><h3>Mağaza kredisi</h3>' +
+        ? '<div class="panel"><h3>' + ceviri("b_magaza_kredisi") + '</h3>' +
           '<p class="muted" style="font-size:13px">Bakiyen: ' + money(checkoutState.credit) + "</p>" +
           '<label style="display:flex;align-items:center;gap:8px;margin-top:8px">' +
           '<input type="checkbox" id="coUseCredit"' + (checkoutState.useCredit > 0 ? " checked" : "") + "> Bakiyeyi kullan</label></div>"
         : "") +
 
-      '<div class="panel"><h3>Ödeme yöntemi</h3>' +
+      '<div class="panel"><h3>' + ceviri("b_h_odeme_yontemi") + '</h3>' +
       '<label style="display:flex;align-items:center;gap:8px"><input type="radio" name="coPay" value="card"' +
-      (checkoutState.method === "card" ? " checked" : "") + "> Kredi/banka kartı (güvenli ödeme sayfası)</label>" +
+      (checkoutState.method === "card" ? " checked" : "") + "> " + ceviri("b_kart_guvenli") + "</label>" +
       '<label style="display:flex;align-items:center;gap:8px;margin-top:6px"><input type="radio" name="coPay" value="cod"' +
-      (checkoutState.method === "cod" ? " checked" : "") + "> Kapıda ödeme</label>" +
-      '<p class="muted" style="font-size:12px;margin-top:8px">Kart bilgilerin bize hiç gelmez; ödeme sağlayıcının kendi sayfasında alınır.</p>' +
+      (checkoutState.method === "cod" ? " checked" : "") + "> " + ceviri("b_kapida_odeme") + "</label>" +
+      '<p class="muted" style="font-size:12px;margin-top:8px">' + ceviri("b_kart_bize_gelmez") + '</p>' +
       "</div>" +
 
       '<button class="btn" id="coSubmit" style="width:100%;padding:13px">' + esc(ceviri("place_order_btn")) + "</button>" +
@@ -1725,12 +1783,12 @@
     if (box.style.display !== "none") { box.style.display = "none"; return; }
     box.style.display = "";
     box.innerHTML =
-      '<input id="adTitle" placeholder="Adres başlığı (Ev/İş)" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
-      '<input id="adName" placeholder="Ad Soyad" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
-      '<input id="adPhone" placeholder="Telefon" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
-      '<input id="adCity" placeholder="İl" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
-      '<input id="adDistrict" placeholder="İlçe" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
-      '<textarea id="adFull" rows="2" placeholder="Açık adres" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px"></textarea>' +
+      '<input id="adTitle" placeholder=ceviri("b_adres_basligi") style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
+      '<input id="adName" placeholder=ceviri("b_ad_soyad") style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
+      '<input id="adPhone" placeholder=ceviri("b_telefon") style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
+      '<input id="adCity" placeholder=ceviri("b_il") style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
+      '<input id="adDistrict" placeholder=ceviri("b_ilce") style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
+      '<textarea id="adFull" rows="2" placeholder=ceviri("b_acik_adres") style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px"></textarea>' +
       '<button class="btn sm" id="adSave">Adresi kaydet</button>' +
       '<div id="adErr" style="color:#a32d2d;font-size:12px;margin-top:6px"></div>';
     document.getElementById("adSave").onclick = async function () {
@@ -1763,12 +1821,12 @@
       checkoutState.coupon = d ? Object.assign({ code: code }, d) : null;
       drawCheckout();
       var m2 = document.getElementById("coCouponMsg");
-      if (m2) { m2.style.color = "#0f6e56"; m2.textContent = "Kupon uygulandı."; }
+      if (m2) { m2.style.color = "#0f6e56"; m2.textContent = ceviri("b_kupon_uygulandi"); }
     } catch (e) {
       checkoutState.coupon = null;
       drawCheckout();
       var m3 = document.getElementById("coCouponMsg");
-      if (m3) { m3.style.color = "#a32d2d"; m3.textContent = e.message || "Kupon geçersiz"; }
+      if (m3) { m3.style.color = "#a32d2d"; m3.textContent = e.message || ceviri("b_kupon_gecersiz"); }
     }
   }
 
@@ -1820,7 +1878,7 @@
     var no = (order && order.order_number) ? String(order.order_number).trim() : "";
     if (no) return no;
     var ref = orderId || (order && order.id) || "-";
-    return "e-postanla paylaşılacak (referans: " + ref + ")";
+    return ceviri("b_eposta_paylasilacak") + ref + ")";
   }
 
   async function submitOrder() {
@@ -1830,8 +1888,8 @@
     checkoutIstekIdSepeteGoreTazele();   // MFIX-1/F-M3f: sepet degistiyse YENI anahtar
     var _zatenVarMesaji = "";            // MFIX-1/F-M3f: catch dalinda da gorulsun
     var items = cartItemsPayload();
-    if (!items.length) { checkoutHatasiYaz("Sepet boş."); return; }
-    if (!checkoutState.addrId && checkoutState.addresses.length) { checkoutHatasiYaz("Adres seç."); return; }
+    if (!items.length) { checkoutHatasiYaz(ceviri("b_sepet_bos_nokta")); return; }
+    if (!checkoutState.addrId && checkoutState.addresses.length) { checkoutHatasiYaz(ceviri("b_adres_sec")); return; }
 
     // BEDENSIZ GIYIM KALEMI: sunucu stok satirini beden ile bulur, "" hicbir satirla
     // eslesmez ve siparis "stok yetersiz" ile duser. Kullaniciyi checkout'un ortasinda
@@ -1843,7 +1901,7 @@
       var adlar = bedensiz.map(function (it) {
         var p = window.byId(it.product_id); return p ? p.name : ("#" + it.product_id);
       }).join(", ");
-      checkoutHatasiYaz("Beden seçilmemiş ürün var: " + adlar + ". Sepetten beden seçip tekrar dene.");
+      checkoutHatasiYaz(ceviri("b_bedensiz_urun") + adlar + ceviri("b_sepetten_beden_sec"));
       return;
     }
 
@@ -1874,7 +1932,7 @@
       var orderNo = (order && order.order_number) ? String(order.order_number) : "";
       if (zatenVar) {
         var _no = orderNo || String(orderId);
-        _zatenVarMesaji = "Bu sipariş zaten oluşturulmuştu (sipariş no: " + _no + "). YENİ bir sipariş oluşturulmadı.";
+        _zatenVarMesaji = ceviri("b_siparis_zaten") + _no + ceviri("b_yeni_siparis_yok");
         checkoutHatasiYaz(_zatenVarMesaji);
       }
       try { sessionStorage.setItem("divisima_last_order", String(orderId)); } catch (e) {}
@@ -1888,7 +1946,7 @@
       }
 
       var pay = unwrap(await api.payment.initialize(orderId));
-      if (!pay || !pay.checkout_form_content) throw new Error("Ödeme formu alınamadı.");
+      if (!pay || !pay.checkout_form_content) throw new Error(ceviri("b_odeme_formu_alinamadi"));
 
       // GOZ-FIX / F-Ö2: "GORUNUR BIR SEY GELDI MI" KONTROLU.
       // OLCULDU: Iyzico mock modunda (Iyzico:UseRealSdk=false) uc HTTP 200 doner ama govde
@@ -1902,10 +1960,10 @@
         // gelmezse UYDURULMAZ, durustce referans olarak yazilir.
         var _n2 = orderNo || orderId;
         checkoutHatasiYaz(
-          "Ödeme sağlayıcısı şu an ödeme formunu döndürmedi (test/mock modu olabilir). " +
-          "Siparişin " + _n2 + " numarasıyla ÖDENMEMİŞ olarak duruyor. " +
-          "Kapıda ödeme ile devam edebilir ya da daha sonra tekrar deneyebilirsin.");
-        notify(ceviri("err_pay_form"));
+          ceviri("b_saglayici_form_yok") +
+          ceviri("b_siparisin") + _n2 + ceviri("b_odenmemis_duruyor") +
+          ceviri("b_kapida_devam"));
+        notify(ceviri("err_pay_form"),'err');
         return;
       }
       embedCheckoutForm(pay.checkout_form_content);
@@ -1915,16 +1973,16 @@
       // auth/refresh 401). Teknik mesaj yerine ne yapmasi gerektigi soylenir.
       if (e && e.status === 401) {
         checkoutHatasiYaz(ceviri("err_session"));
-        notify(ceviri("err_session"));
+        notify(ceviri("err_session"),'err');
         setTimeout(function () { location.hash = "#/giris"; }, 1200);
       } else if (_zatenVarMesaji) {
         // MFIX-1 / F-M3f: siparis ZATEN vardi ve odeme baslatma da dustu. Kullaniciya
         // ONCE "yeni siparis olusmadi" bilgisi verilir - saglayicinin teknik metni
         // ("zaten bekleyen bir odeme var") tek basina birakilirsa kullanici yine
         // tekrar dener ve neden bir sey olmadigini ANLAMAZ.
-        checkoutHatasiYaz(_zatenVarMesaji + " Ödeme şu an başlatılamıyor; kapıda ödeme ile devam edebilir ya da daha sonra tekrar deneyebilirsin.");
+        checkoutHatasiYaz(_zatenVarMesaji + ceviri("b_odeme_baslatilamiyor"));
       } else {
-        checkoutHatasiYaz(e && e.message ? e.message : "Sipariş oluşturulamadı");
+        checkoutHatasiYaz(e && e.message ? e.message : ceviri("b_siparis_olusturulamadi_b"));
       }
     } finally {
       // Dugme HER durumda eski haline doner - asili kalmaz.
@@ -2008,7 +2066,7 @@
     // detailCache yuzunden zaten yeniden istenir.
     if (ok) katalogTazele();
 
-    view.innerHTML = '<div class="wrap" style="padding:40px 0;max-width:640px"><p class="muted">Yükleniyor…</p></div>';
+    view.innerHTML = '<div class="wrap" style="padding:40px 0;max-width:640px"><p class="muted">' + ceviri("b_yukleniyor") + '</p></div>';
 
     var order = null;
     if (orderId) { try { order = unwrap(await api.orders.get(orderId)); } catch (e) { order = null; } }
@@ -2033,18 +2091,18 @@
           "<span>" + money(it.line_total) + "</span></div>";
       }).join("");
 
-      ozet = '<div class="panel" style="text-align:left"><h3>Sipariş özeti</h3>' +
-        '<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0"><span>Sipariş no</span><span>' +
+      ozet = '<div class="panel" style="text-align:left"><h3>' + ceviri("b_h_siparis_ozeti") + '</h3>' +
+        '<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0"><span>' + ceviri("b_siparis_no_etiket") + '</span><span>' +
         esc(siparisNoMetni(order, orderId)) + "</span></div>" +
         kalemler +
-        '<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0"><span>Kargo</span><span>' +
+        '<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0"><span>' + ceviri("b_kargo") + '</span><span>' +
         money(order.shipping_cost) + "</span></div>" +
-        '<div style="display:flex;justify-content:space-between;font-size:14px;font-weight:600;padding:6px 0;border-top:1px solid #e8e4de;margin-top:6px"><span>Toplam</span><span>' +
+        '<div style="display:flex;justify-content:space-between;font-size:14px;font-weight:600;padding:6px 0;border-top:1px solid #e8e4de;margin-top:6px"><span>' + ceviri("b_toplam") + '</span><span>' +
         money(toplam) + "</span></div>" +
         '<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0"><span>Durum</span><span>' +
         esc(String(durum)) + "</span></div></div>";
     } else if (orderId) {
-      ozet = '<p class="muted" style="font-size:13px">Sipariş #' + orderId + " detayına şu an ulaşılamadı.</p>";
+      ozet = '<p class="muted" style="font-size:13px">' + ceviri("b_siparis_diyez") + orderId + ceviri("b_detay_ulasilamadi") + "</p>";
     }
 
     // ══ A3 HIBRIT - MISAFIR SONUC EKRANI ═══════════════════════════════════════════════════
@@ -2064,11 +2122,14 @@
       // MFIX-B / K3: numara ARTIK siparis yanitindan geliyor ve URL ile buraya tasiniyor.
       // Gelmezse eski durust hal korunur - UYDURULMAZ.
       var misafirNo = String(params.no || "").trim();
-      ozet = '<div class="panel" style="text-align:left"><h3>Sipariş kaydın alındı</h3>'
+      /* MFIX-3b/(5a) ONARIM: bu cumlede "Şifremi unuttum" TIRNAK ICINDE bir ALINTIYDI ve
+         duz-metin degistirmesi onu yanlislikla kod gibi ele almisti. Cumle artik TEK
+         anahtarla ceviriliyor; alinti isaretleri cevirinin ICINDE. */
+      ozet = '<div class="panel" style="text-align:left"><h3>' + ceviri("b_h_siparis_kaydi") + '</h3>'
         + (misafirNo
-            ? '<p class="muted" style="font-size:13px;margin:6px 0 4px">Sipariş numaran:</p><p style="font-weight:600;margin:0 0 12px">' + esc(misafirNo) + '</p>'
-            : '<p class="muted" style="font-size:13px;margin:6px 0 10px">Sipariş numaran e-postanla paylaşılacak.</p><p class="muted" style="font-size:12px;margin:0 0 12px">Referans: ' + orderId + '</p>')
-        + '<p class="muted" style="font-size:13px;margin:0">Siparişini takip edebilmek için hesabına bir şifre belirle: e-postandaki doğrulama bağlantısına tıkla, sonra Giriş ekranındaki "Şifremi unuttum" adımıyla şifreni oluştur.</p></div>';
+            ? '<p class="muted" style="font-size:13px;margin:6px 0 4px">' + ceviri("b_siparis_numaran") + '</p><p style="font-weight:600;margin:0 0 12px">' + esc(misafirNo) + '</p>'
+            : '<p class="muted" style="font-size:13px;margin:6px 0 10px">' + ceviri("b_no_epostayla") + '</p><p class="muted" style="font-size:12px;margin:0 0 12px">' + ceviri("b_referans") + orderId + '</p>')
+        + '<p class="muted" style="font-size:13px;margin:0">' + ceviri("b_misafir_sifre_belirle") + '</p></div>';
     }
 
     view.innerHTML =
@@ -2083,7 +2144,7 @@
       (misafirMi ? '<a class="btn" href="#/giris">' + esc(ceviri("set_pass")) + "</a>"
                  : '<a class="btn" href="#/hesabim/siparislerim">' + esc(ceviri("go_orders")) + "</a>") +
       (ok ? '<a class="btn ghost" href="#/kategori/tumu">' + esc(ceviri("shop_continue")) + "</a>"
-          : '<a class="btn ghost" href="#/odeme">Tekrar dene</a>') +
+          : '<a class="btn ghost" href="#/odeme">' + ceviri("b_tekrar_dene_btn") + '</a>') +
       "</div></div>";
 
     if (ok && window.cart && window.cart.size) {
@@ -2223,7 +2284,7 @@
   function guvenliYaz(el, ham, hataMetni) {
     var temiz = guvenliHTML(ham);
     if (temiz === null) {
-      el.innerHTML = '<p class="muted">' + (hataMetni || "İçerik güvenli şekilde gösterilemedi.") + "</p>";
+      el.innerHTML = '<p class="muted">' + (hataMetni || ceviri("b_icerik_gosterilemedi")) + "</p>";
       return false;
     }
     el.innerHTML = temiz;
@@ -2248,25 +2309,32 @@
   // Once sunucunun verdigi ad, yoksa katalog, o da yoksa kimlik. Hicbir asamada UYDURMA ad yok.
   function urunAdi(pid, sunucuAdi) {
     if (sunucuAdi) return sunucuAdi;
-    try { var p = (typeof byId === "function") ? byId(pid) : null; if (p) return (typeof nameOf === "function") ? nameOf(p) : (p.name || ("Ürün #" + pid)); } catch (_) { }
-    return "Ürün #" + pid;
+    try { var p = (typeof byId === "function") ? byId(pid) : null; if (p) return (typeof nameOf === "function") ? nameOf(p) : (p.name || (ceviri("b_urun_no") + pid)); } catch (_) { }
+    return ceviri("b_urun_no") + pid;
   }
-  function trTarih(iso) {
+  // MFIX-3b/(5b): TARIH BICIMI DILE BAGLI. Ad "trTarih" idi ve SABIT tr-TR kullaniyordu -
+  // kabul turunda EN/AR modda "28 Ağustos 2026" olarak kalmasinin sebebi buydu.
+  // Locale TEK KAYNAKTAN gelir (index.html dvsLocale); o yoksa tr-TR yedegi kalir.
+  function tarihBicimi(iso) {
     if (!iso) return "—";
-    try { return new Date(iso).toLocaleDateString("tr-TR", { day: "2-digit", month: "long", year: "numeric" }); }
+    var loc = (typeof window.dvsLocale === "function") ? window.dvsLocale() : "tr-TR";
+    try { return new Date(iso).toLocaleDateString(loc, { day: "2-digit", month: "long", year: "numeric" }); }
     catch (_) { return String(iso).slice(0, 10); }
   }
+  // Eski ad KORUNUYOR: bu dosyada 20+ cagri yeri var ve hepsini yeniden adlandirmak
+  // dalganin kapsamini gereksiz buyuturdu. Davranis TEK yerden degisti.
+  var trTarih = tarihBicimi;
   // LAUNCH-FIX A4: money() ile AYNI gerekce - bicim tek kaynaktan (index.html tl()).
   function paraTL(n) {
     if (typeof window.tl === "function") { try { return window.tl(Number(n) || 0); } catch (_) { } }
-    return (Number(n) || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " TL";
+    return (Number(n) || 0).toLocaleString((typeof window.dvsLocale === "function") ? window.dvsLocale() : "tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " TL";
   }
   function bosDurum(metin, ctaMetin, ctaHref) {
     return '<div class="wrap" style="padding:24px 0"><p class="muted" style="margin:0 0 14px">' + esc(metin) + "</p>" +
       (ctaMetin ? '<a class="btn" href="' + ctaHref + '">' + esc(ctaMetin) + "</a>" : "") + "</div>";
   }
   function yukleniyor(metin) {
-    return '<div class="wrap" style="padding:24px 0"><p class="muted">' + esc(metin || "Yükleniyor…") + "</p></div>";
+    return '<div class="wrap" style="padding:24px 0"><p class="muted">' + esc(metin || ceviri("b_yukleniyor")) + "</p></div>";
   }
 
   // IADE UYGUNLUGU - backend kurali BIREBIR yansitilir (ReturnManager.cs:22,59,64-66):
@@ -2275,12 +2343,12 @@
   var IADE_PENCERESI_GUN = 14;
   function iadeUygunlugu(siparis) {
     if (siparis.order_status !== "Delivered")
-      return { uygun: false, sebep: "İade talebi yalnızca teslim edilmiş siparişler için açılabilir." };
+      return { uygun: false, sebep: ceviri("b_iade_yalniz_teslim") };
     var taban = siparis.delivered_at || siparis.created_at;
     var son = new Date(taban);
     son.setDate(son.getDate() + IADE_PENCERESI_GUN);
     if (son < new Date())
-      return { uygun: false, sebep: "İade süresi doldu (teslimden sonra " + IADE_PENCERESI_GUN + " gün)." };
+      return { uygun: false, sebep: ceviri("b_iade_suresi_doldu") + IADE_PENCERESI_GUN + ceviri("b_gun_kapanis") };
     return { uygun: true, sonTarih: son };
   }
 
@@ -2290,16 +2358,16 @@
       var s = unwrap(await api.account.summary());
       el.innerHTML =
         '<div class="acc-tiles">' +
-        '<div class="acc-tile"><div class="at-head"><b>Sadakat puanı</b></div><p style="font-size:22px;margin:6px 0">' + (s.loyalty_points || 0) + "</p></div>" +
-        '<div class="acc-tile"><div class="at-head"><b>Mağaza kredisi</b></div><p style="font-size:22px;margin:6px 0">' + paraTL(s.store_credit) + "</p></div>" +
+        '<div class="acc-tile"><div class="at-head"><b>' + ceviri("b_sadakat_puani") + '</b></div><p style="font-size:22px;margin:6px 0">' + (s.loyalty_points || 0) + "</p></div>" +
+        '<div class="acc-tile"><div class="at-head"><b>' + ceviri("b_magaza_kredisi") + '</b></div><p style="font-size:22px;margin:6px 0">' + paraTL(s.store_credit) + "</p></div>" +
         '<div class="acc-tile"><div class="at-head"><b>Referans kodun</b></div><p style="font-size:18px;margin:6px 0">' + esc(s.referral_code || "—") + "</p></div>" +
         "</div>" +
-        '<div class="acc-tile" style="margin-top:14px"><div class="at-head"><b>Hesap</b></div>' +
+        '<div class="acc-tile" style="margin-top:14px"><div class="at-head"><b>' + ceviri("b_hesap") + '</b></div>' +
         "<p>" + esc(s.name || "") + " · " + esc(s.email || "") + (s.phone ? " · " + esc(s.phone) : "") + "</p>" +
-        '<p class="muted">E-posta doğrulaması: ' + (s.email_verified ? "yapıldı" : "bekliyor") +
-        " · İki adımlı doğrulama: " + (s.two_factor_enabled ? "açık" : "kapalı") + "</p></div>";
+        '<p class="muted">' + ceviri("b_eposta_dogrulamasi") + (s.email_verified ? ceviri("b_yapildi") : "bekliyor") +
+        ceviri("b_iki_adimli") + (s.two_factor_enabled ? ceviri("b_acik") : ceviri("b_kapali")) + "</p></div>";
     } catch (e) {
-      el.innerHTML = bosDurum("Hesap özeti alınamadı: " + (e && e.message ? e.message : "bilinmeyen hata"));
+      el.innerHTML = bosDurum(ceviri("b_ozet_alinamadi") + (e && e.message ? e.message : "bilinmeyen hata"));
     }
   }
 
@@ -2321,7 +2389,7 @@
           "</div>";
       }).join("");
     } catch (e) {
-      el.innerHTML = bosDurum("Siparişler alınamadı: " + (e && e.message ? e.message : "bilinmeyen hata"));
+      el.innerHTML = bosDurum(ceviri("b_siparisler_alinamadi") + (e && e.message ? e.message : "bilinmeyen hata"));
     }
   }
 
@@ -2336,7 +2404,7 @@
       var d = unwrap(await api.orders.get(orderId)) || {};
       var kalemler = d.items || d.order_items || [];
       var satirlar = kalemler.map(function (k) {
-        var ad = k.product_name || k.name || ("Ürün #" + (k.product_id || "?"));
+        var ad = k.product_name || k.name || (ceviri("b_urun_no") + (k.product_id || "?"));
         return '<div class="od-row"><div class="od-info"><b>' + esc(ad) + "</b>" +
           "<span>" + esc(k.size || "") + (k.quantity ? " · " + k.quantity + " adet" : "") + "</span></div>" +
           '<div class="od-price">' + paraTL(k.unit_price != null ? k.unit_price : k.price) + "</div></div>";
@@ -2351,7 +2419,7 @@
             '<span class="muted"> · ' + trTarih(a.created_at) + (not ? " · " + esc(not) : "") + "</span></div>";
         }).join("") + "</div>";
       } catch (_) {
-        cizelge = '<p class="muted">Takip bilgisi alınamadı.</p>';
+        cizelge = '<p class="muted">' + ceviri("b_takip_alinamadi") + '</p>';
       }
 
       // ══ DALGA B / B4 - KARGO TAKIP NUMARASI MUSTERIYE GOSTERILIR ═════════════════════
@@ -2368,7 +2436,7 @@
       try {
         var kg = unwrap(await api.shipment.track(orderId));
         if (kg && kg.tracking_number) {
-          kargoBlok = '<div class="od-row"><div class="od-info"><b>Kargo</b><span>' +
+          kargoBlok = '<div class="od-row"><div class="od-info"><b>' + ceviri("b_kargo") + '</b><span>' +
             esc(kg.carrier_name || "") + " · Takip no: " + esc(kg.tracking_number) +
             (kg.status_name ? " · " + esc(kg.status_name) : "") + "</span></div></div>";
         }
@@ -2380,11 +2448,11 @@
         : '<p class="muted" style="margin:8px 0 0">' + esc(uygun.sebep) + "</p>";
 
       kutu.innerHTML = cizelge + kargoBlok + satirlar +
-        '<div class="od-sum"><span>Toplam</span><b>' + paraTL(d.total) + "</b></div>" +
+        '<div class="od-sum"><span>' + ceviri("b_toplam") + '</span><b>' + paraTL(d.total) + "</b></div>" +
         '<div class="ao-actions" style="margin-top:10px">' +
         '<button class="ao-btn" data-fatura="' + orderId + '">' + esc(ceviri("inv_view")) + "</button>" + iadeBlok + "</div>";
     } catch (e) {
-      kutu.innerHTML = '<p class="muted">Detay alınamadı: ' + esc(e && e.message ? e.message : "hata") + "</p>";
+      kutu.innerHTML = '<p class="muted">' + ceviri("b_detay_alinamadi") + esc(e && e.message ? e.message : "hata") + "</p>";
     }
   }
 
@@ -2392,51 +2460,51 @@
     try {
       var liste = unwrap(await api.returns.my()) || [];
       if (!liste.length) {
-        el.innerHTML = bosDurum("Henüz iade talebin yok. Teslim edilmiş bir siparişin detayından iade talebi oluşturabilirsin.",
+        el.innerHTML = bosDurum(ceviri("b_iade_yok"),
           ceviri("go_orders"), "#/hesabim/siparislerim");
         return;
       }
       el.innerHTML = '<div class="acc-tiles">' + liste.map(function (r) {
-        return '<div class="acc-tile"><div class="at-head"><b>Sipariş ' + esc(String(r.order_number || ("#" + (r.order_id || "")))) + "</b>" +
+        return '<div class="acc-tile"><div class="at-head"><b>' + ceviri("b_at_siparis") + esc(String(r.order_number || ("#" + (r.order_id || "")))) + "</b>" +
           '<span class="at-def">' + esc(iadeDurumEtiket(r.status_name)) + "</span></div>" +
           "<p>" + esc(urunAdi(r.product_id, r.product_name)) + " · " + esc(r.size || "") +
           " · " + (r.quantity || 1) + " adet</p>" +
           '<p class="muted">' + trTarih(r.created_at) + (r.refund_amount != null ? " · " + paraTL(r.refund_amount) : "") + "</p></div>";
       }).join("") + "</div>";
     } catch (e) {
-      el.innerHTML = bosDurum("İadeler alınamadı: " + (e && e.message ? e.message : "bilinmeyen hata"));
+      el.innerHTML = bosDurum(ceviri("b_iadeler_alinamadi") + (e && e.message ? e.message : "bilinmeyen hata"));
     }
   }
 
   async function sekmeFaturalar(el) {
     try {
       var liste = unwrap(await api.invoices.my()) || [];
-      if (!liste.length) { el.innerHTML = bosDurum("Henüz faturan yok."); return; }
+      if (!liste.length) { el.innerHTML = bosDurum(ceviri("b_fatura_yok")); return; }
       el.innerHTML = '<div class="acc-tiles">' + liste.map(function (f) {
         return '<div class="acc-tile"><div class="at-head"><b>' + esc(f.invoice_number || ("#" + f.id)) + "</b></div>" +
           "<p>" + paraTL(f.total) + " · " + trTarih(f.created_at || f.issued_at) + "</p>" +
           '<div class="ao-actions"><button class="ao-btn" data-fatura="' + (f.order_id || "") + '">' + esc(ceviri("view_btn")) + "</button></div></div>";
       }).join("") + "</div>";
     } catch (e) {
-      el.innerHTML = bosDurum("Faturalar alınamadı: " + (e && e.message ? e.message : "bilinmeyen hata"));
+      el.innerHTML = bosDurum(ceviri("b_faturalar_alinamadi") + (e && e.message ? e.message : "bilinmeyen hata"));
     }
   }
 
   async function sekmeAdresler(el) {
     try {
       var liste = unwrap(await api.address.list()) || [];
-      var form = '<div class="ao-actions" style="margin-bottom:12px"><button class="ao-btn primary" data-adres-yeni>+ Yeni adres</button></div>';
-      if (!liste.length) { el.innerHTML = form + bosDurum("Kayıtlı adresin yok."); return; }
+      var form = '<div class="ao-actions" style="margin-bottom:12px"><button class="ao-btn primary" data-adres-yeni>' + ceviri("b_yeni_adres") + '</button></div>';
+      if (!liste.length) { el.innerHTML = form + bosDurum(ceviri("b_kayitli_adres_yok")); return; }
       el.innerHTML = form + '<div class="acc-tiles">' + liste.map(function (a) {
         return '<div class="acc-tile"><div class="at-head"><b>' + esc(a.title) + "</b>" +
-          (a.is_default ? '<span class="at-def">Varsayılan</span>' : "") + "</div>" +
+          (a.is_default ? '<span class="at-def">' + ceviri("b_varsayilan") + '</span>' : "") + "</div>" +
           "<p>" + esc(a.full_name) + (a.phone ? " · " + esc(a.phone) : "") + "</p>" +
           "<p>" + esc(a.city) + " / " + esc(a.district) + "</p>" +
           '<p class="muted">' + esc(a.full_address) + "</p>" +
           '<div class="ao-actions"><button class="ao-btn" data-adres-sil="' + a.id + '">Sil</button></div></div>';
       }).join("") + "</div>";
     } catch (e) {
-      el.innerHTML = bosDurum("Adresler alınamadı: " + (e && e.message ? e.message : "bilinmeyen hata"));
+      el.innerHTML = bosDurum(ceviri("b_adresler_alinamadi") + (e && e.message ? e.message : "bilinmeyen hata"));
     }
   }
 
@@ -2446,8 +2514,8 @@
   function sekmeKartlar(el) {
     el.innerHTML = '<div class="wrap" style="padding:24px 0"><p class="muted" style="margin:0 0 8px">' +
       "Kart bilgilerin Divisima'da saklanmaz." + "</p>" +
-      '<p class="muted">Ödeme sırasında kartın, ödeme sağlayıcının kendi güvenli sayfasında alınır; ' +
-      "bize hiçbir zaman ulaşmaz.</p></div>";
+      '<p class="muted">' + ceviri("b_kart_saglayici_sayfasi") +
+      ceviri("b_kart_ulasmaz") + "</p></div>";
   }
 
   // ── Fatura goruntuleme (sunucu HTML'i -> DOMPurify -> modal) ───────────────
@@ -2465,7 +2533,7 @@
     m.innerHTML = '<div style="background:#fff;color:#111;max-width:860px;width:100%;max-height:88vh;overflow:auto;border-radius:10px;padding:18px">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px">' +
       "<b>Fatura</b><button id=\"e3FaturaKapat\" class=\"btn ghost\">Kapat</button></div>" +
-      '<div id="e3FaturaGovde">Yükleniyor…</div></div>';
+      '<div id="e3FaturaGovde">' + ceviri("b_yukleniyor") + '</div></div>';
     document.body.appendChild(m);
     m.querySelector("#e3FaturaKapat").onclick = function () { m.remove(); };
     m.addEventListener("click", function (e) { if (e.target === m) m.remove(); });
@@ -2481,46 +2549,46 @@
       // E3 KAPSAMINDA DUZELTILDI (OrderManager artik "data:" adlandirilmis argumani kullanir);
       // bu dal yine de duruyor - belirsizlik dilde kaldigi icin (Sprint 8 madde 11).
       if (!html || !String(html).trim()) {
-        kutu.innerHTML = '<p class="muted">Fatura içeriği şu an alınamıyor. ' +
-          "Sipariş numaranla müşteri hizmetlerinden fatura talep edebilirsin.</p>";
+        kutu.innerHTML = '<p class="muted">' + ceviri("b_fatura_icerik_yok") +
+          ceviri("b_fatura_musteri_hizmet") + "</p>";
         return;
       }
-      guvenliYaz(kutu, html, "Fatura güvenli şekilde gösterilemedi.");
+      guvenliYaz(kutu, html, ceviri("b_fatura_gosterilemedi"));
     }).catch(function (e) {
-      document.getElementById("e3FaturaGovde").textContent = "Fatura alınamadı: " + (e && e.message ? e.message : "hata");
+      document.getElementById("e3FaturaGovde").textContent = ceviri("b_fatura_alinamadi") + (e && e.message ? e.message : "hata");
     });
   }
 
   // ── Iade talebi formu (siparis detayinin icinde) ───────────────────────────
   var IADE_SEBEPLERI = [
-    [0, "Beden uymadı"], [1, "Ürün beklediğim gibi değil"], [2, "Hatalı/kusurlu ürün"],
-    [3, "Yanlış ürün gönderildi"], [4, "Diğer"]
+    [0, ceviri("b_beden_uymadi")], [1, ceviri("b_ret_beklendigi_gibi")], [2, ceviri("b_ret_hatali_urun")],
+    [3, ceviri("b_ret_yanlis_urun")], [4, ceviri("b_diger")]
   ];
   async function iadeFormuAc(kart, orderId) {
     var kutu = kart.querySelector(".od-detail");
     if (!kutu || kutu.querySelector(".e3-iade-form")) return;
     var d;
     try { d = unwrap(await api.orders.get(orderId)) || {}; }
-    catch (e) { toast(ceviri("err_order_info")); return; }
+    catch (e) { toast(ceviri("err_order_info"),'err'); return; }
     var kalemler = (d.items || d.order_items || []).filter(function (k) { return !k.is_cancelled; });
-    if (!kalemler.length) { toast(ceviri("err_ret_none")); return; }
+    if (!kalemler.length) { toast(ceviri("err_ret_none"),'err'); return; }
 
     var f = document.createElement("div");
     f.className = "e3-iade-form";
     f.style.cssText = "border-top:1px solid rgba(0,0,0,.12);margin-top:12px;padding-top:12px";
     f.innerHTML =
-      "<h4 style=\"margin:0 0 8px\">İade talebi</h4>" +
-      '<label style="display:block;margin-bottom:8px">Ürün<select id="e3IadeKalem" style="width:100%">' +
+      "<h4 style=\"margin:0 0 8px\">" + ceviri("b_h_iade_talebi") + "</h4>" +
+      '<label style="display:block;margin-bottom:8px">' + ceviri("b_urun") + '<select id="e3IadeKalem" style="width:100%">' +
       kalemler.map(function (k, i) {
-        var ad = k.product_name || k.name || ("Ürün #" + k.product_id);
+        var ad = k.product_name || k.name || (ceviri("b_urun_no") + k.product_id);
         return '<option value="' + i + '">' + esc(ad) + " · " + esc(k.size || "") + " · " + (k.quantity || 1) + " adet</option>";
       }).join("") + "</select></label>" +
       '<label style="display:block;margin-bottom:8px">Adet<input id="e3IadeAdet" type="number" min="1" value="1" style="width:100%"></label>' +
       '<label style="display:block;margin-bottom:8px">Sebep<select id="e3IadeSebep" style="width:100%">' +
       IADE_SEBEPLERI.map(function (s) { return '<option value="' + s[0] + '">' + esc(s[1]) + "</option>"; }).join("") + "</select></label>" +
-      '<label style="display:block;margin-bottom:8px">Tür<select id="e3IadeTur" style="width:100%">' +
-      '<option value="0">İade</option><option value="1">Değişim</option></select></label>' +
-      '<label style="display:block;margin-bottom:10px">Açıklama (isteğe bağlı)<textarea id="e3IadeAcik" rows="2" style="width:100%"></textarea></label>' +
+      '<label style="display:block;margin-bottom:8px">' + ceviri("b_tur") + '<select id="e3IadeTur" style="width:100%">' +
+      '<option value="0">' + ceviri("b_iade") + '</option><option value="1">' + ceviri("b_degisim") + '</option></select></label>' +
+      '<label style="display:block;margin-bottom:10px">' + ceviri("b_aciklama_istege") + '<textarea id="e3IadeAcik" rows="2" style="width:100%"></textarea></label>' +
       '<button class="ao-btn primary" id="e3IadeGonder">' + esc(ceviri("ret_send")) + "</button>";
     kutu.appendChild(f);
 
@@ -2538,11 +2606,11 @@
           return_type: +f.querySelector("#e3IadeTur").value,
           description: f.querySelector("#e3IadeAcik").value.trim()
         });
-        toast(ceviri("ok_ret_sent"));
-        f.innerHTML = '<p class="muted">İade talebin oluşturuldu. Durumunu “İadelerim” sekmesinden takip edebilirsin.</p>';
+        toast(ceviri("ok_ret_sent"),'ok');
+        f.innerHTML = '<p class="muted">' + ceviri("b_iade_olusturuldu") + '</p>';
       } catch (e) {
         btn.disabled = false;
-        toast("İade talebi oluşturulamadı: " + (e && e.message ? e.message : "hata"));
+        toast(ceviri("b_iade_olusturulamadi") + (e && e.message ? e.message : "hata"),'err');
       }
     };
   }
@@ -2554,13 +2622,13 @@
     f.className = "e3-adres-form acc-tile";
     f.style.cssText = "margin-bottom:12px";
     f.innerHTML =
-      '<input id="e3AdBaslik" placeholder="Adres başlığı (Ev/İş)" style="width:100%;margin-bottom:6px">' +
-      '<input id="e3AdAd" placeholder="Ad Soyad" style="width:100%;margin-bottom:6px">' +
-      '<input id="e3AdTel" placeholder="Telefon" style="width:100%;margin-bottom:6px">' +
-      '<input id="e3AdIl" placeholder="İl" style="width:100%;margin-bottom:6px">' +
-      '<input id="e3AdIlce" placeholder="İlçe" style="width:100%;margin-bottom:6px">' +
-      '<textarea id="e3AdTam" rows="2" placeholder="Açık adres" style="width:100%;margin-bottom:6px"></textarea>' +
-      '<label style="display:block;margin-bottom:8px"><input type="checkbox" id="e3AdVars"> Varsayılan adresim olsun</label>' +
+      '<input id="e3AdBaslik" placeholder=ceviri("b_adres_basligi") style="width:100%;margin-bottom:6px">' +
+      '<input id="e3AdAd" placeholder=ceviri("b_ad_soyad") style="width:100%;margin-bottom:6px">' +
+      '<input id="e3AdTel" placeholder=ceviri("b_telefon") style="width:100%;margin-bottom:6px">' +
+      '<input id="e3AdIl" placeholder=ceviri("b_il") style="width:100%;margin-bottom:6px">' +
+      '<input id="e3AdIlce" placeholder=ceviri("b_ilce") style="width:100%;margin-bottom:6px">' +
+      '<textarea id="e3AdTam" rows="2" placeholder=ceviri("b_acik_adres") style="width:100%;margin-bottom:6px"></textarea>' +
+      '<label style="display:block;margin-bottom:8px"><input type="checkbox" id="e3AdVars">' + ceviri("b_varsayilan_adres") + '</label>' +
       '<button class="ao-btn primary" id="e3AdKaydet">Adresi kaydet</button>';
     el.insertBefore(f, el.firstChild);
     f.querySelector("#e3AdKaydet").onclick = async function () {
@@ -2574,9 +2642,9 @@
         full_address: f.querySelector("#e3AdTam").value.trim(),
         is_default: f.querySelector("#e3AdVars").checked
       };
-      if (!p.title || !p.city || !p.full_address) { toast(ceviri("err_addr_req")); return; }
-      try { await api.address.upsert(p); toast("Adres kaydedildi."); sekmeAdresler(el); }
-      catch (e) { toast("Adres kaydedilemedi: " + (e && e.message ? e.message : "hata")); }
+      if (!p.title || !p.city || !p.full_address) { toast(ceviri("err_addr_req"),'err'); return; }
+      try { await api.address.upsert(p); toast(ceviri("b_adres_kaydedildi"),'ok'); sekmeAdresler(el); }
+      catch (e) { toast(ceviri("b_adres_kaydedilemedi_i") + (e && e.message ? e.message : "hata"),'err'); }
     };
   }
 
@@ -2601,14 +2669,14 @@
     } catch (e) { hata = (e && e.message) ? e.message : "hata"; }
 
     if (hata) {
-      el.innerHTML = '<p class="muted">Bildirim aboneliklerin şu an alınamıyor (' + esc(hata) + ").</p>";
+      el.innerHTML = '<p class="muted">' + ceviri("b_bildirim_alinamiyor") + esc(hata) + ").</p>";
       return;
     }
 
     var hepsi = stok.concat(fiyat);
     if (!hepsi.length) {
-      el.innerHTML = '<p class="muted">Henüz bildirim aboneliğin yok. Tükenmiş bir bedende ' +
-        "“gelince haber ver”e, favorilerinde de fiyat uyarısı ziline basarak abone olabilirsin.</p>";
+      el.innerHTML = '<p class="muted">' + ceviri("b_bildirim_yok") +
+        ceviri("b_bildirim_nasil") + "</p>";
       return;
     }
 
@@ -2617,10 +2685,10 @@
 
     el.innerHTML = hepsi.map(function (s) {
       var stokMu = s.type === "stock";
-      var ad = s.product_name || ("Ürün #" + s.product_id);
+      var ad = s.product_name || (ceviri("b_urun_no") + s.product_id);
       var ayrinti = stokMu
-        ? (s.size ? "Beden " + esc(s.size) : "Tüm bedenler")
-        : ("Takip fiyatı " + paraTL(s.subscribed_price));
+        ? (s.size ? "Beden " + esc(s.size) : ceviri("b_tum_bedenler"))
+        : (ceviri("b_takip_fiyati") + paraTL(s.subscribed_price));
       // is_notified: bildirim GONDERILMIS demek. Satiri gizlemiyoruz - kullanici "bana haber
       // verilmis mi" sorusunun yanitini gorebilmeli; ama durumu ACIKCA yaziyoruz.
       var durum = s.is_notified
@@ -2628,7 +2696,7 @@
         : '<span class="muted">Bekliyor</span>';
       return '<div class="acc-tile" style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:10px">' +
         "<div><b>" + esc(ad) + "</b><br>" +
-        '<span class="muted">' + (stokMu ? "Stok bildirimi" : "Fiyat uyarısı") + " · " + ayrinti + "</span><br>" +
+        '<span class="muted">' + (stokMu ? ceviri("b_stok_bildirimi") : ceviri("b_fiyat_uyarisi")) + " · " + ayrinti + "</span><br>" +
         durum + "</div>" +
         '<button class="btn ghost" data-bildirim-sil="' + s.id + '" data-bildirim-tur="' +
         (stokMu ? "stock" : "price_drop") + '">' + esc(ceviri("remove")) + "</button></div>";
@@ -2690,15 +2758,15 @@
           var bid = +bs.getAttribute("data-bildirim-sil");
           var tur = bs.getAttribute("data-bildirim-tur");
           var cagri = (tur === "stock") ? api.stockNotification.remove(bid) : api.priceDrop.remove(bid);
-          cagri.then(function () { toast(ceviri("ok_notif_rm")); sekmeBildirimler(el); })
-            .catch(function (er) { toast("Kaldırılamadı: " + (er && er.message ? er.message : "hata")); });
+          cagri.then(function () { toast(ceviri("ok_notif_rm"),'ok'); sekmeBildirimler(el); })
+            .catch(function (er) { toast(ceviri("b_kaldirilamadi") + (er && er.message ? er.message : "hata"),'err'); });
           return;
         }
         var as = e.target.closest("[data-adres-sil]");
         if (as) {
           var aid = +as.getAttribute("data-adres-sil");
-          api.address.remove(aid).then(function () { toast("Adres silindi."); sekmeAdresler(el); })
-            .catch(function (er) { toast("Adres silinemedi: " + (er && er.message ? er.message : "hata")); });
+          api.address.remove(aid).then(function () { toast(ceviri("b_adres_silindi"),'ok'); sekmeAdresler(el); })
+            .catch(function (er) { toast(ceviri("b_adres_silinemedi") + (er && er.message ? er.message : "hata"),'err'); });
           return;
         }
         var fav = e.target.closest("[data-fadd]");
@@ -2727,7 +2795,7 @@
       slug = slug || "mesafeli-satis";
       setView("legal");
       var L = (window.lang === "en") ? "en" : "tr";
-      legalView.innerHTML = '<div class="cat-banner"><div class="wrap"><div class="breadcrumb"><a href="#/">Anasayfa</a> &nbsp;/&nbsp; Sözleşmeler</div>' +
+      legalView.innerHTML = '<div class="cat-banner"><div class="wrap"><div class="breadcrumb"><a href="#/">' + ceviri("b_anasayfa") + '</a> &nbsp;/&nbsp; ' + ceviri("b_sozlesmeler") + '</div>' +
         '<h1 class="serif">…</h1></div></div><section class="wrap legal-wrap"><div class="legal-doc" id="e3LegalGovde">' +
         yukleniyor() + "</div></section>";
 
@@ -2736,14 +2804,14 @@
         var baslik = (L === "en" && c.title_en) ? c.title_en : c.title_tr;
         var govde = (L === "en" && c.body_en) ? c.body_en : c.body_tr;
         var h1 = legalView.querySelector("h1");
-        if (h1) h1.textContent = baslik || "Sözleşme";
+        if (h1) h1.textContent = baslik || ceviri("b_sozlesme");
         var kutu = document.getElementById("e3LegalGovde");
-        if (kutu) guvenliYaz(kutu, govde, "Sözleşme metni güvenli şekilde gösterilemedi.");
-        document.title = (baslik || "Sözleşme") + " · Divisima";
+        if (kutu) guvenliYaz(kutu, govde, ceviri("b_sozlesme_gosterilemedi"));
+        document.title = (baslik || ceviri("b_sozlesme")) + " · Divisima";
       }).catch(function (e) {
         var kutu = document.getElementById("e3LegalGovde");
-        if (kutu) kutu.innerHTML = '<p class="muted">Bu sayfa şu an görüntülenemiyor' +
-          (e && e.status === 404 ? " (içerik bulunamadı)" : "") + ".</p>";
+        if (kutu) kutu.innerHTML = '<p class="muted">' + ceviri("b_sayfa_goruntulenemiyor") +
+          (e && e.status === 404 ? ceviri("b_icerik_yok") : "") + ".</p>";
       });
       window.scrollTo(0, 0);
     };
@@ -2785,15 +2853,15 @@
       var em = inp ? inp.value.trim() : "";
       if (!em || em.indexOf("@") < 1) { if (inp) { inp.style.borderColor = "#b85c5c"; inp.focus(); } return; }
       var pid = window.__e3NotifyPid, size = window.__e3NotifySize;
-      if (!pid) { toast(ceviri("err_prod_info")); return; }
+      if (!pid) { toast(ceviri("err_prod_info"),'err'); return; }
       e.preventDefault(); e.stopPropagation();
       b.disabled = true;
       api.stockNotification.subscribe(pid, size || "", em).then(function () {
-        if (box) box.innerHTML = '<div class="notify-done"><span class="nd-ic">✓</span> Stoğa girince ' + esc(em) + " adresine haber vereceğiz.</div>";
-        toast(ceviri("ok_notify_saved"));
+        if (box) box.innerHTML = '<div class="notify-done"><span class="nd-ic">✓</span>' + ceviri("b_stoga_girince") + esc(em) + ceviri("b_haber_verecegiz") + "</div>";
+        toast(ceviri("ok_notify_saved"),'ok');
       }).catch(function (er) {
         b.disabled = false;
-        toast("Kayıt yapılamadı: " + (er && er.message ? er.message : "hata"));
+        toast(ceviri("b_kayit_yapilamadi") + (er && er.message ? er.message : "hata"),'err');
       });
     }, true);
 
@@ -2822,13 +2890,13 @@
       e.preventDefault(); e.stopPropagation();
       var pid = +pa.getAttribute("data-palert");
       var em = await kullaniciEpostasi();
-      if (!em) { toast(ceviri("err_pa_login")); return; }
-      if (pa.classList.contains("on")) { toast(ceviri("err_pa_dup")); return; }
+      if (!em) { toast(ceviri("err_pa_login"),'info'); return; }
+      if (pa.classList.contains("on")) { toast(ceviri("err_pa_dup"),'info'); return; }
       api.priceDrop.subscribe(pid, em).then(function () {
         pa.classList.add("on");
-        toast(ceviri("ok_pa_set"));
+        toast(ceviri("ok_pa_set"),'ok');
       }).catch(function (er) {
-        toast("Fiyat uyarısı kurulamadı: " + (er && er.message ? er.message : "hata"));
+        toast(ceviri("b_fiyat_uyarisi_kurulamadi") + (er && er.message ? er.message : "hata"),'err');
       });
     }, true);
   }
@@ -2947,41 +3015,41 @@
   }
 
   function sifremiUnuttumEkrani(onDolu) {
-    authKutusu("Şifremi unuttum");
+    authKutusu(ceviri("b_sifremi_unuttum"));
     document.getElementById("dvsAuthGovde").innerHTML =
-      "Hesabının e-posta adresini gir; şifreni sıfırlaman için bir bağlantı gönderelim." +
-      authInput("dvsFpMail", "E-posta", "email") + authBtn("dvsFpGo", "Bağlantı gönder");
+      ceviri("b_sifirlama_aciklama") +
+      authInput("dvsFpMail", "E-posta", "email") + authBtn("dvsFpGo", ceviri("b_baglanti_gonder"));
     if (onDolu) document.getElementById("dvsFpMail").value = onDolu;
     document.getElementById("dvsFpGo").onclick = async function () {
       var er = document.getElementById("dvsAuthErr"); er.textContent = "";
       var mail = (document.getElementById("dvsFpMail").value || "").trim();
-      if (!mail) { er.textContent = "E-posta gir."; return; }
+      if (!mail) { er.textContent = ceviri("b_eposta_gir"); return; }
       try {
         await api.auth.forgotPassword(mail);
         // GUVENLIK-FIX (G2) KALIBI: uc, adresin kayitli olup olmadigini SIZDIRMIYOR (her durumda
         // ayni yanit). Istemci de bu yuzden "gonderildi" diye KESIN konusamaz.
         document.getElementById("dvsAuthGovde").innerHTML =
-          "Bu adres kayıtlıysa şifre sıfırlama bağlantısını gönderdik. Bağlantı 30 dakika geçerli.";
-      } catch (e) { er.textContent = e.message || "Gönderilemedi"; }
+          ceviri("b_sifirlama_gonderildi");
+      } catch (e) { er.textContent = e.message || ceviri("b_gonderilemedi"); }
     };
   }
 
   function sifreSifirlaEkrani(token) {
-    authKutusu("Yeni şifre belirle");
+    authKutusu(ceviri("b_yeni_sifre_belirle"));
     document.getElementById("dvsAuthGovde").innerHTML =
-      "Yeni şifreni gir. Kayıt kuralıyla aynı: en az 8 karakter, bir büyük harf, bir küçük harf ve bir rakam." +
-      (token ? "" : authInput("dvsRpToken", "E-postadaki kod", "text")) +
-      authInput("dvsRpPass", "Yeni şifre", "password") +
-      authInput("dvsRpPass2", "Yeni şifre (tekrar)", "password") +
-      authBtn("dvsRpGo", "Şifreyi güncelle");
+      ceviri("b_sifre_kural_aciklama") +
+      (token ? "" : authInput("dvsRpToken", ceviri("b_epostadaki_kod"), "text")) +
+      authInput("dvsRpPass", ceviri("b_yeni_sifre"), "password") +
+      authInput("dvsRpPass2", ceviri("b_yeni_sifre_tekrar"), "password") +
+      authBtn("dvsRpGo", ceviri("b_sifreyi_guncelle"));
     document.getElementById("dvsRpGo").onclick = async function () {
       var er = document.getElementById("dvsAuthErr"); er.textContent = "";
       var tkEl = document.getElementById("dvsRpToken");
       var tk = token || (tkEl ? (tkEl.value || "").trim() : "");
       var p1 = document.getElementById("dvsRpPass").value || "";
       var p2 = document.getElementById("dvsRpPass2").value || "";
-      if (!tk) { er.textContent = "E-postadaki kodu gir."; return; }
-      if (p1 !== p2) { er.textContent = "İki şifre aynı değil."; return; }
+      if (!tk) { er.textContent = ceviri("b_epostadaki_kod_gir"); return; }
+      if (p1 !== p2) { er.textContent = ceviri("b_iki_sifre_ayni_degil"); return; }
       // ISTEMCI TARAFI POLITIKA - SUNUCUNUN YERINE GECMEZ, ONUNLA AYNI OLMAYA CALISIR.
       // A2-FIX (SUPHELI #21) SONRASI DURUM: sunucu tarafinda kural ARTIK VAR ve DORT ucta da
       // AYNI (Divisima.Core.Security.SifrePolitikasi - register / seller register /
@@ -2992,33 +3060,33 @@
       // harfli bir sifreyi burada reddedip sunucuda kabul ettirebilir. Ters yonde bir bosluk
       // YOK; kritik olan da bu.
       if (p1.length < 8 || !/[A-Z]/.test(p1) || !/[a-z]/.test(p1) || !/[0-9]/.test(p1)) {
-        er.textContent = "Şifre en az 8 karakter olmalı; büyük harf, küçük harf ve rakam içermeli.";
+        er.textContent = ceviri("b_sifre_kurali");
         return;
       }
       try {
         await api.auth.resetPassword({ token: tk, new_password: p1 });
         document.getElementById("dvsAuthGovde").innerHTML =
-          "Şifren güncellendi. Şimdi yeni şifrenle giriş yapabilirsin.";
+          ceviri("b_sifre_guncellendi");
         // Sunucu sifre degisince TUM oturumlari kapatiyor (InvalidateAllForCustomerAsync);
         // istemcideki bayat access token da atilmali - aksi halde kullanici 15 dakika boyunca
         // "girisli" gorunup her korumali cagrida 401 yerdi.
         try { api.setAccessToken(null); api.setRefreshToken(null); } catch (_) { }
         window.loggedIn = false;
-      } catch (e) { er.textContent = e.message || "Şifre güncellenemedi"; }
+      } catch (e) { er.textContent = e.message || ceviri("b_sifre_guncellenemedi"); }
     };
   }
 
   async function dogrulaEkrani(token) {
-    authKutusu("E-posta doğrulama");
+    authKutusu(ceviri("b_eposta_dogrulama"));
     var govde = document.getElementById("dvsAuthGovde");
-    if (!token) { govde.textContent = "Doğrulama kodu bulunamadı."; return; }
-    govde.textContent = "Doğrulanıyor…";
+    if (!token) { govde.textContent = ceviri("b_dogrulama_kodu_yok"); return; }
+    govde.textContent = ceviri("b_dogrulaniyor");
     try {
       await api.auth.verifyEmail(token);
-      govde.innerHTML = "E-postan doğrulandı. Artık giriş yapabilirsin.";
+      govde.innerHTML = ceviri("b_epostan_dogrulandi");
     } catch (e) {
-      document.getElementById("dvsAuthErr").textContent = e.message || "Doğrulama başarısız";
-      govde.innerHTML = "Kod geçersiz ya da süresi dolmuş olabilir. Üye Ol sekmesinden " +
+      document.getElementById("dvsAuthErr").textContent = e.message || ceviri("b_dogrulama_basarisiz");
+      govde.innerHTML = ceviri("b_kod_gecersiz") +
         "\"Tekrar gönder\" ile yeni kod isteyebilirsin.";
     }
   }
@@ -3032,12 +3100,12 @@
     // sifirlama baglantisinin "Sayfa Bulunamadi" gorunmesi, kullaniciya linkin BOZUK oldugunu
     // soyler - oysa sayfa calisiyor.
     if (h[0] === "dogrula") {
-      document.title = "E-posta Doğrulama · Divisima";
+      document.title = ceviri("b_eposta_dogrulama_baslik");
       dogrulaEkrani(decodeURIComponent(h[1] || ""));
       return true;
     }
     if (h[0] === "sifre-sifirla") {
-      document.title = "Yeni Şifre Belirle · Divisima";
+      document.title = ceviri("b_yeni_sifre_baslik");
       sifreSifirlaEkrani(decodeURIComponent(h[1] || ""));
       return true;
     }

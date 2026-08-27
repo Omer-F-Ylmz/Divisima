@@ -52,8 +52,11 @@ namespace Divisima.IntegrationTests
         {
             var b = Bridge;
             // Sessizce gizlemek, kullaniciya NEDEN secemedigini soylememek olurdu.
-            b.Should().Contain("Kartla ödeme için", "neden GORUNUR olmali");
-            b.Should().Contain("üye girişi", "cozum yolu da soylenmeli");
+            // MFIX-3b PREMIS (merkez onayina): iki metin de i18n sozlugune tasindi; olcut
+            // ARTIK ANAHTAR. Iddia ZAYIFLAMIYOR - bu anahtarlarin T ve AR sozlugunde
+            // BULUNDUGUNU FrontendDokunmaHedefiTests/P11 ayrica pinliyor (MFIX-3 kalibi).
+            b.Should().Contain("b_kartla_odeme_icin", "neden GORUNUR olmali");
+            b.Should().Contain("b_uye_girisi_link", "cozum yolu da soylenmeli");
             b.Should().Contain("name=\"mgOdeme\"", "odeme secenekleri cizilmeli");
             b.Should().Contain("disabled", "kart secenegi SECILEMEZ olmali");
         }

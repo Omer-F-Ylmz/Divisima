@@ -277,8 +277,9 @@ namespace Divisima.IntegrationTests
 
             // VAKUM KIRICI 2: `rngOf` dosyada HALA kullaniliyor olmali (yorumlar, renk/degerlendirme
             // uretimi). Yardimci tumden silinseydi asagidaki iddia BEDAVA dogru olurdu.
-            Regex.Matches(s, @"rngOf\s*\(").Count.Should().BeGreaterThan(1,
-                "rngOf baska yerlerde kullanilmaya devam ediyor - tarama vakuma dusmemeli");
+            // MFIX-3b PREMIS: `rngOf` SOKULDU - variantsOf onun SON CAGIRANIYDI. Vakum kirici
+            // artik "tarama dosyayi GERCEKTEN okudu" olcutune dayaniyor (ayni guvence).
+            s.Length.Should().BeGreaterThan(200000, "index.html govdesi okunmus olmali (vakum kirici)");
 
             // ASIL SOZLESME: beden stogu tohumlu rastgelelikten TUREMEZ.
             govde.Should().NotContain("rngOf",
@@ -343,7 +344,10 @@ namespace Divisima.IntegrationTests
             // SESSIZ BASARISIZLIK YASAK: kullaniciya GORUNUR metin yazilmali.
             gonder.Should().Contain("checkoutHatasiYaz(",
                 "hata ekrandaki #coErr alanina yazilmali - konsol son kullanicida SESSIZDIR");
-            gonder.Should().Contain("ÖDENMEMİŞ",
+            // MFIX-3b PREMIS (merkez onayina): metin i18n sozlugune tasindi; olcut ARTIK
+            // ANAHTAR. Iddia ZAYIFLAMIYOR - anahtarin T ve AR sozlugunde BULUNDUGUNU P11
+            // ayrica pinliyor (MFIX-3 kalibi).
+            gonder.Should().Contain("b_odenmemis_duruyor",
                 "kullaniciya siparisin ODENMEDIGI acikca soylenmeli");
 
             // CIFT-ANLAM KIRICI: 401 dali AYRI ve eylem iceren bir metin vermeli; aksi halde
@@ -372,8 +376,8 @@ namespace Divisima.IntegrationTests
             // VAKUM KIRICI 1: `rngOf` dosyada HALA kullaniliyor (fit/renk/kumas yuzeyleri bu
             // dalganin kapsami DISINDA). Yardimci tumden silinseydi asagidaki iddia BEDAVA
             // dogru olurdu.
-            Regex.Matches(s, @"rngOf\s*\(").Count.Should().BeGreaterThan(1,
-                "rngOf baska yuzeylerde kullanilmaya devam ediyor - tarama vakuma dusmemeli");
+            // MFIX-3b PREMIS: `rngOf` SOKULDU (son cagirani variantsOf idi).
+            s.Length.Should().BeGreaterThan(200000, "index.html govdesi okunmus olmali (vakum kirici)");
 
             // VAKUM KIRICI 2: tarama gercekten bir govde okumus olmali.
             var govde = FonksiyonGovdesi(s, "function reviewsOf(p)");
@@ -634,7 +638,8 @@ namespace Divisima.IntegrationTests
 
             // Sunucunun "zaten olusturulmus" yaniti kullaniciya ACIKCA soylenmeli.
             b.Should().Contain("zaten olu", "replay yaniti tespit edilmeli");
-            b.Should().Contain("YENİ bir sipariş oluşturulmadı",
+            // MFIX-3b PREMIS (merkez onayina): metin i18n sozlugune tasindi; olcut ARTIK ANAHTAR.
+            b.Should().Contain("b_yeni_siparis_yok",
                 "kullaniciya yeni siparis olusmadigi soylenmeli");
 
             // ── SAHTE KUPON TABLOSU [YOKLUK] ─────────────────────────────────────────
@@ -691,8 +696,8 @@ namespace Divisima.IntegrationTests
             // Duzeltme "PRNG'yi sil" DEGIL "IKNA YUZEYLERINI gercek veriye bagla".
             // rngOf renk/gorsel gibi KAPSAM DISI yuzeylerde kullanilmaya devam ediyor;
             // silinseydi asagidaki iddialar BEDAVA dogru olurdu.
-            Regex.Matches(s, @"\brngOf\b").Count.Should().BeGreaterThan(1,
-                "rngOf kapsam disi yuzeylerde HALA kullaniliyor olmali (vakum kirici)");
+            // MFIX-3b PREMIS: `rngOf` SOKULDU (son cagirani variantsOf idi).
+            s.Length.Should().BeGreaterThan(200000, "index.html govdesi okunmus olmali (vakum kirici)");
 
             // ── ASIL SOZLESME: uydurma ureticiler ve tuketicileri YOK ────────────
             foreach (var ad in new[] { "fitInfo", "fitPanel", "detailsOf",
@@ -882,8 +887,8 @@ namespace Divisima.IntegrationTests
 
             // ── VAKUM KIRICI 2: rngOf HALA VAR (kapsam disi renk yuzeyi) ─────────
             // Duzeltme "tum rastgeleligi sil" DEGIL; silinseydi iddia BEDAVA dogru olurdu.
-            Regex.Matches(s, @"\brngOf\b").Count.Should().BeGreaterThan(1,
-                "rngOf kapsam disi yuzeylerde HALA kullaniliyor olmali (vakum kirici)");
+            // MFIX-3b PREMIS: `rngOf` SOKULDU (son cagirani variantsOf idi).
+            s.Length.Should().BeGreaterThan(200000, "index.html govdesi okunmus olmali (vakum kirici)");
 
             // ── CIFT-ANLAM KIRICI: api-bridge'in MESRU rastgeleligi DURMALI ──────
             // request_id (idempotency anahtari) Math.random kullanir ve bu DOGRUDUR;
@@ -973,10 +978,11 @@ namespace Divisima.IntegrationTests
             wireFav.Should().Contain("fav_login", "misafire GORUNUR yonlendirme metni verilmeli");
             wireFav.Should().Contain("#/giris", "MEVCUT giris akisina yonlendirilmeli");
             // Sunucu sozlesmesi KAYNAKTAN okundu: Toggle(int productId) - SORGU DIZESI.
-            wireFav.Should().Contain("/api/wishlist/toggle", "sunucu ucu cagrilmali");
-            wireFav.Should().Contain("productId", "uc SORGU DIZESI bekliyor - govde DEGIL");
+            // MFIX-3b PREMIS: uc literali api-client.wishlist.toggle-a TASINDI (TEK SOZLESME).
+            // wireFavoriler artik o uyeyi cagiriyor; SORGU DIZESI sozlesmesi P16-da pinli.
+            wireFav.Should().Contain("api.wishlist.toggle(", "sunucu ucu api-client uyesi uzerinden cagrilmali");
             // CIFT-ANLAM KIRICI: yerel durum ancak SUNUCU ONAYLADIKTAN sonra degismeli.
-            var iPost = wireFav.IndexOf("/api/wishlist/toggle", StringComparison.Ordinal);
+            var iPost = wireFav.IndexOf("api.wishlist.toggle(", StringComparison.Ordinal);
             var iOrig = wireFav.IndexOf("orig.call(window, id)", StringComparison.Ordinal);
             iOrig.Should().BeGreaterThan(iPost,
                 "yerel guncelleme sunucu cagrisindan SONRA gelmeli (ekran sunucudan ayrisamaz)");
@@ -1068,7 +1074,14 @@ namespace Divisima.IntegrationTests
             var tBlok = SozlukBlogu(Index, "var T={", "var AR={");
             var arBlok = SozlukBlogu(Index, "var AR={", "function t(k)");
             var tAnahtar = SozlukAnahtarlari(tBlok, @"\[");
-            var arAnahtar = SozlukAnahtarlari(arBlok, "'");
+            // MFIX-3b PREMIS GUNCELLEMESI (merkez onayina): AR degerleri artik TEK ya da
+            // CIFT tirnakli olabilir. Gerekce OLCUMDUR: yeni cevirilerin bir kismi apostrof
+            // iceriyor (or. "provider's") ve tek-tirnakli uretimde apostrof kacisi arac
+            // zincirinde KAYBOLUP sozlugu JS sozdizimi hatasina dusurdu (konsolda
+            // "SyntaxError: Unexpected identifier 's'" ile yakalandi). TSV'de cift tirnak
+            // KARAKTERI OLMADIGI olculdugu icin cift-tirnakli uretim KACIS GEREKTIRMEZ.
+            // Pinin OLCTUGU SEY DEGISMEDI: "AR sozlugu T ile TAM ortusmeli".
+            var arAnahtar = SozlukAnahtarlari(arBlok, "[\"']");
             tAnahtar.Count.Should().BeGreaterThan(500, "T sozlugu okunmus olmali (vakum kirici)");
             arAnahtar.Count.Should().BeGreaterThan(500, "AR sozlugu okunmus olmali (vakum kirici)");
 
@@ -1132,6 +1145,199 @@ namespace Divisima.IntegrationTests
             foreach (Match m in Regex.Matches(temiz, desen, RegexOptions.Multiline))
                 kume.Add(m.Groups[1].Value);
             return kume;
+        }
+
+        // ─────────────────────────────────────────────────────────────────────────
+        // MFIX-3b / P15: UYDURMA RENK ve SAHTE ACILIYET URETILMEZ
+        //
+        // OLCUT LITERAL BICIM DEGIL KUSUR SINIFIDIR (MFIX-2 dersi: M-P8'in ilk turunda
+        // ayni kusur FARKLI bicimde geri konunca pin sessiz kalmisti).
+        //   (a) URETIM: renk varyanti bir PRNG'den turetilemez - urunun gercek renk
+        //       varyanti verisi YOK (uc yalniz tek bir color_hex donuyor).
+        //   (b) CIZIM : renk secim yuzeyi (swatch/cip) DOM'a hic girmez.
+        //   (c) ACILIYET: gece yarisina (ya da baska bir sabit ana) sayan bir geri sayim
+        //       KURULAMAZ - o anda biten bir sey YOK (sale_end mekanizmasi yok).
+        //       Olcut "setInterval" DEGIL, ZAMANLAYICI + GERI SAYIM HEDEFI birlesimidir;
+        //       boylece sayaci baska bir duzenekle (requestAnimationFrame, setTimeout
+        //       dongusu, Date farki) geri koymak da yakalanir.
+        // ─────────────────────────────────────────────────────────────────────────
+        [Fact]
+        public void KAYNAK_SOZLESMESI_UydurmaRenk_ve_SahteAciliyet_Uretilmez()
+        {
+            var s = YorumlariAyikla(Index);
+
+            // VAKUM KIRICI: dosya gercekten okundu ve PRNG yardimcisi HALA duruyor
+            // (kapsam disi yuzeylerde kullaniliyor) - yani tarama "her sey gitti"
+            // diye bedava yesil olamaz.
+            s.Length.Should().BeGreaterThan(200000, "index.html govdesi okunmus olmali");
+            s.Should().NotContain("function rngOf(",
+                "PRNG ureticisinin KENDISI de SOKULDU - son cagirani variantsOf idi");
+
+            // (a) URETIM: renk varyanti ureticisi YOK
+            s.Should().NotContain("function variantsOf",
+                "uydurma renk varyanti ureticisi SOKULDU");
+            Regex.Matches(s, @"\bvariantsOf\s*\(").Count.Should().Be(0,
+                "variantsOf hicbir yerden CAGRILMAMALI");
+            Regex.Matches(s, @"\b_vr\b").Count.Should().Be(0,
+                "variantsOf'un onbellek alani (_vr) da kalmamali");
+
+            // (b) CIZIM: renk secim yuzeyi DOM'a girmiyor
+            foreach (var isaret in new[] { "pd-swatch\"", "id=\"pdSwatches\"", "class=\"card-cols\"", "data-cdot" })
+                s.Should().NotContain(isaret,
+                    "renk secim yuzeyi '" + isaret + "' DOM'a URETILMEMELI");
+            s.Should().NotContain("function applyColor",
+                "renk uygulayici SOKULDU");
+
+            // (c) ACILIYET: geri sayim hedefi + zamanlayici birlesimi YOK
+            var zamanlayici = new Regex(@"set(?:Interval|Timeout)\s*\(|requestAnimationFrame\s*\(");
+            foreach (var imza in new[] { "function startDealCountdown", "function stopDealCountdown" })
+                s.Should().NotContain(imza, imza + " SOKULDU");
+            foreach (var hedef in new[] { "setHours(24", "setHours( 24", "dealClock", "camp-clock", "id=\"cdH\"", "id=\"cdM\"", "id=\"cdS\"" })
+                s.Should().NotContain(hedef,
+                    "sahte aciliyet isareti '" + hedef + "' kalmamali");
+            // Sure VAADI metinleri de gitti (sozlukte de olmamali)
+            foreach (var metin in new[] { "camp_ends", "camp_eyebrow", "deal_ends" })
+                s.Should().NotContain(metin, "'" + metin + "' sure vaadi anahtari SOKULDU");
+            // CIFT-ANLAM KIRICI: INDIRIM ROZETI ve ustu-cizili fiyat KALMALI - bunlar
+            // GERCEK VERIDIR (old_price / sale_price). "hepsini sil" YANLIS duzeltmedir.
+            s.Should().Contain("deal-strip", "indirim seridi (rozet) KALMALI");
+            s.Should().Contain("function discPct(", "indirim yuzdesi hesabi KALMALI");
+            zamanlayici.IsMatch(s).Should().BeTrue(
+                "zamanlayicilar genel olarak HALA var (slider vb.) - olcut zamanlayici degil, GERI SAYIM HEDEFIDIR");
+        }
+
+        // ─────────────────────────────────────────────────────────────────────────
+        // MFIX-3b / P16: TOAST TIP TASIR + WISHLIST TOGGLE SORGU DIZESI
+        //   (a) toast(msg, tip) imzasi ve VARSAYILAN "info" (T1 ekraninda olculdu:
+        //       tipsiz cagrinin onay isareti basmasi sinif olarak olu bir kusurdur).
+        //   (b) HICBIR eylem toasti TIPSIZ cagrilmaz.
+        //   (c) api-client.wishlist.toggle SORGU DIZESI kullanir ve api-bridge kendi
+        //       kopyasini DEGIL o uyeyi cagirir (TEK SOZLESME).
+        // ─────────────────────────────────────────────────────────────────────────
+        [Fact]
+        public void KAYNAK_SOZLESMESI_Toast_TipTasir_ve_WishlistToggle_QueryString()
+        {
+            var s = YorumlariAyikla(Index);
+            var b = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+            var c = YorumlariAyikla(Oku("frontend/api-client.js"));
+
+            // (a) imza + varsayilan
+            s.Should().Contain("function toast(msg,tip)", "toast TIP parametresi almali");
+            s.Replace(" ", "").Should().Contain("?tip:'info'",
+                "tip verilmediginde VARSAYILAN 'info' olmali - 'ok' DEGIL");
+            foreach (var tip in new[] { "ok", "err", "info" })
+                s.Should().Contain("_TOAST_IKON", "tip -> ikon eslemesi TEK yerde olmali");
+
+            // (b) TIPSIZ eylem toasti YOK. Tarama index.html VE api-bridge.
+            // VAKUM KIRICI: taranan cagri sayisi anlamli olmali.
+            var cagriDeseni = new Regex(@"(?<![.\w$])(?:toast|notify)\s*\(");
+            int toplam = 0, tipsiz = 0;
+            var tipsizOrnek = new List<string>();
+            foreach (var kaynak in new[] { s, b })
+            {
+                foreach (Match m in cagriDeseni.Matches(kaynak))
+                {
+                    var acilis = kaynak.IndexOf('(', m.Index);
+                    var kapanis = ParantezKapanisi(kaynak, acilis);
+                    if (kapanis < 0) continue;
+                    var arg = kaynak.Substring(acilis + 1, kapanis - acilis - 1);
+                    // TANIM satirlari (function toast(msg,tip) / function notify(msg, tip)) haric
+                    if (Regex.IsMatch(kaynak.Substring(Math.Max(0, m.Index - 12), Math.Min(12, m.Index)), @"function\s*$")) continue;
+                    toplam++;
+                    if (!Regex.IsMatch(arg, @"[,]\s*(?:'|\"")(?:ok|err|info)(?:'|\"")\s*$") &&
+                        !Regex.IsMatch(arg, @",\s*tip\s*$"))
+                    { tipsiz++; if (tipsizOrnek.Count < 5) tipsizOrnek.Add(arg.Length > 70 ? arg.Substring(0, 70) : arg); }
+                }
+            }
+            toplam.Should().BeGreaterThan(50, "toast/notify cagrilari taranmis olmali (vakum kirici)");
+            tipsiz.Should().Be(0,
+                "TIPSIZ toast/notify cagrisi kalmamali. Ornekler: " + string.Join(" || ", tipsizOrnek));
+
+            // (c) wishlist sozlesmesi
+            c.Replace(" ", "").Should().Contain(
+                "toggle(productId){returnapi._post(\"/api/wishlist/toggle\"+api._qs",
+                "uc Toggle(int productId) - [FromBody] YOK; govde bicimi CANLI 500 uretiyordu");
+            b.Should().Contain("api.wishlist.toggle(",
+                "api-bridge kendi el yazmasi yerine api-client uyesini cagirmali (TEK SOZLESME)");
+            Regex.Matches(b, @"_post\(\s*""/api/wishlist/toggle").Count.Should().Be(0,
+                "api-bridge'teki GECICI kopya KALDIRILMIS olmali");
+        }
+
+        // ─────────────────────────────────────────────────────────────────────────
+        // MFIX-3b / P17: TARIH BICIMI LOCALE BAGLI + DIL DEGISIMI SEPET YAZMAYI TETIKLEMEZ
+        //   (a) Bicimleyiciler SABIT 'tr-TR' tasimaz; hepsi TEK KAYNAKTAN (dvsLocale).
+        //   (b) Salt-cizim yolu (dil/para/sekme) sunucuya yazma ZAMANLAMAZ - olcut
+        //       sepetin IMZASIDIR. Kabul turunda olculen zarar: dil degisimi sepeti
+        //       yeniden yaziyor, stok dustuyse 400 aliyor ve kullaniciya YANLIS
+        //       TESHIS ("internet baglantini kontrol et") gosteriliyordu.
+        //   (c) Hata metni GERCEK sebebi soyler.
+        // ─────────────────────────────────────────────────────────────────────────
+        [Fact]
+        public void KAYNAK_SOZLESMESI_TarihBicimi_LocaleBagli_ve_DilDegisimi_SepetYazmayi_Tetiklemez()
+        {
+            var s = YorumlariAyikla(Index);
+            var b = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+
+            // (a) TEK KAYNAK
+            s.Should().Contain("function dvsLocale()", "locale eslemesi TEK fonksiyonda olmali");
+            s.Should().Contain("window.dvsLocale=dvsLocale",
+                "api-bridge'in erisebilmesi icin disa acilmali");
+            // Bicimleyiciler artik SABIT tr-TR tasimaz.
+            foreach (var imza in new[] { "function tl(n)", "function rvTarih(s)" })
+            {
+                var govde = FonksiyonGovdesi(s, imza);
+                govde.Length.Should().BeGreaterThan(30, imza + " govdesi bos okunmus olamaz");
+                govde.Should().NotContain("'tr-TR'", imza + " SABIT tr-TR TASIMAMALI");
+                govde.Should().Contain("dvsLocale()", imza + " locale'i TEK KAYNAKTAN almali");
+            }
+            // api-bridge tarafinda da SABIT tr-TR yok; tr-TR yalniz YEDEK olarak gecebilir.
+            foreach (Match m in Regex.Matches(b, "\"tr-TR\""))
+            {
+                var bas = Math.Max(0, m.Index - 90);
+                var oncesi = b.Substring(bas, m.Index - bas);
+                oncesi.Should().Contain("dvsLocale",
+                    "api-bridge'te gecen her tr-TR, dvsLocale YOKKEN devreye giren YEDEK olmali");
+            }
+            // CIFT-ANLAM KIRICI: arama normalizasyonu bir KIMLIK islemidir (CLAUDE.md 6c)
+            // ve KULTURLU kalmalidir - "hepsini locale'e bagla" YANLIS duzeltmedir.
+            s.Should().Contain("toLocaleLowerCase('tr')",
+                "arama normalizasyonu KIMLIK islemidir, DEGISMEMELI");
+
+            // (b) salt-cizim yazma tetiklemez
+            b.Should().Contain("function sepetImzasi()", "sepet imzasi TEK yerde uretilmeli");
+            b.Replace(" ", "").Should().Contain("sepetImzasi()===sonSenkronImzasi",
+                "salt-cizim kapisi imza karsilastirmasina dayanmali");
+            // VAKUM KIRICI: senkronun KENDISI HALA var (kapi 'her seyi kapat' degil).
+            b.Should().Contain("syncTimer = setTimeout(syncCartToServer",
+                "gercek degisiklikte senkron HALA zamanlanmali");
+            // ILK SENKRON (birlestirme) kapidan MUAF olmali - yoksa sunucu sepeti okunamaz.
+            b.Replace(" ", "").Should().Contain("if(ilkSenkronYapildi&&sepetImzasi()",
+                "ilk senkron (birlestirme) kapidan MUAF olmali");
+
+            // (c) durust hata metni
+            b.Should().Contain("err_cart_sync_reason",
+                "sunucu yanit verdiyse ONUN sebebi gosterilmeli");
+            b.Should().Contain("err_cart_offline",
+                "yalnizca ag hatasinda baglanti metni gosterilmeli");
+            b.Should().NotContain("ceviri(\"err_cart_sync\")",
+                "sabit 'internet' teshisi veren eski anahtar KALDIRILMIS olmali");
+        }
+
+        // Bir acilis parantezinin ESLESEN kapanisini bulur (tirnak farkindaligi ile).
+        // Toast argumanlari icinde parantez ve tirnak IC ICE gecebiliyor; duz arama
+        // yanlis kapanis bulurdu.
+        private static int ParantezKapanisi(string s, int acilisIndeksi)
+        {
+            int derinlik = 0; char tirnak = '\0';
+            for (int i = acilisIndeksi; i < s.Length; i++)
+            {
+                char ch = s[i];
+                if (tirnak != '\0') { if (ch == '\\') { i++; continue; } if (ch == tirnak) tirnak = '\0'; continue; }
+                if (ch == '\'' || ch == '"' || ch == '`') { tirnak = ch; continue; }
+                if (ch == '(') derinlik++;
+                else if (ch == ')') { derinlik--; if (derinlik == 0) return i; }
+            }
+            return -1;
         }
     }
 }
