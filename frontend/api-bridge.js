@@ -133,6 +133,9 @@
       name: p.name,
       brand: p.brand || "Divisima",
       cat: categorySlugOf(p),
+      // MFIX-2 / F-M9: beden tablosu GERCEK size-guide'dan cekilecegi icin urun
+      // KATEGORI KIMLIGINI de tasimali (GET /api/size-guide/category/{categoryId}).
+      catId: Number(p.category_id) || 0,
       sub: "",
       price: Number(p.price) || 0,
       old: p.old_price ? Number(p.old_price) : 0,
@@ -641,18 +644,29 @@
         if (d.image_url) p.img = api.resolveUrl(d.image_url);
         if (!p.cat || p.cat === "tumu") p.cat = categorySlugOf(d);
         if (d.stocks && d.stocks.length) {
-          p.sizes = d.stocks.map(function (s) { return isNaN(+s.size) ? s.size : +s.size; });
-          // storefront beden-stok'u p._ss'te tutuyor ve sizeStockOf() ONU ÖNBELLEĞE ALIYOR.
-          // İlk çizim stok=0 iken yapıldığı için _ss "tüm bedenler 0" olarak donuyor ve
-          // ürün sonsuza kadar "Stokta Yok" görünüyordu (ölçüldü). Gerçek haritayı yazıyoruz.
-          var map = {}, total = 0;
+          // MFIX-2 / F-M1-H3: ONCE (olculdu, urun 937) detay acilinca liste 29 -> 35 EZILIYORDU.
+          // Sebep: ProductStockDto YALNIZ stock_quantity (FIZIKSEL) tasiyor; liste yolu ise
+          // Sprint 8 madde 5'ten beri total_stock/sizes degerlerini available uzerinden
+          // (stock_quantity - reserved_quantity) DOLDURUYOR. Yani detayin toplami YANLIS,
+          // listenin toplami DOGRU. Detayin toplami stok alanina YAZILMIYOR artik (satir
+          // KALDIRILDI - kalibi buraya YAZMIYORUM, kayitli ders: yorum taramayi kirletir) ve eski
+          // yorum ("liste yolunun 0 dondurdugu") o tarihten beri BAYATTI.
+          // Beden listesi de LISTENIN sozune uyar: liste tamamen rezerve bedeni ZATEN
+          // disliyor (urun 932: total_stock 0, sizes []), detay ise onu hala gosterirdi.
+          var listeBedenleri = (p.sizes && p.sizes.length) ? p.sizes.map(String) : null;
+          var map = {};
           d.stocks.forEach(function (s) {
-            var q = Number(s.stock_quantity) || 0;
-            map[s.size] = q;
-            total += q;
+            if (listeBedenleri && listeBedenleri.indexOf(String(s.size)) < 0) return;
+            map[s.size] = Number(s.stock_quantity) || 0;
           });
+          // Liste beden bildirmediyse (eski/dar yanit) detayinkine duseriz - bos kalmasin.
+          if (!listeBedenleri) {
+            p.sizes = d.stocks.map(function (s) { return isNaN(+s.size) ? s.size : +s.size; });
+            d.stocks.forEach(function (s) { map[s.size] = Number(s.stock_quantity) || 0; });
+          }
           p._ss = map;
-          p.stock = total;   // liste yolunun 0 döndürdüğü gerçek toplam stok
+          // SINIR (DURUST KAYIT): beden BASINA ust sinir HALA FIZIKSEL - DTO'da available
+          // YOK. Toplam artik dogru, beden bazi MFIX-B'de (H2) kapanir.
         }
       }
       detailCache[id] = d;
@@ -686,15 +700,98 @@
     if (kutu.firstChild) el.parentNode.replaceChild(kutu.firstChild, el);
   }
 
+
+  // ── MFIX-2 / F-M9: GERCEK VERI CEKICILERI ──────────────────────────────────
+  // Kural (0b): bir ikna satiri icin GERCEK alan VARSA ondan cizilir, YOKSA satir
+  // TAMAMEN kaldirilir. Asagidaki ucu de GERCEK uclara baglanir; uc bos donerse
+  // ilgili blok CIZILMEZ - uydurma yerine BOSLUK.
+
+  // (a) URUN OZELLIKLERI: GET /api/product-attribute/product/{id} (ANONIM).
+  //     attribute_key / attribute_value dondurur. Tablo bugun BOS; admin doldurunca
+  //     blok kendiliginden dolar. Urun basina onbellekli - ikinci acilis istek atmaz.
+  var attrCache = {};
+  async function ozellikleriCiz(id) {
+    var p = (typeof window.byId === "function") ? window.byId(id) : null;
+    if (!p) return;
+    if (attrCache[id] === undefined) {
+      try {
+        var res = await api._get("/api/product-attribute/product/" + id);
+        var liste = unwrap(res) || [];
+        attrCache[id] = liste.map(function (a) {
+          return { k: a.attribute_key || a.key || "", v: a.attribute_value || a.value || "" };
+        }).filter(function (a) { return a.k && a.v; });
+      } catch (e) { attrCache[id] = []; }
+    }
+    p._attrs = attrCache[id];
+    if (!p._attrs.length) return;                      // BOSSA blok DEGISMEZ (durust bos durum kalir)
+    var govde = document.getElementById("piBody");
+    if (!govde) return;
+    govde.innerHTML = p._attrs.map(function (a) {
+      return '<div class="pi-row"><span>' + esc(a.k) + "</span><b>" + esc(a.v) + "</b></div>";
+    }).join("");
+  }
+
+  // (b) BEDEN TABLOSU: GET /api/size-guide/category/{categoryId} (ANONIM).
+  //     index.html'in openSizeChart'i SENKRON oldugu icin onbellek onceden doldurulur;
+  //     window.divisimaSizeGuide(catId) yalnizca onbellegi OKUR (uydurma uretmez).
+  var sizeGuideCache = {};
+  window.divisimaSizeGuide = function (catId) {
+    var k = Number(catId) || 0;
+    var v = sizeGuideCache[k];
+    return (v && v.length) ? v : null;
+  };
+  async function bedenRehberiniCek(catId) {
+    var k = Number(catId) || 0;
+    if (!k || sizeGuideCache[k] !== undefined) return;
+    try {
+      var res = await api._get("/api/size-guide/category/" + k);
+      sizeGuideCache[k] = unwrap(res) || [];
+    } catch (e) { sizeGuideCache[k] = []; }
+  }
+
+  // MFIX-2 / F-M1-H3: siparis sonrasi vitrin tazeleme. detailCache ve urunlerin _ss
+  // haritasi siparis ONCESI stoga ait; ikisi de bosaltilir ve katalog yeniden cekilir.
+  function katalogTazele() {
+    try {
+      Object.keys(detailCache).forEach(function (k) { delete detailCache[k]; });
+      if (window.PRODUCTS && window.PRODUCTS.length) {
+        window.PRODUCTS.forEach(function (p) { if (p && p._ss) delete p._ss; });
+      }
+      loadCatalog();
+    } catch (e) { console.warn("Divisima: katalog tazelenemedi", e); }
+  }
+
+  // (c) TESLIMAT SEHRI: GET /api/address (Customer). YALNIZ girisli kullanicida ve
+  //     YALNIZ VARSAYILAN adresten. Cikista TEMIZLENIR - eski oturumun sehri sizmasin.
+  window.divisimaDelivCity = null;
+  async function teslimatSehriniTazele() {
+    if (!api.isLoggedIn()) { window.divisimaDelivCity = null; return; }
+    try {
+      var liste = unwrap(await api.address.list()) || [];
+      var v = liste.filter(function (a) { return a.is_default; })[0] || liste[0] || null;
+      window.divisimaDelivCity = (v && v.city) ? String(v.city) : null;
+    } catch (e) { window.divisimaDelivCity = null; }
+  }
   function wireProductDetail() {
     if (typeof window.openDetail !== "function") return;
     var orig = window.openDetail;
     window.openDetail = function (id) {
-      if (detailCache[id]) { orig.call(window, id); yorumlariCiz(id); return; }
+      // MFIX-2 / F-M9: beden rehberi index.html'de SENKRON okundugu icin onbellek
+      // detay ACILIRKEN doldurulur; gelmezse tablo GERCEK BEDENLERE duser (uydurma YOK).
+      var _p0 = (typeof window.byId === "function") ? window.byId(id) : null;
+      if (_p0 && _p0.catId) bedenRehberiniCek(_p0.catId);
+      if (detailCache[id]) { orig.call(window, id); yorumlariCiz(id); ozellikleriCiz(id); return; }
       // Önce mevcut (liste) veriyle aç - kullanıcı beklemesin; detay gelince yeniden aç.
       orig.call(window, id);
       yorumlariCiz(id);
-      enrichProduct(id).then(function (d) { if (d) { orig.call(window, id); yorumlariCiz(id); } });
+      ozellikleriCiz(id);
+      enrichProduct(id).then(function (d) {
+        if (d) {
+          var _p = (typeof window.byId === "function") ? window.byId(id) : null;
+          if (_p && _p.catId) bedenRehberiniCek(_p.catId);
+          orig.call(window, id); yorumlariCiz(id); ozellikleriCiz(id);
+        }
+      });
     };
   }
 
@@ -747,6 +844,7 @@
         var d = unwrap(r) || {};
         window.loggedIn = true;
         sepetBirlestirmesiniSilahlandir();   // F-A1: bu oturumun ilk senkronu BIRLESTIRME olsun
+        teslimatSehriniTazele();             // MFIX-2/F-M9: teslimat sehri GERCEK varsayilan adresten
         if (typeof window.login === "function") window.login(d.name || String(email).split("@")[0]);
         return r;
       },
@@ -757,6 +855,7 @@
         try { await api.auth.logout(); } finally {
           window.loggedIn = false;
           sepetBirlestirmesiniSilahlandir();   // F-A1: sonraki giris de birlestirme ile baslar
+          window.divisimaDelivCity = null;     // MFIX-2/F-M9: eski oturumun sehri SIZMAZ
           if (typeof window.logout === "function") window.logout();
         }
       },
@@ -767,6 +866,7 @@
     };
 
     if (api.isLoggedIn()) window.loggedIn = true;
+    teslimatSehriniTazele();   // MFIX-2/F-M9: sayfa gecerli jetonla acildiginda da sehir gerekir
 
     // index.html'in MOCK giriş/kayıt düğmeleri gerçek uçlara bağlanır.
     // Eski davranış: loginSubmit yalnız login(email.split("@")[0]) çağırıyordu -
@@ -1689,6 +1789,14 @@
     // kullanici geri donup tekrar basarsa sunucu "zaten olusturulmus" demeli, YENI
     // siparis DEGIL.
     if (ok) checkoutIstekIdYenile();
+    // MFIX-2 / F-M1-H3: siparis BASARILI olduysa stok DUSMUSTUR. Vitrindeki sayilar
+    // siparis oncesine ait; kullanici geri dondugunde YENILEMEDEN dogru gormeli.
+    // EN DAR COZUM: (1) kendi detay onbellegimizi bosalt, (2) katalogu yeniden cek.
+    // Tarayici onbellegi ICIN BIR SEY YAPILMASI GEREKMEDI - olculdu: katalog ucu
+    // POST /api/product/filter'dir ve POST yanitlari onbelleklenmez; ETag'in
+    // "private, max-age=60" basligi yalnizca GET detay ucunu etkiler, o da bosaltilan
+    // detailCache yuzunden zaten yeniden istenir.
+    if (ok) katalogTazele();
 
     view.innerHTML = '<div class="wrap" style="padding:40px 0;max-width:640px"><p class="muted">Yükleniyor…</p></div>';
 

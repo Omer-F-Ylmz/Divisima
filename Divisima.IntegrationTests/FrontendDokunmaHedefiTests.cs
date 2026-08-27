@@ -101,7 +101,11 @@ namespace Divisima.IntegrationTests
         public void HICBIR_YENI_EYLEM_HANDLERI_target_id_ILE_KATI_KARSILASTIRMA_YAPMAZ()
         {
             var dosyalar = new[] { "frontend/index.html", "frontend/api-bridge.js", "frontend/admin.html" };
-            var izinli = new HashSet<string> { "giftChk", "cmpDiffChk" };
+            // MFIX-2: "giftChk" IZINLI LISTEDEN CIKTI - o checkbox MOCK CHECKOUT'un
+            // hediye paketi adimindaydi ve MFIX-1 devri kapsaminda SOKULDU. Kural
+            // DEGISMEDI (kati e.target.id yalniz change-olayli checkbox'ta guvenli);
+            // liste, mesru bir uyesi kaldirildigi icin daraldi.
+            var izinli = new HashSet<string> { "cmpDiffChk" };
             var bulunan = new List<string>();
 
             foreach (var f in dosyalar)
@@ -116,7 +120,6 @@ namespace Divisima.IntegrationTests
             // CIFT-ANLAM KIRICI: liste bosalirsa (or. iki checkbox da silinirse) yukaridaki
             // assert "hicbir sey yok" diye YESIL kalirdi. Izinli kullanimlarin GERCEKTEN
             // durdugunu dogrula ki tarama vakuma dusmesin.
-            bulunan.Should().Contain("giftChk");
             bulunan.Should().Contain("cmpDiffChk");
 
             // .target.matches( bugun SIFIR (olculdu). Yeni bir tanesi incelemeye girmeli.
@@ -569,21 +572,23 @@ namespace Divisima.IntegrationTests
                 "yer tutucudan HEMEN SONRAKI satir KOSULSUZ return olmali (erken donus)");
             var erkenDonus = yerTutucuSatiri;
 
-            // VAKUM KIRICI: mock uretici HALA govdede (silinmedi, ERISILEMEZ kilindi).
-            // Silinseydi "erken donus mock'tan once" iddiasi BEDAVA dogru olurdu.
-            var mockUreticiSatiri = -1;
-            for (var i = 0; i < mockSatirlari.Length; i++)
-            {
-                if (mockSatirlari[i].Contains("coStepBar()"))
-                {
-                    mockUreticiSatiri = i;
-                    break;
-                }
-            }
-            mockUreticiSatiri.Should().BeGreaterThan(-1,
-                "mock uretici govdede duruyor olmali (sokum degil, erisilemezlik)");
-            erkenDonus.Should().BeLessThan(mockUreticiSatiri,
-                "erken donus mock URETIMINDEN ONCE gelmeli");
+            // MFIX-2'DE BILINCLI DEGISTIRILDI. MFIX-1'de buradaki vakum kirici "mock uretici
+            // HALA govdede (silinmedi, ERISILEMEZ kilindi)" diyordu; o gun DOGRUYDU cunku
+            // uretici ADDR/CARDS ile ic ice oldugu icin silinememisti. MFIX-2'de merkez
+            // SOKUMU ACIKCA emretti (MFIX-1 devri) ve 0c haritasi bagi cozdu, dolayisiyla
+            // uretici ARTIK YOK - eski assert bugun SOKULMEMIS olmasini SAVUNURDU.
+            // Yerine GECEN iddia daha gucludur: govde YALNIZ yer tutucu + return tasir,
+            // yani "erken donus mock'tan once" degil "MOCK URETIMI HIC YOK".
+            mockGovde.Should().NotContain("coStepBar",
+                "mock uretici SOKULDU - govdede uretim izi kalmamali");
+            mockGovde.Should().NotContain("coSummaryHTML",
+                "mock ozet uretici de SOKULDU");
+            // VAKUM KIRICI (yenisi): govde BOS okunmus olamaz - yer tutucu satiri BULUNDU
+            // ve o satirdan sonra en az bir satir var (yukarida assert edildi); ayrica
+            // fonksiyon govdesi anlamli bir uzunlukta olmali.
+            mockGovde.Trim().Length.Should().BeGreaterThan(40,
+                "govde gercekten okunmus olmali - bos string uzerinde NotContain BEDAVA gecerdi");
+            erkenDonus.Should().BeGreaterThan(-1, "erken donus satiri bulunmus olmali");
         }
 
         // ── P6 (MFIX-1 / F-M3f + F-M3a): REQUEST_ID OTURUM BASINA, SAHTE KUPON TABLOSU YOK ──
@@ -661,6 +666,186 @@ namespace Divisima.IntegrationTests
                 "sunucu reddinde erken donulmeli");
             uygulaGovde.Should().Contain("cp_invalid",
                 "reddedilen kod icin GORUNUR hata mesaji olmali");
+        }
+
+        // ── P7 (MFIX-2 / F-M9 + F-M6): IKNA YUZEYLERI PRNG ILE URETILMEZ,
+        //    GERCEK VERI YOKSA SATIR CIZILMEZ ────────────────────────────────────
+        // DURUST ETIKET: KAYNAK SOZLESMESI pinidir, DAVRANIS pini DEGILDIR (depoda
+        // JS/DOM kosucusu yok - Dalga 4'ten beri acik kalem). Davranis kaniti MFIX-2
+        // raporundaki R-M9/R-M6 KONTROLLU A/B olcumleridir: ayni tarayicida yedek surum
+        // servis edilip olculdu, sonra yeni surum. ONCE deri kemerde "12 kisi su an bu
+        // urune bakiyor", fit cubugu, "3 x 190 TL taksit", model satiri, kalip onerisi,
+        // uydurma kumas ve "Istanbul icin ... Hizli Teslimat" vardi; SONRA yedisi de YOK.
+        [Fact]
+        public void KAYNAK_SOZLESMESI_IknaYuzeyleri_PRNG_Uretilmez_ve_GercekVeriYoksaSatirYok()
+        {
+            var s = YorumlariAyikla(Index);
+            var b = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+
+            // ── VAKUM KIRICI 1: rngOf'un KENDISI HALA VAR ────────────────────────
+            // Duzeltme "PRNG'yi sil" DEGIL "IKNA YUZEYLERINI gercek veriye bagla".
+            // rngOf renk/gorsel gibi KAPSAM DISI yuzeylerde kullanilmaya devam ediyor;
+            // silinseydi asagidaki iddialar BEDAVA dogru olurdu.
+            Regex.Matches(s, @"\brngOf\b").Count.Should().BeGreaterThan(1,
+                "rngOf kapsam disi yuzeylerde HALA kullaniliyor olmali (vakum kirici)");
+
+            // ── ASIL SOZLESME: uydurma ureticiler ve tuketicileri YOK ────────────
+            foreach (var ad in new[] { "fitInfo", "fitPanel", "detailsOf",
+                                       "viewingHTML", "pdViewing", "_viewInt",
+                                       "instHTML", "pdInst",
+                                       "SIZE_TABLE", "SIZE_CONV",
+                                       "CARE_STD", "CARE_DRY" })
+            {
+                Regex.Matches(s, @"\b" + Regex.Escape(ad) + @"\b").Count.Should().Be(0,
+                    $"uydurma ikna yuzeyi '{ad}' kaynakta HIC gecmemeli (yorumlar ayiklanmis halde)");
+            }
+            Regex.Matches(s, @"\bvar\s+FABRIC\b").Count.Should().Be(0, "uydurma kumas havuzu kalmamali");
+            Regex.Matches(s, @"\bvar\s+FITS\b").Count.Should().Be(0, "uydurma kalip havuzu kalmamali");
+
+            // ── GERCEK VERIYE BAGLANDI: uc GERCEK uc da kaynakta olmali ─────────
+            b.Should().Contain("/api/product-attribute/product/",
+                "urun ozellikleri GERCEK attribute ucundan gelmeli");
+            b.Should().Contain("/api/size-guide/category/",
+                "beden tablosu GERCEK size-guide ucundan gelmeli");
+            b.Should().Contain("api.address.list()",
+                "teslimat sehri GERCEK adres ucundan gelmeli");
+
+            // ── CIFT-ANLAM KIRICI 1: teslimat sehri BILINMIYORSA KESIN TARIH YOK ──
+            // "Her zaman genel ifade yaz" da bir cozum olurdu ama o zaman GERCEK sehri
+            // bilen kullaniciya da tarih verilmezdi; iki dalin DA olmasi gerekiyor.
+            var teslimat = FonksiyonGovdesi(s, "function deliveryHTML()");
+            teslimat.Should().Contain("deliv_est_generic",
+                "sehir bilinmiyorsa sehirsiz DURUST ifade yazilmali");
+            teslimat.Should().Contain("deliv_est_city",
+                "sehir BILINIYORSA gercek sehirle tahmin yazilmali (cift-anlam kirici)");
+            var genelIndex = teslimat.IndexOf("deliv_est_generic", StringComparison.Ordinal);
+            var rozetIndex = teslimat.IndexOf("deliv_fast", StringComparison.Ordinal);
+            genelIndex.Should().BeLessThan(rozetIndex,
+                "'Hizli Teslimat' rozeti sehirsiz daldan SONRA gelmeli - yani sehir yoksa CIZILMEMELI");
+
+            // ── CIFT-ANLAM KIRICI 2: sehir KOSULSUZ 'Istanbul'a DUSMEMELI ────────
+            var sehir = FonksiyonGovdesi(s, "function delivCity()");
+            sehir.Should().NotContain("İstanbul",
+                "sehir bulunamayinca KOSULSUZ bir sehre dusulmemeli - olculen once-durum buydu");
+            sehir.Should().Contain("divisimaDelivCity",
+                "sehir GERCEK adresten gelen koprulu degerden okunmali");
+
+            // ── F-M6: yildiz KOSULLU ────────────────────────────────────────────
+            var yildiz = FonksiyonGovdesi(s, "function pdRateHTML(rv)");
+            yildiz.Should().Contain("rv.count>0",
+                "puan satiri yorum sayisina KOSULLU olmali");
+            yildiz.Should().Contain("rv_none",
+                "yorum yokken 'Henuz degerlendirilmedi' yazilmali");
+            // CIFT-ANLAM KIRICI: yorum VARSA gercek ortalama HALA gosterilmeli.
+            yildiz.Should().Contain("rv.avg.toFixed(1)",
+                "yorum varsa GERCEK ortalama gosterilmeli (yildizi tumden kaldirmak YANLIS duzeltmedir)");
+
+            // ── VITRIN-FIX-2 KORUMALARI BOZULMADI ───────────────────────────────
+            // P3 kart/cross-sell/karsilastirma yuzeyini tutuyor; o yuzey bu dalgada
+            // DEGISMEDI ve yildiz kaynagi HALA sunucu alanlari.
+            b.Should().Contain("Number(p.average_rating)",
+                "yildiz kaynagi HALA sunucudan gelen average_rating olmali");
+            b.Should().Contain("Number(p.review_count)",
+                "yorum sayisi HALA sunucudan gelmeli");
+        }
+
+        // ── P8 (MFIX-2 / F-M1-H3 + MFIX-1 DEVRI): DETAY STOGU LISTEYI EZMEZ,
+        //    SIPARIS SONRASI TAZELEME VAR ────────────────────────────────────────
+        // DURUST ETIKET: KAYNAK SOZLESMESI pinidir. Davranis kaniti R-M1H3 A/B:
+        // ONCE urun 937'de liste 29 -> detay acilinca 35 (EZILDI); SONRA 29 -> 29.
+        // Siparis tarafi: kurgu COD siparis 221 sonrasi vitrin 29 -> 28 ve DB de 28.
+        [Fact]
+        public void KAYNAK_SOZLESMESI_DetayStogu_Listeyi_Ezmez_ve_SiparisSonrasiTazeleme()
+        {
+            var b = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+            var s = YorumlariAyikla(Index);
+
+            // ── ASIL SOZLESME 1: detay FIZIKSEL toplami listenin uzerine YAZMAZ ──
+            // NOT (5. KONTROL YAKALADI - MFIX-1 dersinin TEKRARI): ilk yazimda bu assert
+            // ESKI LITERAL BICIMI ariyordu. M-P8 mutasyonu ayni zarari BASKA BIR BICIMDE
+            // yazinca (reduce ile toplam) pin KIRMIZI VERMEDI; mutasyon dosyaya inmisti ve
+            // build temizdi, yani "uygulanmadi" DEGIL - PIN ZAYIFTI.
+            // AYRICA regex'in ters bolu kacisi bu depoda YAZIM ZINCIRINDE KAYBOLDU (dorduncu
+            // kez - CLAUDE.md dersi). Bu yuzden regex TUMDEN KALDIRILDI: bosluk ayiklanip
+            // duz dizge araniyor. Kacis semantigi YOK, sessizce bozulamaz.
+            var enrich = FonksiyonGovdesi(b, "async function enrichProduct(id)");
+            var enrichSik = enrich.Replace(" ", "").Replace("\t", "");
+            enrichSik.Should().NotContain("p.stock=",
+                "detay zenginlestirmesi stok alanina HICBIR BICIMDE atama yapmamali - " +
+                "listenin SATILABILIR degeri detayin FIZIKSEL toplamiyla ezilemez");
+
+            // VAKUM KIRICI 1: govde GERCEKTEN okunmus olmali - bos string uzerinde
+            // NotContain BEDAVA gecerdi.
+            enrich.Trim().Length.Should().BeGreaterThan(200,
+                "enrichProduct govdesi gercekten okunmus olmali");
+
+            // VAKUM KIRICI 2: liste yolu stok degerini HALA yaziyor olmali - yoksa
+            // "ezmiyor" iddiasi stok hic yazilmadigi icin bedava dogru olurdu.
+            b.Should().Contain("stock: Number(p.total_stock)",
+                "liste yolu total_stock'u HALA yaziyor olmali");
+
+            // Beden haritasi HALA yaziliyor (detayin tek gercek katkisi) ...
+            enrichSik.Should().Contain("p._ss=map",
+                "beden bazi stok haritasi detaydan gelmeye devam etmeli");
+            // ... ama LISTENIN bildirdigi bedenlerle SINIRLI.
+            enrich.Should().Contain("listeBedenleri",
+                "beden haritasi listenin bildirdigi bedenlerle sinirlanmali (tamamen rezerve beden gelmemeli)");
+
+            // ── ASIL SOZLESME 2: siparis sonrasi tazeleme ───────────────────────
+            b.Should().Contain("function katalogTazele()",
+                "siparis sonrasi tazeleme yardimcisi tanimli olmali");
+            Regex.Matches(b, @"\bkatalogTazele\s*\(\s*\)").Count.Should().BeGreaterThan(1,
+                "tanim + cagri: en az iki gecis olmali (yalniz tanim = olu kod)");
+            b.Should().Contain("if (ok) katalogTazele();",
+                "tazeleme YALNIZ basarili sipariste kosmali");
+
+            var tazele = FonksiyonGovdesi(b, "function katalogTazele()");
+            tazele.Should().Contain("delete detailCache[k]",
+                "detay onbellegi bosaltilmali - yoksa bayat stok geri gelir");
+            tazele.Should().Contain("delete p._ss",
+                "beden haritasi da bosaltilmali");
+            tazele.Should().Contain("loadCatalog()",
+                "katalog yeniden cekilmeli");
+
+            // ── MFIX-1 DEVRI: mock checkout icerik fonksiyonlari SOKULDU ────────
+            foreach (var ad in new[] { "coData", "coVal", "coFinish", "coStepBar",
+                                       "coSummaryHTML", "addrItemHTML", "coStep1",
+                                       "coStep2", "coStep3", "coAddrSum", "coPaySum",
+                                       "coStepContent", "coSaveStep", "coValidateStep",
+                                       "wireCheckout" })
+            {
+                Regex.Matches(s, @"\b" + Regex.Escape(ad) + @"\b").Count.Should().Be(0,
+                    $"mock checkout parcasi '{ad}' sokulmus olmali");
+            }
+
+            // CIFT-ANLAM KIRICI: MFIX-1'in IKINCI SAVUNMA HATTI DURUYOR. Fonksiyonlari
+            // silmek TEK BASINA yetmez - renderCheckout govdesi hala mock cizebilirdi.
+            var mock = FonksiyonGovdesi(s, "function renderCheckout()");
+            var mockSatirlari = mock.Split('\n');
+            var yerTutucu = -1;
+            for (var i = 0; i < mockSatirlari.Length; i++)
+                if (mockSatirlari[i].Contains("Ödeme hazırlanıyor", StringComparison.Ordinal)) { yerTutucu = i; break; }
+            yerTutucu.Should().BeGreaterThan(-1, "mock govdesi notr yer tutucuyu HALA yazmali");
+            mockSatirlari[yerTutucu + 1].Trim().Should().Be("return;",
+                "yer tutucudan HEMEN SONRAKI satir KOSULSUZ return olmali (MFIX-1 ikinci savunma hatti)");
+
+            // ── ADDR/CARDS tohumlari BOSALTILDI (ciziciler SILINMEDI) ───────────
+            Regex.IsMatch(s, @"var\s+ADDR\s*=\s*\[\s*\]\s*;").Should().BeTrue(
+                "ADDR tohumu BOS olmali - defer yarisinda sahte adres gorunmemeli");
+            Regex.IsMatch(s, @"var\s+CARDS\s*=\s*\[\s*\]\s*;").Should().BeTrue(
+                "CARDS tohumu BOS olmali - defer yarisinda sahte kayitli kart gorunmemeli");
+            // VAKUM KIRICI: ciziciler DURUYOR. Silinselerdi index.html'in kendi
+            // renderAccount'u ReferenceError'a duserdi; tohum bosaltmak DURUST BOS
+            // DURUMU gosterir - iddia "sahte veri yok", "ekran yok" DEGIL.
+            s.Should().Contain("function accAddr()", "adres cizici YERINDE durmali");
+            s.Should().Contain("function accCards()", "kart cizici YERINDE durmali");
+
+            // ── F-M7: urun modali karartmaya tiklaninca kapanir ─────────────────
+            Regex.IsMatch(s, @"modal\.addEventListener\('click',function\(e\)\{if\(e\.target===this\)closeModal\(\);\}\);")
+                .Should().BeTrue("urun modali depodaki e.target===this kalibiyla kapanmali");
+            // CIFT-ANLAM KIRICI: DIGER kapanis yollari DEGISMEDI.
+            s.Should().Contain("function closeModal()", "closeModal yerinde durmali");
+            s.Should().Contain("overlay.onclick", "overlay yolu da yerinde durmali");
         }
     }
 }
