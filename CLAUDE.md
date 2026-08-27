@@ -8561,3 +8561,272 @@ ve dosya adlari TURA OZGU secildi.
 6. FIX-2             (B-6 · C-1 · G5 · B-5 · D-3)
 7. FIX-3 / B13       (kupon geri bildirimi · terk edilmis Pending TTL)
 ```
+
+---
+
+# SDP — SAHADA DOGRULANMIS DENETIM PROTOKOLU v1.1 (KALICI, 27 Agustos 2026)
+
+**Bu bolum BAGLAYICIDIR: bundan sonraki her CC isi bu protokole uyar.**
+v1.0 MTUR-OLCUM turunda sahada surulda; her v1.1 maddesi O TURDA OLCULEN bir
+surtunmeye dayanir ve gerekcesi maddenin yaninda yazilidir. Iki parcadir:
+proje-bagimsiz CEKIRDEK ve depoya ozgu DIVISIMA EKI.
+
+## 1. SDP-CEKIRDEK v1.1 (PROJE-BAGIMSIZ)
+
+### 1.1 ORANTILILIK
+Denetim derinligi RISKLE orantilidir; amac toren degil, **YANLIS RAPORUN
+IMKANSIZLASMASI**. Maliyet olculur ve sonraki surum kalibre edilir.
+
+| Seviye | Ne zaman | Denetim bicimi |
+|---|---|---|
+| **L1** kaynak tespiti | "kod boyle yaziyor" turu iddialar | Denetci, satir iddialarinin **>=%50 RASTGELE** orneklemini KENDI actigi dosyalardan dogrular; rastgelelik yontemi kayda gecer |
+| **L2** davranis/canli | "sistem boyle davraniyor" turu iddialar | TAM BAGIMSIZ denetci; paketteki HER kaniti KENDI komutuyla yeniden uretir. **Kopyala-onayla GECERSIZ**: kendi komut ciktisi olmayan onay sayilmaz |
+| **L3** kritik | para · stok · oturum · durustluk | **CIFT-KOR**: denetci ana akis sonuclarini GORMEDEN, yalniz gorev tanimi + kendi planiyla olcer; sonuclar sonra kiyaslanir, her fark tek tek kapatilir |
+
+Is turu -> seviye: para/stok/oturum/durustluk = **L3** · davranissal = **L2** ·
+salt kaynak okumasi = **L1**.
+
+### 1.2 KANIT DEFTERI (tek gercek kaynak, APPEND-ONLY)
+Satir silinmez/degistirilmez. Duzeltme:
+`[KALEM][sira-DUZELTME] SUPERSEDES sira-n + gerekce`.
+
+SEMA: `[KALEM][sira][SINIF][GUVEN] IDDIA | KOMUT | CIKTI-OZETI | HAM: yol | SHA | SAAT`
+SINIFLAR: `K`=kaynak · `C`=canli · `D`=DB · `A`=ag · `J`=journal/denetim
+GUVEN: KESIN / YUKSEK / ORTA / DUSUK — **DUSUK tek basina fix dayanagi OLAMAZ.**
+
+Zorunlu kayit turleri:
+- **ON-KAYIT**: her kalemde OLCUMDEN ONCE `[KALEM][PLAN]` — sorular + komut taslagi +
+  **KARAR KRITERI** ("X gorursem kirik, Y gorursem saglam"). Sapma serbest ama
+  `[PLAN-SAPMA]` gerekceli. **Bu zorunluluk AJAN SEMALARINA GOMULUR** (bkz 1.3).
+- **ANLIK GORUNTU**: AYRI bir kayit turudur ve **ON-KAYIT kurali KAPSAMINDA DEGILDIR**.
+  *(v1.1 — gerekce: MTUR ara kapisi anlik goruntuleri "plansiz olcum" sayip YANLIS ihlal
+  uretti.)*
+- **YOKLUK**: "temiz/yok" da bir IDDIADIR — `[YOKLUK]` + tarama kapsami + komut +
+  **negatif kontrol kaniti** sart.
+- Denetci/hakem gorev promptlari da deftere girer (verbatim ya da yol).
+- **FINAL RAPOR YALNIZ DEFTERDEN TURETILIR.**
+
+### 1.3 ROLLER ve SEMA ZORUNLULUGU
+- **ANA AKIS** olcer, bulgu paketi uretir.
+- **DENETCI (L1/L2/L3)** dogrular. Karar: `ONAY` / `ITIRAZ`(gerekce + KENDI kaniti) /
+  `OLCEMEDIM`. Ayrica **PLAN-UYUM** kontrolu: sonuc PLAN'daki karar kriteriyle mi
+  verilmis; kriter degistiyse `[PLAN-SAPMA]` gerekcesi var mi.
+- **HAKEM**: yalniz cozulmeyen itirazda, 1 tur, iki tarafin kanitini gorur, kararini
+  KENDI olcumuyle verir.
+- **RAPOR DENETCISI** (final): taslagi DEFTERE karsi satir satir — (a) defterde olmayan
+  iddia = **UYDURMA ADAYI, en agir**, (b) rapora girmeyen kritik bulgu, (c) sayi
+  uyusmazligi, (d) gruplar arasi capraz tutarlilik, (e) denetim matrisi <-> defter
+  eslesmesi, (f) **SUPERSEDES zinciri** — rapor gecersiz kilinmis bir satira dayaniyor mu.
+  *(v1.1 (f) — gerekce: MTUR'da muhurlu bir kanit, defterlenmemis bir olcumle
+  DEGISTIRILMISTI; rapor denetcisi yakaladi.)*
+- **KURAL-UYUM DENETCISI** (final): baslangic anlik goruntusune karsi KENDI komutlariyla;
+  **git diff KAPSAM TARAMASI** (yalniz beklenen dosyalar degismis mi) ve **cift-kor
+  izolasyon kaniti** dahil.
+- **SEMA KURALI (v1.1):** `plan` alani **TUM ajan semalarinda ZORUNLUDUR** (yalniz L3'te
+  degil), karar kriteri dahil. *(Gerekce: MTUR'da L1 kaynak semasinda zorunlu olmadigi
+  icin YEDI kalem plansiz kaldi ve ara kapi bunu ihlal olarak buldu.)*
+
+### 1.4 AKIS ve SONLANMA
+olcum -> BULGU PAKETI deftere -> denetci -> `ONAY`/`ITIRAZ`/`OLCEMEDIM` -> itirazda
+yeniden olcum. **Ana <-> denetci EN FAZLA 2 TUR** -> **HAKEM** (1 tur) -> cozulmezse
+**CEKISMELI** -> merkez.
+
+BUTCELER: denetci yazmali tekrari kalem basina 1 · hakemde 1 · ana akis kalem basina en
+fazla 2 derinlesme turu, sonrasi "KISMEN OLCULDU + neden".
+**PLANSIZ AJAN DAGITILAMAZ**: dagitim plani (kim, ne, hangi seviye) ONCE deftere.
+
+### 1.5 ARA KAPILAR (her grup sonunda)
+1. **DEFTER BUTUNLUK BOTU**: her satirin HAM dosyasi mevcut + SHA tutuyor · her kalemde
+   PLAN satiri olcumden ONCE · PLAN'siz olcum satiri yok (anlik goruntuler HARIC) ·
+   suzgec sinamalari kayitli.
+2. **GRUP ICI CAPRAZ TUTARLILIK**: grubun kalemleri birbiriyle celisiyor mu (2-3 satir).
+3. **CHECKPOINT + 2 satir mini-retro.**
+
+### 1.6 BULGU BICIMI
+- **SIDDET**: `[PARA]` / `[VERI-BOZAN]` / `[OTURUM]` / `[DURUSTLUK]` / `[UX]` /
+  `[KOZMETIK]` + **AKTIF|LATENT** + tek satir maruziyet.
+- **KOR NOKTA**: her kalem kapanisinda "bu olcumun goremeyecekleri" 1-2 satir; denetci
+  ekleyebilir.
+- **REPRO**: davranissal her bulguya NUMARALI yeniden-uretim blogu (temiz kosullar +
+  adimlar + beklenen KIRIK sonuc). **Fix dalgasinin once/sonra olcumu BIREBIR bununla
+  kosar.**
+- **BULGU PAKETINE GOMULU NOT (v1.1):** "Satir numarasi kaymasi ITIRAZ DEGILDIR —
+  denetci iddianin OZUNU dogrular, kaymayi NOT eder." *(Gerekce: MTUR'da bu, prompt'a
+  elle eklenmek zorunda kaldi.)*
+
+### 1.7 OLCUM DISIPLINI
+1. **SINIFLANDIRICI ONCE BILINEN GIRDIYLE SINANIR** — her eslestirme dizgesi/grep/cikis
+   kosulu, KARAR icin kullanilmadan once bilinen-POZITIF **ve** bilinen-NEGATIF girdiyle
+   sinanir; sinama deftere. Hata yutan bir yedek (`|| echo`, `2>/dev/null`, try/catch)
+   KARAR besleyemez.
+2. **AD/ROTA/KOLON KAYNAKTAN OKUNUR, TAHMIN EDILMEZ** — okundugu yer yazilir.
+3. **CALISMA ORTAMI OLCULUR — ZORUNLU ILK ADIM (v1.1).** Kosan surecin **KOMUT SATIRI**,
+   ortam degiskenleri ve gizli yapilandirma katmanlari (user-secrets vb.) olculur ve
+   deftere gecer. *(Gerekce: MTUR'da BES komut satiri argumani — odeme modu, arka plan
+   isleri, posta host'u, rate limit, admin seed — URUN DAVRANISI SANILIYORDU; olculunce
+   IKI iddia birden duzeldi.)*
+4. **AYIRT EDICI DENEY (v1.1, kalip):** kok sebebi, tahminin ONCEDEN AYRISTIGI iki
+   girdiyle **TEK olcumde** sina. *(Gerekce: MTUR'da misafir sepetinin kok sebebi,
+   "mock katalogda olan" ve "yalniz gercek katalogda olan" iki kalemle tek yenilemede
+   ispatlandi.)*
+5. **DINAMIK VERI**: canli sayilar ZAMAN DAMGALI. Denetci fark gorunce ONCE yazma
+   envanterine bakar — kurgu kayit farki itiraz sebebi DEGILDIR; itiraz yalniz ayni
+   kosulda YENIDEN URETILEMEYEN iddiaya.
+
+### 1.8 KURAL SIMETRISI (v1.1)
+Ana akis ve TUM denetciler **TEK ORTAK KURAL METNINI** alir (ayni yasak listesi).
+*(Gerekce: MTUR'da "user-secrets okuma" yasagi yalniz kaynak ajanlarina verilmisti;
+denetci onu okudu — yalniz uzunluk olctu, deger basmadi, sizinti olmadi — ama asimetri
+kayda gecti.)*
+
+### 1.9 IZOLASYON (v1.1)
+L3 cift-kor izolasyonu **PROMPT duzeyinde YETMEZ**; teknik olarak da saglanir: ajanlara
+ayri calisma dizini verilir, ana akisin ara dosyalarina erisim yolu ACILMAZ ve kural-uyum
+denetcisi transkriptleri tarayarak **izolasyon kaniti** uretir (pozitif kontrollu).
+
+### 1.10 RETRO ve SURUMLEME
+Her tur sonunda: ne iyi calisti · ne surtundu · changelog onerileri. Surum numarasi artar;
+her madde degisikligi OLCULEN bir surtunmeye dayanir. **DENETIM MALIYETI RAPORLANIR**
+(ajan sayisi, tur sayisi, plan sapmasi, ara kapi bulgusu) — kalibrasyon icin.
+
+## 2. DIVISIMA EKI v1.1 (DEPOYA OZGU)
+
+### 2.1 FIX DALGALARINA ESLEME
+Mevcut pin disiplini (pin + dis kontrolu + 5. kontrol/mutasyon) **KORUNUR**; SDP onun
+YANINA eklenir:
+
+| Mevcut | SDP eki |
+|---|---|
+| PIN yazilir | — |
+| DIS KONTROLU (assert ters -> isimli kirmizi) | — |
+| 5. KONTROL (uretim mutasyonu) | — |
+| — | **DAVRANIS DENETCISI (L3 cift-kor)**: dalganin ONCE/SONRA REPRO bloklarini ana akisin sonuclarini GORMEDEN yeniden uretir |
+| — | **RAPOR DENETCISI**: dalga raporunu deftere karsi tarar |
+| — | **KURAL-UYUM DENETCISI**: `git diff` KAPSAM taramasi — dalga kapsami disinda dosya degismis mi |
+
+KURAL: bir FIX dalgasinda her REPRO blogu, olcum turunda yazilan **NUMARALI blokla
+BIREBIR ayni adimlari** kosar; fix "once kirik / sonra saglam" olarak AYNI komutla
+gosterilir.
+
+### 2.2 IZLEYICI SOZLESMESININ SDP ICINDEKI YERI
+Bolum "KALICI KURAL - IZLEYICI / OLCUM ARACI SOZLESMESI" maddesi, SDP CEKIRDEK 1.7/1'in
+OZEL BIR HALIDIR. Ayni aile: **mekanizmanin CALISTIGI, sonucu bilinen bir girdiyle BIR KEZ
+gozlenir.** Depoda bu ailenin bes ornegi kayitli (`Identity.Name` · `IDistributedCache` ·
+uygulanmayan mutasyonlar · izleyici cikis kosulu · MTUR'daki grep hane-sayisi/diakritik
+tuzaklari).
+
+### 2.3 GOZ ORTAM KURALLARI
+- Ortam `scratchpad/goz1/` altindaki `schtasks` gorevleriyle kalkar (`DivisimaGoz1Api`,
+  `DivisimaGoz1Statik`). `Start-Process` bu ortamda OLUR (bkz. GOZ-FIX muhru).
+- **`api-baslat.cmd` BES ARGUMAN VERIYOR ve bunlar URUN VARSAYILANI DEGILDIR:**
+  `--Iyzico:UseRealSdk=false` · `--BackgroundJobs:Enabled=false` · `--MailSettings:Host=`
+  · `--AdminSeed:Enabled=false` · `--RateLimit:AuthPermitLimit=100`.
+  **HER OLCUM RAPORU BU LISTEYI ANMAK ZORUNDADIR** — aksi halde duzenek artifakti urun
+  kusuru sanilir (MTUR'da iki kez sanildi).
+- Build ONCESI gorev DURDURULUR (kosan API DLL'leri kilitler -> MSB3027), SONRASINDA
+  yeniden baslatilir. **Her mutasyon/dis turu oncesi YENIDEN DERLENIR** (bayat-ikili
+  kurali).
+- Omer'in hesabi (musteri 10, `e2b.sandbox@example.com`) ve verileri OLCUMDE KULLANILMAZ;
+  tum yazmali senaryolar kurgu hesapla ve TAMAMI envantere.
+- Ekran goruntusu bu panelde ALINAMIYOR; yerlesim SAYISAL olculur
+  (`getBoundingClientRect`, `elementFromPoint`).
+
+---
+
+# GOZ-1 BIRLESIK KABUL TURU - KAPANDI (27 Agustos 2026)
+
+Omer'in ertelenmis insan kabul turu (GOZ-FIX + VITRIN-FIX-2 birlikte) kosuldu.
+**MERKEZ KAYDI** (CC olcumu degil - merkezden bildirildi):
+
+- **M2 / M4 / M5 / M7 / M8 GECTI.**
+- **M6 CC kanitiyla gecti.**
+- **M3'te O2 duzeltmesi SAHADA CALISTI** (odeme gomme yolunun gorunur-icerik kontrolu).
+- Turda gorulen kalan belirtiler **F-M serisine donusturuldu** ve MTUR-OLCUM turunda
+  kok sebep duzeyinde olculdu (asagi).
+
+---
+
+# MTUR-OLCUM KAPANISI (salt olcum, zemin a58a204)
+
+SDP v1.0'in ilk tam uygulamasi. **Kod degismedi, commit atilmadi, build alinmadi.**
+
+## KALEM OZETLERI
+
+| Kalem | Kok sebep (ozet) | Siddet |
+|---|---|---|
+| **F-M3a** | index.html'in MOCK checkout'u ile api-bridge'in gercek checkout'u AYNI kaba yaziyor (`#checkoutView`, index.html:1600); tercih CIZIM SIRASINA bagli. Mock'u DORT yol diriltiyor: kupon uygula (2447), kupon kaldir (2490), para birimi (2766), **DIL** (2806). api-bridge geri ALAMAZ (`odemeOzetiniTazele` yalniz `#coSubmit`/`#mgGonder` arar). Mock CANLI KART FORMU tasiyor ve `coFinish()` (2732) **sunucuya HICBIR istek atmadan** "Order received!" deyip sepeti bosaltiyor. Cekmecede GOMULU SAHTE KUPON TABLOSU (2438) ve ekran bunlari REKLAM EDIYOR ("Try: HOSGELDIN · STIL20 · KARGOBEDAVA") | **[PARA+DURUSTLUK] AKTIF** |
+| **F-M3f** | Sunucu idempotency CALISIYOR ama istemci HER TIKTA yeni `request_id` uretiyor (api-bridge.js:1518 / :1286) -> koruma YAPISAL OLARAK ULASILAMAZ. "Form donmedi" dali `return` ediyor, `finally` dugmeyi geri aciyor, mesaj "tekrar deneyebilirsin" diyor - siparis ZATEN OLUSTU. Omer'in turu: **dort saniyede uc siparis**, tek denemeden ALTI Pending | **[PARA] AKTIF** |
+| **F-M3b** | Oturum DUSMUYOR (jeton/`loggedIn`/cookie sabit, `logout` cagrisi SIFIR). `setLang` (2793) satir **2806**'da mock'u cagiriyor; mock'un misafir uyarisi `coStep1()` icinde KOSULSUZ -> GIRISLI kullaniciya "Continuing as guest". **Yon TERS: gorunurdeki oturum dusmesi SAYFA DEGISIMININ SONUCU** | **[UX] AKTIF** |
+| **F-M1** | H1 (DB) ELENDI - stok dogru duser (87 stok satirinda invariant 0 ihlal; 55 onayli kalemin 55'inde hareket=miktar). **H2 KIRIK**: `product/get` FIZIKSEL stok donuyor (`ProductManager.cs:370`), `product/filter` ise `available` (`:517-530`) - AYNI SINIFTA IKI TANIM; `ProductStockDto`da alan olmadigi icin istemci TELAFI EDEMEZ. **H3 KIRIK**: `api-bridge.js:655` fiziksel toplami `p.stock` uzerine yaziyor; siparis sonrasi katalog tazeleme YOK. **DENGELEYICI: `order/place` asiri satisi 400 ile DURDURUYOR** | **[VERI-BOZAN] AKTIF** |
+| **F-M4** | `index.html:2644` sepeti geri yuklerken `if(byId(it.id))` kapisi koyuyor; acilista `PRODUCTS` hala MOCK dizi -> gercek urun ATLANIYOR, ardindan `saveCart()` (2432) bosalmis sepeti GERI YAZIYOR. **AYIRT EDICI DENEY**: id 2 (mock'ta var) SAG KALDI, id 955 (yalniz gercek) SILINDI | **[VERI-BOZAN/UX] AKTIF** |
+| **F-M5** | Backend favori yuzeyi TAM ve CALISIYOR (`WishlistController` uc rota; jetonla 200) ama vitrin HIC cagirmiyor. Favoriler `localStorage['dvs_favs']`de: cikista TEMIZLENMIYOR, **misafir hesabin favorisini SILEBILIYOR** | **[OTURUM/UX] AKTIF** |
+| **F-M2** | Sozlukte esasli boskuk YOK (T=561/AR=559, AR'da 2 eksik; EN eksik 0). Sebep: api-bridge index.html'in i18n-farkinda cizicilerini SARMALAYIP EZIYOR ve CEVIRISIZ TURKCE koyuyor (2655'teki 5 anahtar -> api-bridge.js:2199-2205'te 9 gomulu dizge); uretilen HTML `data-i18n` tasimadigi icin `applyI18n()` ULASAMIYOR | **[UX] AKTIF** |
+| **F-M6** | Kok sebep TEK yerde: `index.html:2301` (`.pd-rate`/`#pdRateJump`) KOSULSUZ ciziliyor. VITRIN-FIX-2 kart/cross-sell/karsilastirma/JSON-LD/yorum bolumunu korumaya aldi, YALNIZ 2301 disarida kaldi. Yildizlar BOS iskelet ama "0.0" yaziyor; alt bolum "yorum yok" derken ust satir puan gosteriyor | **[DURUSTLUK] AKTIF** |
+| **F-M7** | Carpi · ESC · **tarayici GERI** (modal `history.pushState` yapiyor, `index.html:2360`) CALISIYOR. **KAPATMAYAN TEK YOL: OVERLAY tiklamasi** - handler YOK. Hash degismiyor -> paylasilabilir adres YOK | **[UX] AKTIF (dar)** |
+| **F-M8** | Iki siparis ucu de YALNIZ sayisal id donuyor (`OrderManager.cs:449`). `renderPaymentResult` (api-bridge.js:1613) uc branch tasiyor: girisli yol siparisi yeniden cekip `order_number`i kurtariyor (:1647), misafir yolu cekemiyor (`order/get` Customer'a kilitli, anonim 401) ve `'#'+orderId` basiyor (:1671), **girisli branch'i KOSULSUZ eziyor**. Iade listesi (:1962) `r.order_id` basiyor oysa `order_number` DTO'da MEVCUT | **[UX] AKTIF** |
+| **F-M9** | 12 ikna yuzeyinden **5'i PRNG uydurmasi** (`rngOf`), **3'u sabit-kosulsuz**, **2'si GERCEK** ("senin bedenin" rozeti; "Kolay Iade 14 gun" = `ReturnManager.ReturnWindowDays`), 2'si kismi. Kumas kompozisyonu **YASAL BEYANDIR** ve `detailsOf -> rngOf(p.id*3313+17)`den geliyor. Ic celiski: fit paneli "dar kaliyor" derken Urun Bilgisi "Oversize" (ayri tohumlar 4517/3313). Aksesuar korumasi OLU (`p.cat==='aksesuar'` vs canli slug `goz1-aksesuar`) -> deri kemere "bir beden buyuk al", yun bereye model boyu | **[DURUSTLUK] AKTIF** |
+| **KAYIT** | **Katalogda GERCEK urun SIFIR** - 35 urunun tamami test artifakti, 33'u vitrinde canli. `products`a isaret eden 17 FK'nin tamami NO_ACTION, 10 urun siparis/fatura/iade kaydina bagli -> hard silinemez. Bes kuponun UCU sifir degerli. 10 CMS sayfasinda satici kimligi YOK | envanter |
+
+**EK BULGULAR (denetimde cikti):** gecersiz kupon siparis yolunda **SESSIZCE yok sayiliyor**
+(HTTP 201, indirim yok, uyari yok) · misafir hesap sahiplenme zincirinin ILK halkasi
+istemci<->sunucu sozlesme uyusmazligiyla kirik (`resendVerification` GOVDE gonderiyor, uc
+`[FromQuery]` bekliyor, canli 400) · `MailSettings:Host` bossa `SmtpMailService` sessizce
+donuyor ve outbox mesaji "Processed" isaretleniyor (**25 Agustos'ta 38 uyari <-> 38 mesaj,
+saniye duzeyinde birebir**) — bugun ise `--BackgroundJobs:Enabled=false` yuzunden isleyici
+HIC kosmuyor (25 Agustos 11:50'den beri tek posta uretilmedi).
+
+## DENETIM METRIKLERI
+- **27 ajan** (12 kaynak + 13 denetci + 2 final) · hata 0 · bos sonuc 0
+- **6 itiraz -> 6'si da ILK turda KABUL** · **HAKEM 0** · **CEKISMELI 0** · plan sapmasi 0
+- **GERCEK UYDURMA: 0.** Rapor denetcisinin 13 "uydurma adayi"nin cogu **DEFTER BOSLUGU**
+  cikti (terimler muhurlu ham dosyalarda izlenebilir ama deftere yazilmamis).
+- **KURAL-UYUM: UYUMLU** (alti maddenin altisi; cift-kor izolasyonu TEMIZ - uc L3
+  transkriptinde "mtur" gecisi 0, pozitif kontrollu)
+- Defter: 190 satir / 121 kanit satiri / 13 ham dosya, **SHA 13/13 TUTTU**
+- **L3 cift-kor IKI kalemde yakinsadi ve IKISINDE DE denetci ana akistan DAHA KESKIN
+  ornek buldu** (urun 1'in tamami rezerve S bedeni; model boyunun tek sayfada uc degeri)
+
+## DENETIMIN DUZELTTIKLERI (on bir) - ozet
+`F-M3c` user-secrets'ta anahtarlar VAR, asil engel komut satiri · `F-M3g` YENI BULGU
+(sozlesme uyusmazligi) · `F-M3g` "Processed" bugunku ortam icin yanlis · `F-M7` geri tusu
+CALISIYOR (olcumum ileri-gecmis budamasi yuzunden yaniltiiciydi) · `F-M2` sozluk sayimi
+eksigi GIZLEYEN artefaktti · `F-M2` ham enum kullaniciya ULASMIYOR, cerceve yanlisti ·
+outbox deltasi 10 -> **8** · F-M9'un L3 satiri defterde YOKTU · **[F-M1][2] "sunucu stok
+kapisi saglam" defterde VARDI ama rapora GIRMEMISTI** (risk oldugundan agir gorunuyordu) ·
+muhurlu kanit defterlenmemis olcumle DEGISTIRILMISTI · ajan sayimi 25 -> 27.
+
+## KURGU KAYIT ENVANTERI (MTUR)
+`orders 213, 214` musteri 74 online **Pending** (idempotency olcumu) · `orders 215, 216, 217`
+musteri 74 COD **Confirmed** · `user_sessions` 6 yeni satir (218 -> 224) ·
+`outbox_messages` **8 yeni mesaj (id 141-148)**, hepsi Pending · **yeni musteri YOK**
+(max 77) · **yeni adres YOK** (max 44). Mock checkout turu HICBIR DB kaydi uretmedi.
+Mevcut Pending'lere DOKUNULMADI (muhur `561429369 / 35`, id<=210 kumesi).
+
+---
+
+# KUYRUK (MTUR sonrasi, merkez karari)
+
+```
+1. MFIX-1   F-M3a (tek gercek checkout, mock sokum/delege) + F-M3f (request_id oturum
+            basina) + F-M3b (dil degisimi) + F-M8 istemci ucu        <- SU AN
+2. MFIX-2   F-M9 kararlari: KALDIR x6 · teslimat GERCEK ADRESE · beden tablosu GERCEK
+            BEDENLERE · taksit satiri KALDIR · F-M6 (index.html:2301) · F-M7 overlay ·
+            F-M1-H3 (istemci tazeleme)
+3. MFIX-3   F-M4 (misafir sepeti) · F-M5 (hesaba-ozgu favori) · F-M2 (api-bridge
+            bypass'i sozluge + AR 2 anahtar) · F-M3g (istemci query duzeltmesi)
+4. MFIX-B   [BACKEND] F-M1-H2 available DTO · gecersiz kupon siparis yolunda REDDEDILIR
+            ya da GORUNUR UYARI · place yanitina order_number · outbox Host-bos ->
+            Failed+error
+5. FIX-1B   F4 + F8 zinciri, kara liste desenlesmesi, sentetik yazma pinleri
+6. ADMIN-FIX
+7. IMPORT-FIX   [KRITIK YOL - katalogda gercek urun 0]
+8. FIX-1C   F5 · F6 · F7 · F9 · F13 · D-YAN dev-veri temizligi
+9. LOG-FIX  bes ham log satiri -> KanitMaskesi
+10. FIX-2   B-6 · C-1 · G5 · B-5 · D-3
+11. FIX-3 / B13   kupon geri bildirimi · terk edilmis Pending TTL
+```
+
+**D-YAN TEMIZLIK LISTESINE EKLENENLER:** uc sifir-degerli kupon (`E2TEST`,
+`DALGABOLCUM`, `PANELDEN30` - tipi Yuzde, degeri 0.00, hepsi aktif) · musteri 74'un kurgu
+siparisleri (213-217) · **test urunleri envanteri** (35 urunun tamami; `temizle.ps1`
+scratchpad'de HAZIR ama KOSULMAMIS, 30 urun hala aktif).
