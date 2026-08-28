@@ -165,10 +165,10 @@
       // kargo kazandin!" gosteriyordu, sunucu 1.874,60 + 49,90 = 1.924,50 tahsil ediyordu.
       // Kok IKI KATMANLIYDI: liste DTO'su indirim bilgisini tasimiyordu VE istemci detaydaki
       // sale_price'i da okumuyordu (dosyada 0 gecis).
-      // NEDEN BURASI: istemcide DOGRUDAN `.price` okuyan 40 nokta var (index.html 34 +
+      // NEDEN BURASI: istemcide DOGRUDAN `.price` okuyan 36 nokta var (index.html 34 +
       // bu dosya 6) ve HEPSI bu fonksiyonun URETTIGI nesneyi tuketiyor - detaydanUrun bunu
       // cagiriyor, enrichProduct fiyata dokunmuyor, cartSubtotal ve pPrice p.price okuyor.
-      // Sinirda tek yerde cozunce 40 tuketici DEGISMEDEN dogru olur; ayri bir dvsEtkinFiyat()
+      // Sinirda tek yerde cozunce 36 tuketici DEGISMEDEN dogru olur; ayri bir dvsEtkinFiyat()
       // yardimcisi 40 cagri yerine elle baglanmayi gerektirir ve YENI yazilan her yuzey
       // VARSAYILAN OLARAK yanlis olurdu.
       // PENCEREYI ISTEMCI YORUMLAMAZ: sale_start/sale_end SUNUCUDA degerlendirilir ve sonuc
@@ -1568,7 +1568,16 @@
     // cozulur; bu is icin bu dosyada ZATEN cartSubtotal() var ve uye yolu da onu kullaniyor.
     // Kendi hesabimi yazmak, ayni sayinin iki yerde ayrisması demekti.
     var toplam = cartSubtotal();
-    var kargo = toplam >= 2000 ? 0 : 49.9;
+    // CELISKI AVCISI (MANTIK-FIX-1 denetimi) BULDU: burada `freeShip` kontrolu YOKTU,
+    // uye panelinde (:1750) VARDI - dalganin KENDI ICINDE asimetri. K3 misafir kuponunu
+    // sunucuya tasidigi ICIN bu erisilebilir hale geldi: kargo-bedava kuponunda sunucu
+    // (OrderManager.cs:293 `freeShipping || subtotal >= esik`) kargoyu 0 yapar, ekran ise
+    // 49,90 gosterirdi - dalganin "her ekran = tahsilat" olcutunun tam ihlali.
+    // BUGUN LATENT (discount_type=2 kupon DB'de 0) ama admin panelinden BIR TIK uzakta.
+    var misafirKargoBedava = (function () {
+      try { return !!(window.coupon && window.coupon.srvShip); } catch (e) { return false; }
+    })();
+    var kargo = (misafirKargoBedava || toplam >= 2000) ? 0 : 49.9;
     // MANTIK-FIX-1 / K3: misafir ozetinde de KUPON SATIRI.
     // Yalnizca govdeyi duzeltmek TERS bir ayrisma yaratirdi: sunucu indirimi uygular ama
     // ekran onu HIC gostermezdi (A2/B7 ve A3'un ayni bulgusu). Indirim, cekmecenin
@@ -1866,19 +1875,46 @@
     };
   }
 
+  // CELISKI AVCISI (MANTIK-FIX-1 denetimi) BULDU: bu, kuponun UCUNCU yazicisiydi ve
+  // YALNIZ `checkoutState.coupon`a yaziyordu - cekmecenin `window.coupon`una DOKUNMUYORDU.
+  // Sonuc: panelden uygulanan bir kupon `kuponuTazele`nin guard'indan HIC gecmiyordu, yani
+  // sepet kuculunce R-M4'un ta kendisi (bayat indirim) YENIDEN URETILIYORDU - ustelik kupon
+  // uygulamanin en dogal yeri BURASI. K4'un "TEK KUPON DURUMU" iddiasi bu yol yuzunden
+  // YANLISTI. Artik yazma TEK KAYNAGA (cekmecenin `coupon` nesnesi) yapilir, panel durumu
+  // ondan TURETILIR - kupon hangi ekrandan uygulanirsa uygulansin tazeleme kapsamina girer.
+  function cekmeceKuponunuYaz(code, d) {
+    if (!code || !d) {
+      try { if (typeof window.removeCoupon === "function") window.removeCoupon(); } catch (e) { }
+      return;
+    }
+    var ship = !!d.free_shipping, amt = Number(d.discount_amount) || 0;
+    var etiket = ship ? "" : ("−" + (typeof window.tl === "function" ? window.tl(amt) : amt));
+    var nesne = {
+      code: code, type: ship ? "ship" : "srv", val: amt,
+      min: Number(d.min_amount) || 0,
+      srvAmount: ship ? 0 : amt, srvShip: ship,
+      label: [etiket, etiket]
+    };
+    try { window.coupon = nesne; } catch (e) { }
+    try { localStorage.setItem("dvs_coupon", JSON.stringify(nesne)); } catch (e) { }
+    if (typeof window.renderCart === "function") window.renderCart();
+  }
+
   async function applyCouponReal() {
     var msg = document.getElementById("coCouponMsg");
     var code = (document.getElementById("coCoupon").value || "").trim();
     msg.textContent = ""; msg.style.color = "#a32d2d";
-    if (!code) { checkoutState.coupon = null; drawCheckout(); return; }
+    if (!code) { cekmeceKuponunuYaz(null, null); kuponDurumunuEsitle(); drawCheckout(); return; }
     try {
       var d = unwrap(await api.coupons.validate(code, cartSubtotal()));
-      checkoutState.coupon = d ? Object.assign({ code: code }, d) : null;
+      cekmeceKuponunuYaz(code, d);          // TEK KAYNAGA yaz
+      kuponDurumunuEsitle();                // panel durumu ONDAN turer
       drawCheckout();
       var m2 = document.getElementById("coCouponMsg");
       if (m2) { m2.style.color = "#0f6e56"; m2.textContent = ceviri("b_kupon_uygulandi"); }
     } catch (e) {
-      checkoutState.coupon = null;
+      cekmeceKuponunuYaz(null, null);
+      kuponDurumunuEsitle();
       drawCheckout();
       var m3 = document.getElementById("coCouponMsg");
       if (m3) { m3.style.color = "#a32d2d"; m3.textContent = e.message || ceviri("b_kupon_gecersiz"); }
@@ -1949,16 +1985,30 @@
   async function kuponuTazele() {
     var c = null;
     try { c = window.coupon; } catch (e) { c = null; }
-    if (!c || !c.code) { sonKuponImzasi = null; return; }
+    if (!c || !c.code) {
+      sonKuponImzasi = null;
+      // CELISKI AVCISI BULDU: cekmeceden "Kaldir" tiklandiginda `coupon` null olur ama
+      // `checkoutState.coupon` ESKI degeri tasimaya devam ediyordu - panel indirimi
+      // cizmeye VE `coupon_code`'u GONDERMEYE devam ediyordu. K4'un kapattigini iddia
+      // ettigi (a) maddesi ASLINDA ACIK KALMISTI. Esitleme KOSULSUZ yapilir.
+      if (typeof window.kuponDurumunuEsitle === "function") window.kuponDurumunuEsitle();
+      return;
+    }
 
     var imza = sepetImzasi();
     if (imza === sonKuponImzasi) return;   // sepet DEGISMEDI -> istek YOK
     sonKuponImzasi = imza;
 
     var araToplam = (typeof window.cartRaw === "function") ? Number(window.cartRaw()) || 0 : cartSubtotal();
-    var d = null;
-    try { d = await window.divisimaValidateCoupon(c.code, araToplam); } catch (e) { d = null; }
+    var durum = { ulasildi: false, gecerli: null, veri: null };
+    try { durum = await window.divisimaKuponDurumu(c.code, araToplam); } catch (e) { durum.ulasildi = false; }
 
+    // SUNUCUYA ULASILAMADIYSA HICBIR SEY YAPMA. Gecici bir kesinti yuzunden GECERLI bir
+    // kuponu dusurmek ve sebebini YANLIS soylemek, sessiz dusurmeden daha kotudur.
+    // Imza da geri alinir ki bir sonraki cizimde YENIDEN denensin.
+    if (!durum.ulasildi) { sonKuponImzasi = null; return; }
+
+    var d = durum.veri;
     if (!d) {
       // Kupon artik gecerli DEGIL (minimum tutar bozuldu, limit doldu, suresi gecti...).
       try { if (typeof window.removeCoupon === "function") window.removeCoupon(); } catch (e) { }
@@ -2411,6 +2461,24 @@
     window.divisimaValidateCoupon = async function (code, subtotal) {
       try { return unwrap(await api.coupons.validate(code, subtotal)); }
       catch (e) { return null; }
+    };
+    // CELISKI AVCISI BULDU: yukaridaki sarmalayici HER hatayi null'a ceviriyor - sunucunun
+    // "bu kupon gecersiz" (400) yaniti ile "sunucuya ULASILAMADI" (ag/timeout/500) AYIRT
+    // EDILEMIYORDU. `kuponuTazele` null gorunce kuponu KALDIRIYOR ve kullaniciya
+    // "artik gecerli degil" diyordu - yani gecici bir kesintide GECERLI bir kupon
+    // dusuruluyor ve sebep YANLIS soyleniyordu. "Sessiz dusurme yasak" karari burada
+    // "GORUNUR ama YANLIS" mesaja donusmustu.
+    // AYRIM: sunucu bir SEBEPLE reddettiyse (4xx) kaldiririz; ULASAMADIYSAK DOKUNMAYIZ.
+    window.divisimaKuponDurumu = async function (code, subtotal) {
+      try {
+        var d = unwrap(await api.coupons.validate(code, subtotal));
+        return { ulasildi: true, gecerli: !!d, veri: d };
+      } catch (e) {
+        var kod = Number(e && e.status) || 0;
+        // 4xx = sunucu KARAR VERDI (gecersiz). Digerleri (0/5xx) = ULASILAMADI.
+        if (kod >= 400 && kod < 500) return { ulasildi: true, gecerli: false, veri: null };
+        return { ulasildi: false, gecerli: null, veri: null };
+      }
     };
   }
 

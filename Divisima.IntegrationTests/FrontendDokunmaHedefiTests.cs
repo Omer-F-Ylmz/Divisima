@@ -1361,11 +1361,11 @@ namespace Divisima.IntegrationTests
         // JS/DOM kosucusu yok - Dalga 4'ten beri acik kalem). Davranis kaniti dalganin
         // A/B tarayici olcumlerindedir.
         //
-        // OLCULEN GEREKCE: istemcide DOGRUDAN `.price` okumasi 40 nokta (index.html 34 +
-        // api-bridge 6), `pPrice(` cagrisi yalnizca 4. Hepsi mapProduct'in URETTIGI nesneyi
+        // OLCULEN GEREKCE: istemcide DOGRUDAN `.price` okumasi 36 nokta (index.html 34 +
+        // api-bridge 2), `pPrice(` cagrisi yalnizca 4. Hepsi mapProduct'in URETTIGI nesneyi
         // tuketiyor (detaydanUrun :809 mapProduct cagiriyor, enrichProduct fiyata dokunmuyor,
         // cartSubtotal :1217 ve pPrice :1670 p.price okuyor). Bu yuzden normalizasyon TEK
-        // SINIR NOKTASINDA yapilir; 40 tuketici DEGISMEDEN dogru olur ve YENI yazilacak bir
+        // SINIR NOKTASINDA yapilir; 36 tuketici DEGISMEDEN dogru olur ve YENI yazilacak bir
         // yuzey de VARSAYILAN OLARAK dogru olur.
         [Fact]
         public void KAYNAK_SOZLESMESI_IstemciFiyati_SINIRDA_Normalize_Edilir_TEK_NOKTA()
@@ -1375,8 +1375,21 @@ namespace Divisima.IntegrationTests
             govde.Should().NotBeNullOrWhiteSpace("mapProduct govdesi okunabilmeli");
 
             // (1) ASIL IDDIA: fiyat sunucunun ETKIN alanindan turer.
-            govde.Should().Contain("effective_price",
-                "mapProduct fiyati sunucunun etkin fiyat alanindan turetmeli");
+            //
+            // L3 DENETCISI PIN BOSLUGU BULDU (AGIR) ve assert ALAN BAZLI hale getirildi:
+            // eski hali `Contain("effective_price")` idi ve bu **BEDAVA DOGRU** kaliyordu -
+            // dizge govdede DORT satirda geciyor (price, old x2, cart). Denetci `price:`
+            // satirini K1 ONCESI haline (`Number(p.price)`) dondurdu ve **TUM SUIT 575/578
+            // ile TEMIZ DURUMLA BIREBIR AYNI kaldi** - yani K1'in istemci yarisi PINSIZDI.
+            // Olcut artik ALANIN KENDISI: `price` alani etkin fiyattan TUREMELI.
+            // (Bosluk ayiklanir ki bicimlendirme degisikligi pini kirmasin - M-P8 dersi.)
+            var govdeBosluksuz = govde.Replace(" ", "").Replace("\t", "").Replace("\r", "").Replace("\n", "");
+            govdeBosluksuz.Should().Contain("price:Number(p.effective_price",
+                "mapProduct'in `price` ALANI sunucunun etkin fiyat alanindan turemeli - " +
+                "govdede dizgenin BASKA satirlarda gecmesi YETMEZ (L3 denetcisi bu boslugu " +
+                "uretim mutasyonuyla gosterdi: `price` geri alindi, HICBIR pin yakalamadi)");
+            govdeBosluksuz.Should().NotContain("price:Number(p.price)",
+                "K1 ONCESI ham fiyat okumasi GERI GELEMEZ");
 
             // (2) CIFT-ANLAM KIRICI: `old` alani indirimliyken LISTE fiyatini tasimali.
             // Bu olmadan indirim EKRANDA GORUNMEZ: olculdu ki 8 indirimli urunun 7'sinde
@@ -1444,8 +1457,19 @@ namespace Divisima.IntegrationTests
             tazeleGovde.Should().Contain("sepetImzasi",
                 "tazeleme SEPET IMZASINA baglanmali - salt-cizim yollari (dil, para birimi, " +
                 "sekme) istek URETMEMELI; MFIX-3b/T1'de bu tuzagin bedeli odendi");
-            tazeleGovde.Should().Contain("divisimaValidateCoupon",
+            // PREMIS GUNCELLEMESI (celiski avcisi bulgusu, gerekce yazili): assert once
+            // `divisimaValidateCoupon` ariyordu. O sarmalayici HER hatayi null'a ceviriyordu -
+            // sunucunun "gecersiz" (4xx) yaniti ile "sunucuya ULASILAMADI" (ag/5xx) AYIRT
+            // EDILEMIYORDU ve gecici bir kesintide GECERLI kupon dusuruluyordu. Tazeleme artik
+            // ayrimi YAPAN `divisimaKuponDurumu`yu kullaniyor. OLCULEN SEY DEGISMEDI
+            // ("tazeleme SUNUCUYA sorar"), yalnizca cagrilan fonksiyonun adi degisti; assert
+            // ayrica AYRIMIN KENDISINI de tutar hale getirildi - yani pin GUCLENDI.
+            tazeleGovde.Should().Contain("divisimaKuponDurumu",
                 "tazeleme SUNUCUYA sormali - yerel hesapla yetinmek bayatligi cozmez");
+            tazeleGovde.Should().Contain("ulasildi",
+                "sunucuya ULASILAMADIGINDA kupon DUSURULMEMELI - 'gecersiz' ile 'soramadim' " +
+                "ayirt edilmezse gecici bir kesinti GECERLI bir kuponu kaldirir ve sebebi " +
+                "YANLIS soylenir (gorunur ama yanlis mesaj)");
 
             // (3) TEK DURUM: checkoutState.coupon BAGIMSIZ YASAYAMAZ.
             b.Should().Contain("kuponDurumunuEsitle",
@@ -1508,6 +1532,18 @@ namespace Divisima.IntegrationTests
             // bile, JS calismadan once kullanicinin gordugu METIN BUDUR.
             s.Should().NotContain("%10 İndirim Seni Bekliyor",
                 "satir ici HTML varsayilani da vaadi tasimamali");
+
+            // KAPSAM GENISLETMESI - IKI DENETCI BAGIMSIZ OLARAK AYNI BOSLUGU BULDU:
+            // K5 sozluk METINLERINI temizledi ama modalin EN BASKIN ogesi olan dekoratif
+            // rozet (`nl-deco`, 58px / mobilde 46px) HALA "%10" yaziyordu. Modal ilk ziyarette
+            // ~5 sn sonra KENDILIGINDEN aciliyor. L3 denetcisi rozeti "%10 INDIRIM" yapip
+            // vaadi BUYUTTU ve P23 YESIL KALDI - yani anahtar bazli tarama bu yuzeyi
+            // KAPSAMIYORDU. Rozet artik ADIYLA taraniyor.
+            var deco = Regex.Matches(s, @"class=""nl-deco""[^<]{0,40}>[^<]{0,60}<").Cast<Match>().FirstOrDefault();
+            deco.Should().NotBeNull("bulten rozeti (nl-deco) HALA var olmali - vakum kirici");
+            deco!.Value.Should().NotContain("%",
+                "bulten rozeti YUZDE bir indirim VAAT ETMEMELI - metinler temizlense bile " +
+                "modalin en baskin ogesi vaat ediyorsa kusur KAPANMAMISTIR");
 
             // VAKUM KIRICI: bulten penceresi HALA VAR ve anahtarlari HALA tanimli.
             // "hepsini sil" YANLIS duzeltmedir - pencere mesru bir e-bulten kaydidir.

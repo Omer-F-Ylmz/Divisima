@@ -2115,9 +2115,16 @@ function showCategory(cat,sub){
   var dealBanner='';
   if(cat==='indirim'){var dps=base0.filter(function(x){return x.old;}),mx=0;dps.forEach(function(x){var pc=discPct(x);if(pc>mx)mx=pc;});/* MFIX-3b/(2): SAHTE ACILIYET SOKULDU. Geri sayim gece yarisina (gun sonuna sabitlenmis bir ana)
    sayiyordu ama gece yarisi HICBIR SEY BITMIYOR - urunun indirimini sonlandiran bir
-   mekanizma YOK (sale_end hicbir kod yolunda yazilmiyor/okunmuyor; PricingHelper
-   sale_price>0 iken indirimi HER ZAMAN uygular). Sayac ve "firsat bitisine" etiketi
-   kaldirildi; INDIRIM ROZETLERI ve sale_price gosterimi AYNEN KALIYOR (gercek veri). */
+   mekanizma YOK. Sayac ve "firsat bitisine" etiketi kaldirildi.
+   MANTIK-FIX-1 / K1 GUNCELLEMESI (celiski avcisi buldu - bu yorum BAYATLAMISTI):
+   (a) "PricingHelper sale_price>0 iken indirimi HER ZAMAN uygular" mekanik olarak
+       YANLISTI - IsOnSale pencereyi OKUR. Sonuc olarak dogruydu, cunku depoda
+       sale_start/sale_end YAZAN bir kod yolu YOK; ama gerekce yanlisti.
+       StorefrontCatalogContractTests artik penceresi KAPALI bir urunle bunu pinliyor.
+   (b) "sale_price gosterimi AYNEN KALIYOR" da YANLISTI: K1 oncesi vitrin sale_price'i
+       HIC okumuyordu (dosyada 0 gecis). K1 sonrasi okuyor - `effective_price` alani
+       uzerinden, mapProduct'ta TEK SINIR NOKTASINDA normalize ederek. Indirim
+       rozetleri artik GERCEKTEN calisiyor. */
 dealBanner='<div class="deal-strip"><div class="wrap deal-inner"><div class="deal-left"><span class="deal-fire">🔥</span><div><b>'+t('deal_title')+'</b><small>'+dps.length+' '+t('deal_count')+' · '+t('deal_upto').replace('{n}',mx)+'</small></div></div></div></div>';}
   catView.innerHTML=
     '<div class="cat-banner"><div class="wrap"><div class="breadcrumb"><a href="#/">'+t('home')+'</a> &nbsp;/&nbsp; '+crumb+'</div><h1 class="serif">'+esc(title)+'</h1><p>'+esc(t('catd_'+cat))+'</p></div></div>'+dealBanner+
@@ -3128,7 +3135,11 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'&&panel.class
 <div class="nl-modal" id="nlModal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="nlTitle">
   <div class="nl-box">
     <button class="nl-x" id="nlX" type="button" aria-label="Kapat">×</button>
-    <div class="nl-deco">%10</div>
+    <!-- MANTIK-FIX-1 / K5 (celiski avcisi buldu): bu blok 58px punto ile "%10" yaziyordu.
+         K5 METIN vaadini kaldirdi ama GORSEL vaat modalin EN BASKIN ogesi olarak duruyordu -
+         kullanici dev bir "%10" gorup abone oluyor, hicbir kod almiyordu. Karsiligi olmayan
+         SAYI kaldirildi; blok marka ogesi olarak KALDI (pencere silinmedi). -->
+    <div class="nl-deco">Divisima</div>
     <div class="nl-body">
       <h3 class="serif" id="nlTitle" data-i18n="nl_title">Yeniliklerden İlk Sen Haberdar Ol</h3>
       <p data-i18n="nl_sub">E-bültenimize üye ol; yeni koleksiyonlar ve kampanyalardan ilk sen haberdar ol.</p>

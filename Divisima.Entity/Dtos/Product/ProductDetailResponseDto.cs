@@ -27,8 +27,11 @@ namespace Divisima.Entity.Dtos.Product
         public decimal? sale_price { get; set; }
         // MANTIK-FIX-1 / K1: MUSTERININ ODEYECEGI FIYAT (liste DTO'sundaki alanin ikizi).
         // Yukaridaki `sale_price` HAM kalir - admin formunun geri yazdigi alan odur ve
-        // yorumundaki "zamanli indirim eklenirse burasi yeniden degerlendirilmelidir" uyarisi
-        // TAM DA BU DALGADA karsilandi: istemci artik pencere farkindaligini KENDISI yorumlamak
+        // NOT (celiski avcisi duzeltti): yukaridaki alanin "zamanli indirim eklenirse burasi
+        // yeniden degerlendirilmelidir" uyarisi BU DALGADA KARSILANMADI - uyarinin KOSULU
+        // (zamanli indirim ozelliginin acilmasi) GERCEKLESMEDI: ProductAdd/UpdateRequestDto
+        // icinde sale_start/sale_end alani YOK ve depoda yazici YOK (DB: penceresi olan urun 0).
+        // Bu dalganin yaptigi yalnizca sudur: istemci artik pencereyi KENDISI yorumlamak
         // yerine bu hesaplanmis alani okuyor. Iki tuketici (admin = HAM, vitrin = PENCERE
         // FARKINDA) boylece AYRI alanlardan beslenir; bir alana iki anlam yuklenmez.
         public decimal effective_price { get; set; }
