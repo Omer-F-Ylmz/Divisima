@@ -446,7 +446,7 @@
         _setDocTitle.apply(this, arguments);
         if (sonKategoriBulunamadi) {
           var en = (typeof window.lang !== "undefined" && window.lang === "en");
-          document.title = (en ? "Page Not Found" : ceviri("b_sayfa_bulunamadi")) + " · Divisima";
+          document.title = ceviri("b_sayfa_bulunamadi") + " · Divisima";
         }
       };
       sarmalT.__taksonomi = true;
@@ -1360,16 +1360,14 @@
   var syncing = false;
   var ilkSenkronYapildi = false;
   var korunanSunucuAnahtarlari = {};
-  // MFIX-3b / T1 (1): son BASARIYLA senkronlanan sepetin imzasi. Yalniz sepet ICERIGINDEN
-  // turer (urun + beden + adet), siralamadan bagimsizdir. Yazma BASARISIZ olduysa imza
-  // GUNCELLENMEZ - boylece bir sonraki gercek degisiklikte yeniden denenir.
+  // MFIX-3b / T1 (1): son senkron DENEMESINDEKI sepetin imzasi.
+  // KURAL-UYUM DENETIMI BULDU: buraya IKINCI bir `sepetImzasi` tanimi yazmistim; ayni
+  // IIFE icinde MFIX-1'den gelen bir tanim ZATEN VARDI (asagida, ~1850) ve JS hoisting
+  // geregi SONRAKI tanim oncekini EZIYORDU - yani yazdigim fonksiyon HIC CALISMIYORDU.
+  // Bu, bu depoda alti kez bedeli odenen "ayni kuralin ikinci kopyasi" sinifidir.
+  // MEVCUT tanim KULLANILIYOR (cartItemsPayload uzerinden; olculdu: o fonksiyon HICBIR
+  // kalemi SUZMUYOR, yani imza sepetin TAMAMINI temsil ediyor). Ikinci kopya KALDIRILDI.
   var sonSenkronImzasi = null;
-  function sepetImzasi() {
-    if (!window.cart || typeof window.cart.forEach !== "function") return "";
-    var p = [];
-    window.cart.forEach(function (it) { p.push(it.id + "|" + (it.size || "") + "|" + Math.floor(it.qty)); });
-    return p.sort().join(";");
-  }
 
   function sunucuSepetiniOku(yanit) {
     var d = unwrap(yanit);
@@ -1743,7 +1741,7 @@
         ? '<div class="panel"><h3>' + ceviri("b_magaza_kredisi") + '</h3>' +
           '<p class="muted" style="font-size:13px">Bakiyen: ' + money(checkoutState.credit) + "</p>" +
           '<label style="display:flex;align-items:center;gap:8px;margin-top:8px">' +
-          '<input type="checkbox" id="coUseCredit"' + (checkoutState.useCredit > 0 ? " checked" : "") + "> Bakiyeyi kullan</label></div>"
+          '<input type="checkbox" id="coUseCredit"' + (checkoutState.useCredit > 0 ? " checked" : "") + "> " + ceviri("b_bakiyeyi_kullan") + "</label></div>"
         : "") +
 
       '<div class="panel"><h3>' + ceviri("b_h_odeme_yontemi") + '</h3>' +
@@ -1807,7 +1805,7 @@
         });
         checkoutState.addrId = null;
         await renderRealCheckout();
-      } catch (e) { err.textContent = e.message || "Adres kaydedilemedi"; }
+      } catch (e) { err.textContent = e.message || ceviri("b_adres_kaydedilemedi"); }
     };
   }
 
@@ -2406,7 +2404,7 @@
       var satirlar = kalemler.map(function (k) {
         var ad = k.product_name || k.name || (ceviri("b_urun_no") + (k.product_id || "?"));
         return '<div class="od-row"><div class="od-info"><b>' + esc(ad) + "</b>" +
-          "<span>" + esc(k.size || "") + (k.quantity ? " · " + k.quantity + " adet" : "") + "</span></div>" +
+          "<span>" + esc(k.size || "") + (k.quantity ? " · " + k.quantity + " " + ceviri("b_adet_sonek") : "") + "</span></div>" +
           '<div class="od-price">' + paraTL(k.unit_price != null ? k.unit_price : k.price) + "</div></div>";
       }).join("");
 
@@ -2437,7 +2435,7 @@
         var kg = unwrap(await api.shipment.track(orderId));
         if (kg && kg.tracking_number) {
           kargoBlok = '<div class="od-row"><div class="od-info"><b>' + ceviri("b_kargo") + '</b><span>' +
-            esc(kg.carrier_name || "") + " · Takip no: " + esc(kg.tracking_number) +
+            esc(kg.carrier_name || "") + " · " + ceviri("b_takip_no") + esc(kg.tracking_number) +
             (kg.status_name ? " · " + esc(kg.status_name) : "") + "</span></div></div>";
         }
       } catch (_) { kargoBlok = ""; }
@@ -2468,7 +2466,7 @@
         return '<div class="acc-tile"><div class="at-head"><b>' + ceviri("b_at_siparis") + esc(String(r.order_number || ("#" + (r.order_id || "")))) + "</b>" +
           '<span class="at-def">' + esc(iadeDurumEtiket(r.status_name)) + "</span></div>" +
           "<p>" + esc(urunAdi(r.product_id, r.product_name)) + " · " + esc(r.size || "") +
-          " · " + (r.quantity || 1) + " adet</p>" +
+          " · " + (r.quantity || 1) + " " + ceviri("b_adet_sonek") + "</p>" +
           '<p class="muted">' + trTarih(r.created_at) + (r.refund_amount != null ? " · " + paraTL(r.refund_amount) : "") + "</p></div>";
       }).join("") + "</div>";
     } catch (e) {
@@ -2513,7 +2511,7 @@
   // gostermek dogrudan yalan olur. Notr ve DOGRU bilgi cizilir.
   function sekmeKartlar(el) {
     el.innerHTML = '<div class="wrap" style="padding:24px 0"><p class="muted" style="margin:0 0 8px">' +
-      "Kart bilgilerin Divisima'da saklanmaz." + "</p>" +
+      ceviri("b_kart_saklanmaz") + "</p>" +
       '<p class="muted">' + ceviri("b_kart_saglayici_sayfasi") +
       ceviri("b_kart_ulasmaz") + "</p></div>";
   }
@@ -2528,11 +2526,11 @@
     m.id = "e3FaturaModal";
     m.setAttribute("role", "dialog");
     m.setAttribute("aria-modal", "true");
-    m.setAttribute("aria-label", "Fatura");
+    m.setAttribute("aria-label", ceviri("b_fatura"));
     m.style.cssText = "position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:20px";
     m.innerHTML = '<div style="background:#fff;color:#111;max-width:860px;width:100%;max-height:88vh;overflow:auto;border-radius:10px;padding:18px">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px">' +
-      "<b>Fatura</b><button id=\"e3FaturaKapat\" class=\"btn ghost\">Kapat</button></div>" +
+      "<b>" + ceviri("b_fatura") + "</b><button id=\"e3FaturaKapat\" class=\"btn ghost\">" + ceviri("b_kapat") + "</button></div>" +
       '<div id="e3FaturaGovde">' + ceviri("b_yukleniyor") + '</div></div>';
     document.body.appendChild(m);
     m.querySelector("#e3FaturaKapat").onclick = function () { m.remove(); };
@@ -2581,9 +2579,9 @@
       '<label style="display:block;margin-bottom:8px">' + ceviri("b_urun") + '<select id="e3IadeKalem" style="width:100%">' +
       kalemler.map(function (k, i) {
         var ad = k.product_name || k.name || (ceviri("b_urun_no") + k.product_id);
-        return '<option value="' + i + '">' + esc(ad) + " · " + esc(k.size || "") + " · " + (k.quantity || 1) + " adet</option>";
+        return '<option value="' + i + '">' + esc(ad) + " · " + esc(k.size || "") + " · " + (k.quantity || 1) + " " + ceviri("b_adet_sonek") + "</option>";
       }).join("") + "</select></label>" +
-      '<label style="display:block;margin-bottom:8px">Adet<input id="e3IadeAdet" type="number" min="1" value="1" style="width:100%"></label>' +
+      '<label style="display:block;margin-bottom:8px">' + ceviri("b_adet") + '<input id="e3IadeAdet" type="number" min="1" value="1" style="width:100%"></label>' +
       '<label style="display:block;margin-bottom:8px">Sebep<select id="e3IadeSebep" style="width:100%">' +
       IADE_SEBEPLERI.map(function (s) { return '<option value="' + s[0] + '">' + esc(s[1]) + "</option>"; }).join("") + "</select></label>" +
       '<label style="display:block;margin-bottom:8px">' + ceviri("b_tur") + '<select id="e3IadeTur" style="width:100%">' +
@@ -2687,7 +2685,7 @@
       var stokMu = s.type === "stock";
       var ad = s.product_name || (ceviri("b_urun_no") + s.product_id);
       var ayrinti = stokMu
-        ? (s.size ? "Beden " + esc(s.size) : ceviri("b_tum_bedenler"))
+        ? (s.size ? ceviri("b_beden_bosluk") + esc(s.size) : ceviri("b_tum_bedenler"))
         : (ceviri("b_takip_fiyati") + paraTL(s.subscribed_price));
       // is_notified: bildirim GONDERILMIS demek. Satiri gizlemiyoruz - kullanici "bana haber
       // verilmis mi" sorusunun yanitini gorebilmeli; ama durumu ACIKCA yaziyoruz.
@@ -3086,8 +3084,9 @@
       govde.innerHTML = ceviri("b_epostan_dogrulandi");
     } catch (e) {
       document.getElementById("dvsAuthErr").textContent = e.message || ceviri("b_dogrulama_basarisiz");
-      govde.innerHTML = ceviri("b_kod_gecersiz") +
-        "\"Tekrar gönder\" ile yeni kod isteyebilirsin.";
+      // L3 DENETIMI BULDU: cumlenin ILK yarisi cevriliyken KUYRUGU Turkce yapistiriliyordu -
+      // EN/AR kullanicisi YARI CEVRILI bir cumle goruyordu. Kuyruk da sozluge tasindi.
+      govde.innerHTML = ceviri("b_kod_gecersiz") + ceviri("b_tekrar_gonder_ile");
     }
   }
 

@@ -57,6 +57,14 @@ namespace Divisima.IntegrationTests
 
         private static string Index => Oku("frontend/index.html");
 
+        // KURAL-UYUM DENETIMI (MFIX-3b): rastgelelik kaynagi olcutu ARTIK AD DEGIL SINIF.
+        // Onceki hal tek bir yardimci ADINA (`rngOf`) bakiyordu; o yardimci tumden
+        // silinince assert HICBIR KOSULDA kirilamaz hale gelmisti (bolum 6 vakum yasagi).
+        // Desen: bilinen tum rastgelelik kaynaklarini VE tohumlu-uretici kalibini kapsar.
+        private static readonly Regex RASTGELELIK =
+            new(@"Math\.random|crypto\.getRandomValues|\brngOf\b|\bmulberry32\b|\bxorshift\b|\bseed\s*=",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
         // ── M10 (a): SEPET "Sepeti Onayla" ────────────────────────────────────────────────
         [Fact]
         public void SepetOnayHandleri_HEDEFI_closest_ILE_Cozer_ALT_ELEMAN_DUSURMEZ()
@@ -277,16 +285,19 @@ namespace Divisima.IntegrationTests
 
             // VAKUM KIRICI 2: `rngOf` dosyada HALA kullaniliyor olmali (yorumlar, renk/degerlendirme
             // uretimi). Yardimci tumden silinseydi asagidaki iddia BEDAVA dogru olurdu.
-            // MFIX-3b PREMIS: `rngOf` SOKULDU - variantsOf onun SON CAGIRANIYDI. Vakum kirici
-            // artik "tarama dosyayi GERCEKTEN okudu" olcutune dayaniyor (ayni guvence).
-            s.Length.Should().BeGreaterThan(200000, "index.html govdesi okunmus olmali (vakum kirici)");
+            // MFIX-3b + KURAL-UYUM DENETIMI: eski vakum kirici ("rngOf HALA kullaniliyor")
+            // BU DALGADA GECERSIZ KALDI - rngOf tumden SOKULDU, dolayisiyla ona bakan
+            // NotContain artik HICBIR KOSULDA kirilamazdi (bolum 6 vakum yasagi).
+            // OLCUT ARTIK KUSUR SINIFI: govde HICBIR rastgelelik kaynagindan beslenmez.
+            // Desen ADI DEGIL SINIFI tarar - yarin baska bir PRNG adi gelse de yakalar.
+            // VAKUM KIRICI: asagidaki POZITIF assertler (gercek veri kaynagi) govdenin
+            // okundugunu ve anlamli oldugunu ZATEN kanitliyor.
+            s.Length.Should().BeGreaterThan(200000, "index.html govdesi okunmus olmali");
 
             // ASIL SOZLESME: beden stogu tohumlu rastgelelikten TUREMEZ.
-            govde.Should().NotContain("rngOf",
+            govde.Should().NotMatchRegex(RASTGELELIK,
                 "beden bazli stok UYDURULMAZ; bilinmiyorsa BOS harita donulur ve urun toplami " +
-                "sunucunun verdigi total_stock'tan (p.stock) okunur");
-            govde.Should().NotContain("Math.random",
-                "ayni gerekce: rastgelelik envanter sayisi uretemez");
+                "sunucunun verdigi total_stock'tan (p.stock) okunur - HICBIR rastgelelik kaynagi");
 
             // Bilinmeyen kirilim BOS harita ile temsil edilir (cagiranlar 'anahtar yok' = kisit yok).
             govde.Should().Contain("return {};",
@@ -376,17 +387,22 @@ namespace Divisima.IntegrationTests
             // VAKUM KIRICI 1: `rngOf` dosyada HALA kullaniliyor (fit/renk/kumas yuzeyleri bu
             // dalganin kapsami DISINDA). Yardimci tumden silinseydi asagidaki iddia BEDAVA
             // dogru olurdu.
-            // MFIX-3b PREMIS: `rngOf` SOKULDU (son cagirani variantsOf idi).
-            s.Length.Should().BeGreaterThan(200000, "index.html govdesi okunmus olmali (vakum kirici)");
+            // MFIX-3b + KURAL-UYUM DENETIMI: eski vakum kirici ("rngOf HALA kullaniliyor")
+            // BU DALGADA GECERSIZ KALDI - rngOf tumden SOKULDU, dolayisiyla ona bakan
+            // NotContain artik HICBIR KOSULDA kirilamazdi (bolum 6 vakum yasagi).
+            // OLCUT ARTIK KUSUR SINIFI: govde HICBIR rastgelelik kaynagindan beslenmez.
+            // Desen ADI DEGIL SINIFI tarar - yarin baska bir PRNG adi gelse de yakalar.
+            // VAKUM KIRICI: asagidaki POZITIF assertler (gercek veri kaynagi) govdenin
+            // okundugunu ve anlamli oldugunu ZATEN kanitliyor.
+            s.Length.Should().BeGreaterThan(200000, "index.html govdesi okunmus olmali");
 
             // VAKUM KIRICI 2: tarama gercekten bir govde okumus olmali.
             var govde = FonksiyonGovdesi(s, "function reviewsOf(p)");
             govde.Length.Should().BeGreaterThan(120, "reviewsOf govdesi bos okunmus olamaz");
 
             // ASIL SOZLESME: yorum verisi tohumlu rastgelelikten TUREMEZ.
-            govde.Should().NotContain("rngOf",
-                "yildiz ve yorum sayisi bir TICARI BEYANDIR - uydurulamaz");
-            govde.Should().NotContain("Math.random", "ayni gerekce");
+            govde.Should().NotMatchRegex(RASTGELELIK,
+                "yildiz ve yorum sayisi bir TICARI BEYANDIR - uydurulamaz (hicbir rastgelelik kaynagi)");
 
             // Kaynak SUNUCU: average_rating / review_count (api-bridge.js mapProduct esler).
             govde.Should().Contain("Number(p.rating)", "ortalama sunucudan gelmeli");
@@ -696,8 +712,14 @@ namespace Divisima.IntegrationTests
             // Duzeltme "PRNG'yi sil" DEGIL "IKNA YUZEYLERINI gercek veriye bagla".
             // rngOf renk/gorsel gibi KAPSAM DISI yuzeylerde kullanilmaya devam ediyor;
             // silinseydi asagidaki iddialar BEDAVA dogru olurdu.
-            // MFIX-3b PREMIS: `rngOf` SOKULDU (son cagirani variantsOf idi).
-            s.Length.Should().BeGreaterThan(200000, "index.html govdesi okunmus olmali (vakum kirici)");
+            // MFIX-3b + KURAL-UYUM DENETIMI: eski vakum kirici ("rngOf HALA kullaniliyor")
+            // BU DALGADA GECERSIZ KALDI - rngOf tumden SOKULDU, dolayisiyla ona bakan
+            // NotContain artik HICBIR KOSULDA kirilamazdi (bolum 6 vakum yasagi).
+            // OLCUT ARTIK KUSUR SINIFI: govde HICBIR rastgelelik kaynagindan beslenmez.
+            // Desen ADI DEGIL SINIFI tarar - yarin baska bir PRNG adi gelse de yakalar.
+            // VAKUM KIRICI: asagidaki POZITIF assertler (gercek veri kaynagi) govdenin
+            // okundugunu ve anlamli oldugunu ZATEN kanitliyor.
+            s.Length.Should().BeGreaterThan(200000, "index.html govdesi okunmus olmali");
 
             // ── ASIL SOZLESME: uydurma ureticiler ve tuketicileri YOK ────────────
             foreach (var ad in new[] { "fitInfo", "fitPanel", "detailsOf",
@@ -887,8 +909,14 @@ namespace Divisima.IntegrationTests
 
             // ── VAKUM KIRICI 2: rngOf HALA VAR (kapsam disi renk yuzeyi) ─────────
             // Duzeltme "tum rastgeleligi sil" DEGIL; silinseydi iddia BEDAVA dogru olurdu.
-            // MFIX-3b PREMIS: `rngOf` SOKULDU (son cagirani variantsOf idi).
-            s.Length.Should().BeGreaterThan(200000, "index.html govdesi okunmus olmali (vakum kirici)");
+            // MFIX-3b + KURAL-UYUM DENETIMI: eski vakum kirici ("rngOf HALA kullaniliyor")
+            // BU DALGADA GECERSIZ KALDI - rngOf tumden SOKULDU, dolayisiyla ona bakan
+            // NotContain artik HICBIR KOSULDA kirilamazdi (bolum 6 vakum yasagi).
+            // OLCUT ARTIK KUSUR SINIFI: govde HICBIR rastgelelik kaynagindan beslenmez.
+            // Desen ADI DEGIL SINIFI tarar - yarin baska bir PRNG adi gelse de yakalar.
+            // VAKUM KIRICI: asagidaki POZITIF assertler (gercek veri kaynagi) govdenin
+            // okundugunu ve anlamli oldugunu ZATEN kanitliyor.
+            s.Length.Should().BeGreaterThan(200000, "index.html govdesi okunmus olmali");
 
             // ── CIFT-ANLAM KIRICI: api-bridge'in MESRU rastgeleligi DURMALI ──────
             // request_id (idempotency anahtari) Math.random kullanir ve bu DOGRUDUR;
@@ -1225,8 +1253,13 @@ namespace Divisima.IntegrationTests
             s.Should().Contain("function toast(msg,tip)", "toast TIP parametresi almali");
             s.Replace(" ", "").Should().Contain("?tip:'info'",
                 "tip verilmediginde VARSAYILAN 'info' olmali - 'ok' DEGIL");
+            // KURAL-UYUM DENETIMI: burada `tip` dongu degiskeni KULLANILMIYORDU - ayni iddia uc
+            // kez kosuyor, okuyan "uc tipin eslemesi dogrulaniyor" saniyordu ama _TOAST_IKON
+            // icinden bir girdi silinse pin YESIL kalirdi. Artik HER TIP AYRI AYRI aranir.
+            var ikonBlok = s.Substring(s.IndexOf("var _TOAST_IKON", StringComparison.Ordinal));
+            ikonBlok = ikonBlok.Substring(0, ikonBlok.IndexOf('\n'));
             foreach (var tip in new[] { "ok", "err", "info" })
-                s.Should().Contain("_TOAST_IKON", "tip -> ikon eslemesi TEK yerde olmali");
+                ikonBlok.Should().Contain(tip + ":", "_TOAST_IKON icinde '" + tip + "' girdisi OLMALI");
 
             // (b) TIPSIZ eylem toasti YOK. Tarama index.html VE api-bridge.
             // VAKUM KIRICI: taranan cagri sayisi anlamli olmali.
