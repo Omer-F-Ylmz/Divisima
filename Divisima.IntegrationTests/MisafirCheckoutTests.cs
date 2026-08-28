@@ -282,6 +282,86 @@ namespace Divisima.IntegrationTests
                 "uye icin takip baglantisi YINE olmali (vakum kirici)");
         }
 
+        // ── P21) MANTIK-FIX-1 / K3 - MISAFIR KUPONU SUNUCUYA TASINIR ───────────────────
+        // DAVRANIS pini (durust etiket): gercek HTTP ucu, gercek DB dogrulamasi.
+        //
+        // OLCULEN ONCE-DURUM (R-M3): api-bridge.js misafir govdesinde `coupon_code: ""`
+        // SABITTI; uye govdesi kuponu GONDERIYORDU. Musteri cekmecede indirimi GORUYOR
+        // (kupon kutusu misafire ACIK - index.html:2610 kosulsuz) ve TAM FIYAT oduyordu.
+        // Sunucu tarafi ZATEN calisiyordu: GuestCheckoutDto.coupon_code VAR ve
+        // GuestCheckoutManager.cs:220 onu PlaceOrder'a TASIYOR - yani K3 SAF ISTEMCI duzeltmesi.
+        [Fact]
+        public async Task MISAFIR_KUPONU_SUNUCUYA_TASINIR_GECERSIZ_KUPON_400_DONER()
+        {
+            if (Skipped()) return;
+            var (urunId, beden) = await UrunHazirlaAsync();   // 499,90 TL
+
+            // (1) ASIL IDDIA: gecerli kupon UYGULANIR ve DB'ye YAZILIR.
+            var kod = await KuponHazirlaAsync(deger: 10m);
+            var eposta = $"misafir-kupon-{Guid.NewGuid():N}@example.com";
+            var r = await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesi(eposta, urunId, beden, KapidaOdeme, kod));
+            r.StatusCode.Should().Be(HttpStatusCode.Created,
+                "gecerli kuponlu misafir siparisi olusmali. Govde: " +
+                Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(await r.Content.ReadAsStringAsync()));
+
+            await using (var ctx = NewContext())
+            {
+                var m = await ctx.Set<Customer>().AsNoTracking().FirstAsync(c => c.email == eposta);
+                var o = await ctx.Set<Order>().AsNoTracking()
+                    .Where(x => x.customer_id == m.id).OrderByDescending(x => x.id).FirstAsync();
+
+                // VAKUM KIRICI: indirim GERCEKTEN uygulanmis olmali - alan tasinip yok
+                // sayilsaydi siparis yine 201 doner ama discount_amount 0 kalirdi.
+                o.discount_amount.Should().BeGreaterThan(0m,
+                    "kupon SUNUCUYA TASINMIS ve UYGULANMIS olmali - eski halde coupon_code sabit "
+                    + "bos dizgeydi ve musteri cekmecede indirimi gorup TAM FIYAT oduyordu");
+                o.coupon_code.Should().Be(kod, "kullanilan kupon kodu siparise YAZILMALI");
+                o.discount_amount.Should().Be(49.99m, "yuzde 10 indirim 499,90 uzerinden hesaplanmali");
+            }
+
+            // (2) ZORUNLU BACAK / CIFT-ANLAM KIRICI: GECERSIZ kupon 400 + KENDI MESAJI.
+            // MFIX-B/K2 sunucu tarafinda "gecersiz kupon SESSIZCE yok sayilmaz" sozlesmesini
+            // kurmustu; K3 kuponu misafir yolunda tasimaya baslayinca o sozlesmenin misafirde
+            // de GECERLI oldugu KANITLANMALI. Bu assert olmadan "misafirde kuponu yine sessizce
+            // yut" diyen bir uygulama (1)'i gecerdi.
+            var eposta2 = $"misafir-kupon-{Guid.NewGuid():N}@example.com";
+            var r2 = await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesi(eposta2, urunId, beden, KapidaOdeme, "MFXYOKBOYLEKOD"));
+            r2.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+                "gecersiz kupon SESSIZCE yok sayilmaz - MFIX-B/K2 sozlesmesi misafir yolunda da gecerli");
+            (await r2.Content.ReadAsStringAsync()).Should().Contain("upon",
+                "yanit sebebi ADIYLA soylemeli - musteri neden reddedildigini bilmeli");
+
+            // (3) SIPARIS OLUSMAZ - MFIX-B/K2'nin uye yolundaki ikizi.
+            (await SiparisSayisiAsync(eposta2)).Should().Be(0,
+                "gecersiz kupon reddedilen istekte SIPARIS olusmamali");
+
+            // (4) SUPHELI DAVRANIS - BUGUNKU HALI PINLENIR, DEGISTIRILMEZ (ev kurali).
+            // OLCULDU: reddedilen istek MUSTERI SATIRI BIRAKIYOR. Kok sebep
+            // GuestCheckoutManager.cs:173 - musteri (ve :190 adres) PlaceOrder'a DEVRETMEDEN
+            // ONCE yaziliyor, kupon dogrulamasi ise PlaceOrder'in ICINDE.
+            // CANLI ZARAR ZINCIRI (uctan uca olculdu):
+            //   1) misafir gecersiz kupon girer      -> 400 "Gecersiz kupon kodu."
+            //   2) DB'de musteri satiri OLUSMUS olur (email_verified=0, siparis YOK)
+            //   3) ayni misafir KUPONSUZ tekrar dener -> 409 "Bu e-posta kayitli. Lutfen giris yapin."
+            //   -> TEK BIR YANLIS KUPON KODU, o e-postayi misafir checkout'a KALICI KAPATIYOR
+            //      (ustelik musteri giris de yapamaz: parola rastgele uretildi, kendisi bilmiyor).
+            // K3 BU TUZAGI YARATMADI ama ULASILABILIR KILDI: K3 oncesi misafir kuponu
+            // sunucuya HIC gitmiyordu, dolayisiyla bu 400 dali misafirde HIC ATESLEYEMEZDI.
+            // NEDEN BU DALGADA DUZELTILMEDI: cozum ya GuestCheckoutManager'da ikinci bir kupon
+            // dogrulama noktasi acar (bu depoda YEDI kez bedeli odenen "ayni kuralin ikinci
+            // kopyasi" sinifi), ya da 409 semantigine dokunur - o ise GUVENLIK DALGASI 2 / #1'de
+            // MERKEZIN KABUL ETTIGI bir risk kararidir. Karar MERKEZIN.
+            // HAFIFLETICI (olculdu): istemci kuponu cekmecede /api/coupon/validate ile ONCEDEN
+            // dogruluyor, dolayisiyla DUZ YAZIM HATASI bu dala normalde ULASMAZ; dal ancak kupon
+            // dogrulama ile siparis arasinda GECERSIZLESIRSE (limit/sure) atesler.
+            (await MusteriSayisiAsync(eposta2)).Should().Be(1,
+                "SUPHELI (MANTIK-FIX-1'de olculdu, DUZELTILMEDI): reddedilen misafir istegi " +
+                "MUSTERI SATIRI BIRAKIYOR ve ayni e-posta ikinci denemede 409 aliyor. Bu assert " +
+                "bugunku davranisi PINLER; duzeltildigi gun KIRILIR ve o zaman 0'a cevrilir.");
+        }
+
         // ── Yardimcilar ─────────────────────────────────────────────────────────────────
         private static MailMessageDto? MailBul(string konuParcasi, string alici)
         {
@@ -619,19 +699,41 @@ namespace Divisima.IntegrationTests
             }
         }
 
-        private static object MisafirGovdesi(string eposta, int urunId, string beden, byte yontem) => new
+        // MANTIK-FIX-1 / K3: `kuponKodu` parametresi EKLENDI (varsayilan "" - mevcut
+        // cagiranlarin HICBIRI etkilenmez). Depoda misafir + kupon tasiyan tek bir fikstur
+        // YOKTU; K3'un davranisi onsuz olculemezdi.
+        private static object MisafirGovdesi(string eposta, int urunId, string beden, byte yontem,
+            string kuponKodu = "") => new
+            {
+                guest_name = "Misafir Musteri",
+                guest_email = eposta,
+                guest_phone = "5550000000",
+                city = "Istanbul",
+                district = "Kadikoy",
+                full_address = "Misafir Mah. 1",
+                zip_code = "34710",
+                coupon_code = kuponKodu,
+                payment_method = yontem,
+                items = new[] { new { product_id = urunId, size = beden, quantity = 1 } }
+            };
+
+        // MANTIK-FIX-1 / K3: kupon fiksturu (uretimdeki alan adlariyla; kaynaktan okundu).
+        private static async Task<string> KuponHazirlaAsync(decimal deger, decimal minTutar = 0m)
         {
-            guest_name = "Misafir Musteri",
-            guest_email = eposta,
-            guest_phone = "5550000000",
-            city = "Istanbul",
-            district = "Kadikoy",
-            full_address = "Misafir Mah. 1",
-            zip_code = "34710",
-            coupon_code = "",
-            payment_method = yontem,
-            items = new[] { new { product_id = urunId, size = beden, quantity = 1 } }
-        };
+            await using var ctx = NewContext();
+            var kod = "MFXK3" + Guid.NewGuid().ToString("N").Substring(0, 8).ToUpperInvariant();
+            ctx.Set<Coupon>().Add(new Coupon
+            {
+                code = kod,
+                discount_type = 0,          // Yuzde
+                value = deger,
+                min_amount = minTutar,
+                is_active = true,
+                created_at = DateTime.Now
+            });
+            await ctx.SaveChangesAsync();
+            return kod;
+        }
 
         private static async Task OutboxBosaltAsync()
         {

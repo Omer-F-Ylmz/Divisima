@@ -160,14 +160,39 @@
       // KATEGORI KIMLIGINI de tasimali (GET /api/size-guide/category/{categoryId}).
       catId: Number(p.category_id) || 0,
       sub: "",
-      price: Number(p.price) || 0,
-      old: p.old_price ? Number(p.old_price) : 0,
+      // MANTIK-FIX-1 / K1: FIYAT SINIRDA NORMALIZE EDILIR - TEK NOKTA.
+      // OLCULEN ZARAR (R-M1a, siparis 257): urun 926 x5 icin ekran 2.499,50 TL + "Ucretsiz
+      // kargo kazandin!" gosteriyordu, sunucu 1.874,60 + 49,90 = 1.924,50 tahsil ediyordu.
+      // Kok IKI KATMANLIYDI: liste DTO'su indirim bilgisini tasimiyordu VE istemci detaydaki
+      // sale_price'i da okumuyordu (dosyada 0 gecis).
+      // NEDEN BURASI: istemcide DOGRUDAN `.price` okuyan 40 nokta var (index.html 34 +
+      // bu dosya 6) ve HEPSI bu fonksiyonun URETTIGI nesneyi tuketiyor - detaydanUrun bunu
+      // cagiriyor, enrichProduct fiyata dokunmuyor, cartSubtotal ve pPrice p.price okuyor.
+      // Sinirda tek yerde cozunce 40 tuketici DEGISMEDEN dogru olur; ayri bir dvsEtkinFiyat()
+      // yardimcisi 40 cagri yerine elle baglanmayi gerektirir ve YENI yazilan her yuzey
+      // VARSAYILAN OLARAK yanlis olurdu.
+      // PENCEREYI ISTEMCI YORUMLAMAZ: sale_start/sale_end SUNUCUDA degerlendirilir ve sonuc
+      // effective_price alaninda gelir (ProductProfile). Buradaki yedek yalnizca alani
+      // tasimayan ESKI bir yanit icindir.
+      price: Number(p.effective_price ?? p.price) || 0,
+      // `old` = ustu cizili fiyat. Indirimliyken old_price BOSSA liste fiyati kullanilir;
+      // boylece mevcut discPct (index.html:2002) ve rozet makinesi CALISIR. Olculdu: 8
+      // indirimli urunun 7'sinde old_price BOS, yani bugun musteri HICBIR indirim isareti
+      // gormuyor. Uc fiyatli urunde (or. 123: price 299,90 / sale 249,90 / old 399,90)
+      // old_price kazanir - ikisi de GERCEK KAYITLI degerdir, uydurma yok.
+      old: p.old_price ? Number(p.old_price)
+         : ((Number(p.effective_price) || 0) > 0 && Number(p.effective_price) < Number(p.price) ? Number(p.price) : 0),
       // VITRIN-FIX-2 / F-D1: yildiz ve yorum sayisi SUNUCUDAN gelir. index.html eskiden
       // bunlari urunun id'sinden tohumlanan bir PRNG ile UYDURUYORDU. ProductListResponseDto
       // ve ProductDetailResponseDto ikisi de bu iki alani tasiyor (canli olculdu).
       rating: Number(p.average_rating) || 0,
       rvcount: Math.max(0, Math.floor(Number(p.review_count) || 0)),
-      cart: Number(p.price) || 0,
+      // MANTIK-FIX-1 / K1: bu alan OLU (olculdu: p.cart / x.cart / it.cart okumasi SIFIR;
+      // negatif kontrol p.stock 12 okuma). SILINMEDI cunku dalganin kapsami genisletilmiyor;
+      // ama HAM fiyat tasimaya devam etseydi normalize edilmis `price`in yaninda duran bir
+      // TUZAK olurdu - ileride onu okuyan biri sessizce liste fiyatini alirdi. Ayni degeri
+      // tasiyor. TEMIZLIK ADAYI: olu alan olarak kaldirilabilir (ayri, janitor isi).
+      cart: Number(p.effective_price ?? p.price) || 0,
       stock: Number(p.total_stock) || 0,   // SPRINT 8 madde 5: liste yolu ARTIK gercek degeri donduruyor
       sizes: (p.sizes && p.sizes.length) ? p.sizes.map(function (s) { return isNaN(+s) ? s : +s; }) : [],
       col: p.color_hex || "#cccccc",
@@ -1208,6 +1233,14 @@
     return out;
   }
 
+  // MANTIK-FIX-1 / K3: misafir govdesinin kupon kodu. TEK KAYNAK cekmecedeki
+  // `window.coupon` (index.html:2586 couponApplyFrom onu SUNUCU dogrulamasiyla kurar).
+  // Ikinci bir kupon durumu ACILMIYOR - D3 kararinin "kupon durumu TEKLESIR" sarti.
+  function misafirKuponKodu() {
+    try { return (window.coupon && window.coupon.code) ? String(window.coupon.code) : ""; }
+    catch (e) { return ""; }
+  }
+
   function cartSubtotal() {
     var s = 0;
     if (!window.cart || !window.cart.forEach) return 0;
@@ -1302,6 +1335,10 @@
         // Kullanici #/odeme'deyken sepeti degistirirse (or. cekmeceden kalem silerse)
         // ozet eski tutari gostermeye devam ediyordu. Sepet her degistiginde ve odeme
         // sayfasi ACIKKEN ozet yeniden hesaplanir.
+        // MANTIK-FIX-1 / K4: kupon tazelemesi. Kendi IMZA kapisi var (sonKuponImzasi),
+        // dolayisiyla salt-cizim yollari istek URETMEZ. GIRIS SARTINDAN ONCE cagriliyor
+        // cunku MISAFIR de kupon uygulayabiliyor (cekmecedeki kutu kosulsuz - index.html:2610).
+        kuponuTazele();
         odemeOzetiniTazele();
         if (!api.isLoggedIn()) return;
         // MFIX-3b / T1 (1): SALT YENIDEN CIZIM SUNUCUYA YAZMAZ.
@@ -1532,6 +1569,13 @@
     // Kendi hesabimi yazmak, ayni sayinin iki yerde ayrisması demekti.
     var toplam = cartSubtotal();
     var kargo = toplam >= 2000 ? 0 : 49.9;
+    // MANTIK-FIX-1 / K3: misafir ozetinde de KUPON SATIRI.
+    // Yalnizca govdeyi duzeltmek TERS bir ayrisma yaratirdi: sunucu indirimi uygular ama
+    // ekran onu HIC gostermezdi (A2/B7 ve A3'un ayni bulgusu). Indirim, cekmecenin
+    // KULLANDIGI TEK KAYNAKTAN (index.html couponDiscount) hesaplanir - ikinci bir kupon
+    // matematigi ACILMAZ.
+    var misafirIndirim = (typeof window.couponDiscount === "function")
+      ? (Number(window.couponDiscount(toplam)) || 0) : 0;
 
     view.innerHTML =
       '<div class="wrap" style="padding:28px 0"><h2>' + ceviri("b_h_odeme") + '</h2>' +
@@ -1568,7 +1612,11 @@
       '<div class="co-block" style="margin-top:18px"><h3>' + ceviri("b_h_siparis_ozeti") + '</h3>' +
       '<div class="od-sum"><span>' + ceviri("b_ara_toplam") + '</span><b>' + money(toplam) + "</b></div>" +
       '<div class="od-sum"><span>' + ceviri("b_kargo") + (kargo === 0 ? ceviri("b_ucretsiz") : "") + "</span><b>" + money(kargo) + "</b></div>" +
-      '<div class="od-sum"><span>' + ceviri("b_toplam") + '</span><b>' + money(toplam + kargo) + "</b></div>" +
+      (misafirIndirim > 0
+        ? '<div class="od-sum" style="color:#0f6e56"><span>' + ceviri("b_kupon_indirimi") +
+          "</span><b>-" + money(misafirIndirim) + "</b></div>"
+        : "") +
+      '<div class="od-sum"><span>' + ceviri("b_toplam") + '</span><b>' + money(Math.max(0, toplam - misafirIndirim + kargo)) + "</b></div>" +
       '<p class="muted" style="font-size:12px;margin:8px 0 0">' + ceviri("b_kargo_tahmini") + '</p>' +
       "</div>" +
 
@@ -1622,7 +1670,14 @@
       var r = await api.orders.placeAsGuest({
         guest_name: d.ad, guest_email: d.eposta, guest_phone: d.telefon,
         city: d.il, district: d.ilce, full_address: d.adres, zip_code: d.posta,
-        coupon_code: "",              // non-nullable string - eksikse 400 (E2 dersi)
+        // MANTIK-FIX-1 / K3: MISAFIR KUPONU ARTIK SUNUCUYA TASINIR.
+        // OLCULEN ONCE-DURUM (R-M3): burada sabit "" vardi, uye govdesi ise kuponu
+        // GONDERIYORDU. Cekmecedeki kupon kutusu misafire de ACIK (index.html:2610
+        // kosulsuz), yani musteri indirimi GORUP TAM FIYAT oduyordu.
+        // Sunucu tarafi ZATEN hazirdi: GuestCheckoutDto.coupon_code VAR ve
+        // GuestCheckoutManager.cs:220 onu PlaceOrder'a devrediyor - yani SAF ISTEMCI duzeltmesi.
+        // Kaynak cekmecedeki TEK kupon durumu (window.coupon); ikinci bir durum ACILMAZ.
+        coupon_code: misafirKuponKodu(),   // non-nullable string - eksikse 400 (E2 dersi)
         payment_method: 1,            // A3: misafirde YALNIZ kapida odeme
         request_id: checkoutIstekIdAl(),   // MFIX-1/F-M3f: OTURUM basina (her tikta YENI degil)
         items: kalemler
@@ -1725,7 +1780,9 @@
       '<div class="panel"><h3>' + ceviri("b_h_siparis_ozeti") + '</h3>' + items.join("") +
       '<div style="border-top:1px solid #e8e4de;margin-top:10px;padding-top:10px;font-size:13px">' +
       '<div style="display:flex;justify-content:space-between"><span>' + ceviri("b_ara_toplam") + '</span><span>' + money(sub) + "</span></div>" +
-      (disc > 0 ? '<div style="display:flex;justify-content:space-between;color:#0f6e56"><span>Kupon indirimi</span><span>-' + money(disc) + "</span></div>" : "") +
+      // MANTIK-FIX-1 / K3: bu satir SABIT TURKCE idi (AR/EN kullanici Turkce goruyordu).
+      // Misafir ozetine ayni satir eklenirken ikisi de AYNI sozluk anahtarina baglandi.
+      (disc > 0 ? '<div style="display:flex;justify-content:space-between;color:#0f6e56"><span>' + ceviri("b_kupon_indirimi") + '</span><span>-' + money(disc) + "</span></div>" : "") +
       '<div style="display:flex;justify-content:space-between"><span>' + ceviri("b_kargo") + (ship === 0 ? ceviri("b_ucretsiz") : "") + "</span><span>" + money(ship) + "</span></div>" +
       (credUse > 0 ? '<div style="display:flex;justify-content:space-between;color:#0f6e56"><span>' + ceviri("b_magaza_kredisi") + '</span><span>-' + money(credUse) + "</span></div>" : "") +
       '<div style="display:flex;justify-content:space-between;font-weight:600;font-size:15px;margin-top:8px"><span>' + ceviri("b_toplam") + '</span><span id="coTotal">' + money(total) + "</span></div>" +
@@ -1848,6 +1905,88 @@
   // yenilenir; arada kac kez tiklanirsa tiklansin AYNI anahtar gider.
   var _checkoutIstekId = null;
   var _checkoutSepetImzasi = null;
+  // MANTIK-FIX-1 / K4 - SEPET DEGISINCE KUPON SUNUCUYA YENIDEN SORULUR.
+  // OLCULEN ZARAR (R-M4): sepet 4 -> 1 kuculdu, ekran -159,96 indirimi GOSTERMEYE DEVAM ETTI;
+  // dogrusu 31,99 idi - BES KAT. Yuzde kuponda indirim sepetle ORANTILIDIR, yani min dalindan
+  // BAGIMSIZ olarak her sepet degisiminde tazelenmelidir. Yalniz min_amount'i DTO'ya eklemek
+  // YETMEZDI (D3 karari).
+  // NEDEN IMZAYA BAGLI: MFIX-3b/T1'de olculdu ki salt-cizim yollari (dil, para birimi, sekme)
+  // renderCart'i tetikliyor; imza kapisi olmadan her dil degisimi bir kupon istegi uretirdi -
+  // o dalgada ayni tuzak [ISLEV-KIRAN] bir zarara donusmustu.
+  // SESSIZ DUSURME YASAK: kupon gecersizlestiyse kullaniciya GORUNUR ve CEVIRILI mesaj verilir
+  // (MFIX-B/K2'nin sunucuda kapattigi kusurun istemci ikizi olmasin).
+  var sonKuponImzasi = null;
+
+  // MANTIK-FIX-1 / K4 - SESSIZ DUSURME KAPATILIR.
+  // OLCUMLE BULUNDU: `min_amount` sunucudan gelmeye baslayinca index.html'in `validateCoupon`
+  // guard'i (A3/2A'da "YAPISAL OLARAK OLU" diye olculmustu - `coupon.min` SABIT 0 oldugu icin
+  // `cartRaw() < 0` asla dogru olamiyordu) CANLANDI ve sepet kuculunce kuponu KENDISI kaldiriyor.
+  // Dogru davranis bu - ama SESSIZ yapiyordu: olculdu ki toast() HIC cagrilmiyor. D3 karari
+  // "gecersizse GORUNUR ve CEVIRILI mesajla kaldirilir" diyor; MFIX-B/K2'nin sunucuda kapattigi
+  // "sessizce yok say" kusurunun istemci ikizi olusmasin.
+  // COZUM: guard SARMALANIR - KARARI O VERIR (tek kaynak korunur), KONUSMAYI biz yaparız.
+  // Kullanicinin KENDI "Kaldir" tiklamasi bu yoldan GECMEZ (o dogrudan removeCoupon cagirir),
+  // dolayisiyla mesru kaldirmada YANLIS ALARM olmaz.
+  function kuponGuardiniSarmala() {
+    if (typeof window.validateCoupon !== "function" || window.validateCoupon.__divisimaSarmalandi) return;
+    var orij = window.validateCoupon;
+    window.validateCoupon = function () {
+      var oncekiKod = null;
+      try { oncekiKod = (window.coupon && window.coupon.code) ? window.coupon.code : null; } catch (e) { }
+      var sonuc = orij.apply(window, arguments);
+      var sonrakiKod = null;
+      try { sonrakiKod = (window.coupon && window.coupon.code) ? window.coupon.code : null; } catch (e) { }
+      if (oncekiKod && !sonrakiKod) {
+        sonKuponImzasi = null;
+        if (typeof window.kuponDurumunuEsitle === "function") window.kuponDurumunuEsitle();
+        toast(ceviri("b_kupon_artik_gecersiz"), "err");
+      }
+      return sonuc;
+    };
+    window.validateCoupon.__divisimaSarmalandi = true;
+  }
+
+  async function kuponuTazele() {
+    var c = null;
+    try { c = window.coupon; } catch (e) { c = null; }
+    if (!c || !c.code) { sonKuponImzasi = null; return; }
+
+    var imza = sepetImzasi();
+    if (imza === sonKuponImzasi) return;   // sepet DEGISMEDI -> istek YOK
+    sonKuponImzasi = imza;
+
+    var araToplam = (typeof window.cartRaw === "function") ? Number(window.cartRaw()) || 0 : cartSubtotal();
+    var d = null;
+    try { d = await window.divisimaValidateCoupon(c.code, araToplam); } catch (e) { d = null; }
+
+    if (!d) {
+      // Kupon artik gecerli DEGIL (minimum tutar bozuldu, limit doldu, suresi gecti...).
+      try { if (typeof window.removeCoupon === "function") window.removeCoupon(); } catch (e) { }
+      if (typeof window.kuponDurumunuEsitle === "function") window.kuponDurumunuEsitle();
+      toast(ceviri("b_kupon_artik_gecersiz"), "err");
+      if (typeof window.renderCheckout === "function" && location.hash.indexOf("odeme") >= 0) window.renderCheckout();
+      return;
+    }
+
+    // Tutar TAZELENIR - cekmecenin nesnesi SUNUCU yanitindan yeniden kurulur.
+    var ship = !!d.free_shipping, amt = Number(d.discount_amount) || 0;
+    var etiket = ship ? "" : ("−" + (typeof window.tl === "function" ? window.tl(amt) : amt));
+    c.srvAmount = ship ? 0 : amt;
+    c.srvShip = ship;
+    c.val = amt;
+    c.min = Number(d.min_amount) || 0;
+    if (etiket) c.label = [etiket, etiket];
+    try { localStorage.setItem("dvs_coupon", JSON.stringify(c)); } catch (e) { }
+    if (typeof window.kuponDurumunuEsitle === "function") window.kuponDurumunuEsitle();
+    // CEKMECEYI YENIDEN CIZ. OLCULDU: bu satir olmadan `srvAmount` DOGRU tazeleniyor ama
+    // EKRAN ESKI TUTARI gostermeye devam ediyordu (sepet 3->2 kuculdugunde durum 275,94'e
+    // dondu, cekmece hala -413,91 yaziyordu) - yani R-M4'un zarari YARIM kapanirdi.
+    // SONSUZ DONGU YOK: renderCart sarmalayicisi kuponuTazele'yi yeniden cagirir ama
+    // `sonKuponImzasi` ARTIK GUNCEL oldugu icin imza kapisindan ANINDA doner.
+    if (typeof window.renderCart === "function") window.renderCart();
+    if (typeof window.renderCheckout === "function" && location.hash.indexOf("odeme") >= 0) window.renderCheckout();
+  }
+
   function sepetImzasi() {
     try {
       return (cartItemsPayload() || []).map(function (i) {
@@ -2097,6 +2236,20 @@
         money(order.shipping_cost) + "</span></div>" +
         '<div style="display:flex;justify-content:space-between;font-size:14px;font-weight:600;padding:6px 0;border-top:1px solid #e8e4de;margin-top:6px"><span>' + ceviri("b_toplam") + '</span><span>' +
         money(toplam) + "</span></div>" +
+        // MANTIK-FIX-1 / K2-A: MAGAZA KREDISI KIRILIMI.
+        // OLCULEN ZARAR (R-M2): checkout krediyi DUSUP 849,80 gosteriyor, bu ekran sunucunun
+        // `total` alanini basip 949,80 gosteriyordu - AYNI SIPARIS, ARDISIK IKI EKRAN, IKI
+        // FARKLI TOPLAM. `total` KREDIYI ICERIR (D1/K2-A: semantik DEGISMEDI); dolayisiyla
+        // dogru cozum tutari degistirmek degil, KIRILIMI GOSTERMEK.
+        // "Kalan odeme" satiri da yazilir ki musteri neyi NAKIT/KART odedigini gorsun;
+        // fatura HTML'i (OrderManager.cs:578) zaten ayni kirilimi basiyor.
+        (Number(order.store_credit_used) > 0
+          ? '<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;color:#0f6e56"><span>' +
+            ceviri("b_magaza_kredisiyle_odenen") + '</span><span>-' + money(order.store_credit_used) + "</span></div>" +
+            '<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0"><span>' +
+            ceviri("b_kalan_odeme") + '</span><span>' +
+            money(Math.max(0, Number(toplam) - Number(order.store_credit_used))) + "</span></div>"
+          : "") +
         '<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0"><span>Durum</span><span>' +
         esc(String(durum)) + "</span></div></div>";
     } else if (orderId) {
@@ -2227,11 +2380,34 @@
       if (!code || !d) { checkoutState.coupon = null; return; }
       checkoutState.coupon = Object.assign({ code: code }, d);
     };
+    // MANTIK-FIX-1 / K4 - TEK KUPON DURUMU.
+    // OLCULEN ONCE-DURUM: IKI BAGIMSIZ durum vardi - index.html'in `coupon`'i (KALICI,
+    // dvs_coupon) ve buradaki `checkoutState.coupon` (BELLEK). UC ayri ayrisma uretiyorlardi:
+    //   (a) cekmeceden kupon kaldirmak paneli TEMIZLEMIYORDU (removeCoupon checkoutState'e
+    //       dokunmuyor) -> panel indirimi gosterip coupon_code'u HALA gonderiyordu,
+    //   (b) yeniden yuklemede TERS ayrisma: dvs_coupon kalici, checkoutState null'a doner ->
+    //       cekmece indirimi gosterir, panel coupon_code:"" gonderir,
+    //   (c) sepet tamamen degisse bile checkoutState eski indirimi tasiyordu ([ANA][16]).
+    // COZUM: checkout durumu HER cizimde cekmecenin durumundan TURETILIR - bagimsiz yasayamaz.
+    window.kuponDurumunuEsitle = function () {
+      var c = null;
+      try { c = window.coupon; } catch (e) { c = null; }
+      if (!c || !c.code) { checkoutState.coupon = null; return; }
+      // Cekmece nesnesi sunucu yanitindan kuruluyor (srvAmount/srvShip); panelin bekledigi
+      // alan adlarina cevrilir. IKINCI bir kupon matematigi ACILMAZ - tutar aynen tasinir.
+      checkoutState.coupon = {
+        code: c.code,
+        discount_amount: Number(c.srvAmount) || 0,
+        free_shipping: !!c.srvShip,
+        min_amount: Number(c.min) || 0
+      };
+    };
     window.addEventListener("hashchange", function () { setTimeout(handle, 0); });
     setTimeout(handle, 0);   // ilk yuklemede zaten #/odeme'deysek
   }
   // ── Kupon (gerçek API) ─────────────────────────────────────────────────────
   function wireCoupon() {
+    kuponGuardiniSarmala();
     window.divisimaValidateCoupon = async function (code, subtotal) {
       try { return unwrap(await api.coupons.validate(code, subtotal)); }
       catch (e) { return null; }
@@ -2447,6 +2623,13 @@
 
       kutu.innerHTML = cizelge + kargoBlok + satirlar +
         '<div class="od-sum"><span>' + ceviri("b_toplam") + '</span><b>' + paraTL(d.total) + "</b></div>" +
+        // MANTIK-FIX-1 / K2-A: siparis detayinda da AYNI kirilim (sonuc ekraniyla tutarli).
+        (Number(d.store_credit_used) > 0
+          ? '<div class="od-sum" style="color:#0f6e56"><span>' + ceviri("b_magaza_kredisiyle_odenen") +
+            "</span><b>-" + paraTL(d.store_credit_used) + "</b></div>" +
+            '<div class="od-sum"><span>' + ceviri("b_kalan_odeme") + "</span><b>" +
+            paraTL(Math.max(0, Number(d.total) - Number(d.store_credit_used))) + "</b></div>"
+          : "") +
         '<div class="ao-actions" style="margin-top:10px">' +
         '<button class="ao-btn" data-fatura="' + orderId + '">' + esc(ceviri("inv_view")) + "</button>" + iadeBlok + "</div>";
     } catch (e) {

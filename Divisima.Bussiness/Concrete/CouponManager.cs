@@ -180,7 +180,11 @@ namespace Divisima.Bussiness.Concrete
                 code = coupon.code,
                 discount_type = ((DiscountTypeEnum)coupon.discount_type).ToString(),
                 free_shipping = false,
-                discount_amount = 0m
+                discount_amount = 0m,
+                // MANTIK-FIX-1 / K4: istemcinin sepet kuculdugunde kuponu tazeleyebilmesi icin
+                // minimum tutar da bildirilir. Deger SUNUCUNUN kendi kaydindan gelir - istemci
+                // ikinci bir kural yazmaz.
+                min_amount = coupon.min_amount
             };
 
             // Açıklayıcı yorum: Tipe göre indirim (frontend couponDiscount: pct/fixed/ship)

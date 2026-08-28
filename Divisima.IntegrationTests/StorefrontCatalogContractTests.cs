@@ -56,6 +56,13 @@ namespace Divisima.IntegrationTests
         private bool _sqlAvailable;
         private int _productId;
         private int _categoryId;
+        // MANTIK-FIX-1 / K1 - PREMIS DEGISIKLIGI (merkez onayi ister):
+        // Tohumda `sale_price` atayan TEK BIR URUN YOKTU (olculdu: depodaki 64 "new Product"
+        // tohumunun HICBIRI bu alani atamiyor; negatif kontrol: color_hex 40 atama). Bu haliyle
+        // K1'in davranisi HICBIR YERDE olculemezdi - her K1 davranis pini VAKUM olurdu.
+        // MFIX-B / K1'de bu sinifin tohumu ayni sebeple 7/0 -> 10/3 yapilmisti; ayni kalip.
+        private int _indirimliId;   // penceresi ACIK indirim  -> etkin fiyat = sale_price
+        private int _penceresiKapaliId; // sale_end GECMISTE   -> etkin fiyat = price (cift-anlam kirici)
 
         private static DivisimaDbContext NewContext() =>
             new DivisimaDbContext(new DbContextOptionsBuilder<DivisimaDbContext>().UseSqlServer(ConnStr).Options);
@@ -135,6 +142,47 @@ namespace Divisima.IntegrationTests
                 is_active = true,
                 created_at = DateTime.Now
             });
+            await ctx.SaveChangesAsync();
+
+            // MANTIK-FIX-1 / K1 tohum genislemesi (gerekce alan tanimlarinda).
+            // IKI urun daha: biri penceresi ACIK indirimli, biri penceresi KAPALI.
+            // Ikincisi CIFT-ANLAM KIRICIDIR: "sale_price doluysa uygula" diyen yanlis
+            // bir uygulama pini GECEMEZ, cunku pencere kapaliyken liste fiyati beklenir.
+            var indirimli = new Product
+            {
+                name = "Vitrin Indirimli",
+                brand = "Divisima",
+                category_id = cat.id,
+                price = 400m,
+                sale_price = 300m,
+                description = "penceresi acik indirim",
+                color_hex = "#202020",
+                product_type = 0,
+                is_active = true,
+                created_at = DateTime.Now
+            };
+            var kapali = new Product
+            {
+                name = "Vitrin Penceresi Kapali",
+                brand = "Divisima",
+                category_id = cat.id,
+                price = 500m,
+                sale_price = 350m,
+                sale_end = DateTime.Now.AddDays(-1),   // pencere GECMISTE kapandi
+                description = "penceresi kapali indirim",
+                color_hex = "#303030",
+                product_type = 0,
+                is_active = true,
+                created_at = DateTime.Now
+            };
+            ctx.Products.AddRange(indirimli, kapali);
+            await ctx.SaveChangesAsync();
+            _indirimliId = indirimli.id;
+            _penceresiKapaliId = kapali.id;
+
+            ctx.ProductStocks.AddRange(
+                new ProductStock { product_id = indirimli.id, size = "M", stock_quantity = 5, reserved_quantity = 0, is_active = true, created_at = DateTime.Now },
+                new ProductStock { product_id = kapali.id, size = "M", stock_quantity = 5, reserved_quantity = 0, is_active = true, created_at = DateTime.Now });
             await ctx.SaveChangesAsync();
         }
 
@@ -514,6 +562,72 @@ namespace Divisima.IntegrationTests
                 "vitrine baglanirsa onek BILINCLI olarak '/api/size-guide' yapilir ve bu pin kirilir");
         }
 
+        // ── P18) MANTIK-FIX-1 / K1 - ETKIN FIYAT LISTEDE DE DONER, DETAYLA AYRISMAZ ──────
+        // DAVRANIS pini (durust etiket): gercek HTTP uclari, gercek DB tohumu.
+        //
+        // OLCULEN ONCE-DURUM (R-M1a, siparis 257): urun 926 x5 icin ekran 2.499,50 TL +
+        // "Ucretsiz kargo kazandin!" gosterdi, sunucu 1.874,60 + 49,90 = 1.924,50 tahsil etti.
+        // Kok IKI KATMANLIYDI: liste DTO'su indirim bilgisini TASIMIYORDU (istemci telafi
+        // EDEMEZDI) ve istemci detaydakini de okumuyordu. Bu pin BIRINCI katmani tutar.
+        [Fact]
+        public async Task Liste_ETKIN_FIYATI_Doner_ve_DETAYLA_AYRISMAZ()
+        {
+            if (Skipped()) return;
+            var anon = _factory!.CreateClient();
+
+            var resp = await anon.PostAsJsonAsync("/api/product/filter", FullFilter(1, 50));
+            resp.StatusCode.Should().Be(HttpStatusCode.OK);
+            var env = await resp.Content.ReadFromJsonAsync<FilterEnvelope>();
+            var satirlar = env?.data?.items;
+            satirlar.Should().NotBeNullOrEmpty("tohum urunleri listede gorunmeli");
+
+            var normal = satirlar!.SingleOrDefault(x => x.id == _productId);
+            var indirimli = satirlar!.SingleOrDefault(x => x.id == _indirimliId);
+            var kapali = satirlar!.SingleOrDefault(x => x.id == _penceresiKapaliId);
+            normal.Should().NotBeNull("tohumdaki indirimsiz urun listede olmali");
+            indirimli.Should().NotBeNull("tohumdaki indirimli urun listede olmali");
+            kapali.Should().NotBeNull("tohumdaki penceresi kapali urun listede olmali");
+
+            // (1) ASIL IDDIA: indirimli urunun etkin fiyati sale_price'tir.
+            indirimli!.effective_price.Should().Be(300m,
+                "liste yolu artik indirimli fiyati tasimali - musterinin ODEYECEGI tutar budur");
+
+            // (2) VAKUM KIRICI: indirimsiz urunde etkin fiyat = liste fiyati.
+            // Bu olmadan "her urune indirim uygula" diyen bir uygulama da (1)'i gecerdi.
+            normal!.effective_price.Should().Be(250m,
+                "indirimsiz urunde etkin fiyat liste fiyatina ESIT olmali");
+
+            // (3) CIFT-ANLAM KIRICI: penceresi KAPALI indirim UYGULANMAZ.
+            // "sale_price doluysa uygula" diyen yanlis uygulama bu asserti GECEMEZ; ayrica
+            // PricingHelper.IsOnSale sozlesmesinin SUNUCUDA degerlendirildigini kanitlar.
+            kapali!.effective_price.Should().Be(500m,
+                "sale_end GECMISTE ise indirim UYGULANMAZ - pencere SUNUCUDA degerlendirilir");
+
+            // (4) `price` ALANININ ANLAMI DEGISMEDI. Admin duzenleme formu ayni degeri geri
+            // yaziyor (A2/EKSEN-1); anlami kaysaydi taban fiyat KALICI olarak asagi kayardi.
+            indirimli.price.Should().Be(400m, "liste fiyati ALANININ anlami DEGISMEMELI");
+            kapali.price.Should().Be(500m);
+
+            // (5) LISTE <-> DETAY AYRISMAZ. Ayni urun icin iki uc AYNI etkin fiyati vermeli;
+            // MANTIK-AV-1'de olculen zarar tam da bu iki yolun ayrismasiydi.
+            foreach (var (id, beklenen) in new[] { (_productId, 250m), (_indirimliId, 300m), (_penceresiKapaliId, 500m) })
+            {
+                var d = await anon.GetAsync($"/api/product/get/{id}");
+                d.StatusCode.Should().Be(HttpStatusCode.OK);
+                var dd = (await d.Content.ReadFromJsonAsync<DetailEnvelope>())?.data;
+                dd.Should().NotBeNull();
+                dd!.effective_price.Should().Be(beklenen,
+                    $"urun {id}: detay ucu listeyle AYNI etkin fiyati vermeli");
+            }
+
+            // (6) sale_price HAM KALIR. Admin formu bu alani geri yaziyor; pencere kapaliyken
+            // NULL'lansaydi ileride tanimlanacak bir kampanya SESSIZCE SILINIRDI (Dalga B sinifi).
+            var kapaliDetay = (await (await anon.GetAsync($"/api/product/get/{_penceresiKapaliId}"))
+                .Content.ReadFromJsonAsync<DetailEnvelope>())?.data;
+            kapaliDetay!.sale_price.Should().Be(350m,
+                "sale_price HAM kalmali - admin formunun geri yazdigi alan budur");
+        }
+
         private sealed class FilterEnvelope { public FilterPage? data { get; set; } }
         private sealed class FilterPage
         {
@@ -528,12 +642,20 @@ namespace Divisima.IntegrationTests
             public int category_id { get; set; }
             public string? category_name { get; set; }
             public decimal price { get; set; }
+            public decimal effective_price { get; set; }
+            public decimal? old_price { get; set; }
             public int total_stock { get; set; }
             public List<string> sizes { get; set; } = new();
         }
 
         private sealed class DetailEnvelope { public DetailRow? data { get; set; } }
-        private sealed class DetailRow { public List<StockRow> stocks { get; set; } = new(); }
+        private sealed class DetailRow
+        {
+            public decimal price { get; set; }
+            public decimal effective_price { get; set; }
+            public decimal? sale_price { get; set; }
+            public List<StockRow> stocks { get; set; } = new();
+        }
         private sealed class StockRow { public string size { get; set; } = ""; public int stock_quantity { get; set; } }
 
         // PagedResult<T> camelCase serilesir: Items -> items

@@ -110,7 +110,13 @@ namespace Divisima.IntegrationTests
         // Faturasi cekilecek GERCEK bir siparis kurar. Kategori GERCEKTEN olusturulur, urunun
         // description/color_hex alanlari doldurulur (zorunlu alanlar). Her cagri kendi verisini
         // uretir - var olan satirlara guvenilmez.
-        private static async Task<(int OrderId, string OrderNumber, string ProductName)> SeedOrderAsync(int customerId)
+        // MANTIK-FIX-1 / K2-A: `magazaKredisi` parametresi EKLENDI (varsayilan 0 - mevcut
+        // cagiranlar ETKILENMEZ). Gerekce: kredi tasiyan bir siparis olmadan K2-A'nin
+        // davranisi olculemez; depoda kredi POZITIF olan tek bir test fiksturu YOKTU.
+        // `total_price` KREDIYI ICERIR (D1/K2-A karari: semantik DEGISMEDI) - fikstur
+        // uretimdeki OrderManager.cs:294/:322 kalibiyla AYNI sekilde kurulur.
+        private static async Task<(int OrderId, string OrderNumber, string ProductName)> SeedOrderAsync(
+            int customerId, decimal magazaKredisi = 0m)
         {
             var damga = Guid.NewGuid().ToString("N").Substring(0, 8).ToUpper();
             await using var ctx = NewContext();
@@ -150,6 +156,7 @@ namespace Divisima.IntegrationTests
                 discount_amount = 0m,
                 shipping_cost = 49.90m,
                 total_price = 549.90m,
+                store_credit_used = magazaKredisi,
                 currency = "TRY",
                 payment_type = 0,
                 is_online_payment_done = true,
@@ -217,6 +224,64 @@ namespace Divisima.IntegrationTests
             govde.Should().Contain(beklenenToplam,
                 $"genel toplam tr bicimiyle govdede yer almali (beklenen: {beklenenToplam}) - " +
                 "uygulama kulturu pinlemezse kosucu yerelinde '549.90' cikar ve bu assert kirilir");
+        }
+
+        // ── P20) MANTIK-FIX-1 / K2-A - MAGAZA KREDISI SIPARIS DETAYINDA GORUNUR ────────
+        // DAVRANIS pini (durust etiket): gercek HTTP ucu, gercek DB fiksturu.
+        //
+        // OLCULEN ONCE-DURUM (R-M2): OrderDetailResponseDto `store_credit_used` TASIMIYORDU
+        // ([YOKLUK] taramasi: Dtos/ genelinde 0 satir; negatif kontrol shipping_cost BULUNUYOR).
+        // Checkout krediyi DUSUYOR (api-bridge.js:1697) ama sonuc/detay ekranlari DTO'nun
+        // `total` alanini basiyor ve o alan krediyi ICERIYOR -> AYNI SIPARIS icin ardisik
+        // IKI EKRAN FARKLI TOPLAM gosteriyordu (849,80 <-> 949,80).
+        //
+        // D1 KARARI K2-A: alan EKLENIR, `total` SEMANTIGI DEGISMEZ. Bu pin IKISINI DE tutar -
+        // cunku K2-B'ye kaymak PaymentRefundTests.cs:20'yi YESIL BIRAKARAK uretimi tersine
+        // cevirir (tam-cuzdan sipariste tum iade OLMAYAN KARTA gider).
+        [Fact]
+        [Trait("Category", "Sql")]
+        public async Task SiparisDetayi_MAGAZA_KREDISINI_Doner_ve_TOTAL_SEMANTIGI_DEGISMEZ()
+        {
+            if (Skipped()) return;
+
+            var user = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+            var krediliSiparis = await SeedOrderAsync(user.CustomerId, magazaKredisi: 100.00m);
+            var kredisizSiparis = await SeedOrderAsync(user.CustomerId);   // VAKUM KIRICI
+
+            var resp = await user.Client.GetAsync($"/api/order/get/{krediliSiparis.OrderId}");
+            resp.StatusCode.Should().Be(HttpStatusCode.OK);
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            var data = doc.RootElement.GetProperty("data");
+
+            // (1) ASIL IDDIA: kredi alani DONER ve DOGRU degeri tasir.
+            data.TryGetProperty("store_credit_used", out var kredi).Should().BeTrue(
+                "siparis detayi magaza kredisini BILDIRMELI - musteri iki ekranda iki farkli " +
+                "toplam gormemeli (R-M2'de olculen zarar buydu)");
+            kredi.GetDecimal().Should().Be(100.00m);
+
+            // (2) CIFT-ANLAM KIRICI: `total` SEMANTIGI DEGISMEDI - krediyi ICERIR.
+            // K2-B'ye kayan bir uygulama bu asserti GECEMEZ. Semantik sessizce kaymasin diye
+            // beklenen deger ACIKCA yaziliyor (D1 karari: MF-2'ye kadar boyle kalir).
+            data.GetProperty("total").GetDecimal().Should().Be(549.90m,
+                "K2-A karari: total_price KREDIYI ICERMEYE DEVAM EDER - semantik MF-2'ye ait");
+
+            // (3) MUHASEBE KIMLIGI KORUNUR: subtotal - indirim + kargo = total.
+            var subtotal = data.GetProperty("subtotal").GetDecimal();
+            var indirim = data.GetProperty("discount_amount").GetDecimal();
+            var kargo = data.GetProperty("shipping_cost").GetDecimal();
+            (subtotal - indirim + kargo).Should().Be(data.GetProperty("total").GetDecimal(),
+                "OrderCancellationMoneyTests'teki MUHASEBE KIMLIGI pini ile AYNI iddia - " +
+                "K2-A bu kimligi BOZMAMALI");
+
+            // (4) VAKUM KIRICI: kredi KULLANILMAYAN sipariste alan 0 doner ve `total` DEGISMEZ.
+            // Bu olmadan "her siparise 100,00 yaz" diyen bir uygulama da (1)'i gecerdi.
+            var r2 = await user.Client.GetAsync($"/api/order/get/{kredisizSiparis.OrderId}");
+            using var doc2 = JsonDocument.Parse(await r2.Content.ReadAsStringAsync());
+            var d2 = doc2.RootElement.GetProperty("data");
+            d2.GetProperty("store_credit_used").GetDecimal().Should().Be(0m,
+                "kredi kullanilmayan sipariste alan 0 olmali");
+            d2.GetProperty("total").GetDecimal().Should().Be(549.90m,
+                "kredi yokken de toplam AYNI - alan eklemek tutari DEGISTIRMEZ");
         }
 
         // ── 2) UC DUZEYI PIN: REFERANS KODU "data" ALANINDA DONER ──────────────────────

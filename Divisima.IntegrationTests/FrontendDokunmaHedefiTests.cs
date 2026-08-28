@@ -1356,9 +1356,194 @@ namespace Divisima.IntegrationTests
                 "sabit 'internet' teshisi veren eski anahtar KALDIRILMIS olmali");
         }
 
+        // ── P19) MANTIK-FIX-1 / K1 - ISTEMCI FIYATI TEK SINIR NOKTASINDA NORMALIZE EDER ──
+        // DURUST ETIKET: bu bir KAYNAK SOZLESMESI pinidir, DAVRANIS pini DEGILDIR (depoda
+        // JS/DOM kosucusu yok - Dalga 4'ten beri acik kalem). Davranis kaniti dalganin
+        // A/B tarayici olcumlerindedir.
+        //
+        // OLCULEN GEREKCE: istemcide DOGRUDAN `.price` okumasi 40 nokta (index.html 34 +
+        // api-bridge 6), `pPrice(` cagrisi yalnizca 4. Hepsi mapProduct'in URETTIGI nesneyi
+        // tuketiyor (detaydanUrun :809 mapProduct cagiriyor, enrichProduct fiyata dokunmuyor,
+        // cartSubtotal :1217 ve pPrice :1670 p.price okuyor). Bu yuzden normalizasyon TEK
+        // SINIR NOKTASINDA yapilir; 40 tuketici DEGISMEDEN dogru olur ve YENI yazilacak bir
+        // yuzey de VARSAYILAN OLARAK dogru olur.
+        [Fact]
+        public void KAYNAK_SOZLESMESI_IstemciFiyati_SINIRDA_Normalize_Edilir_TEK_NOKTA()
+        {
+            var b = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+            var govde = FonksiyonGovdesi(b, "function mapProduct");
+            govde.Should().NotBeNullOrWhiteSpace("mapProduct govdesi okunabilmeli");
+
+            // (1) ASIL IDDIA: fiyat sunucunun ETKIN alanindan turer.
+            govde.Should().Contain("effective_price",
+                "mapProduct fiyati sunucunun etkin fiyat alanindan turetmeli");
+
+            // (2) CIFT-ANLAM KIRICI: `old` alani indirimliyken LISTE fiyatini tasimali.
+            // Bu olmadan indirim EKRANDA GORUNMEZ: olculdu ki 8 indirimli urunun 7'sinde
+            // old_price BOS ve musteri hicbir indirim isareti gormuyor. `old` dolunca
+            // mevcut discPct (index.html:2002) ve ustu-cizili makinesi CALISIR.
+            govde.Should().Contain("old",
+                "eski fiyat alani KORUNMALI - ustu cizili ve yuzde rozeti ona bagli");
+
+            // (3) VAKUM KIRICI: mapProduct HALA diger alanlari da esliyor - yani govde
+            // gercekten okundu ve tarama bos bir dizgede kosmuyor.
+            govde.Should().Contain("total_stock", "mapProduct hala stok alanini esliyor olmali");
+            govde.Should().Contain("average_rating", "mapProduct hala puan alanini esliyor olmali");
+
+            // (4) TEK NOKTA SARTI: fiyat cozumu mapProduct DISINDA bir yerde TEKRARLANMAZ.
+            // Bu depoda "ayni kuralin ikinci kopyasi" YEDI kez bedel odetti (B10, D5, K7,
+            // Faz 0/K1, D-SEMA, cift tanimli sepetImzasi, cift kupon durumu). Etkin fiyat
+            // ikinci bir yerde hesaplanirsa iki taraf ZAMANLA ayrisir.
+            var toplamGecis = Regex.Matches(b, "effective_price").Count;
+            var govdeGecis = Regex.Matches(govde, "effective_price").Count;
+            toplamGecis.Should().Be(govdeGecis,
+                "etkin fiyat YALNIZ mapProduct icinde cozulmeli - ikinci bir cozum noktasi " +
+                "acilirsa iki taraf zamanla ayrisir (bu depoda yedi kez bedeli odendi)");
+
+            // (5) index.html tarafi DEGISMEZ: pPrice HALA p.price dondurmeli. Fiyat orada
+            // yeniden cozulseydi sinir normalizasyonu ANLAMSIZ olurdu.
+            var s = YorumlariAyikla(Index);
+            s.Should().Contain("function pPrice(p)",
+                "pPrice KORUNMALI - sepet ekseninin ortak tabani odur");
+            Regex.Matches(s, "effective_price").Count.Should().Be(0,
+                "index.html sunucu alan adini BILMEMELI - normalizasyon sinirda yapilir");
+        }
+
         // Bir acilis parantezinin ESLESEN kapanisini bulur (tirnak farkindaligi ile).
         // Toast argumanlari icinde parantez ve tirnak IC ICE gecebiliyor; duz arama
         // yanlis kapanis bulurdu.
+        // ── P22) MANTIK-FIX-1 / K3+K4 - KUPON: TEK DURUM ve SEPET-IMZALI TAZELEME ───────
+        // DURUST ETIKET: KAYNAK SOZLESMESI pini, DAVRANIS pini DEGIL (JS/DOM kosucusu yok).
+        // Davranis kaniti dalganin A/B tarayici olcumlerindedir.
+        //
+        // OLCULEN ONCE-DURUM (R-M4): sepet 4 -> 1 kuculdu, ekran -159,96 indirimi GOSTERMEYE
+        // DEVAM ETTI; dogrusu 31,99 idi (BES KAT). Ayrica IKI BAGIMSIZ KUPON DURUMU vardi:
+        // index.html `coupon` (KALICI, dvs_coupon) ile api-bridge `checkoutState.coupon`
+        // (BELLEK) ayri yasiyordu - cekmece "kupon yok" derken checkout artik VAR OLMAYAN bir
+        // sepetin indirimini dusuyordu.
+        [Fact]
+        public void KAYNAK_SOZLESMESI_Kupon_TEK_DURUM_ve_SepetImzasiyla_Tazelenir()
+        {
+            var b = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+
+            // (1) K3: misafir govdesinde SABIT bos kupon kodu GERI GELEMEZ.
+            // Olcut LITERAL BICIM DEGIL: bosluk ayiklanmis govdede aranir (M-P8 dersi).
+            // KACISSIZ COZUM (kacis-kaybi ailesi - bu depoda BES kez bedeli odendi):
+            // regex yerine duz karakter silme. Zincirde ters bolu KAYBOLAMAZ.
+            var bosluksuz = b.Replace(" ", "").Replace("\t", "").Replace("\r", "").Replace("\n", "");
+            bosluksuz.Should().NotContain("coupon_code:\"\",",
+                "misafir govdesindeki SABIT bos kupon kodu geri gelemez - musteri cekmecede " +
+                "indirimi gorup TAM FIYAT oderdi (R-M3'te olculdu)");
+
+            // (2) K4: kupon SEPET IMZASINA bagli olarak SUNUCUYA yeniden sorulur.
+            b.Should().Contain("kuponuTazele",
+                "sepet degisince kupon sunucuya YENIDEN SORULMALI - yuzde kuponda indirim " +
+                "sepetle ORANTILIDIR ve bayat kalirsa musteri yanlis toplam gorur");
+            var tazeleGovde = FonksiyonGovdesi(b, "async function kuponuTazele");
+            tazeleGovde.Should().NotBeNullOrWhiteSpace("kuponuTazele govdesi okunabilmeli");
+            tazeleGovde.Should().Contain("sepetImzasi",
+                "tazeleme SEPET IMZASINA baglanmali - salt-cizim yollari (dil, para birimi, " +
+                "sekme) istek URETMEMELI; MFIX-3b/T1'de bu tuzagin bedeli odendi");
+            tazeleGovde.Should().Contain("divisimaValidateCoupon",
+                "tazeleme SUNUCUYA sormali - yerel hesapla yetinmek bayatligi cozmez");
+
+            // (3) TEK DURUM: checkoutState.coupon BAGIMSIZ YASAYAMAZ.
+            b.Should().Contain("kuponDurumunuEsitle",
+                "checkout kupon durumu cekmecenin kupon durumundan TURETILMELI - iki bagimsiz " +
+                "durum UC ayri ayrisma uretiyordu (A3/2D-2E ve [ANA][16])");
+
+            // (4) VAKUM KIRICI: kupon makinesi HALA YERINDE - tarama bos dizgede kosmuyor.
+            b.Should().Contain("divisimaSetCheckoutCoupon", "kupon koprusu HALA var olmali");
+            b.Should().Contain("checkoutState.coupon", "checkout kupon alani HALA kullaniliyor olmali");
+
+            // (5) CIFT-ANLAM KIRICI: SESSIZ DUSURME YASAK.
+            // MFIX-B/K2 sunucuda "gecersiz kupon sessizce yok sayilmaz" sozlesmesini kurmustu;
+            // istemcide sessizce kaldirmak ayni kusurun ikizi olurdu. Tazeleme kuponu
+            // dusuruyorsa kullaniciya GORUNUR ve CEVIRILI bir mesaj vermeli.
+            tazeleGovde.Should().Contain("ceviri(",
+                "kupon dusurulurken GORUNUR ve CEVIRILI mesaj verilmeli - sessiz dusurme " +
+                "MFIX-B/K2'nin sunucuda kapattigi kusurun istemci ikizidir");
+
+            // (6) index.html'in kupon nesnesi min degerini SUNUCUDAN almali.
+            // A3/2A: `min:0` SABITTI, bu yuzden validateCoupon (index.html:2584) guard'i
+            // `cartRaw() < 0` sartina bagliydi ve HICBIR KOSULDA atesleyemiyordu.
+            var s = YorumlariAyikla(Index);
+            s.Replace(" ", "").Replace("\t", "").Replace("\r", "").Replace("\n", "")
+             .Should().NotContain("min:0,srvAmount",
+                "kupon nesnesindeki SABIT min:0 geri gelemez - guard'i yapisal olarak olu kilar");
+        }
+
+        // ── P23) MANTIK-FIX-1 / K5+K6 - KARSILIGI OLMAYAN VAAT ve ESIK METNI ───────────
+        // DURUST ETIKET: KAYNAK SOZLESMESI pini. Davranis kaniti R-M5/R-M6 A/B olcumleridir.
+        //
+        // K5 OLCULEN ONCE-DURUM (R-M5): bulten penceresi "%10 indirim kodu" VAAT EDIYORDU ve
+        // veritabaninda karsiligi YOKTU. MFIX-1 satir ici metinlerden YALNIZ BIRINE dokunmustu
+        // (nl_done_s) ve applyI18n (index.html:2909) `el.textContent = t(...)` ile onu da
+        // SOZLUKTEN GERI YAZIYORDU - yani duzeltme YAPILMIS GORUNUP CALISMIYORDU. Vaat DORT
+        // noktadaydi: nl_title · nl_sub · nl_btn · nl_done_s, UC DILDE.
+        //
+        // K6 OLCULEN ONCE-DURUM (R-M6): kargo esigi metinleri `>=` davranisiyla CELISIYORDU.
+        // Kod HER YERDE `>=` (OrderManager :293, misafir :1534, uye :1695, cubuk :2606), yani
+        // TAM 2.000,00'de kargo BEDAVA; ama TR `ben_ship_s` "2.000 TL UZERI" ve EN/AR karsiliklari
+        // "over"/"فوق" diyordu - metin `>` IMA EDIYORDU. K6 SAF METIN ISIDIR, davranis DEGISMEZ.
+        [Fact]
+        public void KAYNAK_SOZLESMESI_KarsiligiOlmayanVaat_YOK_ve_EsikMetni_Davranisla_Tutarli()
+        {
+            var s = Oku("frontend/index.html");   // YORUM AYIKLAMA YOK: sozluk ve HTML metni aranir
+
+            // ── K5: "%10" VAADI DORT ANAHTARIN UCUNDE DE, UC DILDE DE KALMAMALI ──
+            // [YOKLUK] iddiasi. Anahtar bazinda taranir; boylece "bir dilde unutuldu" durumu
+            // GORUNUR olur (R-M5'te tam bu olmustu - MFIX-1 dortten birine dokunmustu).
+            foreach (var anahtar in new[] { "nl_title", "nl_sub", "nl_btn", "nl_done_s" })
+            {
+                foreach (var m in Regex.Matches(s, "[,{]" + anahtar + ":[^,}]{0,240}").Cast<Match>())
+                {
+                    m.Value.Should().NotContain("10%",
+                        anahtar + " karsiligi olmayan bir indirim kodu VAAT ETMEMELI (EN/AR)");
+                    m.Value.Should().NotContain("%10",
+                        anahtar + " karsiligi olmayan bir indirim kodu VAAT ETMEMELI (TR)");
+                }
+            }
+            // SATIR ICI HTML varsayilanlari da temiz olmali - applyI18n sozlukten geri yazsa
+            // bile, JS calismadan once kullanicinin gordugu METIN BUDUR.
+            s.Should().NotContain("%10 İndirim Seni Bekliyor",
+                "satir ici HTML varsayilani da vaadi tasimamali");
+
+            // VAKUM KIRICI: bulten penceresi HALA VAR ve anahtarlari HALA tanimli.
+            // "hepsini sil" YANLIS duzeltmedir - pencere mesru bir e-bulten kaydidir.
+            Regex.Matches(s, "[,{]nl_title:").Count.Should().BeGreaterThan(1,
+                "nl_title T ve AR'da HALA tanimli olmali (pencere SILINMEDI)");
+            s.Should().Contain("nlModal", "bulten penceresi HALA var olmali");
+
+            // ── K6: ESIK METNI `>=` DAVRANISIYLA TUTARLI ──
+            // Kod tarafi DEGISMEZ; degisen yalnizca METIN. Bu yuzden once davranisin `>=`
+            // oldugunu DOGRULARIZ (premis pini) - kod `>` olsaydi metin duzeltmesi YANLIS olurdu.
+            var b = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+            b.Should().Contain(">= 2000",
+                "kargo esigi karsilastirmasi `>=` olmali - metin duzeltmesinin PREMISI budur");
+
+            // TR: "uzeri" tek basina `>` ima eder; "ve uzeri" `>=` demektir.
+            // KACISSIZ: verbatim dizge - ters bolu zincirde kaybolamaz (aile dersi, 6 ornek).
+            var trEsik = Regex.Matches(s, @"[,{]ben_ship_s:\[[^]]{0,120}\]").Cast<Match>().FirstOrDefault();
+            trEsik.Should().NotBeNull("ben_ship_s T'de tanimli olmali");
+            trEsik!.Value.Should().Contain("ve üzeri",
+                "TR metni `>=` demeli - kod TAM 2.000,00'de kargoyu BEDAVA yapiyor");
+            trEsik.Value.Should().NotContain("over",
+                "EN karsiligi `over` DEMEMELI - `over 2,000` 2.000,00'i DISLAR");
+
+            // AR karsiligi da ayni semantigi tasimali (uc dilde AYNI vaat).
+            var arEsik = Regex.Matches(s, "[,{]ben_ship_s:'[^']{0,120}'").Cast<Match>().FirstOrDefault();
+            arEsik.Should().NotBeNull("ben_ship_s AR'da tanimli olmali");
+            arEsik!.Value.Should().NotContain("فوق",
+                "AR metni `fevk` (uzeri/ustunde) DEMEMELI - kod esigi DAHIL ediyor");
+
+            // CIFT-ANLAM KIRICI: ZATEN DOGRU olan anahtar BOZULMAMALI.
+            // ann_free_ship "{tutar} ve uzeri" diyor ve esigi FREE_SHIP'ten parametrik aliyor
+            // (index.html:2884). K6 onu DEGISTIRMEMELI - yoksa esik iki yerde ayrisir.
+            s.Should().Contain("{tutar}",
+                "duyuru seridi esigi PARAMETRIK almaya DEVAM etmeli (FREE_SHIP tek kaynak)");
+        }
+
         private static int ParantezKapanisi(string s, int acilisIndeksi)
         {
             int derinlik = 0; char tirnak = '\0';
