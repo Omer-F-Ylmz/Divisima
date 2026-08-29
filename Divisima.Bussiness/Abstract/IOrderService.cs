@@ -13,7 +13,7 @@ namespace Divisima.Bussiness.Abstract
         // Açıklayıcı yorum: Sipariş durumunu değiştir (admin)
         Task<(HttpStatusCode, Result)> ChangeOrderStatus(OrderStatusChangeRequestDto dto);
         Task<(HttpStatusCode, Result)> ConfirmManualPayment(int orderId);
-        Task<(HttpStatusCode, Result)> GetInvoiceHtml(int orderId, int customerId);
+        Task<(HttpStatusCode, Result)> GetInvoiceView(int orderId, int customerId);
 
         Task<(HttpStatusCode, Result)> GetById(int id, int customerId);
         Task<(HttpStatusCode, Result)> GetByCustomer(int customerId);

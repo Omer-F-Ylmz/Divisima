@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Net;
+using System.Text.Json;
+using Divisima.Bussiness.Abstract;
 using Divisima.DataAccess.Concrete.Context;
 using Divisima.Entity.Entities;
 using FluentAssertions;
@@ -115,7 +117,7 @@ namespace Divisima.IntegrationTests
                 "pinleme yalniz yeni thread'lere degil, calisan koda da yansimali");
         }
 
-        // ── 2) FATURA GOVDESI KOSUCU KULTURUNDEN BAGIMSIZ tr BICIMI TASIR ────────────
+        // ── 2) FATURA UCU SAYI BICIMLEMEZ - KULTUR SIZINTISI YAPISAL OLARAK YOK ──────
         //
         // ASIL PIN. Beklenen deger ACIKCA tr-TR ile hesaplaniyor - CurrentCulture ile DEGIL.
         // Boylece invariant bir kosucuda (GitHub Actions) da AYNI degeri bekler: uygulama
@@ -125,7 +127,7 @@ namespace Divisima.IntegrationTests
         // BULUNMADIGI da olculuyor. Aksi halde her iki bicimi birden basan bir cikti da gecerdi.
         [Fact]
         [Trait("Category", "Sql")]
-        public async Task FaturaGovdesi_KOSUCU_KULTURUNDEN_BAGIMSIZ_tr_BICIMI_Tasir()
+        public async Task FaturaUcu_SAYI_BICIMLEMEZ_HAM_DEGER_Doner_KulturSizintisi_YAPISAL()
         {
             if (Skipped()) return;
 
@@ -152,22 +154,93 @@ namespace Divisima.IntegrationTests
                 ctx.Set<Order>().Add(o);
                 await ctx.SaveChangesAsync();
                 orderId = o.id;
+
+                // MANTIK-FIX-2R / K2: KURGU DURUSTLESTI. Onceden bu bacak YALNIZ bir Order
+                // satiri yaziyor, FATURA URETMIYORDU (olculdu: "Invoice" gecisi 0) - yani
+                // "fatura govdesi" diye sinanan sey aslinda SIPARISTEN YENIDEN HESAPLANMIS
+                // bir belgeydi. Uc artik KAYITTAN besleniyor; kurgu da gercek bir fatura kurar.
+                var kat = new Category
+                {
+                    name = "Kultur Pin Kategori",
+                    slug = $"kultur-{Guid.NewGuid():N}",
+                    is_active = true,
+                    created_at = DateTime.Now
+                };
+                ctx.Set<Category>().Add(kat);
+                await ctx.SaveChangesAsync();
+
+                var urun = new Product
+                {
+                    name = "Kultur Pin Urun",
+                    brand = "T",
+                    category_id = kat.id,
+                    price = 999.80m,
+                    description = "kultur pini urunu",
+                    color_hex = "#222222",
+                    product_type = 0,
+                    is_active = true,
+                    created_at = DateTime.Now
+                };
+                ctx.Products.Add(urun);
+                await ctx.SaveChangesAsync();
+
+                ctx.Set<OrderItem>().Add(new OrderItem
+                {
+                    order_id = orderId,
+                    product_id = urun.id,
+                    size = "M",
+                    quantity = 1,
+                    unit_price = 999.80m,
+                    is_cancelled = false,
+                    created_at = DateTime.Now
+                });
+                await ctx.SaveChangesAsync();
+            }
+
+            // FATURA URETIM YOLUNDAN kesilir (elle satir yazilmaz).
+            using (var scope = _factory!.Services.CreateScope())
+            {
+                var inv = scope.ServiceProvider.GetRequiredService<IInvoiceService>();
+                var gen = await inv.GenerateForOrder(orderId);
+                gen.Item1.Should().Be(HttpStatusCode.OK, $"fatura uretilmeli: {gen.Item2.Message}");
             }
 
             var resp = await user.Client.GetAsync($"/api/order/{orderId}/invoice-html");
             resp.StatusCode.Should().Be(HttpStatusCode.OK);
             var govde = await resp.Content.ReadAsStringAsync();
-            govde.Should().NotBeNullOrWhiteSpace("POZITIF OLAY: fatura govdesi gercekten uretilmeli");
+            govde.Should().NotBeNullOrWhiteSpace("POZITIF OLAY: fatura yaniti gercekten uretilmeli");
 
+            // ── SOZLESMENIN YENI BICIMI (MANTIK-FIX-2R / K2) ──────────────────────────────
+            // KORUNAN SOZLESME AYNI: kultur sizintisi yasagi. DEGISEN: nasil korundugu.
+            //
+            // ESKI: "govde tr bicimli parayi ICERMELI, invariant bicimi ICERMEMELI" -> sunucu
+            //       parayi BICIMLIYORDU ve dogru bicim tek bir kulture (tr-TR) kilitliydi.
+            //       O halde EN/AR kullanicisina dogru bicimi vermenin tek yolu sunucuda
+            //       RequestLocalization acmakti - Sprint 8 madde 13 onu OLCEREK REDDETTI.
+            // YENI: sunucu SAYI BICIMLEMEZ. Yanit HAM decimal tasir; bicimleme istemcide
+            //       dvsLocale ile yapilir. Boylece kultur sizintisi YAPISAL OLARAK imkansiz
+            //       hale gelir - "yanlis kulturde bicimlemek" degil, HIC BICIMLEMEMEK.
+            //
+            // CIFT-ANLAM KIRICI: HER IKI bicim de yasak. Yalnizca invariant'i yasaklamak,
+            // sunucunun tr-TR'ye geri donmesini gormezdi.
             var tr = new CultureInfo("tr-TR");
-            var beklenen = 1049.70m.ToString("N2", tr);                 // "1.049,70"
-            var invariant = 1049.70m.ToString("N2", CultureInfo.InvariantCulture);   // "1,049.70"
+            var trBicim = 1049.70m.ToString("N2", tr);                              // "1.049,70"
+            var invariantBicim = 1049.70m.ToString("N2", CultureInfo.InvariantCulture); // "1,049.70"
 
-            govde.Should().Contain(beklenen,
-                $"tutar tr bicimiyle basilmali (beklenen: {beklenen}); uygulama kulturu pinlemezse " +
-                $"invariant kosucuda '{invariant}' cikar");
-            govde.Should().NotContain(invariant,
-                $"invariant bicim ('{invariant}') govdede HIC bulunmamali - cift-anlam kirici");
+            govde.Should().NotContain(trBicim,
+                $"uc SAYI BICIMLEMEMELI - tr bicimli para dizgesi ('{trBicim}') yanitta bulunmamali");
+            govde.Should().NotContain(invariantBicim,
+                $"uc SAYI BICIMLEMEMELI - invariant bicimli para dizgesi ('{invariantBicim}') yanitta bulunmamali");
+
+            // VAKUM KIRICI: "hicbir sey dondurme" de iki NotContain'i gecerdi. Alanlarin
+            // GERCEKTEN ham decimal geldigi ayrica olculur.
+            using var belge = JsonDocument.Parse(govde);
+            var veri = belge.RootElement.GetProperty("data");
+            veri.GetProperty("has_invoice").GetBoolean().Should().BeTrue("kurgu gercek fatura kurdu");
+            veri.GetProperty("total").GetDecimal().Should().Be(1049.70m,
+                "toplam HAM decimal olarak gelmeli - bicimlenmis dizge DEGIL");
+            veri.GetProperty("total").ValueKind.Should().Be(JsonValueKind.Number,
+                "alan SAYI olmali; dizge olsaydi bicimleme sunucuda yapilmis olurdu");
         }
     }
 }

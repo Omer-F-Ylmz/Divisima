@@ -16,6 +16,7 @@ using Divisima.Core.Utilities.Pricing;
 using Divisima.Core.Utilities.Results;
 using Divisima.Core.Utilities.Shipping;
 using Divisima.DataAccess.Abstract;
+using Divisima.Entity.Dtos.Invoice;
 using Divisima.Entity.Dtos.Order;
 using Divisima.Entity.Entities;
 
@@ -42,6 +43,10 @@ namespace Divisima.Bussiness.Concrete
         private readonly IStockService _stockService;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IInvoiceService _invoiceService;
+        // K2: gorunur fatura KAYITTAN beslenir. Capraz Dal kullanimi mevcut manager desenidir
+        // (yeni katman/abstraction ACILMADI).
+        private readonly IInvoiceDal _invoiceDal;
+        private readonly IInvoiceItemDal _invoiceItemDal;
         private readonly IOrderNotificationService _orderNotificationService;
         private readonly IOrderStatusHistoryService _statusHistory;
         private readonly IMapper _mapper;
@@ -71,7 +76,8 @@ namespace Divisima.Bussiness.Concrete
             IOrderSnapshotDal orderSnapshotDal, IOrderSnapshotItemDal orderSnapshotItemDal,
             IProductDal productDal, ICustomerDal customerDal, ICouponDal couponDal,
             IStockService stockService, IUnitOfWork unitOfWork,
-            IInvoiceService invoiceService, IOrderNotificationService orderNotificationService,
+            IInvoiceService invoiceService, IInvoiceDal invoiceDal, IInvoiceItemDal invoiceItemDal,
+            IOrderNotificationService orderNotificationService,
             IOrderStatusHistoryService statusHistory, IMapper mapper,
             IStoreCreditTransactionDal creditTxDal, IAddressDal addressDal,
             IPaymentDal paymentDal, IIyzicoClient iyzico, IRefundService refundService, ILoyaltyService loyaltyService,
@@ -95,6 +101,8 @@ namespace Divisima.Bussiness.Concrete
             _couponDal = couponDal;
             _stockService = stockService;
             _invoiceService = invoiceService;
+            _invoiceDal = invoiceDal;
+            _invoiceItemDal = invoiceItemDal;
             _orderNotificationService = orderNotificationService;
             _statusHistory = statusHistory;
             _unitOfWork = unitOfWork;
@@ -534,7 +542,23 @@ namespace Divisima.Bussiness.Concrete
 
         // Açıklayıcı yorum: FATURA (HTML) - müşteri görüntüler/yazdırır (tarayıcı PDF'e çevirir; PDF lib gerekmez).
         // Sahiplik kontrollü (IDOR yok). KDV %20 dahil varsayımıyla matrah/KDV ayrıştırılır.
-        public async Task<(HttpStatusCode, Result)> GetInvoiceHtml(int orderId, int customerId)
+        // MANTIK-FIX-2R / K2 - GORUNUR FATURA ARTIK KAYITTAN BESLENIR.
+        //
+        // ONCEKI DAVRANIS (olculdu): bu metot faturayi `orders` + `order_items` uzerinden
+        // YENIDEN HESAPLIYOR ve hazir HTML donduruyordu; `invoices` / `invoice_items`
+        // tablolarina HIC DOKUNMUYORDU. Somut zararlar:
+        //   - matrah sabit `total_price / 1.20m` ile ayristiriliyordu ve etiket sabit
+        //     "KDV (%20)" idi -> karisik oranli sepette YANLIS ORAN BEYANI (canli: 12 fatura;
+        //     ornek fatura 55 -> gercek agirlikli oran 0,1416 iken ekran %20 yaziyordu),
+        //   - IPTAL EDILMIS siparis icin TAM GORUNUMLU fatura ciziliyordu (olculdu: siparis
+        //     268 iptal + faturasi iptal, ekranda "iptal" gecisi 0, "Genel Toplam 549,70 TL"),
+        //   - FATURASI OLMAYAN siparis icin de belge uretiliyordu (canli: 143 siparisin 47'si),
+        //   - para SUNUCUDA bicimleniyordu (kultur sunucuya kilitleniyordu).
+        //
+        // ARTIK: kayit okunur, YAPILANDIRILMIS HAM DEGER donulur. Sunucu SAYI BICIMLEMEZ -
+        // bicimleme istemcide dvsLocale ile yapilir, RequestLocalization ACILMAZ.
+        // Sahiplik sozlesmesi AYNEN korunur (ihlal de "bulunamadi" doner - varlik sizdirilmaz).
+        public async Task<(HttpStatusCode, Result)> GetInvoiceView(int orderId, int customerId)
         {
             var order = await _orderDal.GetAsync(o => o.id == orderId);
             if (order == null)
@@ -542,50 +566,73 @@ namespace Divisima.Bussiness.Concrete
             if (order.customer_id != customerId)
                 return (HttpStatusCode.NotFound, new ErrorResult(Messages.OrderNotFound));   // TEK SOZLESME: sahiplik ihlali de "bulunamadi" (varlik sizdirilmaz)
 
-            var items = await _orderItemDal.GetListAsync(i => i.order_id == order.id && !i.is_cancelled);
-            var productIds = items.Select(i => i.product_id).Distinct().ToList();
-            var names = (await _productDal.GetListAsync(p => productIds.Contains(p.id))).ToDictionary(p => p.id, p => p.name);
-
-            decimal matrah = Math.Round(order.total_price / 1.20m, 2);
-            decimal kdv = order.total_price - matrah;
-
-            var rows = new System.Text.StringBuilder();
-            foreach (var it in items)
+            var view = new InvoiceViewResponseDto
             {
-                var pname = System.Net.WebUtility.HtmlEncode(names.TryGetValue(it.product_id, out var n) ? n : "Ürün");
-                var size = System.Net.WebUtility.HtmlEncode(it.size ?? "");
-                rows.Append($"<tr><td>{pname}</td><td>{size}</td><td>{it.quantity}</td><td>{it.unit_price:N2} TL</td><td>{(it.unit_price * it.quantity):N2} TL</td></tr>");
+                order_number = order.order_number,
+                order_status = order.status,
+                order_is_cancelled = order.status == (byte)OrderStatusEnum.Cancelled,
+                // ODEME OZETI SIPARIS VERISINDEN (D2): fatura BRUTTUR, kredi bir ODEME ARACIDIR
+                // ve `invoices` onu KAYDETMEZ. Bu yuzden kirilim tek dogru kaynagindan gelir.
+                payment = new InvoiceViewPaymentDto
+                {
+                    order_total = order.total_price,
+                    store_credit_used = order.store_credit_used,
+                    remaining = order.total_price - order.store_credit_used
+                }
+            };
+
+            var invoice = await _invoiceDal.GetAsync(i => i.order_id == order.id);
+            if (invoice == null)
+            {
+                // BOS DURUM: belge UYDURULMAZ. Eski uc burada da fatura ciziyordu.
+                view.has_invoice = false;
+                return (HttpStatusCode.OK, new SuccessDataResult<InvoiceViewResponseDto>(view));
             }
 
-            var html = $@"<!DOCTYPE html><html lang=""tr""><head><meta charset=""utf-8"">
-<title>Fatura {System.Net.WebUtility.HtmlEncode(order.order_number)}</title>
-<style>body{{font-family:Arial,sans-serif;max-width:800px;margin:20px auto;color:#222}}
-h1{{font-size:20px}}table{{width:100%;border-collapse:collapse;margin:16px 0}}
-th,td{{border:1px solid #ddd;padding:8px;text-align:left;font-size:13px}}th{{background:#f5f5f5}}
-.tot{{text-align:right;margin-top:8px}}.tot div{{margin:2px 0}}</style></head><body>
-<h1>DIVISIMA - Fatura</h1>
-<p>Sipariş No: <b>{System.Net.WebUtility.HtmlEncode(order.order_number)}</b><br>
-Tarih: {order.created_at:dd.MM.yyyy}</p>
-<table><thead><tr><th>Ürün</th><th>Beden</th><th>Adet</th><th>Birim Fiyat</th><th>Tutar</th></tr></thead>
-<tbody>{rows}</tbody></table>
-<div class=""tot"">
-<div>Ara Toplam: {order.subtotal:N2} TL</div>
-{(order.discount_amount > 0 ? $"<div>İndirim: -{order.discount_amount:N2} TL</div>" : "")}
-<div>Kargo: {order.shipping_cost:N2} TL</div>
-<div>Matrah: {matrah:N2} TL</div>
-<div>KDV (%20): {kdv:N2} TL</div>
-<div style=""font-size:16px""><b>Genel Toplam: {order.total_price:N2} TL</b></div>
-{(order.store_credit_used > 0 ? $"<div style=\"margin-top:8px;border-top:1px solid #eee;padding-top:6px\">Mağaza kredisi ile ödenen: {order.store_credit_used:N2} TL</div><div>Kalan (kart/havale): {(order.total_price - order.store_credit_used):N2} TL</div>" : "")}
-</div>
-<p style=""font-size:11px;color:#888;margin-top:24px"">Bu belge bilgilendirme amaçlıdır. Resmi e-fatura ayrıca düzenlenir.</p>
-</body></html>";
-            // ADLANDIRILMIS ARGUMAN (E3'te ZORUNLUYDU, Sprint 8 madde 11'den sonra ARTIK DEGIL):
-            // T = string oldugunda "(T data)" ile "(string message)" ayni imzaya duser ve C# generic
-            // OLMAYAN adayi secerdi; html MESSAGE'a gider, Data null kalir ve controller
-            // Content(ok.Data) yazdigi icin uc "HTTP 200 + Content-Length: 0" donerdi.
-            // Sprint 8'de o kurucu KALDIRILDI; adlandirma artik gerekli degil ama NIYETI acik
-            // tuttugu ve pinlerle birlikte tarihi anlattigi icin BIRAKILDI.
-            return (HttpStatusCode.OK, new SuccessDataResult<string>(data: html));
+            view.has_invoice = true;
+            view.invoice_number = invoice.invoice_number;
+            view.invoice_created_at = invoice.created_at;
+            view.invoice_status = invoice.status;
+            view.invoice_is_cancelled = invoice.status == (byte)InvoiceStatusEnum.Cancelled;
+            view.subtotal = invoice.subtotal;
+            view.tax_amount = invoice.tax_amount;
+            view.total = invoice.total;
+
+            var lines = await _invoiceItemDal.GetListAsync(x => x.invoice_id == invoice.id);
+            foreach (var l in lines.OrderBy(x => x.id))
+            {
+                var kargoMu = l.product_id == null;
+                view.items.Add(new InvoiceViewLineDto
+                {
+                    is_shipping = kargoMu,
+                    // KARGO satirinda ad GONDERILMEZ (E4): etiket ekranda SOZLUKTEN cizilir.
+                    // Bos birakmak bunu istemci adabi olmaktan cikarip YAPISAL kilar.
+                    product_name = kargoMu ? null : l.product_name,
+                    quantity = l.quantity,
+                    unit_price = l.unit_price,
+                    line_subtotal = l.line_subtotal,
+                    vat_rate = l.vat_rate,
+                    vat_amount = l.vat_amount,
+                    line_total = l.line_total
+                });
+            }
+
+            // KDV KIRILIMI: baslik tax_rate AGIRLIKLI ORTALAMADIR ve ekrana oran olarak
+            // cikarsa var olmayan bir oran (or. %14,16) beyan edilirdi. Bu yuzden kalemler
+            // KENDI oranlarina gore gruplanir ve ekran oran BAZINDA gosterir.
+            view.vat_breakdown = lines
+                .GroupBy(x => x.vat_rate)
+                .OrderBy(g => g.Key)
+                .Select(g => new InvoiceViewVatGroupDto
+                {
+                    vat_rate = g.Key,
+                    base_amount = g.Sum(x => x.line_subtotal),
+                    vat_amount = g.Sum(x => x.vat_amount),
+                    gross_amount = g.Sum(x => x.line_total)
+                })
+                .ToList();
+
+            return (HttpStatusCode.OK, new SuccessDataResult<InvoiceViewResponseDto>(view));
         }
 
         // Açıklayıcı yorum: MANUEL ÖDEME ONAYI (admin) - Havale/EFT parası hesaba geçince sipariş onaylanır.

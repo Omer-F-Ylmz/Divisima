@@ -127,14 +127,19 @@ namespace Divisima.API.Controllers
         }
 
 
-        // Fatura (HTML - tarayıcı yazdırıp PDF yapabilir)
+        // FATURA GORUNUMU (MANTIK-FIX-2R / K2).
+        // Onceden bu uc SUNUCUDA URETILMIS HTML donduruyordu ve belgeyi SIPARIS verisinden
+        // YENIDEN HESAPLIYORDU (sabit /1.20 matrah, sabit "KDV (%20)" etiketi, sunucuda
+        // bicimlenmis para). Artik KAYITTAN (invoices + invoice_items) yapilandirilmis HAM
+        // veri doner; bicimleme ve etiketler ISTEMCIDE (sozluk + dvsLocale).
+        // ROTA BILEREK DEGISTIRILMEDI: uc YERINDE evrildi, paralel ikinci fatura ucu
+        // ACILMADI ve istemci TEK uca bagli kaldi. (Yol adindaki "-html" artik yaniti
+        // tarif etmiyor; adlandirma ayri ve kozmetik bir karardir, raporda not dusuldu.)
         [HttpGet("{orderId}/invoice-html")]
         [RequireUserType(UserTypeEnum.Customer)]
         public async Task<IActionResult> InvoiceHtml(int orderId)
         {
-            var r = await _orderService.GetInvoiceHtml(orderId, _currentUser.GetRequiredUserId());
-            if (r.Item2 is SuccessDataResult<string> ok)
-                return Content(ok.Data, "text/html; charset=utf-8");
+            var r = await _orderService.GetInvoiceView(orderId, _currentUser.GetRequiredUserId());
             return StatusCode((int)r.Item1, r.Item2);
         }
 

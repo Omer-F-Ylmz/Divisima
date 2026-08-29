@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Divisima.Bussiness.Abstract;
+using Divisima.Core.Utilities.Enums;
 using Divisima.Core.Utilities.Results;
 using Divisima.DataAccess.Concrete.Context;
 using Divisima.Entity.Entities;
@@ -115,6 +117,73 @@ namespace Divisima.IntegrationTests
         // davranisi olculemez; depoda kredi POZITIF olan tek bir test fiksturu YOKTU.
         // `total_price` KREDIYI ICERIR (D1/K2-A karari: semantik DEGISMEDI) - fikstur
         // uretimdeki OrderManager.cs:294/:322 kalibiyla AYNI sekilde kurulur.
+        // MANTIK-FIX-2R / K2: KARISIK ORANLI sepet kurgusu (%10 giyim + %20 aksesuar).
+        // Gerekce: canli veride karisik oranli fatura VAR (fatura 55 -> agirlikli oran 0,1416)
+        // ama o kayit BASKA bir musteriye ait ve uc SAHIPLIK kontrollu, admin gecisi YOK -
+        // yani o satirla canli kanit URETILEMEZ. Kirilim sozlesmesi bu yuzden KURGUYLA pinlenir.
+        private static async Task<(int OrderId, string OrderNumber)> SeedKarisikOranliSiparisAsync(int customerId)
+        {
+            var damga = Guid.NewGuid().ToString("N").Substring(0, 8).ToUpper();
+            await using var ctx = NewContext();
+
+            async Task<int> UrunAsync(decimal oran, decimal fiyat, string ad)
+            {
+                var k = new Category
+                {
+                    name = ad + " Kat " + damga,
+                    slug = (ad + "-kat-" + damga).ToLowerInvariant(),
+                    vat_rate = oran,
+                    is_active = true,
+                    created_at = DateTime.Now
+                };
+                ctx.Set<Category>().Add(k);
+                await ctx.SaveChangesAsync();
+
+                var u = new Product
+                {
+                    name = ad + " " + damga,
+                    brand = "Divisima",
+                    category_id = k.id,
+                    price = fiyat,
+                    description = "Karisik oran kurgusu.",
+                    color_hex = "#334455",
+                    product_type = 0,
+                    is_active = true,
+                    created_at = DateTime.Now
+                };
+                ctx.Set<Product>().Add(u);
+                await ctx.SaveChangesAsync();
+                return u.id;
+            }
+
+            var giyim = await UrunAsync(0.10m, 1100m, "Giyim");
+            var aksesuar = await UrunAsync(0.20m, 240m, "Aksesuar");
+
+            var siparis = new Order
+            {
+                customer_id = customerId,
+                order_number = "DVS" + DateTime.Now.ToString("yyyyMMdd") + "-K" + damga.Substring(0, 7),
+                status = (byte)3,
+                subtotal = 1340.00m,
+                discount_amount = 0m,
+                shipping_cost = 49.90m,
+                total_price = 1389.90m,
+                currency = "TRY",
+                payment_type = 0,
+                is_online_payment_done = true,
+                created_at = DateTime.Now
+            };
+            ctx.Set<Order>().Add(siparis);
+            await ctx.SaveChangesAsync();
+
+            ctx.Set<OrderItem>().AddRange(
+                new OrderItem { order_id = siparis.id, product_id = giyim, size = "M", quantity = 1, unit_price = 1100m, is_cancelled = false, created_at = DateTime.Now },
+                new OrderItem { order_id = siparis.id, product_id = aksesuar, size = "TEK", quantity = 1, unit_price = 240m, is_cancelled = false, created_at = DateTime.Now });
+            await ctx.SaveChangesAsync();
+
+            return (siparis.id, siparis.order_number);
+        }
+
         private static async Task<(int OrderId, string OrderNumber, string ProductName)> SeedOrderAsync(
             int customerId, decimal magazaKredisi = 0m)
         {
@@ -198,32 +267,225 @@ namespace Divisima.IntegrationTests
             var user = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
             var seed = await SeedOrderAsync(user.CustomerId);
 
+            // MANTIK-FIX-2R / K2: KURGU DURUSTLESTI. Onceden bu bacak da YALNIZ bir Order
+            // satiri yaziyordu (olculdu: "new Invoice" 0, "GenerateForOrder" 0) - uc faturayi
+            // SIPARISTEN YENIDEN HESAPLADIGI icin fatura OLMADAN da belge uretiyordu.
+            // Artik uc KAYITTAN besleniyor; fatura URETIM YOLUNDAN kesilir.
+            using (var scope = _factory!.Services.CreateScope())
+            {
+                var inv = scope.ServiceProvider.GetRequiredService<IInvoiceService>();
+                var gen = await inv.GenerateForOrder(seed.OrderId);
+                gen.Item1.Should().Be(HttpStatusCode.OK, $"fatura uretilmeli: {gen.Item2.Message}");
+            }
+
             var resp = await user.Client.GetAsync($"/api/order/{seed.OrderId}/invoice-html");
             resp.StatusCode.Should().Be(HttpStatusCode.OK);
 
             // OLCULEN BELIRTININ KENDISI: zarar sirasinda uc "200 + Content-Length: 0" donuyordu
-            // (curl ile sunucu tarafinda olculdu). Basligi DOGRUDAN pinliyoruz.
+            // (curl ile sunucu tarafinda olculdu). Basligi DOGRUDAN pinliyoruz - bu iddia
+            // yanit HTML iken de JSON iken de AYNI seyi korur: uc BOS GOVDE donmemeli.
             resp.Content.Headers.ContentLength.Should().BeGreaterThan(0,
                 "Content-Length: 0 tam olarak E3'te olculen zarardir");
 
             var govde = await resp.Content.ReadAsStringAsync();
-
             govde.Should().NotBeNullOrWhiteSpace(
                 "tek argumanli SuccessDataResult<string> kullanilirsa Data null kalir ve uc " +
                 "200 + Content-Length: 0 doner - fatura ekrani BOS gelir (E3'te canli olculdu)");
-            govde.Should().Contain(seed.OrderNumber, "govde GERCEKTEN bu siparisin faturasi olmali");
-            govde.Should().Contain(seed.ProductName, "kalem satirlari cizilmis olmali");
-            // KULTUR BAGIMLI LITERAL YASAK (CI'da BIR KEZ KIRDI - olculdu).
-            // Ilk hali "549,90" yaziyordu. Yerel makine tr-TR oldugu icin YESIL, GitHub kosucusu
-            // invariant kultur oldugu icin KIRMIZI.
-            // SPRINT 8 MADDE 13'ten SONRA beklenti SERTLESTI: uygulama artik kulturu tr-TR'ye
-            // PINLIYOR (Program.cs), dolayisiyla fatura govdesi KOSUCU KULTURUNDEN BAGIMSIZ
-            // olarak tr bicimiyle cikmali. Assert bu yuzden CurrentCulture'a degil ACIKCA
-            // tr-TR'ye bakiyor - CI'da (invariant kosucu) da ayni sonucu bekler.
-            var beklenenToplam = 549.90m.ToString("N2", new CultureInfo("tr-TR"));
-            govde.Should().Contain(beklenenToplam,
-                $"genel toplam tr bicimiyle govdede yer almali (beklenen: {beklenenToplam}) - " +
-                "uygulama kulturu pinlemezse kosucu yerelinde '549.90' cikar ve bu assert kirilir");
+
+            // VAKUM KIRICI (KORUNDU, KAYNAGI DEGISTI): govde GERCEKTEN bu siparisin faturasi
+            // olmali. Eskiden bu bilgi siparisten yeniden hesaplanmis HTML'den okunuyordu;
+            // artik KAYITTAN gelen yapilandirilmis veriden.
+            using var belge = JsonDocument.Parse(govde);
+            var veri = belge.RootElement.GetProperty("data");
+            veri.GetProperty("has_invoice").GetBoolean().Should().BeTrue();
+            veri.GetProperty("order_number").GetString().Should().Be(seed.OrderNumber,
+                "yanit GERCEKTEN bu siparisin faturasi olmali");
+            veri.GetProperty("items").EnumerateArray()
+                .Any(x => x.GetProperty("product_name").ValueKind == JsonValueKind.String
+                       && x.GetProperty("product_name").GetString() == seed.ProductName)
+                .Should().BeTrue("urun kalemi yanitta bulunmali");
+
+            // KULTUR SOZLESMESI - YENI BICIMI (MANTIK-FIX-2R / K2).
+            // ESKI hali "govde tr bicimli '549,90' ICERMELI" idi; o assert sunucunun parayi
+            // BICIMLEDIGINI varsayiyordu ve dogru bicim tek bir kulture kilitliydi.
+            // ARTIK: uc SAYI BICIMLEMEZ - alan HAM decimal gelir, bicimleme istemcide.
+            // CIFT-ANLAM KIRICI: HER IKI bicim de yasak (yalniz invariant'i yasaklamak
+            // sunucunun tr-TR'ye geri donmesini gormezdi).
+            // OLCUM NOTU (yanlis pozitif ONLENDI): bu fiksturun toplami 549,90 ve o degerin
+            // INVARIANT N2 bicimi "549.90" - yani HAM JSON sayisiyla KARAKTER KARAKTER AYNI.
+            // Binlik ayraci olmadigi icin invariant NotContain'i burada AYIRT EDICI DEGIL;
+            // konsaydi uc dogru davransa bile KIRMIZI verirdi (denendi ve birebir bu oldu).
+            // Bu yuzden burada AYIRT EDEN olcutler kullanilir; CulturePinTests'te toplam
+            // 1049,70 oldugu icin (tr "1.049,70" / invariant "1,049.70" - IKISI DE binlik
+            // ayracli) HER IKI bicim de orada anlamli ve orada IKISI DE yasakli.
+            var trBicim = 549.90m.ToString("N2", new CultureInfo("tr-TR"));   // "549,90" - JSON sayisinda VIRGUL ondalik OLAMAZ
+            govde.Should().NotContain(trBicim,
+                $"uc SAYI BICIMLEMEMELI - tr bicimli para dizgesi ('{trBicim}') yanitta bulunmamali");
+            govde.Should().NotContain(" TL",
+                "para birimi SONEKI de sunucuda eklenmemeli - eski HTML 'Genel Toplam: 549,90 TL' basiyordu");
+            veri.GetProperty("total").ValueKind.Should().Be(JsonValueKind.Number,
+                "toplam SAYI olmali; dizge olsaydi bicimleme sunucuda yapilmis olurdu");
+            veri.GetProperty("total").GetDecimal().Should().Be(549.90m, "kayittan gelen brut");
+        }
+
+        // ── P-F2a) MANTIK-FIX-2R / K2 - FATURASIZ SIPARIS: BOS DURUM, BELGE UYDURULMAZ ──
+        //
+        // OLCULEN ONCE-DURUM: 143 siparisin 47'sinin faturasi YOK (45 Pending + 2 Cancelled)
+        // ve "Fatura Goruntule" butonu KOSULSUZ ciziliyor. Eski uc faturayi SIPARISTEN
+        // yeniden hesapladigi icin bu siparisler icin de TAM GORUNUMLU belge donduruyordu.
+        [Fact]
+        [Trait("Category", "Sql")]
+        public async Task FaturasizSiparis_BOS_DURUM_Doner_BELGE_UYDURULMAZ()
+        {
+            if (Skipped()) return;
+
+            var user = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+            var seed = await SeedOrderAsync(user.CustomerId);   // FATURA URETILMEDI - kasitli
+
+            var resp = await user.Client.GetAsync($"/api/order/{seed.OrderId}/invoice-html");
+            resp.StatusCode.Should().Be(HttpStatusCode.OK, "bos durum bir HATA degil - uc 200 doner");
+
+            using var belge = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            var veri = belge.RootElement.GetProperty("data");
+
+            veri.GetProperty("has_invoice").GetBoolean().Should().BeFalse("bu siparisin faturasi YOK");
+            veri.GetProperty("items").GetArrayLength().Should().Be(0, "kalem UYDURULMAZ");
+            veri.GetProperty("total").GetDecimal().Should().Be(0m, "faturasiz sipariste fatura toplami YOKTUR");
+            veri.GetProperty("invoice_number").ValueKind.Should().Be(JsonValueKind.Null);
+
+            // VAKUM KIRICI: bos durum "hicbir sey donme" DEGIL - siparis kimligi gelir ki
+            // ekran "bu siparisin faturasi yok" diyebilsin.
+            veri.GetProperty("order_number").GetString().Should().Be(seed.OrderNumber);
+        }
+
+        // ── P-F2b) MANTIK-FIX-2R / K2 - IPTALLI FATURA: BELGE GELIR, IPTAL ISARETIYLE ───
+        //
+        // OLCULEN ONCE-DURUM (canli, siparis 268): siparis IPTAL (status 5) ve faturasi IPTAL
+        // (status 3) oldugu halde eski uc HTTP 200 ile TAM GORUNUMLU fatura donduruyordu -
+        // govdede "iptal" gecisi 0 idi (negatif kontrol: "Toplam" 2). Ayni sinif canli veride
+        // 8 sipariste daha var (2-8 ve 28).
+        [Fact]
+        [Trait("Category", "Sql")]
+        public async Task IptalliFatura_BELGE_GELIR_ama_IPTAL_ISARETI_Tasir()
+        {
+            if (Skipped()) return;
+
+            var user = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+            var seed = await SeedOrderAsync(user.CustomerId);
+
+            using (var scope = _factory!.Services.CreateScope())
+            {
+                var inv = scope.ServiceProvider.GetRequiredService<IInvoiceService>();
+                (await inv.GenerateForOrder(seed.OrderId)).Item1.Should().Be(HttpStatusCode.OK);
+            }
+
+            // Siparis + fatura URETIM YOLUNDAN iptal edilir (elle satir yazilmaz).
+            await using (var ctx = NewContext())
+            {
+                var o = await ctx.Set<Order>().SingleAsync(x => x.id == seed.OrderId);
+                o.status = (byte)OrderStatusEnum.Cancelled;
+                await ctx.SaveChangesAsync();
+            }
+            using (var scope = _factory!.Services.CreateScope())
+            {
+                var inv = scope.ServiceProvider.GetRequiredService<IInvoiceService>();
+                (await inv.CancelForOrder(seed.OrderId)).Item1.Should().Be(HttpStatusCode.OK);
+            }
+
+            var resp = await user.Client.GetAsync($"/api/order/{seed.OrderId}/invoice-html");
+            resp.StatusCode.Should().Be(HttpStatusCode.OK);
+            using var belge = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            var veri = belge.RootElement.GetProperty("data");
+
+            // IPTAL ISARETI - eski ekranda HIC YOKTU.
+            veri.GetProperty("invoice_is_cancelled").GetBoolean().Should().BeTrue(
+                "iptal edilmis fatura ekranda gecerliden AYIRT EDILEBILMELI");
+            veri.GetProperty("order_is_cancelled").GetBoolean().Should().BeTrue();
+
+            // CIFT-ANLAM KIRICI: "iptalliyse hicbir sey gosterme" YANLIS duzeltmedir -
+            // fatura MALI BIR BELGEDIR, iptal edilse de tutarlariyla gorunur olmalidir.
+            veri.GetProperty("has_invoice").GetBoolean().Should().BeTrue();
+            veri.GetProperty("total").GetDecimal().Should().Be(549.90m, "belge tutarlariyla GELIR");
+            veri.GetProperty("items").GetArrayLength().Should().BeGreaterThan(0);
+        }
+
+        // ── P-F2c) MANTIK-FIX-2R / D2 - ODEME OZETININ KAYNAGI SIPARIS VERISIDIR ────────
+        //
+        // D2 KARARI: `invoices` krediyi KAYDETMEZ (kredi bir ODEME ARACIDIR, belge BRUTTUR;
+        // migration YOK). Dolayisiyla ekranin kredi/odeme ozeti SIPARIS verisinden gelir ve
+        // bu KAYNAK pinlenir - fatura kalemlerinden AYRI bir "odeme" bolumudur.
+        [Fact]
+        [Trait("Category", "Sql")]
+        public async Task OdemeOzeti_KAYNAGI_SIPARIS_VERISI_Fatura_BRUT_KALIR()
+        {
+            if (Skipped()) return;
+
+            var user = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+            var seed = await SeedOrderAsync(user.CustomerId, magazaKredisi: 100.00m);
+
+            using (var scope = _factory!.Services.CreateScope())
+            {
+                var inv = scope.ServiceProvider.GetRequiredService<IInvoiceService>();
+                (await inv.GenerateForOrder(seed.OrderId)).Item1.Should().Be(HttpStatusCode.OK);
+            }
+
+            var resp = await user.Client.GetAsync($"/api/order/{seed.OrderId}/invoice-html");
+            using var belge = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            var veri = belge.RootElement.GetProperty("data");
+            var odeme = veri.GetProperty("payment");
+
+            odeme.GetProperty("store_credit_used").GetDecimal().Should().Be(100.00m,
+                "kredi SIPARIS verisinden gelmeli - invoices onu kaydetmiyor (D2)");
+            odeme.GetProperty("order_total").GetDecimal().Should().Be(549.90m);
+            odeme.GetProperty("remaining").GetDecimal().Should().Be(449.90m, "549,90 - 100,00");
+
+            // CIFT-ANLAM KIRICI: BELGE BRUT KALIR - kredi matrahi/toplami DUSURMEZ.
+            veri.GetProperty("total").GetDecimal().Should().Be(549.90m,
+                "fatura BRUTTUR; kredi bir odeme aracidir, belgeyi kucultmez");
+            (veri.GetProperty("subtotal").GetDecimal() + veri.GetProperty("tax_amount").GetDecimal())
+                .Should().Be(549.90m, "matrah + KDV = brut");
+        }
+
+        // ── P-F2d) MANTIK-FIX-2R / K2 - KDV KIRILIMI: TEK ORAN GOSTERILMEZ ─────────────
+        //
+        // OLCULEN ONCE-DURUM: ekran sabit "KDV (%20)" yaziyordu ve `invoices.tax_rate` HIC
+        // okunmuyordu. Baslik tax_rate artik AGIRLIKLI ORTALAMA - ekrana oran olarak cikarsa
+        // Turkiye'de var olmayan bir deger beyan edilirdi (canli ornek: fatura 55 -> 0,1416).
+        // Bu yuzden ekran oran BAZINDA kirilim gosterir.
+        [Fact]
+        [Trait("Category", "Sql")]
+        public async Task KarisikOranliFatura_KDV_KIRILIMI_Doner_TEK_ORAN_DEGIL()
+        {
+            if (Skipped()) return;
+
+            var user = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+            var seed = await SeedKarisikOranliSiparisAsync(user.CustomerId);
+
+            using (var scope = _factory!.Services.CreateScope())
+            {
+                var inv = scope.ServiceProvider.GetRequiredService<IInvoiceService>();
+                (await inv.GenerateForOrder(seed.OrderId)).Item1.Should().Be(HttpStatusCode.OK);
+            }
+
+            var resp = await user.Client.GetAsync($"/api/order/{seed.OrderId}/invoice-html");
+            using var belge = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            var veri = belge.RootElement.GetProperty("data");
+
+            var kirilim = veri.GetProperty("vat_breakdown").EnumerateArray().ToList();
+            kirilim.Count.Should().BeGreaterThan(1,
+                "karisik oranli sepette kirilim BIRDEN FAZLA grup icermeli - tek oran YANLIS beyandir");
+            kirilim.Select(g => g.GetProperty("vat_rate").GetDecimal()).Should().Contain(0.10m);
+            kirilim.Select(g => g.GetProperty("vat_rate").GetDecimal()).Should().Contain(0.20m);
+
+            // Kirilim TOPLAMI belgeyle tutarli olmali.
+            kirilim.Sum(g => g.GetProperty("vat_amount").GetDecimal())
+                .Should().Be(veri.GetProperty("tax_amount").GetDecimal(), "kirilim KDV toplami = belge KDV'si");
+            kirilim.Sum(g => g.GetProperty("gross_amount").GetDecimal())
+                .Should().Be(veri.GetProperty("total").GetDecimal(), "kirilim brut toplami = belge brutu");
+
+            // GOMULU ORAN 0 GECIS: yanit hicbir yerde sabit bir oran ETIKETI tasimamali.
+            var govde = belge.RootElement.GetRawText();
+            govde.Should().NotContain("KDV (%", "sabit oran etiketi ARTIK URETILMEMELI");
         }
 
         // ── P20) MANTIK-FIX-1 / K2-A - MAGAZA KREDISI SIPARIS DETAYINDA GORUNUR ────────
