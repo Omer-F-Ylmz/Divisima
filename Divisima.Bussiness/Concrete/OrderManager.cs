@@ -630,6 +630,13 @@ namespace Divisima.Bussiness.Concrete
                     vat_amount = g.Sum(x => x.vat_amount),
                     gross_amount = g.Sum(x => x.line_total)
                 })
+                // B1 (MK-4b denetim bulgusu): HICBIR SEYE KATKI VERMEYEN grup KIRILIMDA GORUNMEZ.
+                // BEDAVA kargoda K1 yine bir kalem yazar (D1 sozlesmesi: her faturada TAM 1 kargo
+                // kalemi) ama tutari 0,00'dir. O kalem kosulsuz TaxRate ile damgalandigi icin,
+                // urunleri %10 olan bir sipariste kirilima "KDV %20 (Matrah 0,00) - 0,00" satiri
+                // girerdi: VAR OLMAYAN bir oran BEYAN EDILIRDI - K2'nin acildigi kusurun TAM AYNI
+                // SINIFI. Suzgec KAYITTA degil GORUNTULEMEDE: fatura kalemi (D1) AYNEN durur.
+                .Where(g => g.base_amount != 0m || g.vat_amount != 0m || g.gross_amount != 0m)
                 .ToList();
 
             return (HttpStatusCode.OK, new SuccessDataResult<InvoiceViewResponseDto>(view));

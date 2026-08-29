@@ -121,7 +121,7 @@ namespace Divisima.IntegrationTests
         // Gerekce: canli veride karisik oranli fatura VAR (fatura 55 -> agirlikli oran 0,1416)
         // ama o kayit BASKA bir musteriye ait ve uc SAHIPLIK kontrollu, admin gecisi YOK -
         // yani o satirla canli kanit URETILEMEZ. Kirilim sozlesmesi bu yuzden KURGUYLA pinlenir.
-        private static async Task<(int OrderId, string OrderNumber)> SeedKarisikOranliSiparisAsync(int customerId)
+        private static async Task<(int OrderId, string OrderNumber)> SeedKarisikOranliSiparisAsync(int customerId, bool bedavaKargoTekOran = false)
         {
             var damga = Guid.NewGuid().ToString("N").Substring(0, 8).ToUpper();
             await using var ctx = NewContext();
@@ -164,10 +164,10 @@ namespace Divisima.IntegrationTests
                 customer_id = customerId,
                 order_number = "DVS" + DateTime.Now.ToString("yyyyMMdd") + "-K" + damga.Substring(0, 7),
                 status = (byte)3,
-                subtotal = 1340.00m,
+                subtotal = (bedavaKargoTekOran ? 1100.00m : 1340.00m),
                 discount_amount = 0m,
-                shipping_cost = 49.90m,
-                total_price = 1389.90m,
+                shipping_cost = (bedavaKargoTekOran ? 0m : 49.90m),
+                total_price = (bedavaKargoTekOran ? 1100.00m : 1389.90m),
                 currency = "TRY",
                 payment_type = 0,
                 is_online_payment_done = true,
@@ -176,9 +176,11 @@ namespace Divisima.IntegrationTests
             ctx.Set<Order>().Add(siparis);
             await ctx.SaveChangesAsync();
 
-            ctx.Set<OrderItem>().AddRange(
-                new OrderItem { order_id = siparis.id, product_id = giyim, size = "M", quantity = 1, unit_price = 1100m, is_cancelled = false, created_at = DateTime.Now },
-                new OrderItem { order_id = siparis.id, product_id = aksesuar, size = "TEK", quantity = 1, unit_price = 240m, is_cancelled = false, created_at = DateTime.Now });
+            ctx.Set<OrderItem>().Add(new OrderItem { order_id = siparis.id, product_id = giyim, size = "M", quantity = 1, unit_price = 1100m, is_cancelled = false, created_at = DateTime.Now });
+            // bedavaKargoTekOran: SADECE %10 urun kalir. Kargo kalemi (K1/D1) yine yazilir ama
+            // tutari 0,00'dir; boylece B1'in hayalet %20 grubu URETILEBILIR bir kosul olur.
+            if (!bedavaKargoTekOran)
+                ctx.Set<OrderItem>().Add(new OrderItem { order_id = siparis.id, product_id = aksesuar, size = "TEK", quantity = 1, unit_price = 240m, is_cancelled = false, created_at = DateTime.Now });
             await ctx.SaveChangesAsync();
 
             return (siparis.id, siparis.order_number);
@@ -486,6 +488,65 @@ namespace Divisima.IntegrationTests
             // GOMULU ORAN 0 GECIS: yanit hicbir yerde sabit bir oran ETIKETI tasimamali.
             var govde = belge.RootElement.GetRawText();
             govde.Should().NotContain("KDV (%", "sabit oran etiketi ARTIK URETILMEMELI");
+        }
+
+        // ── P-F5) MK-4b DENETIM BULGUSU B1 - SIFIR KATKILI GRUP KIRILIMDA GORUNMEZ ────
+        //
+        // OLCULEN KUSUR: D1 sozlesmesi geregi BEDAVA kargoda da TAM 1 kargo kalemi yazilir
+        // (tutar 0,00) ve K1 onu KOSULSUZ TaxRate ile damgalar. Kirilim kalemleri oran
+        // BAZINDA gruplayinca, urunleri %10 olan bir sipariste ekrana
+        // "KDV %20 (Matrah 0,00 TL) - 0,00 TL" satiri girerdi: TURKIYE'DE O SIPARIS ICIN
+        // VAR OLMAYAN bir oran BEYAN EDILIRDI - K2'nin acildigi kusurun TAM AYNI SINIFI.
+        //
+        // SUZGEC KAYITTA DEGIL GORUNTULEMEDE: fatura kalemi (D1) AYNEN durur; yalniz hicbir
+        // seye katki vermeyen grup kirilimda gosterilmez.
+        [Fact]
+        [Trait("Category", "Sql")]
+        public async Task BedavaKargo_KIRILIMDA_HAYALET_ORAN_GRUBU_URETMEZ_ama_KALEM_KAYITTA_KALIR()
+        {
+            if (Skipped()) return;
+
+            var user = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+            var seed = await SeedKarisikOranliSiparisAsync(user.CustomerId, bedavaKargoTekOran: true);
+
+            using (var scope = _factory!.Services.CreateScope())
+            {
+                var inv = scope.ServiceProvider.GetRequiredService<IInvoiceService>();
+                (await inv.GenerateForOrder(seed.OrderId)).Item1.Should().Be(HttpStatusCode.OK);
+            }
+
+            var resp = await user.Client.GetAsync($"/api/order/{seed.OrderId}/invoice-html");
+            using var belge = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            var veri = belge.RootElement.GetProperty("data");
+
+            // VAKUM KIRICI: kosul GERCEKTEN kurulmus olmali - kargo 0,00 ve kalem KAYITTA VAR.
+            var kalemler = veri.GetProperty("items").EnumerateArray().ToList();
+            var kargoKalemi = kalemler.Where(k => k.GetProperty("is_shipping").GetBoolean()).ToList();
+            kargoKalemi.Should().HaveCount(1,
+                "D1: bedava kargoda da TAM 1 kargo kalemi YAZILIR - suzgec KAYDA dokunmaz");
+            kargoKalemi[0].GetProperty("line_total").GetDecimal().Should().Be(0m,
+                "bedava kargo kaleminin tutari 0,00 olmali - hayalet grubu URETEN kosul budur");
+
+            // ASIL IDDIA: kirilimda sifir katkili grup YOK.
+            var kirilim = veri.GetProperty("vat_breakdown").EnumerateArray().ToList();
+            foreach (var g in kirilim)
+            {
+                var matrah = g.GetProperty("base_amount").GetDecimal();
+                var kdv = g.GetProperty("vat_amount").GetDecimal();
+                var brut = g.GetProperty("gross_amount").GetDecimal();
+                (matrah != 0m || kdv != 0m || brut != 0m).Should().BeTrue(
+                    "hicbir seye katki vermeyen bir oran grubu BEYAN EDILEMEZ");
+            }
+
+            // CIFT-ANLAM KIRICI: suzgec "her seyi ele" DEGIL - gercek oran GORUNMEYE DEVAM EDER.
+            kirilim.Should().HaveCount(1, "tek gercek oran kalmali - hayalet %20 grubu GITMELI");
+            kirilim[0].GetProperty("vat_rate").GetDecimal().Should().Be(0.10m);
+            kirilim.Sum(g => g.GetProperty("vat_amount").GetDecimal())
+                .Should().Be(veri.GetProperty("tax_amount").GetDecimal(),
+                    "suzgecten sonra da kirilim KDV toplami = belge KDV'si");
+            kirilim.Sum(g => g.GetProperty("gross_amount").GetDecimal())
+                .Should().Be(veri.GetProperty("total").GetDecimal(),
+                    "suzgecten sonra da kirilim brut toplami = belge brutu");
         }
 
         // ── P20) MANTIK-FIX-1 / K2-A - MAGAZA KREDISI SIPARIS DETAYINDA GORUNUR ────────

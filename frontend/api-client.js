@@ -380,9 +380,9 @@
         placeAsGuest(payload) { return api._post("/api/guest-checkout/place", payload); },
         get(id) { return api._get("/api/order/get/" + id); },
         my() { return api._get("/api/order/my-orders"); },
-        // E3 - FATURA HTML. Uc "text/html" doner, JSON DEGIL; _parse JSON cozemezse ham metni
-        // dondurdugu icin burada HTML dizesi elde edilir. ROTA SIRASI: {orderId}/invoice-html
-        // (timeline'in tersine - timeline "timeline/{orderId}", bu ise "{orderId}/invoice-html").
+          // MANTIK-FIX-2R / K2: uc artik YAPISAL JSON doner (InvoiceViewResponseDto), HTML DEGIL.
+          // Govde istemcide kurulur (faturaGovdesiniCiz). ROTA KORUNDU: {orderId}/invoice-html
+          // (E1 - paralel uc ACILMADI; ad artik yaniti tarif etmiyor, bilincli kabul).
         invoiceHtml(orderId) { return api._get("/api/order/" + orderId + "/invoice-html"); },
       };
     }

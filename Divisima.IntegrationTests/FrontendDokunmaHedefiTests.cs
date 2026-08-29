@@ -1620,13 +1620,31 @@ namespace Divisima.IntegrationTests
             // (2) GOVDE ISTEMCIDE KURULUR ve K2 alanlarindan beslenir.
             var ciz = FonksiyonGovdesi(bridge, "function faturaGovdesiniCiz(");
             ciz.Should().NotBeNullOrWhiteSpace("renderer TANIMLI olmali");
+
+            // B3 (MK-4b denetim bulgusu): TANIM YETMEZ, CAGRI DA OLCULUR.
+            // Mutasyonla gosterildi: cagri yeri guvenliYaz(kutu, d.html, ...) ile degistirilince
+            // K3'un TAMAMI bypass oluyor, renderer OLU KODA doniyor ve pin YESIL kaliyordu.
+            // Depoda MFIX-3b/M4 ile AYNI bosluk sinifi ("tanim + cagri = en az iki gecis").
+            // KAPSAM DAR: guvenliYaz(kutu, ...) sozlesme sayfalarinda MESRU olarak kullaniliyor
+            // (api-bridge.js:3186), bu yuzden yasak DOSYA GENELINE degil FATURA MODALINA konur.
+            var modal = FonksiyonGovdesi(bridge, "function faturaModalAc(");
+            modal.Should().NotBeNullOrWhiteSpace("fatura modali TANIMLI olmali");
+            modal.Should().Contain("faturaGovdesiniCiz(",
+                "fatura modali govdeyi RENDERER ile kurmali - tanimli ama cagrilmayan renderer OLU KODDUR");
+            modal.Should().NotContain("guvenliYaz(",
+                "fatura kutusu HTML enjeksiyonuyla DOLDURULAMAZ - eski yol farkli argumanla GERI GELEMEZ");
             foreach (var alan in new[] { "has_invoice", "is_shipping", "vat_breakdown", "payment",
                                           "invoice_is_cancelled", "order_is_cancelled" })
                 ciz.Should().Contain(alan, $"K2 sozlesme alani '{alan}' renderer'da kullanilmali");
 
             // (3) DB'DEN GELEN METIN textContent ILE - escape'siz innerHTML'e DB verisi GIRMEZ.
             ciz.Should().Contain("textContent", "DB metinleri textContent ile yazilmali");
-            ciz.Should().NotContain("innerHTML = ", "renderer innerHTML ile DB verisi BASMAMALI");
+            // B2 (MK-4b denetim bulgusu): olcut BOSLUKTAN BAGIMSIZ olmali. Onceki hal
+            // "innerHTML = " literalini ariyordu ve "ad.innerHTML=..." bicimindeki AYNI
+            // regresyon pinden GECIYORDU (mutasyonla gosterildi). Bu, depoda bedeli odenmis
+            // "literal bicim degil KUSUR SINIFI olculur" dersinin frontend karsiligidir.
+            var cizSik = Regex.Replace(ciz, @"\s+", "");
+            cizSik.Should().NotContain("innerHTML=", "renderer innerHTML ile DB verisi BASMAMALI");
 
             // (4) KARGO ETIKETI SOZLUKTEN (E4) - DB'deki ad ekrana BASILAMAZ.
             // Sunucu product_name'i NULL gonderiyor; renderer is_shipping dalinda ceviri() kullanir.
