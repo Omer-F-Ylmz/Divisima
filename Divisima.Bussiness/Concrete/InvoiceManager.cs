@@ -76,6 +76,15 @@ namespace Divisima.Bussiness.Concrete
             var total = order.total_price;
             var invoiceNumber = $"DIV-{DateTime.Now:yyyy}-{order.id:D6}";
 
+            // KARGO AYRI KALEM (MANTIK-FIX-2R / K1).
+            // ONCEKI DAVRANIS (olculdu): order.total_price kargoyu ICERIR ve asagidaki kurus-kacagi
+            // kurali son URUN kalemine "total - toplananBrut" yaziyordu; yani kargo bedeli sessizce
+            // bir urun kalemine gomuluyordu. Olcum: 89 kalemli faturanin 89'unda
+            // SUM(line_total) - (subtotal - indirim) = shipping_cost, ISTISNASIZ.
+            // ARTIK: urun kalemleri kargosuz brute (total - kargo) esitlenir, kargo KENDI kalemi olur.
+            var kargo = order.shipping_cost;
+            var urunBrutu = total - kargo;
+
             // KALEM BAZLI KDV.
             // Onceden KDV BASLIK duzeyinde tek oranla ayristiriliyordu (subtotal = total / 1.20).
             // Karisik sepette (giyim %10 + aksesuar %20) bu matematiksel olarak YANLIS bir
@@ -113,9 +122,12 @@ namespace Divisima.Bussiness.Concrete
 
                 var brut = MoneyHelper.Round(item.unit_price * item.quantity * indirimOrani);
 
-                // KURUS KACAGI ENGELI: yuvarlama artiklari SON kaleme yazilir; boylece
-                // kalem toplamlari order.total_price'a BIREBIR esitlenir.
-                if (i == items.Count - 1) brut = total - toplananBrut;
+                // KURUS KACAGI ENGELI: yuvarlama artiklari SON URUN kalemine yazilir; boylece
+                // urun kalemlerinin toplami KARGOSUZ brute (total - kargo) BIREBIR esitlenir.
+                // Kargo bu toplamin DISINDADIR ve dongu bittikten sonra KENDI kalemi olarak eklenir -
+                // eski hal "total" kullandigi icin kargoyu da buraya akitiyordu (yorum o zaman da
+                // yalnizca "yuvarlama artigi" diyordu, yani GERCEGI SOYLEMIYORDU).
+                if (i == items.Count - 1) brut = urunBrutu - toplananBrut;
                 toplananBrut += brut;
 
                 var lineSubtotal = MoneyHelper.Round(brut / (1 + effectiveRate));
@@ -142,6 +154,43 @@ namespace Divisima.Bussiness.Concrete
                     LineTotal = brut,
                     VatRate = effectiveRate,
                     VatAmount = vatAmount
+                });
+            }
+
+            // KARGO KALEMI - HER FATURADA TAM 1 TANE (bedava kargoda 0,00).
+            // Neden kosulsuz: pin TEK BICIM olur, ekran DALSIZ cizer ve gorunur faturanin
+            // kargo satiri zaten kosulsuzdur - "bazen var bazen yok" bir kalem uc yerde ayri
+            // dallanma demekti.
+            // product_id NULL = KARGO SOZLESMESI (bkz. InvoiceItem entity). Sahte "Kargo" urunu
+            // ACILMADI: katalog anonim uclardan gorunur, uydurma bir urun oraya sizardi.
+            // ORAN: kargonun urunu/kategorisi olmadigi icin zincirin son halkasina duser -
+            // TaxRate, yani MEVCUT uretim oran kaynagi (EInvoice:KdvRate). YENI SABIT YAZILMADI.
+            {
+                var kargoOrani = TaxRate;
+                var kargoMatrah = MoneyHelper.Round(kargo / (1 + kargoOrani));
+                var kargoKdv = kargo - kargoMatrah;
+
+                invoiceItems.Add(new InvoiceItem
+                {
+                    product_id = null,
+                    product_name = "Kargo",
+                    quantity = 1,
+                    unit_price = kargo,
+                    line_subtotal = kargoMatrah,
+                    vat_rate = kargoOrani,
+                    vat_amount = kargoKdv,
+                    line_total = kargo,
+                    created_at = DateTime.Now
+                });
+
+                lines.Add(new EInvoiceLine
+                {
+                    ProductName = "Kargo",
+                    Quantity = 1,
+                    UnitPrice = kargo,
+                    LineTotal = kargo,
+                    VatRate = kargoOrani,
+                    VatAmount = kargoKdv
                 });
             }
 

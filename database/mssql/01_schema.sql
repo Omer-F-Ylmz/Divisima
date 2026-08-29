@@ -3034,3 +3034,34 @@ GO
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260829010821_KargoKalemiIcinProductIdNullable'
+)
+BEGIN
+    DECLARE @var2 sysname;
+    SELECT @var2 = [d].[name]
+    FROM [sys].[default_constraints] [d]
+    INNER JOIN [sys].[columns] [c] ON [d].[parent_column_id] = [c].[column_id] AND [d].[parent_object_id] = [c].[object_id]
+    WHERE ([d].[parent_object_id] = OBJECT_ID(N'[invoice_items]') AND [c].[name] = N'product_id');
+    IF @var2 IS NOT NULL EXEC(N'ALTER TABLE [invoice_items] DROP CONSTRAINT [' + @var2 + '];');
+    ALTER TABLE [invoice_items] ALTER COLUMN [product_id] int NULL;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260829010821_KargoKalemiIcinProductIdNullable'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20260829010821_KargoKalemiIcinProductIdNullable', N'8.0.30');
+END;
+GO
+
+COMMIT;
+GO
+

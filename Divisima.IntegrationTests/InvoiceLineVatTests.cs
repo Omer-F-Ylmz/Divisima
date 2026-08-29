@@ -128,7 +128,13 @@ namespace Divisima.IntegrationTests
         }
 
         // Siparis + kalemler. total KDV DAHIL kabul edilir (fiyat politikasi).
-        private static async Task<int> NewOrderAsync(params (int productId, int qty, decimal unitPrice)[] items)
+        private static Task<int> NewOrderAsync(params (int productId, int qty, decimal unitPrice)[] items)
+            => NewOrderAsync(0m, items);
+
+        // MANTIK-FIX-2R / K1: kargolu siparis kurgusu. Onceden bu sinifin HICBIR kurgusu
+        // shipping_cost ATAMIYORDU (olculdu: 0 gecis) - bu yuzden "kargo son kaleme gomuluyor"
+        // kusuru bu pin setiyle YAPISAL OLARAK yakalanamiyordu.
+        private static async Task<int> NewOrderAsync(decimal shipping, params (int productId, int qty, decimal unitPrice)[] items)
         {
             await using var ctx = NewContext();
             var c = new Customer
@@ -152,7 +158,8 @@ namespace Divisima.IntegrationTests
                 order_number = $"ORD-{Guid.NewGuid():N}".Substring(0, 18),
                 status = (byte)OrderStatusEnum.Confirmed,
                 subtotal = toplam,
-                total_price = toplam,
+                shipping_cost = shipping,
+                total_price = toplam + shipping,
                 discount_amount = 0m,
                 store_credit_used = 0m,
                 is_online_payment_done = true,
@@ -211,7 +218,14 @@ namespace Divisima.IntegrationTests
             }
 
             var (invoice, items) = await ReadInvoiceAsync(orderId);
-            items.Should().HaveCount(2, "iki kalem icin iki fatura satiri olmali");
+
+            // MANTIK-FIX-2R / K1 PREMIS GUNCELLEMESI: eskiden "items.HaveCount(2)" idi.
+            // Artik HER faturada TAM 1 kargo kalemi var (D1 karari), yani toplam 3 satir.
+            // OLCULEN SEY DEGISMEDI - urun kalemlerinin KDV'si; yalnizca kapsam URUN
+            // kalemlerine daraltildi ve kargo sozlesmesi AYRICA assert edildi.
+            var urunSatirlari = items.Where(i => i.product_id != null).ToList();
+            urunSatirlari.Should().HaveCount(2, "iki urun icin iki urun kalemi olmali");
+            items.Where(i => i.product_id == null).Should().HaveCount(1, "kargo kalemi HER faturada TAM 1");
 
             var giyimSatir = items.Single(i => i.product_id == giyim);
             giyimSatir.vat_rate.Should().Be(0.1000m, "giyim kategorisi orani kaleme kopyalanmali");
@@ -235,6 +249,74 @@ namespace Divisima.IntegrationTests
             invoice.tax_rate.Should().NotBe(0.2000m, "tek oran varsayimi ARTIK GECERLI DEGIL");
         }
 
+        // P-F1 (MANTIK-FIX-2R / K1): KARGO AYRI FATURA KALEMI.
+        //
+        // OLCULEN ONCE-DURUM: order.total_price kargoyu ICERIR ve kurus-kacagi kurali son URUN
+        // kalemine "total - toplananBrut" yaziyordu -> kargo bedeli sessizce bir URUN kalemine
+        // gomuluyordu. Canli olcum: 89 kalemli faturanin 89'unda
+        // SUM(line_total) - (subtotal - indirim) = shipping_cost, ISTISNASIZ.
+        //
+        // VAKUM KIRICI: kargo GERCEKTEN 49,90 olmali (0 kargolu bir kurgu bu pini bedava gecerdi).
+        // CIFT-ANLAM KIRICI: yalniz "NULL kalem var" YETMEZ - urun kaleminin kargoyu EMMEDIGI de
+        // assert edilir; kargo son kaleme geri gomulurse urun kalemi 1149,90 olur ve pin kirilir.
+        [Fact]
+        public async Task KargoluFatura_KARGO_AYRI_KALEM_UrunKalemi_KargoyuEMMEZ()
+        {
+            if (Skipped()) return;
+            var katId = await NewCategoryAsync(0.20m);
+            var urunId = await NewProductAsync(katId, 1100m);
+            var orderId = await NewOrderAsync(49.90m, (urunId, 1, 1100m));   // brut 1149,90
+
+            await using (var ctx = NewContext())
+            {
+                var r = await NewManager(ctx, new CapturingEInvoiceProvider()).GenerateForOrder(orderId);
+                r.Item1.Should().Be(HttpStatusCode.OK, $"fatura uretilmeli: {r.Item2.Message}");
+            }
+
+            var (invoice, items) = await ReadInvoiceAsync(orderId);
+
+            // (1) KARGO KALEMI: TAM 1 tane, product_id NULL, line_total = shipping_cost.
+            var kargoSatirlari = items.Where(i => i.product_id == null).ToList();
+            kargoSatirlari.Should().HaveCount(1, "kargo kalemi HER faturada TAM 1 olmali");
+            kargoSatirlari[0].line_total.Should().Be(49.90m, "kargo kaleminin tutari shipping_cost olmali");
+            kargoSatirlari[0].quantity.Should().Be(1);
+
+            // (2) CIFT-ANLAM KIRICI: urun kalemi kargoyu EMMEMELI.
+            var urunSatirlari = items.Where(i => i.product_id != null).ToList();
+            urunSatirlari.Should().HaveCount(1);
+            urunSatirlari[0].line_total.Should().Be(1100.00m,
+                "urun kalemi KENDI brutu olmali - kargo buraya AKMAMALI (once-durum: 1149,90)");
+
+            // (3) ZINCIR KURUSU KURUSUNA: kalemler + kargo = brut.
+            items.Sum(i => i.line_total).Should().Be(1149.90m, "kalemler + kargo = order.total_price");
+            invoice.total.Should().Be(1149.90m);
+            invoice.subtotal.Should().Be(items.Sum(i => i.line_subtotal), "matrah kalem toplami");
+            invoice.tax_amount.Should().Be(items.Sum(i => i.vat_amount), "KDV kalem toplami");
+            (invoice.subtotal + invoice.tax_amount).Should().Be(invoice.total, "matrah + KDV = brut");
+        }
+
+        // P-F1b (D1 karari): BEDAVA kargoda kalem YAZILIR - 0,00 ile. Tek bicim, dalsiz ekran.
+        [Fact]
+        public async Task BedavaKargo_KARGO_KALEMI_YINE_YAZILIR_SifirTutarla()
+        {
+            if (Skipped()) return;
+            var katId = await NewCategoryAsync(0.20m);
+            var urunId = await NewProductAsync(katId, 1200m);
+            var orderId = await NewOrderAsync(0m, (urunId, 1, 1200m));
+
+            await using (var ctx = NewContext())
+                await NewManager(ctx, new CapturingEInvoiceProvider()).GenerateForOrder(orderId);
+
+            var (invoice, items) = await ReadInvoiceAsync(orderId);
+            var kargo = items.Where(i => i.product_id == null).ToList();
+            kargo.Should().HaveCount(1, "bedava kargoda da kalem YAZILIR - kalem YOKLUGU degil 0,00");
+            kargo[0].line_total.Should().Be(0.00m);
+            kargo[0].vat_amount.Should().Be(0.00m);
+            // VAKUM KIRICI: urun tarafi bozulmadi.
+            items.Single(i => i.product_id != null).line_total.Should().Be(1200.00m);
+            invoice.total.Should().Be(1200.00m);
+        }
+
         // (b) SNAPSHOT: fatura kesildikten SONRA kategori orani degisirse ESKI fatura degismez.
         [Fact]
         public async Task OranSonradanDegisirse_ESKI_Fatura_DEGISMEZ_YeniFatura_YeniOranla()
@@ -248,7 +330,7 @@ namespace Divisima.IntegrationTests
                 await NewManager(ctx, new CapturingEInvoiceProvider()).GenerateForOrder(ilkOrderId);
 
             var (ilkFatura, ilkKalemler) = await ReadInvoiceAsync(ilkOrderId);
-            ilkKalemler.Single().vat_rate.Should().Be(0.1000m);
+            ilkKalemler.Single(i => i.product_id != null).vat_rate.Should().Be(0.1000m);
 
             // Kategori orani %10 -> %20 degistirilir.
             await using (var ctx = NewContext())
@@ -260,7 +342,7 @@ namespace Divisima.IntegrationTests
 
             // ESKI fatura AYNEN kalmali - yasal belge geriye donuk degismez.
             var (ilkFaturaSonra, ilkKalemlerSonra) = await ReadInvoiceAsync(ilkOrderId);
-            ilkKalemlerSonra.Single().vat_rate.Should().Be(0.1000m, "kesilmis faturanin orani DONDURULMUS olmali");
+            ilkKalemlerSonra.Single(i => i.product_id != null).vat_rate.Should().Be(0.1000m, "kesilmis faturanin orani DONDURULMUS olmali");
             ilkFaturaSonra.tax_amount.Should().Be(ilkFatura.tax_amount, "eski faturanin KDV'si degismemeli");
 
             // YENI siparisin faturasi YENI oranla kesilir (vakum kirici: oran degisikligi
@@ -270,8 +352,8 @@ namespace Divisima.IntegrationTests
                 await NewManager(ctx, new CapturingEInvoiceProvider()).GenerateForOrder(yeniOrderId);
 
             var (_, yeniKalemler) = await ReadInvoiceAsync(yeniOrderId);
-            yeniKalemler.Single().vat_rate.Should().Be(0.2000m, "yeni fatura GUNCEL oranla kesilmeli");
-            yeniKalemler.Single().line_subtotal.Should().Be(1000.00m, "1200 / 1.20 = 1000");
+            yeniKalemler.Single(i => i.product_id != null).vat_rate.Should().Be(0.2000m, "yeni fatura GUNCEL oranla kesilmeli");
+            yeniKalemler.Single(i => i.product_id != null).line_subtotal.Should().Be(1000.00m, "1200 / 1.20 = 1000");
         }
 
         // (c) REGRESYON: tek oranli sepette eski davranisla ayni sonuc.
@@ -291,7 +373,7 @@ namespace Divisima.IntegrationTests
             invoice.subtotal.Should().Be(2000.00m, "2400 / 1.20 = 2000 - eski formulle ayni");
             invoice.tax_amount.Should().Be(400.00m);
             invoice.tax_rate.Should().Be(0.2000m, "tek oranli sepette agirlikli ortalama = o oran");
-            items.Single().vat_rate.Should().Be(0.2000m);
+            items.Single(i => i.product_id != null).vat_rate.Should().Be(0.2000m);
         }
 
         // Urun orani kategoriyi EZER; ikisi de yoksa config varsayilanina (0.20) duser.
@@ -332,11 +414,20 @@ namespace Divisima.IntegrationTests
 
             provider.LastRequest.Should().NotBeNull("saglayiciya istek gitmis olmali");
             var lines = provider.LastRequest!.Lines;
-            lines.Should().HaveCount(2);
-            lines.Should().OnlyContain(l => l.VatRate > 0m, "her satirda oran bulunmali");
-            lines.Should().OnlyContain(l => l.VatAmount > 0m, "her satirda KDV tutari bulunmali");
-            lines.Single(l => l.VatRate == 0.10m).VatAmount.Should().Be(100.00m);
-            lines.Single(l => l.VatRate == 0.20m).VatAmount.Should().Be(40.00m);
+
+            // MANTIK-FIX-2R / K1 PREMIS GUNCELLEMESI: eskiden HaveCount(2) idi ve
+            // "her satirda VatAmount > 0" deniyordu. Artik saglayici payloadinda kargo satiri
+            // da var (bu kurguda 0,00 - siparis kargosuz). OLCULEN SEY DEGISMEDI: urun
+            // satirlarinin oran/tutar dolulugu. AYIRT EDICI: EInvoiceLine URUN KIMLIGI TASIMAZ,
+            // dolayisiyla payloadta kargoyu ayirt eden TEK sey addir (E'nin bulgusu - saglayici
+            // sozlesmesi acilirsa burasi yeniden dusunulmeli).
+            lines.Should().HaveCount(3, "iki urun + kargo");
+            var urunSatirlari = lines.Where(l => l.ProductName != "Kargo").ToList();
+            urunSatirlari.Should().HaveCount(2);
+            urunSatirlari.Should().OnlyContain(l => l.VatRate > 0m, "her urun satirinda oran bulunmali");
+            urunSatirlari.Should().OnlyContain(l => l.VatAmount > 0m, "her urun satirinda KDV tutari bulunmali");
+            urunSatirlari.Single(l => l.VatRate == 0.10m).VatAmount.Should().Be(100.00m);
+            urunSatirlari.Single(l => l.VatRate == 0.20m).VatAmount.Should().Be(40.00m);
         }
 
         // (e) NULL TELEFONLU musteri: siparis + fatura akisi kirilmamali.
@@ -419,7 +510,7 @@ namespace Divisima.IntegrationTests
 
             var (invoice, items) = await ReadInvoiceAsync(orderId);
             invoice.total.Should().Be(1100.00m);
-            items.Single().vat_rate.Should().Be(0.1000m);
+            items.Single(i => i.product_id != null).vat_rate.Should().Be(0.1000m);
         }
     }
 }

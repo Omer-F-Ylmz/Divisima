@@ -14,7 +14,13 @@ namespace Divisima.Entity.Entities
     {
         public int id { get; set; }
         public int invoice_id { get; set; }
-        public int product_id { get; set; }
+        // KARGO SÖZLEŞMESİ (MANTIK-FIX-2R / MIG): product_id NULL ise bu kalem bir ÜRÜN DEĞİL,
+        // siparişin KARGO BEDELİDİR. Sahte bir "Kargo" ürünü AÇILMADI - katalog anonim uçlardan
+        // görünür ve uydurma bir ürün oraya sızardı. FK KORUNUR: SQL Server NULL değerleri yabancı
+        // anahtar kontrolünden muaf tutar, yani ürün kalemleri HÂLÂ products'a bağlıdır.
+        // Kargo kalemi HER faturada TAM 1 tanedir (bedava kargoda line_total 0,00) - tek biçim,
+        // ekranda dalsız gösterim, pinde tek sözleşme.
+        public int? product_id { get; set; }
         public string product_name { get; set; }   // sipariş anındaki ad (ürün adı sonradan değişebilir)
         public int quantity { get; set; }
         public decimal unit_price { get; set; }    // KDV DAHİL birim fiyat (sipariş anı)
