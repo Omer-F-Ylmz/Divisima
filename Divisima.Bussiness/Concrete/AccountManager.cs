@@ -40,6 +40,9 @@ namespace Divisima.Bussiness.Concrete
         private readonly ICustomerDal _customerDal;
         private readonly IUserSessionDal _userSessionDal;
         private readonly IAddressDal _addressDal;
+        // K2: KVKK silmesinde abonelik temizligi icin (tablolarda customer_id YOK, kopru e-posta).
+        private readonly IStockNotificationRequestDal _stockNotificationDal;
+        private readonly IPriceDropSubscriptionDal _priceDropDal;
         private readonly ICustomerDeviceDal _deviceDal;
         private readonly IAuditLogDal _auditLogDal;
         private readonly ISecurityEventService _securityEvents;
@@ -47,12 +50,15 @@ namespace Divisima.Bussiness.Concrete
         private readonly ICacheService _cache;
 
         public AccountManager(ICustomerDal customerDal, IUserSessionDal userSessionDal, IAddressDal addressDal,
+            IStockNotificationRequestDal stockNotificationDal, IPriceDropSubscriptionDal priceDropDal,
             ICustomerDeviceDal deviceDal, IAuditLogDal auditLogDal, ISecurityEventService securityEvents,
             IUnitOfWork unitOfWork, ICacheService cache)
         {
             _customerDal = customerDal;
             _userSessionDal = userSessionDal;
             _addressDal = addressDal;
+            _stockNotificationDal = stockNotificationDal;
+            _priceDropDal = priceDropDal;
             _deviceDal = deviceDal;
             _auditLogDal = auditLogDal;
             _securityEvents = securityEvents;
@@ -158,6 +164,30 @@ namespace Divisima.Bussiness.Concrete
 
             await _unitOfWork.ExecuteInTransactionAsync(async () =>
             {
+                // MANTIK-FIX-3 / K2: ABONELIK KAYITLARI DA SILINIR [KVKK].
+                // OLCULEN YAPISAL BOSLUK: stock_notification_requests ve price_drop_subscriptions
+                // tablolarinda `customer_id` KOLONU YOK (16 kolon olculdu; FK'lar yalniz products'a),
+                // bu yuzden silme yolu onlari bugune kadar YAPISAL OLARAK bulamiyordu. Tek kopru
+                // E-POSTADIR ve o dogrudan asagida anonimlestiriliyor.
+                //
+                // *** SIRA KRITIK: BU BLOK c.email ANONIMLESTIRILMEDEN ONCE KOSAR. ***
+                // Sonra kossaydi `deleted_<id>@divisima.invalid` arar, HICBIR SATIR bulamaz ve
+                // HATA DA VERMEZDI - sessiz no-op. (Iki bagimsiz on olcum ajani ayni uyariyi verdi.)
+                //
+                // DUZ ESITLIK KULLANILIR, KANONIKLESTIRME (PostaKutusu.Kanonik) KULLANILMAZ:
+                // kanonik eksende `a+etiket@x` ile `a@x` AYNI kutuya duser ve BASKA MUSTERILERIN
+                // aboneligi silinirdi. Bu veritabaninda CANLI ornek var (uc musteri tek kanonik
+                // kutuyu paylasiyor). Saklanan e-postalar zaten kanonik oldugu icin (B1
+                // normalizasyonu; BIN2 collation ile olculdu, sapma 0) duz esitlik YETERLIDIR.
+                //
+                // SILME > anonimlestirme: `email` NOT NULL ve (product_id[,size],email) uzerinde
+                // filtreli UNIQUE indeks var; anonimlestirme Guid'li yer tutucu + jeton yenileme +
+                // is_notified isaretlemesi yani UC yazma isterdi. Bu tablolarda HasQueryFilter YOK,
+                // dolayisiyla K1'deki pasif-adres tuzaginin ikizi burada DOGMAZ.
+                var silinecekEposta = c.email;
+                await _stockNotificationDal.DeleteWhereAsync(s => s.email == silinecekEposta);
+                await _priceDropDal.DeleteWhereAsync(s => s.email == silinecekEposta);
+
                 // Açıklayıcı yorum: GDPR silme hakkı - KİŞİSEL VERİ ANONİMLEŞTİRME + pasifleştirme.
                 // Hard-delete yerine anonimleştirme: sipariş/fatura geçmişi bütünlüğü (FK) korunur, PII silinir.
                 c.name = "Silinmiş Kullanıcı";
@@ -195,7 +225,19 @@ namespace Divisima.Bussiness.Concrete
                 // Müşteri kaydı anonimleştirilse bile adresler kalırsa erişim hakkı ihlali sürer.
                 // F11: `city` / `district` / `zip_code` DE konum verisidir ve eskiden GERIDE KALIYORDU
                 // (olculdu: silinmis hesabin adresinde "Istanbul" / "Kadikoy" duruyordu).
-                var addresses = await _addressDal.GetListAsync(a => a.customer_id == customerId);
+                // MANTIK-FIX-3 / K1: SORGU FILTRESI BU YOLDA DELINIR.
+                // OLCULEN KUSUR: Address uzerinde global HasQueryFilter(is_active) var
+                // (DivisimaDbContext.cs:825) ve duz GetListAsync o filtreyi DELMIYOR
+                // (EfEntityRepositoryBase.cs:45) -> PASIF (soft-delete edilmis) adresler
+                // kaskada HIC GIRMIYORDU. Kod DOGRU GORUNUYOR, pin YESIL, PII KALIYORDU.
+                // CANLI KANIT (R-H1 once): silinen bir hesabin pasif adresinde ad, telefon,
+                // acik adres, sehir, ilce ve posta kodu OKUNABILIR halde duruyordu.
+                // GUVENLIK SINIRI: IgnoreQueryFilters YALNIZ bu KVKK silme yolunda -
+                // filtrenin GENEL davranisi AYNEN korunur (AdminCustomerManager.cs:47/80 kalibi).
+                // Yeni DAL yuzeyi ACILMADI: GetListIgnoringFiltersAsync ZATEN arayuzde
+                // (IEntityRepository.cs:45). NoTracking doner; UpdateAsync detached varligi
+                // Update() ile ekleyip tum kolonlari modified isaretledigi icin yazma CALISIR.
+                var addresses = await _addressDal.GetListIgnoringFiltersAsync(a => a.customer_id == customerId);
                 foreach (var a in addresses)
                 {
                     a.full_name = "Silinmiş";

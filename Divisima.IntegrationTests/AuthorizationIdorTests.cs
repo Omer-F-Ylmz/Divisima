@@ -749,6 +749,37 @@ namespace Divisima.IntegrationTests
             });
             upsert.IsSuccessStatusCode.Should().BeTrue("adres eklenebilmeli");
 
+            // ── P-H1 (MANTIK-FIX-3 / K1) - PASIF ADRES FIKSTURU ───────────────────────
+            // OLCULEN VAKUM: bu pin bugune kadar YALNIZ AKTIF adres yaziyordu, dolayisiyla
+            // kusurun ON KOSULU (pasif adres) HIC URETILMIYORDU: global HasQueryFilter
+            // hicbir satiri elemiyor, kaskad calisiyor gorunuyor ve pin YESIL kaliyordu.
+            // CANLI KANIT (R-H1 once): silinen bir hesabin pasif adresinde ad, telefon,
+            // acik adres, sehir, ilce ve posta kodu OKUNABILIR halde KALIYORDU.
+            // Ikinci adres GERCEK uctan yazilip GERCEK uctan soft-delete edilir.
+            var upsert2 = await A.Client.PostAsJsonAsync("/api/Address/upsert", new AddressRequestDto
+            {
+                customer_id = A.CustomerId,
+                title = "MF3 Pasif",
+                full_name = "MF3 Pasif Ad",
+                phone = "5559990000",
+                city = "Trabzon",
+                district = "Ortahisar",
+                full_address = "MF3 pasif acik adres 99/1",
+                zip_code = "61000",
+                is_default = false
+            });
+            upsert2.IsSuccessStatusCode.Should().BeTrue("ikinci adres eklenebilmeli");
+
+            int pasifAdresId;
+            await using (var pre0 = NewContext())
+            {
+                pasifAdresId = await pre0.Set<Address>().IgnoreQueryFilters().AsNoTracking()
+                    .Where(a => a.customer_id == A.CustomerId && a.title == "MF3 Pasif")
+                    .Select(a => a.id).SingleAsync();
+            }
+            (await A.Client.DeleteAsync($"/api/Address/delete/{pasifAdresId}")).IsSuccessStatusCode
+                .Should().BeTrue("adres GERCEK uctan soft-delete edilebilmeli");
+
             var cihazJetonu = $"fix1a-{Guid.NewGuid():N}";
             var dev = await A.Client.PostAsJsonAsync("/api/Device/register", new { device_token = cihazJetonu, platform = (byte)1 });
             dev.IsSuccessStatusCode.Should().BeTrue("cihaz kaydedilebilmeli");
@@ -759,6 +790,12 @@ namespace Divisima.IntegrationTests
             {
                 (await pre.Set<Address>().CountAsync(a => a.customer_id == A.CustomerId && a.is_active))
                     .Should().BeGreaterThan(0, "silmeden once aktif adres bulunmali");
+                // P-H1 VAKUM KIRICI: pasif adres GERCEKTEN var ve GERCEKTEN PII tasiyor olmali.
+                // Bu iki assert olmadan asagidaki "pasif de anonimlesti" iddiasi bedava dogru olurdu.
+                var pasifOnce = await pre.Set<Address>().IgnoreQueryFilters().AsNoTracking()
+                    .SingleAsync(a => a.id == pasifAdresId);
+                pasifOnce.is_active.Should().BeFalse("ikinci adres silmeden once PASIF olmali");
+                pasifOnce.full_name.Should().Be("MF3 Pasif Ad", "pasif adres silmeden once PII TASIMALI");
                 (await pre.Set<CustomerDevice>().CountAsync(d => d.customer_id == A.CustomerId && d.is_active))
                     .Should().BeGreaterThan(0, "silmeden once aktif cihaz bulunmali");
                 (await pre.Set<UserSession>().CountAsync(s => s.customer_id == A.CustomerId && s.is_active))
@@ -794,6 +831,16 @@ namespace Divisima.IntegrationTests
             addresses.Should().NotContain(a => a.city == "Bursa", "F11: sehir de konum verisidir, temizlenmeli");
             addresses.Should().NotContain(a => a.district == "Nilufer", "F11: ilce de konum verisidir, temizlenmeli");
             addresses.Should().OnlyContain(a => a.zip_code == null, "F11: posta kodu da temizlenmeli");
+                // P-H1: PASIF ADRES DE ANONIMLESMELI. Bu dort assert olmadan pin, kusurun
+                // ON KOSULUNU uretse bile onu GORMEZDI - global filtre yalniz OKUMAYI eliyor,
+                // yani "pasif satir hic gelmedi" ile "pasif satir temizlendi" AYNI gorunurdu.
+                var pasif = addresses.Single(a => a.id == pasifAdresId);
+                pasif.full_name.Should().NotBe("MF3 Pasif Ad", "PASIF adresin ad-soyadi da temizlenmeli");
+                pasif.phone.Should().BeNull("PASIF adresin telefonu da temizlenmeli");
+                pasif.full_address.Should().NotBe("MF3 pasif acik adres 99/1", "PASIF adres metni de temizlenmeli");
+                pasif.city.Should().NotBe("Trabzon", "PASIF adresin sehri de temizlenmeli");
+                pasif.district.Should().NotBe("Ortahisar", "PASIF adresin ilcesi de temizlenmeli");
+                pasif.zip_code.Should().BeNull("PASIF adresin posta kodu da temizlenmeli");
 
             // (3) CIHAZ - F10: `is_active=false` YETMEZ, kalici tanimlayici YOK EDILMELI
             var devices = await ctx.Set<CustomerDevice>().AsNoTracking()
@@ -814,6 +861,82 @@ namespace Divisima.IntegrationTests
             // (6) CACHE: silinen hesabin ELDEKI access token'i ANINDA reddedilmeli (TTL beklenmeden)
             (await A.Client.GetAsync("/api/Account/summary")).StatusCode
                 .Should().Be(HttpStatusCode.Unauthorized, "hesap durumu cache'i dusurulmeli");
+        }
+
+        // ── P-H2) MANTIK-FIX-3 / K2 - ABONELIK E-POSTASI SILMEYLE GIDER [KVKK] ────────
+        //
+        // OLCULEN YAPISAL BOSLUK: stock_notification_requests ve price_drop_subscriptions
+        // tablolarinda `customer_id` KOLONU YOK, bu yuzden KVKK silme yolu onlari
+        // YAPISAL OLARAK bulamiyordu; silinen hesabin GERCEK e-postasi orada KALIYORDU.
+        // Iki bagimsiz on olcum ajani ayni sonuca vardi.
+        //
+        // NEGATIF BACAK PININ ICINDE: FARKLI e-postali bir abone AYNEN KALMALI. Bu olmadan
+        // "hepsini sil" gibi bir uygulama da pini gecerdi - ve o uygulama, kanonik eksende
+        // BASKA MUSTERILERIN aboneligini silen gercek bir VERI-BOZAN kusur olurdu
+        // (bu veritabaninda uc musterinin tek kanonik kutuyu paylastigi olculdu).
+        [Fact]
+        [Trait("Category", "Sql")]
+        public async Task SILME_ABONELIK_KAYITLARINI_DA_Kaldirir_FARKLI_EPOSTALI_ABONE_KALIR()
+        {
+            if (Skipped()) return;
+
+            var urunId = await UrunIdAsync();
+            var kontrolEposta = $"ph2.kontrol.{Guid.NewGuid():N}@example.com".ToLowerInvariant();
+
+            // ON KOSUL: abonelikler GERCEK ANONIM uclardan kurulur (elle satir yazilmaz).
+            (await A.Client.PostAsJsonAsync("/api/StockNotification/subscribe",
+                new { product_id = urunId, size = "M", email = A.Email })).IsSuccessStatusCode
+                .Should().BeTrue("stok bildirimi aboneligi kurulabilmeli");
+            (await A.Client.PostAsJsonAsync("/api/price-drop/subscribe",
+                new { product_id = urunId, email = A.Email })).IsSuccessStatusCode
+                .Should().BeTrue("fiyat dususu aboneligi kurulabilmeli");
+            (await A.Client.PostAsJsonAsync("/api/StockNotification/subscribe",
+                new { product_id = urunId, size = "L", email = kontrolEposta })).IsSuccessStatusCode
+                .Should().BeTrue("KONTROL abonesi kurulabilmeli");
+
+            var eposta = A.Email.ToLowerInvariant();
+
+            // VAKUM KIRICI: silmeden ONCE her uc kayit da GERCEKTEN var olmali.
+            await using (var pre = NewContext())
+            {
+                (await pre.Set<StockNotificationRequest>().CountAsync(s => s.email == eposta))
+                    .Should().Be(1, "silmeden once musterinin stok abonesi bulunmali");
+                (await pre.Set<PriceDropSubscription>().CountAsync(s => s.email == eposta))
+                    .Should().Be(1, "silmeden once musterinin fiyat abonesi bulunmali");
+                (await pre.Set<StockNotificationRequest>().CountAsync(s => s.email == kontrolEposta))
+                    .Should().Be(1, "silmeden once KONTROL abonesi bulunmali");
+            }
+
+            (await A.Client.DeleteAsync("/api/Account/delete")).StatusCode
+                .Should().Be(HttpStatusCode.OK, "KVKK silme basarili olmali");
+
+            await using var ctx = NewContext();
+
+            // ASIL IDDIA: silinen musterinin abonelikleri GITTI.
+            (await ctx.Set<StockNotificationRequest>().CountAsync(s => s.email == eposta))
+                .Should().Be(0, "silinen musterinin stok aboneligi KALMAMALI");
+            (await ctx.Set<PriceDropSubscription>().CountAsync(s => s.email == eposta))
+                .Should().Be(0, "silinen musterinin fiyat aboneligi KALMAMALI");
+
+            // NEGATIF BACAK: baskasinin aboneligi DOKUNULMAMIS olmali.
+            (await ctx.Set<StockNotificationRequest>().CountAsync(s => s.email == kontrolEposta))
+                .Should().Be(1, "FARKLI e-postali abone AYNEN kalmali - temizlik DAR olmali");
+
+            // SIRA KANITI: temizlik e-posta anonimlestirilmeden ONCE kosmus olmali. Sonra
+            // kossaydi `deleted_<id>@...` arar, HICBIR SATIR bulamaz ve SESSIZCE gecerdi;
+            // o durumda yukaridaki iki assert de kirilirdi - ama bu assert sebebi ADIYLA soyler.
+            var c = await ctx.Set<Customer>().IgnoreQueryFilters().AsNoTracking()
+                .SingleAsync(x => x.id == A.CustomerId);
+            c.email.Should().NotBe(eposta, "e-posta anonimlestirilmis olmali (temizlik ONDEN kosar)");
+        }
+
+        // P-H2 yardimcisi: abonelik uclarinin ihtiyac duydugu GERCEK bir urun kimligi.
+        // Bu sinif her testte veritabanini DUSURUP KURUYOR, dolayisiyla urun de burada
+        // uretilir (depodaki ortak kurgu yardimcisiyla - elle satir yazilmaz).
+        private static async Task<int> UrunIdAsync()
+        {
+            await using var ctx = NewContext();
+            return await TestVeriKurgusu.GercekUrunAsync(ctx);
         }
 
         // F2: DENETIM IZI SIR TASIMAZ ve YALNIZ DEGISEN ALANI TASIR.
