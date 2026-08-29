@@ -134,7 +134,12 @@ namespace Divisima.IntegrationTests
         // MANTIK-FIX-2R / K1: kargolu siparis kurgusu. Onceden bu sinifin HICBIR kurgusu
         // shipping_cost ATAMIYORDU (olculdu: 0 gecis) - bu yuzden "kargo son kaleme gomuluyor"
         // kusuru bu pin setiyle YAPISAL OLARAK yakalanamiyordu.
-        private static async Task<int> NewOrderAsync(decimal shipping, params (int productId, int qty, decimal unitPrice)[] items)
+        private static Task<int> NewOrderAsync(decimal shipping, params (int productId, int qty, decimal unitPrice)[] items)
+            => NewOrderAsync(shipping, 0m, items);
+
+        // MANTIK-FIX-2R / K4: KREDI-ODEMELI kurgu. Depoda bu sinifta kredi tasiyan tek bir
+        // fikstur YOKTU; kredi olmadan "fatura BRUTTEN kesilir" sozlesmesi OLCULEMEZ (pin VAKUM).
+        private static async Task<int> NewOrderAsync(decimal shipping, decimal magazaKredisi, params (int productId, int qty, decimal unitPrice)[] items)
         {
             await using var ctx = NewContext();
             var c = new Customer
@@ -160,8 +165,8 @@ namespace Divisima.IntegrationTests
                 subtotal = toplam,
                 shipping_cost = shipping,
                 total_price = toplam + shipping,
+                store_credit_used = magazaKredisi,
                 discount_amount = 0m,
-                store_credit_used = 0m,
                 is_online_payment_done = true,
                 currency = "TRY",
                 created_at = DateTime.Now
@@ -293,6 +298,60 @@ namespace Divisima.IntegrationTests
             invoice.subtotal.Should().Be(items.Sum(i => i.line_subtotal), "matrah kalem toplami");
             invoice.tax_amount.Should().Be(items.Sum(i => i.vat_amount), "KDV kalem toplami");
             (invoice.subtotal + invoice.tax_amount).Should().Be(invoice.total, "matrah + KDV = brut");
+        }
+
+        // P-F4 (MANTIK-FIX-2R / K4): FATURA URETIM ANINDA BRUTTEN KESILIR.
+        //
+        // SOZLESME: magaza kredisi bir ODEME ARACIDIR, fiyat indirimi DEGILDIR - matrahi
+        // DUSURMEZ. Fatura mali bir beyandir ve BRUT tutar uzerinden duzenlenir; kredi
+        // yalnizca "bu belge nasil odendi" sorusunun yanitidir (D2: invoices krediyi
+        // KAYDETMEZ; ekranin odeme ozeti SIPARIS verisinden gelir - P-F2c).
+        //
+        // KANIT EMSALI (MF-1'de canli olculdu): kredi tasiyan dort tarihsel siparisin
+        // gercek faturalari (invoices 81-84) matrah 863,45 + KDV 86,35 = 949,80 tasiyor -
+        // yani belge kredi DUSULMEDEN uretilmis.
+        //
+        // KAPSAM (C6): bu pin URETIM ANI sozlesmesidir, GLOBAL bir DB esitligi DEGIL.
+        // "invoice.total == order.total_price" her satir icin DOGRU DEGILDIR: iptal sonrasi
+        // order.total_price MUTASYONA ugruyor (canli olcum: 7 satirda i.total 949,80 iken
+        // o.total_price 0,00). O yuzden burada URETIM ANINDAKI zincir olculur.
+        [Fact]
+        public async Task KrediliSiparis_FATURA_BRUTTEN_Kesilir_Kredi_MATRAHI_DUSURMEZ()
+        {
+            if (Skipped()) return;
+            var katId = await NewCategoryAsync(0.20m);
+            var urunId = await NewProductAsync(katId, 1000m);
+            // 1000,00 urun + 49,90 kargo = 1.049,90 BRUT; bunun 200,00'i magaza kredisiyle odenir.
+            var orderId = await NewOrderAsync(49.90m, 200.00m, (urunId, 1, 1000m));
+
+            await using (var ctx = NewContext())
+            {
+                var r = await NewManager(ctx, new CapturingEInvoiceProvider()).GenerateForOrder(orderId);
+                r.Item1.Should().Be(HttpStatusCode.OK, $"fatura uretilmeli: {r.Item2.Message}");
+            }
+
+            var (invoice, items) = await ReadInvoiceAsync(orderId);
+
+            // (1) BELGE BRUTTUR - kredi DUSULMEMIS.
+            invoice.total.Should().Be(1049.90m,
+                "fatura BRUT tutardan kesilir; kredi bir ODEME ARACIDIR, belgeyi kucultmez " +
+                "(kredi dusulseydi 849,90 cikardi)");
+            (invoice.subtotal + invoice.tax_amount).Should().Be(1049.90m, "matrah + KDV = brut");
+
+            // (2) KREDI BELGEYE HIC GIRMEZ (D2: invoices krediyi kaydetmiyor).
+            items.Sum(i => i.line_total).Should().Be(1049.90m, "kalemler toplami da BRUT olmali");
+
+            // (3) CIFT-ANLAM KIRICI + K1 KALEM YAPISI: kargo AYRI kalem olarak duruyor.
+            items.Where(i => i.product_id == null).Should().HaveCount(1, "NULL kargo kalemi");
+            items.Single(i => i.product_id == null).line_total.Should().Be(49.90m);
+            items.Single(i => i.product_id != null).line_total.Should().Be(1000.00m,
+                "urun kalemi kargoyu da krediyi de EMMEMELI");
+
+            // (4) VAKUM KIRICI: kurgu GERCEKTEN kredi tasiyor olmali - aksi halde bu pin
+            // kredisiz bir sipariste de bedava gecerdi.
+            await using var ctx2 = NewContext();
+            (await ctx2.Set<Order>().SingleAsync(o => o.id == orderId)).store_credit_used
+                .Should().Be(200.00m, "fikstur kredi tasimali");
         }
 
         // P-F1b (D1 karari): BEDAVA kargoda kalem YAZILIR - 0,00 ile. Tek bicim, dalsiz ekran.
