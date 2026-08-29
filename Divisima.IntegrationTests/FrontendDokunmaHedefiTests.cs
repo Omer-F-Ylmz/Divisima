@@ -1593,5 +1593,88 @@ namespace Divisima.IntegrationTests
             }
             return -1;
         }
+
+        // ── P-F3) MANTIK-FIX-2R / K3 - FATURA GOVDESI ISTEMCIDE, UC DILDE ─────────────
+        //
+        // DURUST ETIKET: bu bir KAYNAK SOZLESMESI pinidir - depoda JS/DOM kosucusu YOK
+        // (Dalga 4'ten beri acik kalem). Davranis kaniti R-F3a/b/c tarayici olcumleridir
+        // (uc dilde ekran, sizinti dedektoru EN 0 / AR 0, iptal isareti, bos durum).
+        //
+        // OLCULEN ONCE-DURUM: fatura govdesi %100 SUNUCU HTML'iydi (17 TR dizge, lang="tr",
+        // sabit " TL", dd.MM.yyyy) ve istemci onu guvenliYaz -> DOMPurify ile basiyordu.
+        // dvsLocale bir FRONTEND fonksiyonu oldugu icin o dizeye ERISEMIYORDU.
+        [Fact]
+        public void KAYNAK_SOZLESMESI_FaturaGovdesi_ISTEMCIDE_Kurulur_UC_DILDE_ve_DB_METNI_textContent()
+        {
+            var bridge = Oku("frontend/api-bridge.js");
+            var index = Oku("frontend/index.html");
+
+            // (1) ESKI HTML-ENJEKSIYON YOLU OLDU - olu kod kalmadi.
+            bridge.Should().NotContain("guvenliYaz(kutu, html",
+                "fatura govdesi artik sunucu HTML'i DEGIL - eski enjeksiyon yolu KALMAMALI");
+            // VAKUM KIRICI: guvenliYaz'in KENDISI hala var (sozlesme sayfalari onu kullaniyor) -
+            // "fonksiyonu tumden sil" YANLIS duzeltmedir.
+            bridge.Should().Contain("function guvenliYaz(",
+                "guvenliYaz baska ekranlarda KULLANILIYOR - kaldirilmamali");
+
+            // (2) GOVDE ISTEMCIDE KURULUR ve K2 alanlarindan beslenir.
+            var ciz = FonksiyonGovdesi(bridge, "function faturaGovdesiniCiz(");
+            ciz.Should().NotBeNullOrWhiteSpace("renderer TANIMLI olmali");
+            foreach (var alan in new[] { "has_invoice", "is_shipping", "vat_breakdown", "payment",
+                                          "invoice_is_cancelled", "order_is_cancelled" })
+                ciz.Should().Contain(alan, $"K2 sozlesme alani '{alan}' renderer'da kullanilmali");
+
+            // (3) DB'DEN GELEN METIN textContent ILE - escape'siz innerHTML'e DB verisi GIRMEZ.
+            ciz.Should().Contain("textContent", "DB metinleri textContent ile yazilmali");
+            ciz.Should().NotContain("innerHTML = ", "renderer innerHTML ile DB verisi BASMAMALI");
+
+            // (4) KARGO ETIKETI SOZLUKTEN (E4) - DB'deki ad ekrana BASILAMAZ.
+            // Sunucu product_name'i NULL gonderiyor; renderer is_shipping dalinda ceviri() kullanir.
+            ciz.Should().Contain("is_shipping ? ceviri(\"b_kargo\")",
+                "kargo etiketi SOZLESMEDEN + SOZLUKTEN cizilmeli, DB adindan DEGIL");
+
+            // (5) PARA/TARIH dvsLocale uzerinden (paraTL / tarihBicimi) - sunucu bicimlemiyor.
+            ciz.Should().Contain("paraTL(", "para bicimleme istemcide dvsLocale ile olmali");
+            ciz.Should().Contain("tarihBicimi(", "tarih bicimleme istemcide dvsLocale ile olmali");
+
+            // (6) YENI ANAHTARLAR UC DILDE ve MUKERRER DEGIL.
+            // Ankrajli sayim (ship_s dersi: "X:" deseni "onek_X:" ICINDE de esler).
+            var yeniAnahtarlar = new[] { "b_siparis", "b_fatura_no", "b_tarih", "b_birim_fiyat",
+                "b_tutar", "b_matrah", "b_kdv", "b_genel_toplam", "b_kdv_kirilimi",
+                "b_odeme_ozeti", "b_fatura_bu_siparise_yok", "b_fatura_iptal_edildi" };
+            foreach (var k in yeniAnahtarlar)
+            {
+                var n = AnkrajliSayim(index, k);
+                n.Should().Be(2, $"'{k}' T ve AR sozluklerinde BIRER kez tanimli olmali " +
+                                  "(2'den fazlasi MUKERRER anahtar demektir - son tanim digerini sessizce EZER)");
+            }
+
+            // VAKUM KIRICI: sayim yontemi GERCEKTEN calisiyor olmali.
+            AnkrajliSayim(index, "b_kargo").Should().Be(2, "mevcut bir anahtar da 2 saymali");
+            AnkrajliSayim(index, "b_zzz_olmayan_anahtar").Should().Be(0, "olmayan anahtar 0 saymali");
+
+            // CIFT-ANLAM KIRICI: mevcut b_fatura_yok'a DOKUNULMADI - o "hic faturan yok"
+            // (liste) anlamindadir; belge-yok icin AYRI anahtar acildi. Ayni anahtari iki
+            // anlamda kullanmak bu depoda bedeli odenmis bir siniftir.
+            AnkrajliSayim(index, "b_fatura_yok").Should().Be(2, "mevcut liste-bos anahtari KORUNMALI");
+            index.Should().Contain("b_fatura_yok:['Henüz faturan yok.'",
+                "mevcut anahtarin DEGERI degismemeli");
+        }
+
+        // Ankrajli anahtar sayimi: "X:" deseni "onek_X:" ICINDE de eslesir (ship_s dersi).
+        private static int AnkrajliSayim(string kaynak, string anahtar)
+        {
+            int n = 0;
+            for (int i = 1; i < kaynak.Length; i++)
+            {
+                if (kaynak[i] != anahtar[0]) continue;
+                if (i + anahtar.Length + 1 > kaynak.Length) break;
+                if (string.CompareOrdinal(kaynak, i, anahtar, 0, anahtar.Length) != 0) continue;
+                if (kaynak[i + anahtar.Length] != ':') continue;
+                var onceki = kaynak[i - 1];
+                if (onceki == ',' || onceki == '{' || onceki == ' ') n++;
+            }
+            return n;
+        }
     }
 }

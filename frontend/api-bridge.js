@@ -2767,9 +2767,138 @@
       ceviri("b_kart_ulasmaz") + "</p></div>";
   }
 
-  // ── Fatura goruntuleme (sunucu HTML'i -> DOMPurify -> modal) ───────────────
-  // Fatura HTML'i BIZIM sunucudan geliyor ama yine de okuma katmanindan gecer:
-  // "kendi sunucum guvenli" varsayimi, iki katmanli savunmanin amacini bosa cikarir.
+  // ── MANTIK-FIX-2R / K3: FATURA GOVDESI ISTEMCIDE KURULUR ──────────────────────
+  //
+  // OLCULEN ONCE-DURUM: govde %100 SUNUCU HTML'iydi - 17 TR dizge, lang="tr", sabit " TL"
+  // soneki ve dd.MM.yyyy tarih. dvsLocale bir FRONTEND fonksiyonu oldugu icin o dizeye
+  // ERISEMIYORDU; EN/AR kullanicisi Turkce ve tr-bicimli bir belge goruyordu. Sunucuda
+  // dil acmak (RequestLocalization) Sprint 8 madde 13'te OLCEREK REDDEDILMISTI.
+  //
+  // ARTIK: uc HAM decimal + yapisal alan donuyor (K2), govde burada kuruluyor.
+  //   - etiketler SOZLUKTEN (uc dil),
+  //   - para/tarih dvsLocale uzerinden (paraTL / tarihBicimi - sitenin geri kalaniyla AYNI),
+  //   - DB'den gelen HER metin textContent ile yazilir; escape'siz innerHTML'e DB verisi GIRMEZ,
+  //   - kargo etiketi is_shipping SOZLESMESINDEN gelir (E4): sunucu product_name'i NULL
+  //     gonderdigi icin DB'deki ad ekrana BASILAMAZ - bu bir istemci adabi degil, YAPISAL.
+  function faturaSatirElemani(etiket, deger) {
+    var s = document.createElement("div");
+    s.style.cssText = "display:flex;justify-content:space-between;gap:12px;padding:2px 0";
+    var e = document.createElement("span"); e.textContent = etiket;
+    var v = document.createElement("span"); v.textContent = deger;
+    s.appendChild(e); s.appendChild(v);
+    return s;
+  }
+
+  function faturaGovdesiniCiz(kutu, d) {
+    kutu.textContent = "";
+
+    // ── BOS DURUM: belge UYDURULMAZ ───────────────────────────────────────────
+    if (!d.has_invoice) {
+      var bos = document.createElement("p");
+      bos.className = "muted";
+      bos.textContent = ceviri("b_fatura_bu_siparise_yok");
+      kutu.appendChild(bos);
+      var sn = document.createElement("p");
+      sn.className = "muted";
+      sn.textContent = ceviri("b_siparis") + ": " + String(d.order_number || "");
+      kutu.appendChild(sn);
+      return;
+    }
+
+    // ── IPTAL ISARETI: eski ekranda HIC YOKTU ─────────────────────────────────
+    if (d.invoice_is_cancelled || d.order_is_cancelled) {
+      var uy = document.createElement("p");
+      uy.style.cssText = "background:#fdecea;color:#9b1c1c;border:1px solid #f5c2c0;border-radius:6px;padding:8px 10px;margin:0 0 10px";
+      uy.textContent = ceviri("b_fatura_iptal_edildi");
+      kutu.appendChild(uy);
+    }
+
+    var bas = document.createElement("div");
+    bas.style.cssText = "margin-bottom:10px";
+    bas.appendChild(faturaSatirElemani(ceviri("b_fatura_no"), String(d.invoice_number || "")));
+    bas.appendChild(faturaSatirElemani(ceviri("b_tarih"), tarihBicimi(d.invoice_created_at)));
+    bas.appendChild(faturaSatirElemani(ceviri("b_siparis"), String(d.order_number || "")));
+    kutu.appendChild(bas);
+
+    // ── KALEMLER ──────────────────────────────────────────────────────────────
+    var tablo = document.createElement("table");
+    tablo.style.cssText = "width:100%;border-collapse:collapse;margin:8px 0";
+    var thead = document.createElement("thead");
+    var htr = document.createElement("tr");
+    [ceviri("b_urun"), ceviri("b_adet"), ceviri("b_birim_fiyat"), ceviri("b_tutar")].forEach(function (t, i) {
+      var th = document.createElement("th");
+      th.textContent = t;
+      th.style.cssText = "text-align:" + (i === 0 ? "start" : "end") + ";border-bottom:1px solid #eee;padding:6px 4px;font-weight:600";
+      htr.appendChild(th);
+    });
+    thead.appendChild(htr); tablo.appendChild(thead);
+
+    var tbody = document.createElement("tbody");
+    (d.items || []).forEach(function (k) {
+      var tr = document.createElement("tr");
+      var ad = document.createElement("td");
+      // KARGO: etiket SOZLUKTEN. product_name sunucudan NULL geliyor (E4).
+      ad.textContent = k.is_shipping ? ceviri("b_kargo") : String(k.product_name || "");
+      ad.style.cssText = "padding:6px 4px;border-bottom:1px solid #f5f5f5";
+      tr.appendChild(ad);
+      [String(k.quantity), paraTL(k.unit_price), paraTL(k.line_total)].forEach(function (v) {
+        var td = document.createElement("td");
+        td.textContent = v;
+        td.style.cssText = "text-align:end;padding:6px 4px;border-bottom:1px solid #f5f5f5;white-space:nowrap";
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    tablo.appendChild(tbody);
+    kutu.appendChild(tablo);
+
+    // ── KDV KIRILIMI: tek oran GOSTERILMEZ ────────────────────────────────────
+    // Baslik tax_rate AGIRLIKLI ORTALAMADIR; ekrana oran olarak cikarsa Turkiye'de var
+    // olmayan bir deger (or. %14,16) beyan edilirdi. Bu yuzden oran BAZINDA gosterilir.
+    if (d.vat_breakdown && d.vat_breakdown.length) {
+      var kb = document.createElement("div");
+      kb.style.cssText = "margin:10px 0";
+      var kbb = document.createElement("b");
+      kbb.textContent = ceviri("b_kdv_kirilimi");
+      kb.appendChild(kbb);
+      d.vat_breakdown.forEach(function (g) {
+        var oran = (Number(g.vat_rate) * 100).toLocaleString(
+          (typeof window.dvsLocale === "function") ? window.dvsLocale() : "tr-TR",
+          { maximumFractionDigits: 2 });
+        kb.appendChild(faturaSatirElemani(
+          ceviri("b_kdv") + " %" + oran + " (" + ceviri("b_matrah") + " " + paraTL(g.base_amount) + ")",
+          paraTL(g.vat_amount)));
+      });
+      kutu.appendChild(kb);
+    }
+
+    var top = document.createElement("div");
+    top.style.cssText = "border-top:1px solid #eee;padding-top:8px;margin-top:8px";
+    top.appendChild(faturaSatirElemani(ceviri("b_matrah"), paraTL(d.subtotal)));
+    top.appendChild(faturaSatirElemani(ceviri("b_kdv"), paraTL(d.tax_amount)));
+    var gt = faturaSatirElemani(ceviri("b_genel_toplam"), paraTL(d.total));
+    gt.style.fontWeight = "700";
+    top.appendChild(gt);
+    kutu.appendChild(top);
+
+    // ── ODEME OZETI: KAYNAK SIPARIS VERISI (D2) ───────────────────────────────
+    // Fatura BRUTTUR ve `invoices` krediyi KAYDETMEZ; kredi bir ODEME ARACIDIR.
+    // Bu yuzden kirilim AYRI bir bolumdur ve kalem tablosuna KARISMAZ.
+    if (d.payment && Number(d.payment.store_credit_used) > 0) {
+      var od = document.createElement("div");
+      od.style.cssText = "border-top:1px solid #eee;padding-top:8px;margin-top:8px";
+      var odb = document.createElement("b");
+      odb.textContent = ceviri("b_odeme_ozeti");
+      od.appendChild(odb);
+      od.appendChild(faturaSatirElemani(ceviri("b_magaza_kredisiyle_odenen"), "-" + paraTL(d.payment.store_credit_used)));
+      od.appendChild(faturaSatirElemani(ceviri("b_kalan_odeme"), paraTL(d.payment.remaining)));
+      kutu.appendChild(od);
+    }
+  }
+
+  // Fatura modali: cerceve + baslik SOZLUKTEN, govde faturaGovdesiniCiz ile KAYITTAN kurulur.
+  // Sunucu HTML si ARTIK YOK (K2/K3); DOMPurify yolu bu ekranda kullanilmiyor - DB metinleri
+  // textContent ile yazildigi icin escape ihtiyaci YAPISAL olarak ortadan kalkti.
   function faturaModalAc(orderId) {
     var eski = document.getElementById("e3FaturaModal");
     if (eski) eski.remove();
@@ -2787,23 +2916,22 @@
     m.querySelector("#e3FaturaKapat").onclick = function () { m.remove(); };
     m.addEventListener("click", function (e) { if (e.target === m) m.remove(); });
 
-    api.orders.invoiceHtml(orderId).then(function (html) {
-      var kutu = document.getElementById("e3FaturaGovde");
-      if (!kutu) return;
-      // SAVUNMA SATIRI: uc bos govde donerse SESSIZ bos modal yerine DURUM soylenir.
-      // E3 elle dogrulamasinda bu dal GERCEKTEN tetiklendi - kok sebep SuccessDataResult<string>
-      // asiri yukleme belirsizligiydi (T=string iken "(T data)" ile "(string message)" ayni
-      // imzaya duser, C# non-generic olani secer -> HTML Message a gider, Data NULL kalir ve
-      // controller Content(ok.Data) yazdigi icin uc 200 + Content-Length: 0 dondu).
-      // E3 KAPSAMINDA DUZELTILDI (OrderManager artik "data:" adlandirilmis argumani kullanir);
-      // bu dal yine de duruyor - belirsizlik dilde kaldigi icin (Sprint 8 madde 11).
-      if (!html || !String(html).trim()) {
-        kutu.innerHTML = '<p class="muted">' + ceviri("b_fatura_icerik_yok") +
-          ceviri("b_fatura_musteri_hizmet") + "</p>";
-        return;
-      }
-      guvenliYaz(kutu, html, ceviri("b_fatura_gosterilemedi"));
-    }).catch(function (e) {
+      api.orders.invoiceHtml(orderId).then(function (yanit) {
+        var kutu = document.getElementById("e3FaturaGovde");
+        if (!kutu) return;
+        // MANTIK-FIX-2R / K3: ESKI HTML-ENJEKSIYON YOLU OLDU.
+        // Uc artik SUNUCUDA URETILMIS HTML degil, KAYITTAN gelen yapilandirilmis veri
+        // donuyor (K2). Govde burada kuruluyor: etiketler SOZLUKTEN, para/tarih dvsLocale
+        // ile, DB'den gelen her metin textContent ile. Boylece kultur sizintisi YAPISAL
+        // olarak imkansiz (sunucu hicbir sey bicimlemiyor) ve escape'siz innerHTML'e DB
+        // verisi GIRMIYOR.
+        var d = yanit && yanit.data;
+        if (!d) {
+          kutu.textContent = ceviri("b_fatura_icerik_yok") + ceviri("b_fatura_musteri_hizmet");
+          return;
+        }
+        faturaGovdesiniCiz(kutu, d);
+      }).catch(function (e) {
       document.getElementById("e3FaturaGovde").textContent = ceviri("b_fatura_alinamadi") + (e && e.message ? e.message : "hata");
     });
   }
