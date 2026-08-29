@@ -3152,6 +3152,55 @@
 
       var ps = document.getElementById("pfSave");
       if (ps && typeof saveProfileForm === "function") ps.onclick = saveProfileForm;
+      // ── MANTIK-FIX-3 / K3: SIFRE DEGISTIRME GERCEKTEN CALISIR ────────────────
+      // OLCULEN ONCE-DURUM: #pfPassSave HICBIR YERDE baglanmiyordu (api-bridge'de
+      // sifir gecis) ve index.html'in kendi govdesi API'ye gitmeden "guncellendi"
+      // diyordu. Sunucu ucu ZATEN VARDI ve DOGRUYDU (mevcut sifre dogrulamasi +
+      // SifrePolitikasi + tum oturumlari kapatma), yani eksik olan TEK SEY BAGLAMAYDI.
+      //
+      // ISTEMCIDE SIFRE POLITIKASININ IKINCI KOPYASI ACILMAZ: uzunluk/karmasiklik
+      // KARARI YALNIZ SUNUCUNUNDUR. Buradaki iki kontrol politika DEGILDIR -
+      // "iki alan da dolu mu" ve "iki yeni sifre eslesiyor mu"; ikincisini sunucu
+      // zaten GOREMEZ (dogrulama alani ona hic gitmez).
+      function sifreHatasiniCevir(mesaj) {
+        // HATA ESLEME (merkez N2): sunucu IKI durumu da 400 + SERBEST TR METIN ile
+        // donduruyor, MAKINE-OKUNUR sinyal YOK. Capa HAM YANITTAN kopyalandi:
+        //   yanlis mevcut sifre -> {"success":false,"message":"Mevcut şifre hatalı."}
+        //   politika reddi      -> {"success":false,"message":"Şifre en az 8 karakter olmalı."}
+        // CIFT BICIM: metin once Turkce harfler katlanip kucultuluyor, boylece
+        // diyakritikli ve ASCII yazim AYNI sonucu verir (ASCII/Turkce yuklem tuzagi).
+        // KIRILGANLIK BILINCLI: sunucu metni degisirse esleme duser ve kullanici
+        // politika mesajini gorur - yanlis ama ZARARSIZ taraf. Kalici cozum bir HATA
+        // KODU alanidir; sunucu yanit sozlesmesi bu dalgada DEGISTIRILMEDI (devir).
+        var s = String(mesaj || "")
+          .replace(/[şŞ]/g, "s").replace(/[ıİ]/g, "i").replace(/[ğĞ]/g, "g")
+          .replace(/[üÜ]/g, "u").replace(/[öÖ]/g, "o").replace(/[çÇ]/g, "c")
+          .toLowerCase();
+        return s.indexOf("mevcut sifre") >= 0 ? "b_mevcut_sifre_hatali" : "b_sifre_kurali";
+      }
+
+      var pps = document.getElementById("pfPassSave");
+      if (pps) pps.onclick = function () {
+        var cur = document.getElementById("pfCur"), nw = document.getElementById("pfNew"),
+            nw2 = document.getElementById("pfNew2");
+        if (!cur || !nw || !nw2) return;
+        if (!cur.value || !nw.value) { toast(ceviri("pf_pass_req"), "err"); return; }
+        if (nw.value !== nw2.value) { toast(ceviri("pf_pass_match"), "err"); return; }
+        pps.disabled = true;
+        api.account.changePassword({ current_password: cur.value, new_password: nw.value })
+          .then(function () {
+            cur.value = ""; nw.value = ""; nw2.value = "";
+            toast(ceviri("b_sifre_guncellendi"), "ok");
+          })
+          .catch(function (e) {
+            // 400 disi (ag/5xx) durumda sebep BILINMIYOR - notr mesaj verilir.
+            var anahtar = (e && e.status === 400)
+              ? sifreHatasiniCevir(e && e.message)
+              : "b_sifre_guncellenemedi";
+            toast(ceviri(anahtar), "err");
+          })
+          .finally(function () { pps.disabled = false; });
+      };
     };
 
     // ILK YUKLEME TUZAGI (wireLegal ile ayni - E2'de sepette, E3'te sozlesmede yasandi):

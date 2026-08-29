@@ -1679,6 +1679,59 @@ namespace Divisima.IntegrationTests
                 "mevcut anahtarin DEGERI degismemeli");
         }
 
+
+        // ── P-H3c) MANTIK-FIX-3 / K3 - ISTEMCI SOZLESMESI ────────────────────────────
+        //
+        // DURUST ETIKET: KAYNAK SOZLESMESI pini (depoda JS/DOM kosucusu YOK). Davranis
+        // kaniti R-H3 tarayici olcumleridir (uc dilde yanlis-sifre metni, basarili
+        // degisim, eski 401 / yeni 200).
+        //
+        // OLCULEN ONCE-DURUM: #pfPassSave api-bridge'de SIFIR gecis; index.html'in
+        // savePassForm govdesi HICBIR API CAGRISI YAPMADAN "Sifren guncellendi" diyordu
+        // (MFIX-1'de sokulen coFinish ile AYNI SINIF) ve yerel "en az 6 karakter" kurali
+        // tasiyordu - sunucu 8 + karmasiklik istiyor.
+        [Fact]
+        public void KAYNAK_SOZLESMESI_SifreDegistirme_Baglidir_YalanMock_Sokuldu_PolitikaKopyasi_Yok()
+        {
+            var bridge = Oku("frontend/api-bridge.js");
+            var index = Oku("frontend/index.html");
+
+            // (1) GERCEK BAGLAMA: buton VAR ve sunucu ucunu CAGIRIYOR.
+            bridge.Should().Contain("pfPassSave", "sifre butonu api-bridge'de baglanmali");
+            bridge.Should().Contain("api.account.changePassword(",
+                "handler GERCEK ucu cagirmali - tanimli ama cagrilmayan sarmalayici OLU KODDUR");
+
+            // (2) YALAN MOCK SOKULDU: govde artik API'ye gitmeden BASARI DEMEZ.
+            var mock = FonksiyonGovdesi(index, "function savePassForm(");
+            mock.Should().NotBeNullOrWhiteSpace("mock govdesi okunabilmeli");
+            var mockSik = Regex.Replace(mock, @"\s+", "");
+            mockSik.Should().NotContain("pf_pass_ok",
+                "API'ye gitmeden 'guncellendi' diyen yol GERI GELEMEZ");
+            mockSik.Should().NotContain("nw.length<6",
+                "yerel ve YANLIS uzunluk kurali GERI GELEMEZ (sunucu 8 + karmasiklik istiyor)");
+
+            // (3) ISTEMCIDE SIFRE POLITIKASININ IKINCI KOPYASI ACILMADI (merkez N2).
+            // Handler govdesinde uzunluk/karmasiklik karari ARANMAZ; yalniz form-duzeyi
+            // iki kontrol mesrudur ("iki alan dolu mu", "iki yeni sifre esit mi") -
+            // ikincisini sunucu ZATEN GOREMEZ, dogrulama alani ona hic gitmez.
+            var handler = FonksiyonGovdesi(bridge, "if (pps) pps.onclick = function ()");
+            handler.Should().NotBeNullOrWhiteSpace("handler govdesi okunabilmeli");
+            var hSik = Regex.Replace(handler, @"\s+", "");
+            hSik.Should().NotContain(".length<", "istemci uzunluk kurali KOYMAMALI - politika SUNUCUNUN");
+            hSik.Should().Contain("pf_pass_match", "form-duzeyi eslesme kontrolu KALMALI");
+
+            // (4) YENI ANAHTAR UC DILDE ve MUKERRER DEGIL (b_fatura_yok dersi).
+            AnkrajliSayim(index, "b_mevcut_sifre_hatali").Should().Be(2,
+                "yeni anahtar T ve AR sozluklerinde BIRER kez tanimli olmali");
+            // VAKUM KIRICI: sayim yontemi calisiyor olmali.
+            AnkrajliSayim(index, "b_sifre_kurali").Should().Be(2, "mevcut anahtar da 2 saymali");
+            AnkrajliSayim(index, "b_zzz_olmayan").Should().Be(0, "olmayan anahtar 0 saymali");
+
+            // (5) HATALI KURAL ANLATAN ESKI ANAHTAR KULLANILMIYOR: pf_pass_short "6 karakter"
+            // diyor ve sunucu 8 istiyor; anahtar sozlukte DURUYOR ama bu akista KULLANILMAZ.
+            hSik.Should().NotContain("pf_pass_short",
+                "6 karakter diyen anahtar sifre degistirme akisinda KULLANILMAMALI");
+        }
         // Ankrajli anahtar sayimi: "X:" deseni "onek_X:" ICINDE de eslesir (ship_s dersi).
         private static int AnkrajliSayim(string kaynak, string anahtar)
         {

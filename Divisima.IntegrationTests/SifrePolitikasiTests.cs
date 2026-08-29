@@ -223,6 +223,57 @@ namespace Divisima.IntegrationTests
                 .Should().Be(HttpStatusCode.OK, "reddedilen deneme jetonu TUKETMEMELI");
         }
 
+
+        // ── P-H3) MANTIK-FIX-3 / K3 - SIFRE DEGISTIRME GERCEKTEN DEGISTIRIR ──────────
+        //
+        // OLCULEN ONCE-DURUM: sunucu ucu ZATEN VARDI ve DOGRUYDU; kirik olan ISTEMCIYDI
+        // (#pfPassSave hicbir yerde bagli degildi, index.html'in govdesi API'ye gitmeden
+        // "Sifren guncellendi" diyordu). Bu pin sunucu SOZLESMESINI sabitler: yanlis
+        // mevcut sifre REDDEDILIR ve degisim KOZMETIK DEGILDIR.
+        //
+        // CIFT-ANLAM KIRICI: "her degisimi reddet" gibi bir uygulama ilk asserti gecer
+        // ama ikinci bacakta (eski 401 / yeni 200) KIRILIR.
+        [Fact]
+        [Trait("Category", "Sql")]
+        public async Task YANLIS_MEVCUT_SIFRE_REDDEDILIR_ve_DEGISIM_ESKI_SIFREYI_GECERSIZ_Kilar()
+        {
+            if (Skipped()) return;
+
+            var anon = _factory!.CreateClient();
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+
+            // (1) YANLIS mevcut sifre -> 400 ve mesaj SEBEBI SOYLER.
+            var yanlis = await musteri.Client.PostAsJsonAsync("/api/account/change-password", new
+            {
+                current_password = "BuKesinlikleYanlis1",
+                new_password = GecerliSifre
+            });
+            yanlis.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+                "yanlis mevcut sifreyle degisim REDDEDILMELI");
+            var yanlisGovde = await yanlis.Content.ReadAsStringAsync();
+            yanlisGovde.Should().Contain("Mevcut",
+                "mesaj SEBEBI soylemeli - istemci hata eslemesi bu metne dayaniyor (MK-7 capasi)");
+
+            // VAKUM KIRICI: reddedilen istek sifreyi DEGISTIRMEMIS olmali.
+            (await anon.PostAsJsonAsync("/api/auth/login",
+                new { email = musteri.Email, password = TestAuthHelper.TestPassword })).StatusCode
+                .Should().Be(HttpStatusCode.OK, "reddedilen degisim mevcut sifreyi BOZMAMALI");
+
+            // (2) DOGRU mevcut sifre -> 200.
+            (await musteri.Client.PostAsJsonAsync("/api/account/change-password", new
+            {
+                current_password = TestAuthHelper.TestPassword,
+                new_password = GecerliSifre
+            })).StatusCode.Should().Be(HttpStatusCode.OK, "dogru mevcut sifreyle degisim CALISMALI");
+
+            // (3) DEGISIM KOZMETIK DEGIL: eski sifre 401, yeni sifre 200.
+            (await anon.PostAsJsonAsync("/api/auth/login",
+                new { email = musteri.Email, password = TestAuthHelper.TestPassword })).StatusCode
+                .Should().Be(HttpStatusCode.Unauthorized, "ESKI sifre artik gecersiz olmali");
+            (await anon.PostAsJsonAsync("/api/auth/login",
+                new { email = musteri.Email, password = GecerliSifre })).StatusCode
+                .Should().Be(HttpStatusCode.OK, "YENI sifreyle giris yapilabilmeli");
+        }
         [Fact]
         public void HICBIR_UC_KENDI_SIFRE_KURALINI_TANIMLAMAZ()
         {
