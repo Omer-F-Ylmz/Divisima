@@ -222,7 +222,65 @@ namespace Divisima.Bussiness.Concrete
                 payment_method = dto.payment_method,   // A3: yalnizca COD gecebilir (yukarida dogrulandi)
                 items = dto.items
             };
-            return await _orderService.PlaceOrder(orderDto);
+            // ══ MANTIK-FIX-3 / K4 - BASARISIZ SIPARISTE TELAFI SILME ═══════════════════════
+            //
+            // OLCULEN ZARAR (canli, uctan uca): gecersiz kupon -> PlaceOrder 400 doner, ama
+            // musteri (:173) ve adres (:190) ZATEN YAZILMIS olur. Ayni misafir KUPONSUZ tekrar
+            // dediginde bu kez 409 "Bu e-posta kayitli" alir - yani TEK BIR YANLIS KUPON KODU
+            // o e-postayi misafir checkout'a KALICI KAPATIYOR ve musteri giris de yapamiyor
+            // (parola rastgele uretildi, kendisi bilmiyor). Olculen ONCE-durum:
+            //   1) gecersiz kupon -> 400, DB: musteri 1 / adres 1 / siparis 0
+            //   2) ayni e-posta, kuponsuz -> 409
+            //
+            // NEDEN TRANSACTION DEGIL, TELAFI: yazimlari PlaceOrder ile AYNI transaction'a
+            // almak IKI ayri sekilde ENGELLI (olculdu):
+            //   (a) UnitOfWork._transaction TEK ALAN ve BeginTransactionAsync onu KOSULSUZ
+            //       eziyor - ic ice transaction ACILAMAZ; PlaceOrder kendi transaction'ini
+            //       yonetiyor (dosyanin basindaki notun soyledigi sey).
+            //   (b) PlaceOrder hatalarinin cogu ISTISNA DEGIL DONUS DEGERI (11 nokta) -
+            //       ExecuteInTransactionAsync yalniz ISTISNADA geri aliyor, dolayisiyla
+            //       sarmalamak bile bu dali KURTARMAZDI.
+            //
+            // KAPSAM DAR: yalniz BU akisin BU cagrida yazdigi IKI satir siliniyor ve
+            // ID'LER ELDE (guest / address nesneleri) - E-POSTAYLA ARAMA YAPILMIYOR
+            // (yaris + yanlis hedef riski). Sira FK'ya saygili: ONCE adres, SONRA musteri.
+            // 409 dali ve kupon dogrulama noktalari DEGISTIRILMEDI.
+            //
+            // ── BILINCLI SINIRLAR (rapora ve muhre girer) ──────────────────────────────
+            //  1. TELAFI ATOMIK DEGIL. Telafi adimi kendisi duserse satir KALIR; o durumda
+            //     musteriye PlaceOrder'in hatasi doner (telafi hatasi DEGIL) ve olay ADIYLA
+            //     loglanir. Kalici kapanis GUVENLIK-AV-1 girdisidir.
+            //  2. ISTISNA YOLU KAPSAM DISI. Merkez tarifi "donus-degerli hata dahil, throw
+            //     beklenmez" diyor; PlaceOrder ISTISNA firlatirsa telafi KOSMAZ ve davranis
+            //     K4 ONCESIYLE AYNI kalir (regresyon degil, kapatilmamis yol).
+            //  3. DOGRULAMA MAILI YAN KAYDI (outbox mesaji) SILINMIYOR. Musteri satirindaki
+            //     jeton musteriyle birlikte gidiyor ama outbox satirinin KIMLIGI ELDE DEGIL
+            //     (AuthManager.ResendVerification yaziyor, geriye id dondurmuyor) ve onu
+            //     e-postayla aramak "id'ler elde" kuralini delerdi. Sonuc: silinen bir hesap
+            //     icin OLU JETONLU bir dogrulama maili gidebilir - kafa karistirici, ama
+            //     e-postanin KALICI kilitlenmesinden kiyasla cok daha hafif.
+            var (siparisDurum, siparisSonuc) = await _orderService.PlaceOrder(orderDto);
+            if (siparisSonuc == null || !siparisSonuc.Success)
+                await MisafirKayitlariniTelafiSilAsync(guest, address);
+            return (siparisDurum, siparisSonuc);
+        }
+
+        // K4: yalniz PlaceOrder BASARISIZ dondugunde cagrilir. Nesneler cagiranin elinde -
+        // arama yok. Sira FK'ya saygili (adres -> musteri). Telafi kendisi duserse GURULTULU
+        // loglanir ve musteriye ASIL hata doner (bkz. yukaridaki BILINCLI SINIRLAR / 1).
+        private async Task MisafirKayitlariniTelafiSilAsync(Customer guest, Address address)
+        {
+            try
+            {
+                await _addressDal.DeleteAsync(address);
+                await _customerDal.DeleteAsync(guest);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "MISAFIR TELAFI SILME BASARISIZ - siparis olusmadi ama "
+                    + "misafir kaydi KALDI; bu e-posta misafir checkout'ta 409 alacak. "
+                    + "customer_id={CustomerId} address_id={AddressId}", guest.id, address.id);
+            }
         }
     }
 }

@@ -337,29 +337,45 @@ namespace Divisima.IntegrationTests
             (await SiparisSayisiAsync(eposta2)).Should().Be(0,
                 "gecersiz kupon reddedilen istekte SIPARIS olusmamali");
 
-            // (4) SUPHELI DAVRANIS - BUGUNKU HALI PINLENIR, DEGISTIRILMEZ (ev kurali).
-            // OLCULDU: reddedilen istek MUSTERI SATIRI BIRAKIYOR. Kok sebep
-            // GuestCheckoutManager.cs:173 - musteri (ve :190 adres) PlaceOrder'a DEVRETMEDEN
-            // ONCE yaziliyor, kupon dogrulamasi ise PlaceOrder'in ICINDE.
-            // CANLI ZARAR ZINCIRI (uctan uca olculdu):
+            // ── P-H4) MANTIK-FIX-3 / K4 - REDDEDILEN ISTEK IZ BIRAKMAZ ───────────────────
+            //
+            // BILINCLI KIRILAN PIN (merkez ONAYLI). Bu blok onceden SUPHELI davranisi
+            // sabitliyordu ve kendi metni "duzeltildigi gun KIRILIR ve o zaman 0'a cevrilir"
+            // diyordu; K4 o gunu getirdi. Assert 1 -> 0 cevrildi ve YENI BACAK eklendi.
+            //
+            // OLCULEN ONCE-DURUM (canli, uctan uca):
             //   1) misafir gecersiz kupon girer      -> 400 "Gecersiz kupon kodu."
-            //   2) DB'de musteri satiri OLUSMUS olur (email_verified=0, siparis YOK)
-            //   3) ayni misafir KUPONSUZ tekrar dener -> 409 "Bu e-posta kayitli. Lutfen giris yapin."
-            //   -> TEK BIR YANLIS KUPON KODU, o e-postayi misafir checkout'a KALICI KAPATIYOR
-            //      (ustelik musteri giris de yapamaz: parola rastgele uretildi, kendisi bilmiyor).
-            // K3 BU TUZAGI YARATMADI ama ULASILABILIR KILDI: K3 oncesi misafir kuponu
-            // sunucuya HIC gitmiyordu, dolayisiyla bu 400 dali misafirde HIC ATESLEYEMEZDI.
-            // NEDEN BU DALGADA DUZELTILMEDI: cozum ya GuestCheckoutManager'da ikinci bir kupon
-            // dogrulama noktasi acar (bu depoda YEDI kez bedeli odenen "ayni kuralin ikinci
-            // kopyasi" sinifi), ya da 409 semantigine dokunur - o ise GUVENLIK DALGASI 2 / #1'de
-            // MERKEZIN KABUL ETTIGI bir risk kararidir. Karar MERKEZIN.
-            // HAFIFLETICI (olculdu): istemci kuponu cekmecede /api/coupon/validate ile ONCEDEN
-            // dogruluyor, dolayisiyla DUZ YAZIM HATASI bu dala normalde ULASMAZ; dal ancak kupon
-            // dogrulama ile siparis arasinda GECERSIZLESIRSE (limit/sure) atesler.
-            (await MusteriSayisiAsync(eposta2)).Should().Be(1,
-                "SUPHELI (MANTIK-FIX-1'de olculdu, DUZELTILMEDI): reddedilen misafir istegi " +
-                "MUSTERI SATIRI BIRAKIYOR ve ayni e-posta ikinci denemede 409 aliyor. Bu assert " +
-                "bugunku davranisi PINLER; duzeltildigi gun KIRILIR ve o zaman 0'a cevrilir.");
+            //   2) DB'de musteri 1 / adres 1 / siparis 0 KALIYORDU
+            //   3) ayni misafir KUPONSUZ tekrar dener -> 409 "Bu e-posta kayitli."
+            //   -> TEK BIR YANLIS KUPON KODU o e-postayi misafir checkout'a KALICI KAPATIYOR
+            //      (musteri giris de yapamaz: parola rastgele uretildi, kendisi bilmiyor).
+            // K3 BU TUZAGI YARATMADI ama ULASILABILIR KILDI (K3 oncesi misafir kuponu
+            // sunucuya HIC gitmiyordu, dolayisiyla bu 400 dali misafirde ATESLEYEMEZDI).
+            //
+            // K4 COZUMU TELAFI SILMEDIR, transaction DEGIL: ic ice transaction ACILAMIYOR
+            // (UnitOfWork._transaction tek alan, BeginTransactionAsync kosulsuz eziyor) ve
+            // PlaceOrder hatalarinin cogu ISTISNA DEGIL DONUS DEGERI - sarmalamak bu dali
+            // KURTARMAZDI. Gerekce GuestCheckoutManager'daki K4 blogunda ayrintili.
+            (await MusteriSayisiAsync(eposta2)).Should().Be(0,
+                "K4: reddedilen misafir istegi MUSTERI SATIRI BIRAKMAMALI - telafi silme " +
+                "musteri+adresi geri almali");
+
+            // (5) ZARAR ZINCIRININ SON HALKASI: e-posta ARTIK KILITLI DEGIL.
+            // Bu bacak olmadan "musteri satirini sil ama baska bir yerde kilitle" diyen bir
+            // uygulama da (4)'u gecerdi - olculen zarar SAYIDA degil, IKINCI DENEMEDEDIR.
+            var r3 = await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesi(eposta2, urunId, beden, KapidaOdeme, ""));
+            r3.StatusCode.Should().Be(HttpStatusCode.Created,
+                "telafi sonrasi AYNI e-posta ile kuponsuz siparis GECMELI - 409 kilidi kalkmali");
+            (await SiparisSayisiAsync(eposta2)).Should().Be(1,
+                "ikinci deneme GERCEK bir siparis uretmeli");
+
+            // (6) VAKUM KIRICI: telafi YALNIZ basarisiz yolda kosar. (1) bacaginin BASARILI
+            // siparisi hala yerinde olmali - "her cagrida sil" diyen bir uygulama bunu kirar.
+            (await SiparisSayisiAsync(eposta)).Should().Be(1,
+                "BASARILI yolda telafi ATESLEMEMELI - o siparis yerinde durmali");
+            (await MusteriSayisiAsync(eposta)).Should().Be(1,
+                "BASARILI yolun musteri satiri SILINMEMELI");
         }
 
         // ── Yardimcilar ─────────────────────────────────────────────────────────────────
@@ -602,7 +618,11 @@ namespace Divisima.IntegrationTests
         {
             await using var ctx = NewContext();
             var kanonik = eposta.Trim().ToLowerInvariant();
-            var musteri = await ctx.Set<Customer>().AsNoTracking().FirstAsync(c => c.email == kanonik);
+            // K4 SONRASI ZORUNLU: telafi silme musteri satirini GERI ALDIGI icin "musteri
+            // yok" ARTIK NORMAL BIR DURUM. Eski `FirstAsync` bu durumda istisna firlatiyordu
+            // ve pin yanlis sebepten kirmizi veriyordu. Musteri yoksa siparis de yoktur.
+            var musteri = await ctx.Set<Customer>().AsNoTracking().FirstOrDefaultAsync(c => c.email == kanonik);
+            if (musteri == null) return 0;
             return await ctx.Set<Order>().AsNoTracking().CountAsync(o => o.customer_id == musteri.id);
         }
 
