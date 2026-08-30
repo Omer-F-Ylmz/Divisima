@@ -1717,7 +1717,16 @@ namespace Divisima.IntegrationTests
             var handler = FonksiyonGovdesi(bridge, "if (pps) pps.onclick = function ()");
             handler.Should().NotBeNullOrWhiteSpace("handler govdesi okunabilmeli");
             var hSik = Regex.Replace(handler, @"\s+", "");
-            hSik.Should().NotContain(".length<", "istemci uzunluk kurali KOYMAMALI - politika SUNUCUNUN");
+            // MK-4b DENETIM BULGUSU (ITIRAZ-1) - OLCUT BICIMDEN BAGIMSIZ HALE GETIRILDI.
+            // Eski hali YALNIZ ".length<" LITERAL BICIMINI ariyordu; denetci handler govdesine
+            // sunucunun kuralinin BIREBIR REGEX KOPYASINI ekledi ve pin **27/27 YESIL** kaldi.
+            // Bu, MFIX-2/M-P8 ("assert ESKI LITERAL BICIMI ariyordu, KUSUR SINIFINI degil") ve
+            // MANTIK-FIX-2R/B2 ("innerHTML = " bosluksuz bicimi kaciriyordu) ile AYNI SINIF.
+            // Artik KUSUR SINIFI taraniyor: uzunluk karari HANGI BICIMDE yazilirsa yazilsin
+            // ve karmasiklik kararinin klasik yazimi (regex ileri-bakis) da yakalanir.
+            foreach (var politikaIzi in new[] { ".length<", ".length>", ".length!=", ".length==", "(?=" })
+                hSik.Should().NotContain(politikaIzi,
+                    $"istemci uzunluk/karmasiklik kurali KOYMAMALI - politika SUNUCUNUN ({politikaIzi})");
             hSik.Should().Contain("pf_pass_match", "form-duzeyi eslesme kontrolu KALMALI");
 
             // (4) YENI ANAHTAR UC DILDE ve MUKERRER DEGIL (b_fatura_yok dersi).
@@ -1728,7 +1737,13 @@ namespace Divisima.IntegrationTests
             AnkrajliSayim(index, "b_zzz_olmayan").Should().Be(0, "olmayan anahtar 0 saymali");
 
             // (5) HATALI KURAL ANLATAN ESKI ANAHTAR KULLANILMIYOR: pf_pass_short "6 karakter"
-            // diyor ve sunucu 8 istiyor; anahtar sozlukte DURUYOR ama bu akista KULLANILMAZ.
+            // diyor ve sunucu 8 istiyor.
+            // MK-4b DENETIM DUZELTMESI (ITIRAZ-2): eski yorum "anahtar sozlukte DURUYOR ama BU
+            // AKISTA kullanilmaz" diyordu - EKSIK IFADE. Olculdu: `pf_pass_short` (ve mock
+            // sokumuyle olu kalan `pf_err` / `pf_pass_ok`) HICBIR akista kullanilmiyor; uc
+            // dosyada da cagiran sayisi 0, gecisleri YALNIZ T ve AR sozluk tanimlari.
+            // ANAHTARLAR KALDIRILMADI: dalganin sinirlari MEVCUT sozluk anahtarlarini
+            // DOKUNULMAZ ilan ediyor. Uc olu anahtar rapora ve devir listesine yazildi.
             hSik.Should().NotContain("pf_pass_short",
                 "6 karakter diyen anahtar sifre degistirme akisinda KULLANILMAMALI");
         }

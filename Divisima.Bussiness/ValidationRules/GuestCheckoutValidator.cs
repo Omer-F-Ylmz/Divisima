@@ -19,8 +19,22 @@ namespace Divisima.Bussiness.ValidationRules.FluentValidation
     // odendi. Burada YALNIZCA bugun HICBIR YERDE dogrulanmayan alanlar var.
     //
     // KURALLAR UYE YOLUYLA BIREBIR AYNI (AddressRequestValidator): yeni politika ICAT
-    // EDILMEDI, var olan sozlesme ikinci yola TASINDI. Mesajlar da ayni - iki yol
-    // musteriye AYNI dili konusur.
+    // EDILMEDI. Mesajlar da ayni - iki yol musteriye AYNI dili konusur.
+    //
+    // MK-4b DENETIM DUZELTMESI (ITIRAZ-3) - BU YORUM ONCE "TASINDI" DIYORDU, YANLISTI:
+    // sozlesme TASINMADI, **KOPYALANDI**. Denetci olctu ve kabul edildi:
+    //   AddressRequestValidator · CustomerRegisterRequestValidator ·
+    //   SellerRegisterRequestValidator · (K5 ile) GuestCheckoutValidator
+    // -> telefon regex'i ARTIK DORT YERDE. Sinif K5 ile DOGMADI (uc kopya zaten vardi),
+    // K5 sayiyi 3 -> 4 yapti.
+    // BUGUN AKTIF KUSUR YOK: dort kopya arasindaki ayrisma OLCULDU ve SIFIR.
+    // LATENT RISK: bu kopyalari koruyan HICBIR TARAMA PINI YOK - karsilastirma icin
+    // sifre politikasinin `HICBIR_UC_KENDI_SIFRE_KURALINI_TANIMLAMAZ` sinif-duzeyi
+    // tarama pini VAR ve besinci kopyada KIRILIR. Yarin dort kopyadan biri degisirse
+    // iki yol musteriye FARKLI kural anlatir ve hicbir sey kirilmaz.
+    // KALICI COZUM ADAYLARI (KARAR MERKEZIN, bu dalgada UYGULANMADI): ortak bir
+    // RuleBuilder uzantisi (TelefonKurali() / AdresKurallari()) ya da sifre kalibindaki
+    // gibi bir sinif-duzeyi tarama pini.
     public class GuestCheckoutValidator : AbstractValidator<GuestCheckoutDto>
     {
         public GuestCheckoutValidator()
