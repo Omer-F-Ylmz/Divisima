@@ -378,6 +378,79 @@ namespace Divisima.IntegrationTests
                 "BASARILI yolun musteri satiri SILINMEMELI");
         }
 
+        // ── P-H5) MANTIK-FIX-3 / K5 - MISAFIR YOLUNUN ADRES GIRDI SINIFI ─────────────
+        //
+        // OLCULEN ONCE-DURUM: adresi YAZAN IKI YOL vardi ve yalniz BIRI dogrulaniyordu
+        // (uye yolu AddressRequestValidator, misafir yolu HICBIR SEY). Canli olcumde ALTI
+        // gecersiz girdi sinifinin ALTISI da HTTP 201 aldi - yani gercek siparisler
+        // TESLIM EDILEMEZ adreslerle olustu (bos sehir/ilce, bos ya da "dfg" telefon).
+        // Gercek veride de goruluyordu: telefonu bos 8 adres, rakamsiz telefon 1,
+        // sehri bos 1, ilcesi bos 1.
+        //
+        // KURALLAR UYE YOLUYLA BIREBIR AYNI - yeni politika ICAT EDILMEDI. guest_name /
+        // guest_email / items / payment_method GuestCheckoutManager'in KENDI bolgesinde
+        // dogrulaniyor ve BURAYA KOPYALANMADI ("ayni kuralin ikinci kopyasi" sinifi).
+        [Theory]
+        [InlineData("", "Istanbul", "Kadikoy", "Misafir Mah. 1", "34710", "elefon")]
+        [InlineData("dfg", "Istanbul", "Kadikoy", "Misafir Mah. 1", "34710", "elefon")]
+        [InlineData("5550000000", "", "Kadikoy", "Misafir Mah. 1", "34710", "ehir")]
+        [InlineData("5550000000", "Istanbul", "", "Misafir Mah. 1", "34710", "lçe")]
+        [InlineData("5550000000", "Istanbul", "Kadikoy", "", "34710", "dres")]
+        [InlineData("5550000000", "Istanbul", "Kadikoy", "Misafir Mah. 1", "123456789012345", "zip_code")]
+        public async Task MISAFIR_ADRES_GIRDI_SINIFI_DOGRULANIR_TESLIM_EDILEMEZ_SIPARIS_OLUSMAZ(
+            string telefon, string sehir, string ilce, string acikAdres, string posta, string mesajParcasi)
+        {
+            if (Skipped()) return;
+            var (urunId, beden) = await UrunHazirlaAsync();
+            var eposta = $"misafir-k5-{Guid.NewGuid():N}@example.com";
+
+            var r = await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place", new
+            {
+                guest_name = "Misafir Musteri",
+                guest_email = eposta,
+                guest_phone = telefon,
+                city = sehir,
+                district = ilce,
+                full_address = acikAdres,
+                zip_code = posta,
+                coupon_code = "",
+                payment_method = KapidaOdeme,
+                items = new[] { new { product_id = urunId, size = beden, quantity = 1 } }
+            });
+
+            r.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+                "gecersiz adres girdisi TESLIM EDILEMEZ siparis uretmemeli");
+
+            // CIFT-ANLAM KIRICI: yanit HANGI ALANIN sorunlu oldugunu soylemeli. "her seye
+            // notr 400 don" diyen bir uygulama bu asserti GECEMEZ.
+            (await r.Content.ReadAsStringAsync()).Should().Contain(mesajParcasi,
+                "yanit reddedilen ALANI adiyla soylemeli");
+
+            // Reddedilen istek IZ BIRAKMAMALI (dogrulama yazimlardan ONCE kosar).
+            (await MusteriSayisiAsync(eposta)).Should().Be(0,
+                "dogrulamaya takilan istek musteri satiri BIRAKMAMALI");
+            (await SiparisSayisiAsync(eposta)).Should().Be(0,
+                "dogrulamaya takilan istek SIPARIS uretmemeli");
+        }
+
+        // VAKUM KIRICI: kurallar "her seyi reddet" DEGIL - gecerli govde HALA gecer.
+        // Bu olmadan yukaridaki Theory'yi, misafir checkout'u tumden kapatan bir
+        // uygulama da gecerdi.
+        [Fact]
+        public async Task MISAFIR_GECERLI_ADRESLE_SIPARIS_HALA_GECER_K5_HER_SEYI_REDDETMEZ()
+        {
+            if (Skipped()) return;
+            var (urunId, beden) = await UrunHazirlaAsync();
+            var eposta = $"misafir-k5ok-{Guid.NewGuid():N}@example.com";
+
+            var r = await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesi(eposta, urunId, beden, KapidaOdeme));
+
+            r.StatusCode.Should().Be(HttpStatusCode.Created,
+                "K5 kurallari GECERLI bir misafir siparisini kirmamali");
+            (await SiparisSayisiAsync(eposta)).Should().Be(1, "gercek bir siparis olusmali");
+        }
+
         // ── Yardimcilar ─────────────────────────────────────────────────────────────────
         private static MailMessageDto? MailBul(string konuParcasi, string alici)
         {
