@@ -78,13 +78,17 @@ namespace Divisima.IntegrationTests
         {
             try
             {
-                await using var master = new SqlConnection(MasterConn);
-                await master.OpenAsync();
-                await using var cmd = master.CreateCommand();
                 // Collation ACIKCA verilir: kimlik kurallari Turkish_CI_AS varsayar
-                // (CLAUDE.md 6c) ve sunucu varsayilani Latin1 olabilir.
-                cmd.CommandText = $"CREATE DATABASE [{_dbName}] COLLATE Turkish_CI_AS;";
-                await cmd.ExecuteNonQueryAsync();
+                // (CLAUDE.md 6c) ve sunucu varsayilani Latin1 olabilir. EnsureCreated
+                // collation VEREMEDIGI icin bu yol ayri durur.
+                //
+                // MF-3/FF: HAM `CREATE DATABASE` BURADAN KALDIRILDI ve TestDbKurulum'a
+                // tasindi. OLCULEN SEBEP: bu satir tam suitte 3'te 1 sikligiyla
+                // "Execution Timeout Expired" aliyordu (tek basina 6/6 yesil) - varsayilan
+                // 30 sn'lik komut zaman asimi, `model` kilidi altindaki cekismeye
+                // yetmiyordu. Yardimci acik zaman asimi + SINIRLI yeniden deneme sagliyor;
+                // "yalniz 1807" ilkesi genel yolda AYNEN duruyor.
+                await TestDbKurulum.CollationIleOlusturAsync(MasterConn, _dbName, "Turkish_CI_AS");
                 _sqlAvailable = true;
             }
             catch (Exception ex) when (!string.IsNullOrWhiteSpace(ExplicitConn))

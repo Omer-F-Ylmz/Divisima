@@ -149,7 +149,16 @@ namespace Divisima.IntegrationTests
             var silmeDeseni = ".Database." + "EnsureDeletedAsync()";
             var olusturmaDeseni = ".Database." + "EnsureCreatedAsync()";
 
+            // ── MF-3 / FF: OLCUT BICIMDEN BAGIMSIZLASTIRILDI (ITIRAZ-1 kalibi) ──────────
+            // OLCULEN BOSLUK: `SemaTekKaynakTests` HAM bir "CREATE" + " DATABASE ... COLLATE"
+            // calistiriyordu ve yukaridaki IKI DIZGENIN HICBIRINE uymadigi icin bu pin onu
+            // GORMUYORDU. Sonuc: o sinif yeniden denemeden YARARLANAMIYORDU ve tam suitte
+            // 3'te 1 sikligiyla zaman asimiyla dustu. Ayni sinif hata: olcut TEK LITERAL
+            // BICIME baglanmisti (aile: MFIX-2/M-P8 · MANTIK-FIX-2R/B2 · MF-3/ITIRAZ-1).
+            var hamOlusturmaDeseni = "CREATE" + " DATABASE";
+
             var atlayanlar = new List<string>();
+            var hamOlusturanlar = new List<string>();
             var yardimciCagrisi = 0;
 
             foreach (var yol in dosyalar)
@@ -159,13 +168,20 @@ namespace Divisima.IntegrationTests
 
                 yardimciCagrisi += Say(metin, "TestDbKurulum.SilAsync(")
                                  + Say(metin, "TestDbKurulum.OlusturAsync(")
-                                 + Say(metin, "TestDbKurulum.YenidenOlusturAsync(");
+                                 + Say(metin, "TestDbKurulum.YenidenOlusturAsync(")
+                                 + Say(metin, "TestDbKurulum.CollationIleOlusturAsync(");
 
                 if (ad == "TestDbKurulum.cs") continue;   // yardimcinin KENDISI
 
                 if (metin.Contains(silmeDeseni, StringComparison.Ordinal)
                  || metin.Contains(olusturmaDeseni, StringComparison.Ordinal))
                     atlayanlar.Add(ad);
+
+                // YORUMLAR AYIKLANIR - ZORUNLU: `ArkaPlanIsleriIzolasyonTests` bu ifadeyi
+                // bir YORUMDA aniyor ve tam da DOGRUYU YAPAN dosyadir (10d794d duzeltmesi
+                // geregi SIFIR DDL uretir). Ayiklanmasaydi pin, kuralin ORNEGINI suclardi.
+                if (YorumsuzKaynak(metin).Contains(hamOlusturmaDeseni, StringComparison.Ordinal))
+                    hamOlusturanlar.Add(ad);
             }
 
             // VAKUM KIRICI: yardimci GERCEKTEN kullaniliyor olmali. Bu olmadan "hic kimse
@@ -176,6 +192,38 @@ namespace Divisima.IntegrationTests
             atlayanlar.Should().BeEmpty(
                 "veritabani kurulumu TEK NOKTADAN gecmeli - dogrudan EnsureDeleted/EnsureCreated "
               + "cagiran sinif `model` kilidi yeniden denemesinden YARARLANAMAZ (CI kirmizisi 10d794d)");
+
+            hamOlusturanlar.Should().BeEmpty(
+                "ham olusturma ifadesi YALNIZ TestDbKurulum.cs'te yasar - baska bir dosyada "
+              + "yazilirsa o cagri ne zaman asimi sinirindan ne de yeniden denemeden "
+              + "YARARLANIR (MF-3 push turunda olculdu: 3'te 1 timeout)");
+        }
+
+        // Satir ve blok yorumlarini ayiklar. Dizge literallerini AYIKLAMAZ - burada gerekli
+        // degil: aranan ifade bu projede yalnizca SQL metninde ve yorumlarda geciyor.
+        // BILINEN TUZAK: bu metodun KENDI yorumlari da ayiklandigi icin, tarama kendi
+        // aciklamasini bulup yanlis kirmizi veremez.
+        private static string YorumsuzKaynak(string kaynak)
+        {
+            var sb = new System.Text.StringBuilder(kaynak.Length);
+            for (var i = 0; i < kaynak.Length; i++)
+            {
+                if (kaynak[i] == '/' && i + 1 < kaynak.Length && kaynak[i + 1] == '/')
+                {
+                    while (i < kaynak.Length && kaynak[i] != '\n') i++;
+                    if (i < kaynak.Length) sb.Append('\n');
+                    continue;
+                }
+                if (kaynak[i] == '/' && i + 1 < kaynak.Length && kaynak[i + 1] == '*')
+                {
+                    i += 2;
+                    while (i + 1 < kaynak.Length && !(kaynak[i] == '*' && kaynak[i + 1] == '/')) i++;
+                    i++;
+                    continue;
+                }
+                sb.Append(kaynak[i]);
+            }
+            return sb.ToString();
         }
 
         private static int Say(string metin, string desen)
