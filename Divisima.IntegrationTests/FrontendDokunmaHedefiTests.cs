@@ -1732,6 +1732,84 @@ namespace Divisima.IntegrationTests
             hSik.Should().NotContain("pf_pass_short",
                 "6 karakter diyen anahtar sifre degistirme akisinda KULLANILMAMALI");
         }
+        // ── P-H6) MANTIK-FIX-3 / K3b - PROFIL KAYDETME SUNUCUYA GIDER ────────────────
+        //
+        // DURUST ETIKET: KAYNAK SOZLESMESI pini (depoda JS/DOM kosucusu YOK). Davranis
+        // kaniti R-H6 tarayici + DB olcumleridir: ONCE toast "Bilgilerin guncellendi"
+        // derken /api/ istegi 0 ve musteri satiri DEGISMEDI; SONRA /api/account/profile
+        // istegi 1, ad DEGISTI, phone/dogum KORUNDU, e-posta DEGISMEDI.
+        //
+        // OLCULEN ONCE-DURUM: #pfSave index.html'in saveProfileForm mock'una BAGLIYDI ve
+        // o govde HICBIR API CAGRISI YAPMADAN "Bilgilerin guncellendi" diyordu (K3'te
+        // sokulen savePassForm ve MFIX-1'de sokulen coFinish ile AYNI SINIF).
+        [Fact]
+        public void KAYNAK_SOZLESMESI_ProfilKaydetme_SunucuyaGider_YalanMock_Sokuldu_VeriKaybi_Yok()
+        {
+            var bridge = Oku("frontend/api-bridge.js");
+            var index = Oku("frontend/index.html");
+
+            // (1) GERCEK BAGLAMA: buton VAR ve iki ucu da CAGIRIYOR (yukleme + kaydetme).
+            bridge.Should().Contain("pfSave", "profil butonu api-bridge'de baglanmali");
+            var blok = FonksiyonGovdesi(bridge, "var ps = document.getElementById(\"pfSave\");");
+            blok.Should().NotBeNullOrWhiteSpace("baglama blogu okunabilmeli");
+            var bSik = Regex.Replace(blok, @"\s+", "");
+            bSik.Should().Contain("api.account.updateProfile(",
+                "handler GERCEK ucu cagirmali - tanimli ama cagrilmayan sarmalayici OLU KODDUR");
+            bSik.Should().Contain("api.account.summary(",
+                "form SUNUCUDAN yuklenmeli - yerel depodan beslenen form GERCEK veri gostermez");
+
+            // (2) YALAN MOCK SOKULDU: govde artik API'ye gitmeden BASARI DEMEZ.
+            var mock = FonksiyonGovdesi(index, "function saveProfileForm(");
+            mock.Should().NotBeNullOrWhiteSpace("mock govdesi okunabilmeli");
+            var mSik = Regex.Replace(mock, @"\s+", "");
+            mSik.Should().NotContain("pf_saved",
+                "API'ye gitmeden 'guncellendi' diyen yol GERI GELEMEZ");
+            mSik.Should().NotContain("lsSet('dvs_user'",
+                "yerel depoya yazip 'kaydettim' diyen yol GERI GELEMEZ");
+            mSik.Should().Contain("b_profil_guncellenemedi",
+                "IKINCI SAVUNMA HATTI: api-bridge yuklenmese bile ekran DURUST hata vermeli");
+
+            // (3) VERI KAYBI GUARD'I (PUT-ez semantigi / devir listesindeki F5):
+            // DTO uc alan tasir; yalniz {name} gonderilirse phone ve birthdate NULL yazilir.
+            bSik.Should().Contain("phone:", "phone GONDERILMELI - yoksa sunucu onu NULL yazar");
+            bSik.Should().Contain("birthdate:", "birthdate GONDERILMELI - yoksa sunucu onu NULL yazar");
+
+            // (4) E-POSTA KORKULUGU: alan readonly ve govdede HIC gonderilmiyor.
+            index.Should().Contain("id=\"pfEmail\" type=\"email\" value=\"'+esc(userEmail||'')+'\" readonly",
+                "e-posta alani markup DUZEYINDE readonly olmali (api-bridge yuklenmese de)");
+            bSik.Should().NotContain("email:",
+                "e-posta bu dalgada DEGISTIRILMEZ - govdeye KONULAMAZ (DTO da tasimiyor)");
+
+            // (5) ISTEMCIDE DOGRULAMA KOPYASI ACILMADI (merkez N2): "ad bos" KARARI
+            // SUNUCUNUNDUR. v_name YALNIZ hata cevirisinde gecmeli, yani cagriDAN SONRA.
+            var iCagri = bSik.IndexOf("api.account.updateProfile(", StringComparison.Ordinal);
+            var iAdHata = bSik.IndexOf("v_name", StringComparison.Ordinal);
+            iCagri.Should().BeGreaterThan(-1, "cagri bulunmali");
+            iAdHata.Should().BeGreaterThan(iCagri,
+                "v_name yalniz SUNUCU 400'unun cevirisi olmali - istemci ON-DOGRULAMA yapmamali");
+
+            // (6) CIFT-ANLAM KIRICI: "her hataya notr mesaj" uygulamasi bu pini GECEMEZ -
+            // 400 ayrimi da, notr dal da AYRI AYRI bulunmali.
+            bSik.Should().Contain("b_profil_guncellenemedi", "notr hata dali bulunmali");
+            bSik.Should().Contain("e.status===400", "400 ayrimi MAKINE-OKUNUR sinyalle yapilmali");
+
+            // (7) VAKUM KIRICILAR: sokum "fonksiyonu sil" DEGIL - govde YERINDE durmali,
+            // ve okunan bloklar bos olmamali.
+            index.Should().Contain("function saveProfileForm(", "mock fonksiyonu SILINMEDI, govdesi DURUSTLESTI");
+            mSik.Length.Should().BeGreaterThan(10, "mock govdesi bos okunmus olamaz");
+            bSik.Length.Should().BeGreaterThan(200, "baglama blogu bos okunmus olamaz");
+
+            // (8) YENI ANAHTARLAR UC DILDE ve MUKERRER DEGIL (b_fatura_yok dersi).
+            AnkrajliSayim(index, "b_profil_guncellenemedi").Should().Be(2,
+                "yeni anahtar T ve AR sozluklerinde BIRER kez tanimli olmali");
+            AnkrajliSayim(index, "b_eposta_degistirilemez").Should().Be(2,
+                "yeni anahtar T ve AR sozluklerinde BIRER kez tanimli olmali");
+            // Yeniden KULLANILAN mevcut anahtarlar da uc dilde tanimli olmali.
+            AnkrajliSayim(index, "pf_saved").Should().Be(2, "basari mesaji MEVCUT anahtardan gelir");
+            AnkrajliSayim(index, "v_name").Should().Be(2, "ad-bos mesaji MEVCUT anahtardan gelir");
+            AnkrajliSayim(index, "b_zzz_olmayan_k3b").Should().Be(0, "olmayan anahtar 0 saymali");
+        }
+
         // Ankrajli anahtar sayimi: "X:" deseni "onek_X:" ICINDE de eslesir (ship_s dersi).
         private static int AnkrajliSayim(string kaynak, string anahtar)
         {

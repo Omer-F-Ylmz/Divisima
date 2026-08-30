@@ -3150,8 +3150,94 @@
         if (fav && typeof addToCart === "function") { addToCart(+fav.getAttribute("data-fadd"), "", 1, null); return; }
       });
 
+      // ── MANTIK-FIX-3 / K3b: PROFIL KAYDETME GERCEKTEN CALISIR ────────────────
+      // OLCULEN ONCE-DURUM (uc kanal): #pfSave index.html'in saveProfileForm mock'una
+      // BAGLIYDI; o govde yalniz yerel degiskene/localStorage'a yazip "Bilgilerin
+      // guncellendi" diyordu. Canli: fetch sayaci /api/ istegi = 0, musteri satiri
+      // DEGISMEDI, toast YESIL ONAY ISARETIYLE ciktti. api.account.updateProfile
+      // (api-client.js:487) TANIMLIYDI ama CAGIRANI 0 idi - eksik olan TEK SEY BAGLAMAYDI.
+      //
+      // IKI ASIMETRI OLCULDU ve IKISI DE BURADA KAPANIYOR:
+      //  (1) E-POSTA: form e-posta inputu TASIYOR, sunucu DTO'su (UpdateProfileRequestDto)
+      //      TASIMIYOR. Naif baglama YENI BIR YALAN uretirdi. E-posta bu dalgada
+      //      DEGISTIRILMEZ: alan readonly (index.html markup'inda, yani api-bridge
+      //      yuklenmese de) ve buradan SUNUCUYA HIC GONDERILMEZ.
+      //  (2) PUT-EZ SEMANTIGI: DTO uc alan tasir (name/phone/birthdate); yalniz {name}
+      //      gonderilirse phone ve birthdate NULL yazilir - SESSIZ VERI KAYBI (devir
+      //      listesindeki F5 / FIX-1C bulgusu). Sunucu sozlesmesi bu dalgada
+      //      DEGISTIRILMEDIGI icin istemci UC ALANI DA tasimak ZORUNDA: phone/birthdate
+      //      summary'den yuklenip AYNEN geri gonderilir. Bu, kendi degisikligimizin
+      //      acacagi kapiyi kapatmaktir - kapsam genislemesi degil.
+      //
+      // ISTEMCIDE DOGRULAMA KOPYASI ACILMAZ: "ad bos olamaz" KARARI YALNIZ SUNUCUNUNDUR;
+      // istemci onu ON-DOGRULAMAZ, yalnizca sunucunun 400'unu CEVIRIR.
       var ps = document.getElementById("pfSave");
-      if (ps && typeof saveProfileForm === "function") ps.onclick = saveProfileForm;
+      if (ps) {
+        var pfAd = document.getElementById("pfName"),
+            pfEposta = document.getElementById("pfEmail");
+        // PASSTHROUGH DEPOSU: sunucudan yuklenene kadar KAYDETME KAPALI - aksi halde
+        // ilk tikta phone/birthdate NULL yazilirdi (yukaridaki (2) maddesi).
+        var profilYuklendi = false, profilTel = null, profilDogum = null;
+
+        api.account.summary()
+          .then(function (r) {
+            var d = (r && r.data) || {};
+            if (pfAd) pfAd.value = d.name || "";
+            if (pfEposta) pfEposta.value = d.email || "";
+            profilTel = (typeof d.phone === "undefined") ? null : d.phone;
+            profilDogum = (typeof d.birthdate === "undefined") ? null : d.birthdate;
+            profilYuklendi = true;
+            // Diger yuzeyler de gercek degeri gorsun (E3'te olculen dvs_profile bosluğu).
+            if (d.name) window.userName = d.name;
+            if (d.email) window.userEmail = d.email;
+            try { if (typeof updateAccountIcon === "function") updateAccountIcon(); } catch (e) {}
+          })
+          .catch(function () {
+            // Yuklenemedi: alanlar BOS kalir ve kaydetme kapali kalir. Uydurma deger
+            // gostermek ya da eksik govde gondermek yerine GORUNUR hata verilir.
+            toast(ceviri("b_profil_guncellenemedi"), "err");
+          });
+
+        ps.onclick = function () {
+          if (!pfAd) return;
+          if (!profilYuklendi) { toast(ceviri("b_profil_guncellenemedi"), "err"); return; }
+          ps.disabled = true;
+          api.account
+            .updateProfile({
+              name: pfAd.value,
+              phone: profilTel,
+              birthdate: profilDogum
+            })
+            .then(function () {
+              window.userName = (pfAd.value || "").trim();
+              try { if (typeof updateAccountIcon === "function") updateAccountIcon(); } catch (e) {}
+              toast(ceviri("pf_saved"), "ok");
+            })
+            .catch(function (e) {
+              // HATA ESLEME (merkez N2): MAKINE-OKUNUR sinyal olarak ONCE durum kodu
+              // kullanilir. Sunucunun bu uctaki TEK beklenen 400'u "ad bos" durumudur ve
+              // {success,message} govdesinde AYIRT EDICI bir kod alani YOKTUR; bu yuzden
+              // 400 icindeki ayrim HAM YANITTAN kopyalanan capaya dayanir:
+              //   {"success":false,"message":"Ad boş olamaz."}
+              // CIFT BICIM: metin once Turkce harfler katlanip kucultuluyor, boylece
+              // diyakritikli ve ASCII yazim AYNI sonucu verir (ASCII/Turkce yuklem tuzagi).
+              // KIRILGANLIK BILINCLI: sunucu metni degisirse esleme duser ve kullanici
+              // notr "guncellenemedi" mesajini gorur - yanlis degil, yalnizca daha az
+              // yardimci. Kalici cozum bir HATA KODU alanidir; sunucu yanit sozlesmesi
+              // bu dalgada DEGISTIRILMEDI (devir: hata-kodu birlestirme).
+              var anahtar = "b_profil_guncellenemedi";
+              if (e && e.status === 400) {
+                var s = String((e && e.message) || "")
+                  .replace(/[şŞ]/g, "s").replace(/[ıİ]/g, "i").replace(/[ğĞ]/g, "g")
+                  .replace(/[üÜ]/g, "u").replace(/[öÖ]/g, "o").replace(/[çÇ]/g, "c")
+                  .toLowerCase();
+                if (s.indexOf("ad bos olamaz") >= 0) anahtar = "v_name";
+              }
+              toast(ceviri(anahtar), "err");
+            })
+            .then(function () { ps.disabled = false; });
+        };
+      }
       // ── MANTIK-FIX-3 / K3: SIFRE DEGISTIRME GERCEKTEN CALISIR ────────────────
       // OLCULEN ONCE-DURUM: #pfPassSave HICBIR YERDE baglanmiyordu (api-bridge'de
       // sifir gecis) ve index.html'in kendi govdesi API'ye gitmeden "guncellendi"

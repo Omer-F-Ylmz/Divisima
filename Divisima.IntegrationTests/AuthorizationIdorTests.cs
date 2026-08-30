@@ -831,16 +831,16 @@ namespace Divisima.IntegrationTests
             addresses.Should().NotContain(a => a.city == "Bursa", "F11: sehir de konum verisidir, temizlenmeli");
             addresses.Should().NotContain(a => a.district == "Nilufer", "F11: ilce de konum verisidir, temizlenmeli");
             addresses.Should().OnlyContain(a => a.zip_code == null, "F11: posta kodu da temizlenmeli");
-                // P-H1: PASIF ADRES DE ANONIMLESMELI. Bu dort assert olmadan pin, kusurun
-                // ON KOSULUNU uretse bile onu GORMEZDI - global filtre yalniz OKUMAYI eliyor,
-                // yani "pasif satir hic gelmedi" ile "pasif satir temizlendi" AYNI gorunurdu.
-                var pasif = addresses.Single(a => a.id == pasifAdresId);
-                pasif.full_name.Should().NotBe("MF3 Pasif Ad", "PASIF adresin ad-soyadi da temizlenmeli");
-                pasif.phone.Should().BeNull("PASIF adresin telefonu da temizlenmeli");
-                pasif.full_address.Should().NotBe("MF3 pasif acik adres 99/1", "PASIF adres metni de temizlenmeli");
-                pasif.city.Should().NotBe("Trabzon", "PASIF adresin sehri de temizlenmeli");
-                pasif.district.Should().NotBe("Ortahisar", "PASIF adresin ilcesi de temizlenmeli");
-                pasif.zip_code.Should().BeNull("PASIF adresin posta kodu da temizlenmeli");
+            // P-H1: PASIF ADRES DE ANONIMLESMELI. Bu dort assert olmadan pin, kusurun
+            // ON KOSULUNU uretse bile onu GORMEZDI - global filtre yalniz OKUMAYI eliyor,
+            // yani "pasif satir hic gelmedi" ile "pasif satir temizlendi" AYNI gorunurdu.
+            var pasif = addresses.Single(a => a.id == pasifAdresId);
+            pasif.full_name.Should().NotBe("MF3 Pasif Ad", "PASIF adresin ad-soyadi da temizlenmeli");
+            pasif.phone.Should().BeNull("PASIF adresin telefonu da temizlenmeli");
+            pasif.full_address.Should().NotBe("MF3 pasif acik adres 99/1", "PASIF adres metni de temizlenmeli");
+            pasif.city.Should().NotBe("Trabzon", "PASIF adresin sehri de temizlenmeli");
+            pasif.district.Should().NotBe("Ortahisar", "PASIF adresin ilcesi de temizlenmeli");
+            pasif.zip_code.Should().BeNull("PASIF adresin posta kodu da temizlenmeli");
 
             // (3) CIHAZ - F10: `is_active=false` YETMEZ, kalici tanimlayici YOK EDILMELI
             var devices = await ctx.Set<CustomerDevice>().AsNoTracking()
