@@ -2380,7 +2380,7 @@
           "<span>" + money(it.line_total) + "</span></div>";
       }).join("");
 
-      ozet = '<div class="panel" style="text-align:left"><h3>' + ceviri("b_h_siparis_ozeti") + '</h3>' +
+      ozet = '<div class="panel" style="text-align:start"><h3>' + ceviri("b_h_siparis_ozeti") + '</h3>' +
         '<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0"><span>' + ceviri("b_siparis_no_etiket") + '</span><span>' +
         esc(siparisNoMetni(order, orderId)) + "</span></div>" +
         kalemler +
@@ -2428,7 +2428,7 @@
       /* MFIX-3b/(5a) ONARIM: bu cumlede "Şifremi unuttum" TIRNAK ICINDE bir ALINTIYDI ve
          duz-metin degistirmesi onu yanlislikla kod gibi ele almisti. Cumle artik TEK
          anahtarla ceviriliyor; alinti isaretleri cevirinin ICINDE. */
-      ozet = '<div class="panel" style="text-align:left"><h3>' + ceviri("b_h_siparis_kaydi") + '</h3>'
+      ozet = '<div class="panel" style="text-align:start"><h3>' + ceviri("b_h_siparis_kaydi") + '</h3>'
         + (misafirNo
             ? '<p class="muted" style="font-size:13px;margin:6px 0 4px">' + ceviri("b_siparis_numaran") + '</p><p style="font-weight:600;margin:0 0 12px">' + esc(misafirNo) + '</p>'
             : '<p class="muted" style="font-size:13px;margin:6px 0 10px">' + ceviri("b_no_epostayla") + '</p><p class="muted" style="font-size:12px;margin:0 0 12px">' + ceviri("b_referans") + orderId + '</p>')

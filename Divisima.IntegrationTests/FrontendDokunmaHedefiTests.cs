@@ -2034,5 +2034,73 @@ namespace Divisima.IntegrationTests
             Bosluksuz(b).Should().Contain(Bosluksuz("_ha ? ceviri(_ha) : (e.message"),
                 "bilinen hatada ceviri, bilinmeyende HAM metin basilmali");
         }
+
+        // ── P-V6 (MANTIK-FIX-4 / K6): BELGE YONU AR'DA RTL, TEK KAYNAKTAN ───────────────
+        // Dosyada `[dir="rtl"]` ile baslayan ON IKI KURAL ILK COMMIT'ten beri VARDI ama
+        // HEPSI OLU KODDU: `dir` UC AYRI YERDE 'ltr'e SABITLENMISTI (acilis betigi - AR
+        // dalinda ACIKCA -, setLang, dil gostergesi). `git log -S`: `setAttribute('dir',
+        // 'rtl')` HICBIR COMMIT'te gecmiyor. Yazar RTL destegini yazmis ama ACMAMIS.
+        // Bu pin (a) yonun TEK KAYNAKTAN turedigini, (b) 'ltr' sabitlemesinin geri
+        // gelmedigini, (c) `dir=rtl` acilinca MASAUSTUNU KIRAN medya-kapsam asimetrisinin
+        // kapali oldugunu tutar.
+        // KISIT-1 (FrontendDokunmaHedefiTests:1039): setLang govdesindeki her fonksiyon
+        // cagrisi index.html'de `function X(` ile TANIMLI olmali - yardimci bu yuzden
+        // api-bridge'e DEGIL index.html'e konuldu.
+        // DURUST ETIKET: KAYNAK SOZLESMESI pinidir. Davranis kaniti muhurdeki koordinat
+        // olcumleridir (1280px: filtre paneli 1205..1463 -> 937..1195; sortbox 753..845
+        // -> 71..163; body text-align start -> right).
+        [Fact]
+        public void KAYNAK_SOZLESMESI_BelgeYonu_ARda_RTL_ve_TEK_KAYNAKTAN()
+        {
+            var ham = Index;
+            var s = YorumlariAyikla(ham);
+
+            // (1) TEK KAYNAK: yardimci index.html'de TANIMLI (KISIT-1) ve UC noktadan
+            // cagriliyor -> tanim 1 + cagri 2 = en az 3 gecis.
+            s.Should().Contain("function dvsYonUygula(",
+                "yon yardimcisi index.html'de tanimli olmali - setLang pini (:1039) "
+                + "api-bridge'te tanimlanan bir yardimciyi KABUL ETMEZ");
+            Regex.Matches(s, Regex.Escape("dvsYonUygula")).Count.Should().BeGreaterThan(2,
+                "yardimci TANIMLI olmakla kalmayip CAGRILMIS da olmali");
+
+            // (2) 'ltr' SABITLEMESI GERI GELEMEZ. Acilis betigindeki AR dali da dahil.
+            Bosluksuz(s).Should().NotContain(Bosluksuz("setAttribute('dir','ltr')"),
+                "yon kosulsuz 'ltr' yazilarak sabitlenemez - uc noktanin ucu de yardimciya "
+                + "bagli olmali");
+            Bosluksuz(s).Should().Contain(Bosluksuz("setAttribute('dir','rtl')"),
+                "acilis betigi AR dalinda 'rtl' yazmali (sayfa ilk boyandan DOGRU yonde)");
+
+            // (3) CIFT-ANLAM KIRICI: yon AR'a BAGLI olmali. "Her zaman rtl" ya da "her
+            // zaman ltr" uygulamasi (1) ve (2)'yi gecerdi.
+            var yardimci = s.Substring(s.IndexOf("function dvsYonUygula(", StringComparison.Ordinal));
+            yardimci = yardimci.Substring(0, yardimci.IndexOf('\n'));
+            Bosluksuz(yardimci).Should().Contain(Bosluksuz("'ar'?'rtl':'ltr'"),
+                "yon YALNIZ AR'da rtl olmali - TR ve EN ltr kalmali");
+
+            // (4) MEDYA KAPSAM ASIMETRISI KAPALI: taban `.filter-side` kurali
+            // @media(max-width:900px) ICINDE; RTL override'i DISINDA kalirsa masaustunde
+            // taban uygulanmadan override uygulanir ve panel EKRAN DISINA itilir.
+            // OLCULEN ONCE-DURUM (1280px): LTR 71..329 -> RTL 1205..1463.
+            var iMedya = s.IndexOf("@media(max-width:900px){\n  [dir=\"rtl\"] .filter-side",
+                StringComparison.Ordinal);
+            iMedya.Should().BeGreaterThan(-1,
+                "[dir=rtl] .filter-side override'lari @media(max-width:900px) ICINDE olmali");
+
+            // (5) K6'nin kapattigi kirici kalemler kaynakta GERI GELEMEZ.
+            s.Should().NotContain(".sortbox{margin-left:auto}",
+                "fiziksel margin-left RTL'de yanlis tarafi doldurur (olculdu: 753..845, "
+                + "dogru ayna 71..163) - margin-inline-start kullanilmali");
+            s.Should().Contain("[dir=\"rtl\"] .toast.t-err{box-shadow:inset -4px",
+                "toast tip seridi RTL'de KARSI kenara gecmeli");
+            s.Should().Contain("[dir=\"rtl\"] .a11y-sw.on::after{transform:translateX(-18px)}",
+                "erisilebilirlik anahtarinin topu RTL'de karsi uca gitmeli");
+            YorumlariAyikla(Oku("frontend/api-bridge.js")).Should().NotContain("text-align:left",
+                "yon-duyarli inline style `start` olmali (dosyanin fatura renderer'i ZATEN oyle)");
+
+            // (6) VAKUM KIRICI: RTL kural kumesi GERCEKTEN dolu olmali - bos bir kume
+            // "yon acildi" iddiasini anlamsiz kilardi.
+            Regex.Matches(s, Regex.Escape("[dir=\"rtl\"]")).Count.Should().BeGreaterThan(12,
+                "RTL kural kumesi mevcut on iki kurali VE K6'nin ekledigi override'lari tasimali");
+        }
     }
 }
