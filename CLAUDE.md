@@ -1172,6 +1172,14 @@ Ailenin sayaci `git log -S` ile olculdu: `"KACIS-KAYBI AILESI - DORDUNCU ORNEK"`
 `"... ALTINCI ORNEK"` 1 commit (`a5add91`) · `"... BESINCI ORNEK"` ve `"... YEDINCI ORNEK"`
 **0 commit** (NEG kontrol `ZZZINCI` 0). **Sayac ALTINCI'da KALIR.**
 **KAYIT:** MK-4b denetcisinin MUT-3b turunda gercek bir kacis-kaybi yasandi (`sed` ters bolu
+## Suzgec dersi — basliksiz kaynak etiketi (ARSIV-1)
+
+Bir etiketin yapisal basligi olup olmadigini `grep -B1 "^kaynak: " | grep -c "^--$"`
+ile saymak AYRAC sayar, etiket saymaz: ilk kosumda 34 dedi. Dogru ifade iki-ust-satiri
+kontrol eder: `awk '/^kaynak: /{ if (p2 !~ /^#/) n++ } { p2=p1; p1=$0 } END{print n+0}'`.
+POZ (C2/2474135) 4 · NEG (`^ZZZkaynak:`) 0 · C4 sonrasi 0.
+kaynak: ARSIV-1 denetim turu, muhurde 41·ARSIV-1 · CC HATALARI 4
+
 # B7 — KURGU SABITLERI ve D-YAN
 
 ## Olcum duzenegi (goz1) — bes arguman
@@ -1321,6 +1329,10 @@ kaynak: 40·MANTIK-FIX-4_MUHRU · KUYRUK (bayt-ayni KOPYA)
 ```
 
 **ARSIV-1 (bu tur) kuyrugun 1. maddesiydi ve TAMAMLANDI.** Siradaki: GUVENLIK-AV-1.
+
+**ARSIV-1 KAPANDI** - kod `7f8efa7` (dort commit tek push, cift yesil, Gitleaks adimi
+SUCCESS, annotation 39/failure 0); muhur `docs/muhur/41-arsiv-1.md`. CLAUDE.md 747.240 B
+-> 78.773 B (~186.810 -> ~19.693 est.token). Siradaki kuyruk kalemi: GUVENLIK-AV-1.
 
 ## Devir ID'leri
 

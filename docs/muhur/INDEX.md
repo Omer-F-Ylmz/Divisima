@@ -50,5 +50,7 @@ onlari bayatlatmaz. Okuma usulu: CLAUDE.md B0 · MK-11 (b).
 | 39 | `39-mantik-fix-3-muhru.md` | # MANTIK-FIX-3 MUHRU - KVKK/HESAP DURUSTLESIR (30 Agustos 2026) | 11551-12104 | 33375 | 0 fark |
 | 40 | `40-mantik-fix-4-muhru.md` | # MANTIK-FIX-4 MUHRU - VITRIN DURUSTLESIR ve i18n TAMAMLANIR (1 Eylul 2026) | 12105-12434 | 20376 | 0 fark |
 
+| 41 | `41-arsiv-1.md` | # ARSIV-1 MUHRU - CLAUDE.md ACILIS YUKU ~187k -> ~19,7k (1 Eylul 2026) | — | 9212 | yeni usul |
+
 Toplam arsiv: 42 dosya · 702.847 B.
 Bayt denklemi (d8f12dd): 747.240 = 44.393 (C1 sonrasi CLAUDE.md) + 702.847.
