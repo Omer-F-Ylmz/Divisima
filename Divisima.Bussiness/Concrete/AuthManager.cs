@@ -51,10 +51,19 @@ namespace Divisima.Bussiness.Concrete
         // hicbir kod yolunda true yapilmiyor - olculdu).
         private readonly Divisima.Bussiness.Outbox.IOutboxService _outboxService;
 
+        // GF-1 / K2: access token iptali icin kara liste. Program.cs'te AddScoped ile kayitli.
+        private readonly Divisima.Core.Security.JWT.ITokenBlacklist _tokenBlacklist;
+
+        // Jeton bitisi okunamazsa kullanilan TTL. Access token omru 15 dk oldugundan bu
+        // ust siniri ASLA gecmez; iptal kaydi jetonun kendisinden UZUN yasamaz.
+        private static readonly TimeSpan VarsayilanIptalTtl = TimeSpan.FromMinutes(15);
+
         public AuthManager(ICustomerDal customerDal, IUserSessionDal userSessionDal, ITokenHelper tokenHelper, IMailService mailService, ISecurityEventService securityEvents,
             IReferralService referralService, IConsentRecordDal consentDal,
-            IMailLinkBuilder links, Divisima.Bussiness.Outbox.IOutboxService outboxService)
+            IMailLinkBuilder links, Divisima.Bussiness.Outbox.IOutboxService outboxService,
+            Divisima.Core.Security.JWT.ITokenBlacklist tokenBlacklist)
         {
+            _tokenBlacklist = tokenBlacklist;
             _outboxService = outboxService;
             _links = links;
             _referralService = referralService;
@@ -602,8 +611,23 @@ namespace Divisima.Bussiness.Concrete
 
         // Açıklayıcı yorum: Çıkış - refresh token verildiyse o oturumu, verilmediyse tüm oturumları kapat.
         // Böylece çalınan/eski refresh token bir daha kullanılamaz (JWT revocation - oturum tarafı).
-        public async Task<(HttpStatusCode, Result)> Logout(int customerId, string? refreshToken)
+        public async Task<(HttpStatusCode, Result)> Logout(int customerId, string? refreshToken,
+            string? jti = null, DateTime? jtiExpiresAt = null)
         {
+            // ══ GF-1 / K2 (C-1) - ACCESS TOKEN'I DA IPTAL ET ═══════════════════════════════
+            //
+            // OLCULEN ONCE-DURUM: `RevokeAsync` uretimde SIFIR yerden cagriliyordu. Cikis
+            // OTURUMU (refresh tarafini) kapatiyordu ama ELDEKI ACCESS TOKEN 15 dakikaya kadar
+            // CALISMAYA DEVAM EDIYORDU - yani "cikis yaptim" diyen kullanicinin calinmis jetonu
+            // hala gecerliydi. Okuma tarafi (`TokenBlacklistMiddleware`) ZATEN canliydi; eksik
+            // olan YALNIZ yazma tarafiydi.
+            //
+            // SINIR (durust kayit): bu, SUNULAN jetonu iptal eder. Kullanicinin BASKA
+            // cihazlardaki access token'lari jti'leri saklanmadigi icin iptal EDILEMEZ; onlar
+            // en fazla 15 dk daha yasar. Tam coklu-cihaz iptali `tokens_valid_from` benzeri bir
+            // KOLON ister ve bu dalganin TEK migration'i K3'e ayrildi.
+            await AccessTokenIptalEtAsync(jti, jtiExpiresAt);
+
             if (!string.IsNullOrEmpty(refreshToken))
             {
                 var session = await _userSessionDal.GetByRefreshTokenAsync(refreshToken);
@@ -619,6 +643,17 @@ namespace Divisima.Bussiness.Concrete
                 await _userSessionDal.InvalidateAllForCustomerAsync(customerId);
             }
             return (HttpStatusCode.OK, new SuccessResult(Messages.LogoutSuccess));
+        }
+
+        // GF-1 / K2: sunulan access token'in `jti`sini kara listeye yazar. `jti` yoksa (ornegin
+        // servis HTTP disindan cagrildiysa) SESSIZCE gecer - iptal edilecek bir jeton YOKTUR.
+        // TTL jetonun KENDI bitisinden turer; okunamazsa access token omru kadar varsayilan
+        // kullanilir (kayit jetondan uzun yasamaz).
+        private async Task AccessTokenIptalEtAsync(string? jti, DateTime? jtiExpiresAt)
+        {
+            if (string.IsNullOrEmpty(jti)) return;
+            var bitis = jtiExpiresAt ?? DateTime.UtcNow.Add(VarsayilanIptalTtl);
+            await _tokenBlacklist.RevokeAsync(jti, bitis);
         }
 
         // ═══ FIX-1A / F1 - `DeleteAccount` GOVDESI BURADAN KALDIRILDI ══════════════════════════

@@ -21,7 +21,11 @@ namespace Divisima.Bussiness.Abstract
         // Açıklayıcı yorum: Şifre sıfırlama + çıkış (oturum iptali)
         Task<(HttpStatusCode, Result)> ForgotPassword(ForgotPasswordRequestDto dto);
         Task<(HttpStatusCode, Result)> ResetPassword(ResetPasswordRequestDto dto);
-        Task<(HttpStatusCode, Result)> Logout(int customerId, string? refreshToken);
+        // GF-1 / K2: `jti` + `jtiExpiresAt` VARSAYILAN DEGERLI eklendi - mevcut cagiranlarin
+        // hicbiri degismek ZORUNDA degil. Verilirse cikis, oturumun yaninda SUNULAN access
+        // token'i da kara listeye yazar (bkz. AuthManager.Logout).
+        Task<(HttpStatusCode, Result)> Logout(int customerId, string? refreshToken,
+            string? jti = null, System.DateTime? jtiExpiresAt = null);
 
         // Açıklayıcı yorum: GDPR/KVKK - hesap silme (unutulma hakkı) + veri dışa aktarma (taşınabilirlik)
         Task<(HttpStatusCode, Result)> ExportMyData(int customerId);

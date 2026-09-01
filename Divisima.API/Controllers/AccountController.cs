@@ -41,7 +41,9 @@ namespace Divisima.API.Controllers
         [SwaggerOperation(Summary = "Şifre değiştir", Description = "Mevcut şifre doğrulaması ile yeni şifre.")]
         public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequestDto dto)
         {
-            var r = await _accountService.ChangePassword(CurrentCustomerId, dto);
+            // GF-1 / K2: sunulan access token'in kimligi/bitisi de gecirilir - sifre degisimi
+            // artik ELDEKI JETONU da iptal ediyor (bkz. AccountManager.ChangePassword).
+            var r = await _accountService.ChangePassword(CurrentCustomerId, dto, CurrentJti, CurrentTokenExpiry);
             return StatusCode((int)r.Item1, r.Item2);
         }
 

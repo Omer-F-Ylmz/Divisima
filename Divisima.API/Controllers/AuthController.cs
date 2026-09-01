@@ -184,7 +184,18 @@ namespace Divisima.API.Controllers
             // yazilmiyordu, yani Logout oturumu sunucu tarafinda IPTAL EDEMIYORDU (E1'de olculdu).
             var refreshToken = Request.Cookies[RefreshCookie];
             var customerId = int.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id) ? id : 0;
-            var r = await _authService.Logout(customerId, refreshToken);
+
+            // GF-1 / K2: SUNULAN access token'in kimligi ve bitisi de gonderilir - cikis artik
+            // yalniz oturumu degil, ELDEKI JETONU da iptal ediyor. (Bu controller
+            // `SecureControllerBase`ten TUREMIYOR, bu yuzden claim'ler burada okunuyor -
+            // ustteki `customerId` satiriyla AYNI kalip.)
+            var jti = User.FindFirst("jti")?.Value;
+            System.DateTime? jtiExpiresAt =
+                long.TryParse(User.FindFirst("exp")?.Value, out var expSaniye)
+                    ? System.DateTimeOffset.FromUnixTimeSeconds(expSaniye).UtcDateTime
+                    : null;
+
+            var r = await _authService.Logout(customerId, refreshToken, jti, jtiExpiresAt);
             OturumCerezleriniSil();
             return StatusCode((int)r.Item1, r.Item2);
         }

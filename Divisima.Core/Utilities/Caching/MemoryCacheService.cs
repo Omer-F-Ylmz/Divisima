@@ -75,6 +75,11 @@ namespace Divisima.Core.Utilities.Caching
             }
         }
 
+        // GF-1 / K2: SALT-OKUMA varlik sorgusu. `TryGetValue` cache'i DEGISTIRMEZ (yalnizca
+        // LRU/erisim muhasebesine dokunur); anahtar yoksa OLUSTURULMAZ. Gerekcesi
+        // ICacheService'te.
+        public Task<bool> ExistsAsync(string key) => Task.FromResult(_cache.TryGetValue(key, out _));
+
         // Aciklayici yorum: ATOMIK set-if-not-exists (lock ile tek-process). check-then-set bolunmez -> race yok.
         public Task<bool> TryAddAsync(string key, TimeSpan ttl)
         {

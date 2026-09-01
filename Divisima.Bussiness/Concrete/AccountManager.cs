@@ -48,11 +48,14 @@ namespace Divisima.Bussiness.Concrete
         private readonly ISecurityEventService _securityEvents;
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICacheService _cache;
+        // GF-1 / K2: sifre degisiminde SUNULAN access token'i iptal etmek icin.
+        private readonly Divisima.Core.Security.JWT.ITokenBlacklist _tokenBlacklist;
 
         public AccountManager(ICustomerDal customerDal, IUserSessionDal userSessionDal, IAddressDal addressDal,
             IStockNotificationRequestDal stockNotificationDal, IPriceDropSubscriptionDal priceDropDal,
             ICustomerDeviceDal deviceDal, IAuditLogDal auditLogDal, ISecurityEventService securityEvents,
-            IUnitOfWork unitOfWork, ICacheService cache)
+            IUnitOfWork unitOfWork, ICacheService cache,
+            Divisima.Core.Security.JWT.ITokenBlacklist tokenBlacklist)
         {
             _customerDal = customerDal;
             _userSessionDal = userSessionDal;
@@ -64,6 +67,7 @@ namespace Divisima.Bussiness.Concrete
             _securityEvents = securityEvents;
             _unitOfWork = unitOfWork;
             _cache = cache;
+            _tokenBlacklist = tokenBlacklist;
         }
 
         public async Task<(HttpStatusCode, Result)> GetSummary(int customerId)
@@ -106,7 +110,8 @@ namespace Divisima.Bussiness.Concrete
             return (HttpStatusCode.OK, new SuccessResult(Messages.ProfileUpdated));
         }
 
-        public async Task<(HttpStatusCode, Result)> ChangePassword(int customerId, ChangePasswordRequestDto dto)
+        public async Task<(HttpStatusCode, Result)> ChangePassword(int customerId, ChangePasswordRequestDto dto,
+            string? jti = null, System.DateTime? jtiExpiresAt = null)
         {
             // A2-FIX (SUPHELI #21): eski kural YALNIZCA ">= 6 karakter" idi - kayit ucunun
             // istedigi karmasikliktan (buyuk/kucuk/rakam) HABERSIZDI. Ayni hesabin sifresini
@@ -133,6 +138,20 @@ namespace Divisima.Bussiness.Concrete
             // Açıklayıcı yorum: Şifre değişince diğer oturumları geçersiz kıl (çalınan token'ı öldür)
             // Tum aktif oturumlari TEK atomik sorgu ile kapat (foreach N+1 yerine - DRY + performans)
             await _userSessionDal.InvalidateAllForCustomerAsync(customerId);
+
+            // ══ GF-1 / K2 (C-1) - ACCESS TOKEN'I DA IPTAL ET ═══════════════════════════════
+            //
+            // Ustteki satir REFRESH tarafini kapatiyordu; ACCESS token'a DOKUNMUYORDU. Yani
+            // "sifremi degistirdim" diyen kullanicinin calinmis access token'i 15 dakikaya
+            // kadar CALISMAYA DEVAM EDIYORDU - `RevokeAsync` uretimde SIFIR yerden cagriliyordu.
+            //
+            // SINIR (durust kayit): yalnizca SUNULAN jeton iptal edilir. Sifre degisimi
+            // MANTIKEN tum cihazlari dusurmelidir, ama diger cihazlarin `jti`leri hicbir yerde
+            // SAKLANMIYOR; tam kapanis `tokens_valid_from` benzeri bir KOLON ister ve bu
+            // dalganin TEK migration'i K3'e ayrildi. Kalan maruziyet: diger cihazlarda en
+            // fazla 15 dk.
+            if (!string.IsNullOrEmpty(jti))
+                await _tokenBlacklist.RevokeAsync(jti, jtiExpiresAt ?? DateTime.UtcNow.AddMinutes(15));
 
             return (HttpStatusCode.OK, new SuccessResult(Messages.PasswordChanged));
         }

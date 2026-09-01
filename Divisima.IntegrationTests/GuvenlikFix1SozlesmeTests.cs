@@ -40,6 +40,16 @@ namespace Divisima.IntegrationTests
             return File.ReadAllText(tam);
         }
 
+        // ══ YORUM SATIRLARINI DUSUR - CAPA KIRLENMESI KORUMASI ════════════════════════════
+        //
+        // Bu turda BIREBIR dusuldu: "kara liste `GetOrSetAsync` KULLANMAMALI" pini, yasakladigi
+        // dizgeyi ACIKLAMA SATIRINDA tasiyan uretim dosyasi yuzunden mutasyondan ONCE kirmizi
+        // verdi. Ayni aile ARSIV-2'de de kayitli ("NEG capa dizesi belgeye YAZILMAZ").
+        // Cozum aciklamayi kirpmak DEGIL - olcumu KODLA sinirlamaktir: aciklama, kusurun
+        // gerekcesini tasidigi icin DEGERLIDIR ve kalmalidir.
+        private static string KodSatirlari(string metin) => string.Join("\n",
+            metin.Split('\n').Where(s => !s.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+
         // Uretim kaynak agacindaki .cs dosyalarinda bir dizgenin GECIS SAYISI.
         private static int UretimdeSay(string dizge)
         {
@@ -189,6 +199,43 @@ namespace Divisima.IntegrationTests
             typeof(GuvenlikFix1SozlesmeTests)
                 .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: false)
                 .Should().BeEmpty("tarama oznitelik TASIMAYAN tipi dogru gormeli");
+        }
+
+        // ── K2 (C-1) KARA LISTE: OKUMA YOLU YAZMAZ ─────────────────────────────────────────
+        //
+        // OLCULEN KUSUR: `IsRevokedAsync` `GetOrSetAsync` ile okuyup anahtara `false` YAZIYORDU;
+        // `RevokeAsync` de ayni `GetOrSetAsync`i kullandigi icin DOLU anahtari EZEMIYORDU.
+        // Yani iptal, yazma tarafi baglansa BILE sessiz no-op olurdu. Bu pin, kusurun
+        // SINIFINI (okuma yolunda cache-aside) geri gelmesini engeller - davranis kaniti
+        // `AccessTokenIptalTests`tedir.
+        [Fact]
+        public void K2_KARA_LISTE_OKUMA_YOLU_CACHE_ASIDE_KULLANMAZ()
+        {
+            // YALNIZ KOD taranir: dosyanin aciklamasi kusurun gerekcesini anlatirken yasakli
+            // dizgeyi ANMAK ZORUNDA ve o anma bir kusur DEGILDIR (bkz. KodSatirlari).
+            var kaynak = KodSatirlari(Oku("Divisima.Core/Security/JWT/CacheTokenBlacklist.cs"));
+
+            // AYIRT EDICILIK: ham metinde dizge GECIYOR (aciklamada), kodda GECMIYOR.
+            // Bu satir suzgecin gercekten calistigini KANITLAR - yoksa "0 bulundu" sonucu
+            // "dosya okunamadi"dan da gelebilirdi.
+            Oku("Divisima.Core/Security/JWT/CacheTokenBlacklist.cs").Should().Contain("GetOrSetAsync",
+                "POZ kontrol: dizge dosyada (aciklamada) GERCEKTEN var - suzgec onu KOD sanmamali");
+
+            kaynak.Should().NotContain("GetOrSetAsync",
+                "kara listenin HICBIR yolu cache-aside kullanmamali: `GetOrSetAsync` okurken YAZAR "
+                + "ve anahtari `false` ile zehirler - iptal o andan sonra ezilemez hale gelir");
+
+            // POZ kontrol: dosya GERCEKTEN okundu ve beklenen primitifler yerinde.
+            kaynak.Should().Contain("ExistsAsync",
+                "okuma yolu SALT-OKUMA primitifini kullanmali");
+            kaynak.Should().Contain("TryAddAsync",
+                "yazma yolu ATOMIK set-if-not-exists kullanmali");
+
+            // Iptalin YAZMA tarafi uretimde GERCEKTEN bagli olmali (once SIFIR cagri vardi).
+            // ANKRAJLI: ciplak `RevokeAsync` ACIKLAMA satirlarinda da geciyor - `_tokenBlacklist.`
+            // oneki yalniz GERCEK cagriyi yakalar (MK-8 dersi).
+            UretimdeSay("_tokenBlacklist.RevokeAsync(").Should().Be(2,
+                "cikis ve sifre degisimi yollarinin IKISI de access token'i iptal etmeli");
         }
 
         // ── K5 (c) HANGFIRE PANOSU ─────────────────────────────────────────────────────────

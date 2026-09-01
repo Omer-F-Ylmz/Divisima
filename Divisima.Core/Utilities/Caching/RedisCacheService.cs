@@ -68,6 +68,15 @@ namespace Divisima.Core.Utilities.Caching
             }
         }
 
+        // GF-1 / K2: SALT-OKUMA varlik sorgusu (Redis EXISTS). Anahtari OLUSTURMAZ, TTL'e
+        // dokunmaz. `TryAddAsync` ile AYNI ham anahtar uzayini kullanir (InstanceName bos)
+        // - yani biri yazip digeri okuyamaz durumu OLUSMAZ. Gerekcesi ICacheService'te.
+        public async Task<bool> ExistsAsync(string key)
+        {
+            var db = _mux.GetDatabase();
+            return await db.KeyExistsAsync(key);
+        }
+
         // Aciklayici yorum: ATOMIK SETNX (SET key val NX) - Redis'in kendi atomik islemi, race YOK.
         // true = eklendi (yoktu); false = zaten vardi. IDistributedCache InstanceName bos oldugundan raw key Remove ile tutarli.
         public async Task<bool> TryAddAsync(string key, TimeSpan ttl)
