@@ -1813,17 +1813,26 @@ namespace Divisima.IntegrationTests
                 "e-posta bu dalgada DEGISTIRILMEZ - govdeye KONULAMAZ (DTO da tasimiyor)");
 
             // (5) ISTEMCIDE DOGRULAMA KOPYASI ACILMADI (merkez N2): "ad bos" KARARI
-            // SUNUCUNUNDUR. v_name YALNIZ hata cevirisinde gecmeli, yani cagriDAN SONRA.
-            var iCagri = bSik.IndexOf("api.account.updateProfile(", StringComparison.Ordinal);
-            var iAdHata = bSik.IndexOf("v_name", StringComparison.Ordinal);
-            iCagri.Should().BeGreaterThan(-1, "cagri bulunmali");
-            iAdHata.Should().BeGreaterThan(iCagri,
-                "v_name yalniz SUNUCU 400'unun cevirisi olmali - istemci ON-DOGRULAMA yapmamali");
+            // SUNUCUNUNDUR.
+            // MANTIK-FIX-4 / K5 - BILINCLI PREMIS DEGISIKLIGI: esleme `wireAccount`
+            // kapsamindan IIFE UST DUZEYINE tasindi (misafir checkout'un da erisebilmesi
+            // icin), dolayisiyla `v_name` artik BU GOVDEDE degil MERKEZDEKI capa
+            // tablosunda yasiyor. OLCULEN SOZLESME AYNI - "istemci on-dogrulama yapmaz" -
+            // yalniz olcum YERI degisti: eskiden "cagridan SONRA gecmeli", simdi "bu
+            // govdede HIC gecmemeli, merkezde GECMELI".
+            bSik.IndexOf("api.account.updateProfile(", StringComparison.Ordinal)
+                .Should().BeGreaterThan(-1, "cagri bulunmali");
+            bSik.Should().NotContain("v_name",
+                "ad kontrolu istemcide ON-DOGRULAMA olarak yapilmamali - karar SUNUCUNUN");
+            Bosluksuz(YorumlariAyikla(Oku("frontend/api-bridge.js")))
+                .Should().Contain(Bosluksuz("\"ad bos olamaz\", \"v_name\""),
+                    "v_name esleme MERKEZINDEKI capa tablosunda tanimli olmali");
 
             // (6) CIFT-ANLAM KIRICI: "her hataya notr mesaj" uygulamasi bu pini GECEMEZ -
-            // 400 ayrimi da, notr dal da AYRI AYRI bulunmali.
+            // notr dal da, merkeze bagli esleme de AYRI AYRI bulunmali.
             bSik.Should().Contain("b_profil_guncellenemedi", "notr hata dali bulunmali");
-            bSik.Should().Contain("e.status===400", "400 ayrimi MAKINE-OKUNUR sinyalle yapilmali");
+            bSik.Should().Contain("hataAnahtari(e)",
+                "esleme TEK MERKEZDEN gelmeli - satir ici kopya ACILMAMALI");
 
             // (7) VAKUM KIRICILAR: sokum "fonksiyonu sil" DEGIL - govde YERINDE durmali,
             // ve okunan bloklar bos olmamali.
@@ -1953,6 +1962,77 @@ namespace Divisima.IntegrationTests
             // Anahtar uc dilde de tanimli olmali (T + AR birer; T ciftinin ikinci elemani EN).
             AnkrajliSayim(Index, "b_siparis_toplami").Should().Be(2,
                 "yeni anahtar T ve AR sozluklerinde BIRER kez tanimli olmali");
+        }
+
+        // ── P-V5 (MANTIK-FIX-4 / K5): SUNUCU HATASINI CEVIREN TEK MERKEZ ────────────────
+        // Ayni katlama zinciri IKI YERDE yaziliydi (`sifreHatasiniCevir` + wireAccount
+        // icindeki ADSIZ kopya) ve ikisi de `wireAccount()` KAPSAMINDA hapisti; misafir
+        // checkout onlara ULASAMIYOR ve sunucunun HAM TURKCE metnini basiyordu.
+        // Bu pin (a) merkezin TEK oldugunu, (b) 500/429 kararlarinin capa aramasindan ONCE
+        // verildigini, (c) bilinmeyen mesajda HAM BASIM statukosunun korundugunu tutar.
+        // DURUST ETIKET: KAYNAK SOZLESMESI pinidir. Davranis kaniti muhurdeki uc dilli
+        // temsilci-hata olcumu ve bilinmeyen-mesaj simulasyonudur.
+        [Fact]
+        public void KAYNAK_SOZLESMESI_HataEslemesi_TEK_MERKEZDE_ve_500_429_CAPASIZ()
+        {
+            var b = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+
+            // (1) KATLAMA ZINCIRI TAM 1 KEZ - iki eski kopya SOKULMUS olmali.
+            var zincirSayi = Regex.Matches(b, Regex.Escape("[şŞ]")).Count;
+            zincirSayi.Should().Be(1,
+                "Turkce harf katlama zinciri TEK yerde olmali - ayni kuralin ikinci kopyasi "
+                + "bu depoda defalarca bedeli odenmis bir siniftir");
+            b.Should().NotContain("function sifreHatasiniCevir",
+                "kapsam hapsindeki eski yardimci SOKULMUS olmali");
+
+            // (2) MERKEZ, `ceviri` ile AYNI DUZEYDE (IIFE ust duzeyi) tanimli olmali:
+            // wireAccount govdesinin ICINDE olsaydi misafir checkout yine ULASAMAZDI.
+            var iCeviri = b.IndexOf("function ceviri(", StringComparison.Ordinal);
+            var iMerkez = b.IndexOf("function hataAnahtari(", StringComparison.Ordinal);
+            var iWire = b.IndexOf("function wireAccount(", StringComparison.Ordinal);
+            iCeviri.Should().BeGreaterThan(-1, "ceviri() bulunmali");
+            iMerkez.Should().BeGreaterThan(-1, "esleme merkezi bulunmali");
+            iWire.Should().BeGreaterThan(-1, "wireAccount bulunmali");
+            iMerkez.Should().BeLessThan(iWire,
+                "merkez wireAccount'tan ONCE, yani onun kapsami DISINDA tanimlanmali");
+
+            var merkez = FonksiyonGovdesi(b, "function hataAnahtari(e)");
+
+            // (3) 500 ve 429 KARARLARI CAPA DONGUSUNDEN ONCE. 500 yolu RFC 7807 doner ve
+            // `message` alani YOKTUR - orada capa aramak YAPISAL OLARAK bosunadir.
+            var i500 = merkez.IndexOf("500", StringComparison.Ordinal);
+            var i429 = merkez.IndexOf("429", StringComparison.Ordinal);
+            var iDongu = merkez.IndexOf("HATA_CAPALARI.length", StringComparison.Ordinal);
+            i500.Should().BeGreaterThan(-1, "500+ dali bulunmali");
+            i429.Should().BeGreaterThan(-1, "429 dali bulunmali");
+            iDongu.Should().BeGreaterThan(-1, "capa dongusu bulunmali");
+            i500.Should().BeLessThan(iDongu, "500 karari capa aramasindan ONCE verilmeli");
+            i429.Should().BeLessThan(iDongu, "429 karari capa aramasindan ONCE verilmeli");
+
+            // (4) 429 SEBEP IDDIASIZ: uc ayri kaynaktan gelir (guard, Redis rate-limit,
+            // yerlesik limiter), bu yuzden "cok fazla acik siparisin var" gibi bir sebep
+            // ATFEDILEMEZ.
+            merkez.Should().Contain("h_rate_limit", "429 icin notr anahtar verilmeli");
+            AnkrajliSayim(Index, "h_rate_limit").Should().Be(2,
+                "notr 429 anahtari T ve AR sozluklerinde BIRER kez tanimli olmali");
+
+            // (5) VAKUM KIRICI: capa tablosu GERCEKTEN dolu olmali - bos bir tablo
+            // "merkez tek" iddiasini bedava dogru yapardi.
+            var tablo = b.Substring(b.IndexOf("var HATA_CAPALARI", StringComparison.Ordinal));
+            tablo = tablo.Substring(0, tablo.IndexOf("];", StringComparison.Ordinal));
+            Regex.Matches(tablo, Regex.Escape("\", \"")).Count.Should().BeGreaterThan(20,
+                "capa tablosu C listesinin bilinen kumesini tasimali");
+
+            // (6) DIYAKRITIKSIZ VARYANT: sunucunun kendi metinlerinden en az biri
+            // (Messages.cs "Kapida odeme limiti asildi") DIYAKRITIKSIZ yazilmis. Capa
+            // katlanmis bicimde tutuldugu icin iki yazim da AYNI sonucu verir.
+            tablo.Should().Contain("kapida odeme limiti asildi",
+                "diyakritiksiz yazilan sunucu metni de capa kumesinde olmali");
+
+            // (7) BILINMEYEN MESAJDA HAM BASIM STATUKO: misafir yolunda `e.message`
+            // yedegi DURMALI - uydurma notr metin, sunucunun somut sebebinin YERINE GECMEZ.
+            Bosluksuz(b).Should().Contain(Bosluksuz("_ha ? ceviri(_ha) : (e.message"),
+                "bilinen hatada ceviri, bilinmeyende HAM metin basilmali");
         }
     }
 }

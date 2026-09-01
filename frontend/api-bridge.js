@@ -103,6 +103,89 @@
     return yedek !== undefined ? yedek : anahtar;
   }
 
+  // ── MANTIK-FIX-4 / K5: SUNUCU HATASINI CEVIREN TEK MERKEZ ─────────────────────
+  // OLCULEN ONCE-DURUM: ayni katlama zinciri (6 replace + toLowerCase) IKI YERDE
+  // yaziliydi - `sifreHatasiniCevir` ve wireAccount icindeki ADSIZ kopya - ve ikisi de
+  // `wireAccount()` KAPSAMINDA hapisti, yani misafir checkout onlara ULASAMIYORDU.
+  // Misafir yolu bu yuzden sunucunun HAM TURKCE metnini basiyordu (13 temsilci mesajin
+  // 13'unde de sozluk karsiligi YOK): EN/AR kullanici Turkce hata goruyordu.
+  // BURADA olmasinin sebebi KAPSAM: `ceviri()` ile ayni duzeyde oldugu icin misafir
+  // checkout, wireAccount ve 24 ham-basim sitesinin HEPSINDEN erisilebilir. Kopya
+  // ACMIYOR, mevcut IKI kopyayi YUTUYOR (net 2 -> 1).
+  // ELENEN ALTERNATIF: api-client._parse - orada `ceviri()` ve sozluk YOK; oraya
+  // konsaydi kopya 2 -> 3 OLURDU.
+  //
+  // MAKINE-OKUNUR SINYAL YOK (merkez N2): ele alinan HER hata
+  // {"success":false,"message":"<serbest TR metin>"} zarfini donuyor - hata kodu, tip
+  // ya da alan adi YOK. Ayirt edici tek makine-okunur sinyal HTTP DURUM KODU ve TEK
+  // BASINA YETMEZ (400 -> 20 farkli sebep). Bu yuzden capalar HAM YANITTAN kopyalandi.
+  // CIFT BICIM: metin once Turkce harfler katlanip kucultuluyor, boylece diyakritikli
+  // ve ASCII yazim AYNI sonucu verir - sunucunun kendi metinlerinden en az biri
+  // (Messages.cs "Kapida odeme limiti asildi") DIYAKRITIKSIZ yazilmis durumda.
+  // KIRILGANLIK BILINCLI: sunucu metni degisirse esleme duser ve cagiran kendi notr
+  // varsayilanina (ya da ham metne) duser - yanlis degil, yalnizca daha az yardimci.
+  // Kalici cozum bir HATA KODU alanidir; sunucu yanit sozlesmesi bu dalgada
+  // DEGISTIRILMEDI (devir: hata-kodu birlestirme).
+  function hataMetniKatla(mesaj) {
+    return String(mesaj || "")
+      .replace(/[şŞ]/g, "s").replace(/[ıİ]/g, "i").replace(/[ğĞ]/g, "g")
+      .replace(/[üÜ]/g, "u").replace(/[öÖ]/g, "o").replace(/[çÇ]/g, "c")
+      .toLowerCase();
+  }
+
+  // Capa -> sozluk anahtari. SIRA ONEMLI: daha OZEL capa daha genel olandan ONCE.
+  var HATA_CAPALARI = [
+    ["bu idempotency-key farkli", "h_idem_govde"],
+    ["bu istek isleniyor", "h_idem_isleniyor"],
+    ["siparis isleniyor", "h_siparis_isleniyor"],
+    ["non-empty request body", "h_bos_govde"],
+    ["invalid start of a property name", "h_bozuk_json"],
+    ["field is required", "h_eksik_alan"],
+    ["karakterden kucuk veya esit olmalidir", "h_alan_uzun"],
+    ["telefon bos olamaz", "v_phone_empty"],
+    ["gecerli bir telefon girin", "v_phone"],
+    ["gecerli telefon giriniz", "v_phone"],
+    ["sehir bos olamaz", "v_city"],
+    ["ilce bos olamaz", "v_district"],
+    ["acik adres bos olamaz", "v_address"],
+    ["gecersiz e-posta adresi", "v_email"],
+    ["ad bos olamaz", "v_name"],
+    ["sepetiniz bos", "h_sepet_bos"],
+    ["yalnizca kapida odeme", "h_yalniz_cod"],
+    ["bu e-posta kayitli", "h_eposta_kayitli"],
+    ["gecersiz kupon kodu", "h_kupon_gecersiz"],
+    ["kuponun suresi dolmus", "h_kupon_suresi"],
+    ["minimum sepet tutarina", "h_kupon_min"],
+    ["kullanim limitine ulasmis", "h_kupon_limit"],
+    ["kullanma hakkini doldurdun", "h_kupon_kisi"],
+    ["sadece ilk sipariste", "h_kupon_ilk"],
+    ["yetersiz stok", "h_stok"],
+    ["urun bulunamadi", "h_urun_yok"],
+    ["siparis adedi 1-100", "h_adet"],
+    ["gecerli bir beden", "h_beden"],
+    ["kapida odeme limiti asildi", "h_cod_limit"],
+    ["mevcut sifre", "b_mevcut_sifre_hatali"],
+    ["sifre en az", "b_sifre_kurali"]
+  ];
+
+  // Bilinen bir hataysa SOZLUK ANAHTARINI, degilse null doner. Cagiran kendi
+  // varsayilanina ya da ham metne duser - bilinmeyen mesajlarda HAM BASIM STATUKO.
+  function hataAnahtari(e) {
+    var kod = e && e.status;
+    // 500+ : yakalanmayan istisna RFC 7807 zarfi doner ve `message` alani YOKTUR.
+    // Capa aramak burada YAPISAL OLARAK bosuna; cagiran notr varsayilanina duser.
+    if (kod >= 500) return null;
+    // 429 UC AYRI KAYNAKTAN gelir (cop-misafir guard'i, Redis rate-limit, yerlesik
+    // limiter - sonuncusunun GOVDESI BOS). "Cok fazla acik siparisin var" gibi bir
+    // SEBEP IDDIASI rate limit durumunda YANLIS olurdu; mesaj sebep iddiasiz kalir.
+    if (kod === 429) return "h_rate_limit";
+    var s = hataMetniKatla(e && e.message);
+    if (!s) return null;
+    for (var i = 0; i < HATA_CAPALARI.length; i++)
+      if (s.indexOf(HATA_CAPALARI[i][0]) >= 0) return HATA_CAPALARI[i][1];
+    return null;
+  }
+
   // Zarf toleransı: /product/filter "items/total_count" (küçük harf) döner,
   // /search/products ise PagedResult<T> -> camelCase "items/totalCount". İkisi de kabul.
   function pageItems(res) {
@@ -1719,7 +1802,14 @@
     } catch (e) {
       // Uc "e-posta kayitli" (409) ya da "yalniz kapida odeme" (400) donebilir - ikisi de
       // KULLANICIYA GOSTERILIR; sessizce baska bir yola sapmak yanlis olurdu.
-      er.textContent = e.message || ceviri("b_siparis_olusturulamadi");
+      // MANTIK-FIX-4 / K5: bu satir sunucunun HAM TURKCE metnini basiyordu, yani EN/AR
+      // kullanici burada Turkce hata goruyordu (13 temsilci mesajin 13'unde de sozluk
+      // karsiligi YOKTU). Bilinen bir hataysa artik CEVIRILI gosterilir.
+      // BILINMEYEN MESAJDA HAM BASIM STATUKO: uydurma bir notr metin, sunucunun
+      // soyledigi somut sebebin YERINE GECMEZ - musteri "neden olmadi" bilgisini
+      // kaybetmemeli. Bilinmeyenlerin sayimi rapora yazildi.
+      var _ha = hataAnahtari(e);
+      er.textContent = _ha ? ceviri(_ha) : (e.message || ceviri("b_siparis_olusturulamadi"));
       if (btn) { btn.disabled = false; btn.textContent = ceviri("mg_submit"); }
     }
   }
@@ -3248,15 +3338,9 @@
               // notr "guncellenemedi" mesajini gorur - yanlis degil, yalnizca daha az
               // yardimci. Kalici cozum bir HATA KODU alanidir; sunucu yanit sozlesmesi
               // bu dalgada DEGISTIRILMEDI (devir: hata-kodu birlestirme).
-              var anahtar = "b_profil_guncellenemedi";
-              if (e && e.status === 400) {
-                var s = String((e && e.message) || "")
-                  .replace(/[şŞ]/g, "s").replace(/[ıİ]/g, "i").replace(/[ğĞ]/g, "g")
-                  .replace(/[üÜ]/g, "u").replace(/[öÖ]/g, "o").replace(/[çÇ]/g, "c")
-                  .toLowerCase();
-                if (s.indexOf("ad bos olamaz") >= 0) anahtar = "v_name";
-              }
-              toast(ceviri(anahtar), "err");
+              // MANTIK-FIX-4 / K5: satir ici katlama kopyasi SOKULDU; esleme artik
+              // IIFE ust duzeyindeki TEK merkezden (hataAnahtari) geliyor.
+              toast(ceviri(hataAnahtari(e) || "b_profil_guncellenemedi"), "err");
             })
             .then(function () { ps.disabled = false; });
         };
@@ -3271,22 +3355,9 @@
       // KARARI YALNIZ SUNUCUNUNDUR. Buradaki iki kontrol politika DEGILDIR -
       // "iki alan da dolu mu" ve "iki yeni sifre eslesiyor mu"; ikincisini sunucu
       // zaten GOREMEZ (dogrulama alani ona hic gitmez).
-      function sifreHatasiniCevir(mesaj) {
-        // HATA ESLEME (merkez N2): sunucu IKI durumu da 400 + SERBEST TR METIN ile
-        // donduruyor, MAKINE-OKUNUR sinyal YOK. Capa HAM YANITTAN kopyalandi:
-        //   yanlis mevcut sifre -> {"success":false,"message":"Mevcut şifre hatalı."}
-        //   politika reddi      -> {"success":false,"message":"Şifre en az 8 karakter olmalı."}
-        // CIFT BICIM: metin once Turkce harfler katlanip kucultuluyor, boylece
-        // diyakritikli ve ASCII yazim AYNI sonucu verir (ASCII/Turkce yuklem tuzagi).
-        // KIRILGANLIK BILINCLI: sunucu metni degisirse esleme duser ve kullanici
-        // politika mesajini gorur - yanlis ama ZARARSIZ taraf. Kalici cozum bir HATA
-        // KODU alanidir; sunucu yanit sozlesmesi bu dalgada DEGISTIRILMEDI (devir).
-        var s = String(mesaj || "")
-          .replace(/[şŞ]/g, "s").replace(/[ıİ]/g, "i").replace(/[ğĞ]/g, "g")
-          .replace(/[üÜ]/g, "u").replace(/[öÖ]/g, "o").replace(/[çÇ]/g, "c")
-          .toLowerCase();
-        return s.indexOf("mevcut sifre") >= 0 ? "b_mevcut_sifre_hatali" : "b_sifre_kurali";
-      }
+      // MANTIK-FIX-4 / K5: `sifreHatasiniCevir` SOKULDU. Ayni katlama zinciri IIFE ust
+      // duzeyindeki `hataAnahtari` merkezinde yasiyor; capalari ("mevcut sifre",
+      // "sifre en az") oraya TASINDI ve kapsam MISAFIR CHECKOUT'a da acildi.
 
       var pps = document.getElementById("pfPassSave");
       if (pps) pps.onclick = function () {
@@ -3302,11 +3373,9 @@
             toast(ceviri("b_sifre_guncellendi"), "ok");
           })
           .catch(function (e) {
-            // 400 disi (ag/5xx) durumda sebep BILINMIYOR - notr mesaj verilir.
-            var anahtar = (e && e.status === 400)
-              ? sifreHatasiniCevir(e && e.message)
-              : "b_sifre_guncellenemedi";
-            toast(ceviri(anahtar), "err");
+            // Bilinen bir hataysa merkez anahtari verir; degilse (ag/5xx/bilinmeyen
+            // metin) notr varsayilan. 500 ve 429 kararlari merkezde.
+            toast(ceviri(hataAnahtari(e) || "b_sifre_guncellenemedi"), "err");
           })
           .finally(function () { pps.disabled = false; });
       };
