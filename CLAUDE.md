@@ -742,6 +742,19 @@ kontrol eder: `awk '/^kaynak: /{ if (p2 !~ /^#/) n++ } { p2=p1; p1=$0 } END{prin
 POZ (C2/2474135) 4 · NEG (`^ZZZkaynak:`) 0 · C4 sonrasi 0.
 kaynak: ARSIV-1 denetim turu, muhurde 41·ARSIV-1 · CC HATALARI 4
 
+## Iki ders — ARSIV-2 (43·ARSIV-2 · CC HATALARI)
+
+**Capa POZ olcumu "kac" yaninda "NEREDE" sorar — sayim dogru/konum yanlis (AV-1 1.12
+isaretcisi).** Gerekce OLCULDU: AV-1'de "B2 sonuna" konmasi istenen isaretci SUREC'in
+icine dustu; dogrulama `grep -c ... = 1` ile yetindigi icin BIR TUR boyunca gorunmedi.
+ARSIV-2'de satir numarasi karsilastirmasiyla (stub 263 < isaretci 265 < sonraki baslik 267)
+POZITIF dogrulandi.
+
+**NEG capa dizesi belgeye yazilmaz; NEG kontrolu raporda anilir, CLAUDE.md'ye girmez
+(MK-99 metinlesmesi).** Gerekce OLCULDU: MK-10 blogu kendi NEG kontrol cumlesini metin
+olarak tasidigi icin `MK-99` taramasi 0 yerine 1 dondu ve capa KIRLENDI; temiz capa
+`MK-77`'ye tasindi.
+
 ## Iki ders — GUVENLIK-AV-1 (42·GUVENLIK-AV-1 · CC HATALARI)
 
 **BILINEN listesi B8 fragmanlarindan KURULMAZ; 00a/00b tam metni okunur (AV-1 hatasi 2).**
@@ -899,6 +912,8 @@ i18n. **64 bozuk `invoice_items` satiri D-YAN'a** (veri temizligi, fix degil).
 
 ARSIV-1 KAPANDI c6721b7 · GUVENLIK-AV-1 KAPANDI (zemin c6721b7 · muhur
 `docs/muhur/42-guvenlik-av-1.md`)
+ARSIV-2 KAPANDI (kesif olcumu GUVENLIK-FIX kapisinda) · zemin 4c29f32 · muhur
+`docs/muhur/43-arsiv-2.md`
 
 ## Devir ID'leri
 
