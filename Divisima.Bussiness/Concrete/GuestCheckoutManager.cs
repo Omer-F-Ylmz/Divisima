@@ -80,6 +80,57 @@ namespace Divisima.Bussiness.Concrete
 
             var email = dto.guest_email.Trim().ToLowerInvariant();
 
+            // ══ GF-1 / K1 (DV1) - REPLAY GUARD'I: HER OKUMA-YAZMADAN ONCE ══════════════════
+            //
+            // OLCULEN ZARAR: `request_id` dedup'i YALNIZ `OrderManager.PlaceOrder`in ICINDEYDI
+            // (:122-132) ve oraya ancak `:173` musteri + `:190` adres + `:208` dogrulama maili
+            // YAZILDIKTAN SONRA varilıyordu. Replay dali `Success=TRUE` donunce telafi (`:263`)
+            // ATESLEMIYOR, o UC YAZMA YETIM KALIYORDU - ve o e-posta bir daha misafir
+            // checkout'a giremiyordu (kalici 409).
+            //
+            // ULASILABILIRLIK OLCULDU: dedup dalina ancak 409 kapisi GECILEREK varilir, yani
+            // e-posta KAYITLI DEGILKEN - pratikte "ayni request_id, FARKLI e-posta". Istemci
+            // anahtari yalniz (a) odeme sonuc ekrani basariyla render edilirse ya da (b) SEPET
+            // IMZASI degisirse yeniliyor (`api-bridge.js:2348`, `:2150-2152`); e-posta
+            // degistirmek imzayi DEGISTIRMEZ. Yaniti gorememis bir kullanicinin e-postasini
+            // duzeltip tekrar denemesi bu yolu BIREBIR uretir.
+            //
+            // SAHIPLIK YUKLEMI ZORUNLU (SDP 1.12.4 KANAL-2): yalniz "request_id daha once
+            // kullanilmis mi" sorulsaydi, BASKASININ anahtarini gonderen istege o siparisin
+            // `order_number`i DONERDI. `orders.request_id` unique index'i GLOBAL (kapsamlama
+            // migration olurdu - merkez REDDETTI), uc de ANONIM; bu yuzden karar SAHIPLIKLE
+            // veriliyor: e-posta eslesirse idempotent 200, eslesmezse GENEL 400 (varlik da
+            // `order_number` da SIZMAZ).
+            //
+            // ORDINAL karsilastirma - KANONIK KUTU DEGIL (CLAUDE.md 6c): hesap kimligi saklanan
+            // e-postadir; `kurban+a@x` ile `kurban@x` AYRI hesaplardir ve :84'teki 409 kapisi da
+            // ORDINAL esitlikle karar veriyor. Kanonik kutu YALNIZ kotuye kullanim SAYACININ
+            // eksenidir (bkz. PostaKutusu dosyasinin basi) - burada kullanilsaydi iki AYRI
+            // hesabin siparisleri birbirinin replay'i sayilirdi.
+            if (!string.IsNullOrWhiteSpace(dto.request_id))
+            {
+                var oncekiler = await _orderDal.GetListNoTrackingAsync(o => o.request_id == dto.request_id);
+                var onceki = oncekiler.FirstOrDefault();
+                if (onceki != null)
+                {
+                    var sahipler = await _customerDal.GetListNoTrackingAsync(c => c.id == onceki.customer_id);
+                    var sahip = sahipler.FirstOrDefault();
+                    if (sahip != null && string.Equals(sahip.email, email, StringComparison.Ordinal))
+                        return (HttpStatusCode.OK, new SuccessDataResult<OrderPlaceResponseDto>(
+                            new OrderPlaceResponseDto
+                            {
+                                id = onceki.id,
+                                order_number = onceki.order_number,
+                                replayed = true
+                            },
+                            Messages.OrderAlreadyPlaced));
+
+                    _logger.LogWarning("MISAFIR REPLAY GUARD'I: request_id BASKA bir siparise ait "
+                        + "(siparis {OrderId}) - istek reddedildi, hicbir kayit yazilmadi.", onceki.id);
+                    return (HttpStatusCode.BadRequest, new ErrorResult(Messages.OrderPlaceFailed));
+                }
+            }
+
             // Açıklayıcı yorum: E-posta zaten kayıtlıysa misafir checkout'a izin verme - giriş yapsın (hesap ele geçirme önleme)
             var existing = await _customerDal.GetAsync(c => c.email == email);
             if (existing != null)
@@ -260,9 +311,44 @@ namespace Divisima.Bussiness.Concrete
             //     icin OLU JETONLU bir dogrulama maili gidebilir - kafa karistirici, ama
             //     e-postanin KALICI kilitlenmesinden kiyasla cok daha hafif.
             var (siparisDurum, siparisSonuc) = await _orderService.PlaceOrder(orderDto);
-            if (siparisSonuc == null || !siparisSonuc.Success)
+
+            // ══ GF-1 / K1 - TELAFI KOSULU ARTIK "BU CAGRI SIPARIS YAZDI MI" ═══════════════
+            //
+            // ESKI KOSUL `!siparisSonuc.Success` IDI ve REPLAY dallarini GORMUYORDU: replay
+            // `Success=TRUE` donuyor, telafi ATESLEMIYOR, yukarida yazilan musteri+adres YETIM
+            // kaliyordu. Bastaki guard ARDISIK replay'i kapatir ama ESZAMANLI yarisi KAPATMAZ -
+            // iki istek de guard'i gecer, biri unique-index yarisini KAYBEDER ve
+            // `OrderManager.cs:478-485`ten `replayed=true` ile doner. O dal icin telafi SART.
+            var replayYaniti = siparisSonuc as SuccessDataResult<OrderPlaceResponseDto>;
+            var replayMi = replayYaniti?.Data?.replayed ?? false;
+            if (siparisSonuc == null || !siparisSonuc.Success || replayMi)
                 await MisafirKayitlariniTelafiSilAsync(guest, address);
+
+            // Yaris-kaybeden dalda SAHIPLIK bastaki guard'la AYNI kuralla yeniden dogrulanir:
+            // kazanan siparis BASKA bir e-postaya aitse `order_number` DONDURULMEZ. Guard bu
+            // dali goremez (yaris ondan SONRA kaybedilir), dolayisiyla kural burada TEKRAR
+            // uygulanir - ayni yuklemi iki yerde SORMAK, sizintiyi acik birakmaktan iyidir.
+            if (replayMi && !await SiparisBuEpostayaMiAitAsync(replayYaniti.Data.id, email))
+            {
+                _logger.LogWarning("MISAFIR REPLAY YARISI: kazanan siparis {OrderId} BASKA bir "
+                    + "e-postaya ait - govde dondurulmedi, telafi uygulandi.", replayYaniti.Data.id);
+                return (HttpStatusCode.BadRequest, new ErrorResult(Messages.OrderPlaceFailed));
+            }
+
             return (siparisDurum, siparisSonuc);
+        }
+
+        // GF-1 / K1: bastaki replay guard'inin sahiplik yukleminin AYNISI - yaris dalinda
+        // yeniden sorulur. Siparis ya da musteri bulunamazsa GUVENLI TARAF secilir (false).
+        private async Task<bool> SiparisBuEpostayaMiAitAsync(int siparisId, string email)
+        {
+            var siparisler = await _orderDal.GetListNoTrackingAsync(o => o.id == siparisId);
+            var siparis = siparisler.FirstOrDefault();
+            if (siparis == null) return false;
+
+            var sahipler = await _customerDal.GetListNoTrackingAsync(c => c.id == siparis.customer_id);
+            var sahip = sahipler.FirstOrDefault();
+            return sahip != null && string.Equals(sahip.email, email, StringComparison.Ordinal);
         }
 
         // K4: yalniz PlaceOrder BASARISIZ dondugunde cagrilir. Nesneler cagiranin elinde -
@@ -272,8 +358,27 @@ namespace Divisima.Bussiness.Concrete
         {
             try
             {
-                await _addressDal.DeleteAsync(address);
-                await _customerDal.DeleteAsync(guest);
+                // ══ GF-1 / K1 - TRACKER'I ATLAYAN SILME (OLCULEN ZORUNLULUK) ═══════════════
+                //
+                // ESKI HAL `DeleteAsync(entity)` idi ve o `Context.SaveChangesAsync()` cagirir.
+                // YARIS DALINDA BU CALISMAZ, OLCULDU: `PlaceOrder` `orders.request_id` tekil
+                // indeksini ihlal edip `DbUpdateException` yiyor, `UnitOfWork.RollbackAsync`
+                // (UnitOfWork.cs:36-44) DB transaction'ini geri aliyor ama **ChangeTracker'i
+                // TEMIZLEMIYOR** - basarisiz `Order` hala `Added` durumda duruyor. Ayni scope'ta
+                // (Autofac InstancePerLifetimeScope, UnitOfWork.cs:8-9) paylasılan DbContext
+                // uzerinde telafinin `SaveChanges`i o insert'i YENIDEN deniyor, AYNI ihlalle
+                // patliyor ve telafi asagidaki catch'e dusup SESSIZCE hicbir sey silmiyordu.
+                // OLCULEN ONCE-DURUM: musteri=2 adres=2 siparis=1 (yani IKI yetim satir).
+                //
+                // `DeleteWhereAsync` -> `ExecuteDeleteAsync` (EfEntityRepositoryBase.cs:107-108)
+                // dogrudan SQL DELETE uretir, change-tracker'a ve `SaveChanges`e HIC DOKUNMAZ -
+                // kirlenmis tracker bu yolu ENGELLEYEMEZ. Ortamda acik transaction YOKTUR
+                // (rollback onu dispose edip null'ladi), dolayisiyla silme ANINDA kalicidir.
+                //
+                // "ID'LER ELDE" KURALI KORUNDU (K4'un siniri): yuklem `id` uzerinden - e-posta
+                // ile ARAMA YAPILMIYOR. FK sirasi da AYNEN korundu: ONCE adres, SONRA musteri.
+                await _addressDal.DeleteWhereAsync(a => a.id == address.id);
+                await _customerDal.DeleteWhereAsync(c => c.id == guest.id);
             }
             catch (Exception ex)
             {

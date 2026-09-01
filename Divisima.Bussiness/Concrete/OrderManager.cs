@@ -126,8 +126,16 @@ namespace Divisima.Bussiness.Concrete
                     // MFIX-B / K3: UC DONUS SITESININ UCU DE AYNI DAR DTO'yu doner. Bu dal
                     // (request_id replay) canlida EN COK gezilen yoldur - sekli digerlerinden
                     // AYIRMAK, istemcide "bazen nesne bazen sayi" belirsizligi yaratirdi.
+                    // GF-1 / K1: `replayed = true` - bu cagri YENI siparis YAZMADI. Cagiran
+                    // (misafir akisi) kendi on-yazdigi satirlari bu bayraga bakarak telafi eder;
+                    // `Success` bu soruyu YANITLAMIYORDU (bkz. OrderPlaceResponseDto).
                     return (HttpStatusCode.OK, new SuccessDataResult<OrderPlaceResponseDto>(
-                        new OrderPlaceResponseDto { id = duplicate.id, order_number = duplicate.order_number },
+                        new OrderPlaceResponseDto
+                        {
+                            id = duplicate.id,
+                            order_number = duplicate.order_number,
+                            replayed = true
+                        },
                         Messages.OrderAlreadyPlaced));
             }
 
@@ -479,8 +487,18 @@ namespace Divisima.Bussiness.Concrete
                 {
                     var winner = await _orderDal.GetAsync(o => o.request_id == dto.request_id);
                     if (winner != null)
+                        // GF-1 / K1: YARISI KAYBEDEN DAL DA `replayed = true` doner. Eskiden bu
+                        // dal `Success=TRUE` donduğu icin misafir akisinin telafisi ATESLEMIYOR ve
+                        // kaybeden istegin YAZDIGI musteri+adres YETIM kaliyordu - K1'in on-kontrolu
+                        // bu dali KAPATMAZ (on-kontrol gecer, yaris SONRA kaybedilir), o yuzden
+                        // bayrak BURADA da sart.
                         return (HttpStatusCode.OK, new SuccessDataResult<OrderPlaceResponseDto>(
-                            new OrderPlaceResponseDto { id = winner.id, order_number = winner.order_number },
+                            new OrderPlaceResponseDto
+                            {
+                                id = winner.id,
+                                order_number = winner.order_number,
+                                replayed = true
+                            },
                             Messages.OrderAlreadyPlaced));
                 }
                 return (HttpStatusCode.InternalServerError, new ErrorResult(Messages.OrderPlaceFailed));

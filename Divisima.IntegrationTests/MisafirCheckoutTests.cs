@@ -792,6 +792,166 @@ namespace Divisima.IntegrationTests
             }
         }
 
+        // ── GF-1 / K1 (DV1) - REPLAY GUARD'I: UC BACAK ──────────────────────────────────
+        //
+        // ONCE-DURUM (olculdu, ed1bcfe): `request_id` dedup'i YALNIZ OrderManager'in icindeydi
+        // ve oraya musteri+adres+dogrulama maili YAZILDIKTAN SONRA varilıyordu; replay dali
+        // `Success=TRUE` dondugu icin telafi ATESLEMIYOR, o satirlar YETIM kaliyordu.
+
+        // (i) ARDISIK: ayni request_id iki kez -> ikincisi idempotent 200, YENI KAYIT YOK.
+        [Fact]
+        public async Task K1_AYNI_REQUESTID_ARDISIK_IDEMPOTENT_200_DONER_ve_YENI_KAYIT_YAZILMAZ()
+        {
+            if (Skipped()) return;
+            var (urunId, beden) = await UrunHazirlaAsync();
+            var eposta = $"gf1a-{Guid.NewGuid():N}@example.com";
+            var rid = Guid.NewGuid().ToString();
+
+            var ilk = await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesiRid(eposta, urunId, beden, rid));
+            var ilkGovde = await ilk.Content.ReadAsStringAsync();
+            ilk.StatusCode.Should().Be(HttpStatusCode.Created, $"on kosul: ilk siparis olusmali. Govde: {ilkGovde}");
+            var ilkNo = (await ilk.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>())
+                .GetProperty("data").GetProperty("order_number").GetString();
+
+            var musteriOnce = await MusteriSayisiAsync(eposta);
+            var siparisOnce = await SiparisSayisiAsync(eposta);
+            musteriOnce.Should().Be(1, "on kosul: ilk istek TAM BIR musteri yazmis olmali");
+            siparisOnce.Should().Be(1, "on kosul: ilk istek TAM BIR siparis yazmis olmali");
+
+            var ikinci = await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesiRid(eposta, urunId, beden, rid));
+            var ikinciGovde = await ikinci.Content.ReadAsStringAsync();
+
+            // CIFT-ANLAM KIRICI: yalniz durum koduna BAKILMAZ - govdedeki numara ve DB sayaclari da.
+            ikinci.StatusCode.Should().Be(HttpStatusCode.OK,
+                $"ayni request_id idempotent 200 donmeli (409 DEGIL - guard 409 kapisindan ONCE). Govde: {ikinciGovde}");
+            var ikinciData = (await ikinci.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>()).GetProperty("data");
+            ikinciData.GetProperty("order_number").GetString().Should().Be(ilkNo,
+                "replay AYNI siparisi dondurmeli");
+            ikinciData.GetProperty("replayed").GetBoolean().Should().BeTrue(
+                "bayrak 'bu cagri siparis YAZMADI' demeli - telafi kosulu buna baglandi");
+
+            (await MusteriSayisiAsync(eposta)).Should().Be(musteriOnce, "replay YENI musteri YAZMAMALI");
+            (await SiparisSayisiAsync(eposta)).Should().Be(siparisOnce, "replay YENI siparis YAZMAMALI");
+        }
+
+        // (ii) ESZAMANLI: guard'i iki istek de gecer; biri unique-index yarisini KAYBEDER ve
+        // `OrderManager.cs:478-485`ten replayed=true doner -> kendi yazdigi satirlari TELAFI ETMELI.
+        [Fact]
+        public async Task K1_AYNI_REQUESTID_ESZAMANLI_TEK_SIPARIS_ve_YETIM_KALMAZ()
+        {
+            if (Skipped()) return;
+            var (urunId, beden) = await UrunHazirlaAsync();
+            var rid = Guid.NewGuid().ToString();
+            // ══ RIG OLCUMU - NEDEN AYNI E-POSTA DEGIL (durust kayit, SDP 1.12.12/1) ═══════
+            // Ilk kurulum AYNI e-postayla `Task.WhenAll` kullaniyordu. OLCULDU: bu rigde iki
+            // istek FIILEN ORTUSMUYOR (isitma eklendikten sonra da) - ikincisi birincinin 409
+            // kapisina takiliyor ve `OrderManager.cs:478-485` yaris dali HIC KOSMUYOR; pin
+            // GERI ALINMIS uretim kodunda 3/3 YESIL kaldi, yani OLCMUYORDU.
+            // (`customers.email` uzerinde tekil indeks YOK - DivisimaDbContext.cs:290 ve indeks
+            //  listesi; yani yesillik "ikinci insert patladi"dan DEGIL, ortusmemekten geliyor.)
+            // FARKLI e-postalar ayni `request_id` ile: iki istek de 409 kapisini GECER, ikisi de
+            // kendi musterisini YAZAR, biri `orders.request_id` tekil indeks yarisini KAYBEDER.
+            // Bu kurulum HER IKI serpilmede de dogru olcer:
+            //   ortusurlerse  -> kaybeden :480'den replayed=true alir -> telafi ETMELI
+            //   ortusmezlerse -> ikincisi bastaki guard'a takilir -> 400, HIC yazmamali
+            // Ikisinde de degismeyen YUKLEM: 1 siparis, 0 yetim.
+            var e1 = $"gf1b1-{Guid.NewGuid():N}@example.com";
+            var e2 = $"gf1b2-{Guid.NewGuid():N}@example.com";
+
+            var a = _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesiRid(e1, urunId, beden, rid));
+            var b = _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesiRid(e2, urunId, beden, rid));
+            var yanitlar = await Task.WhenAll(a, b);
+
+            // POZITIF OLAY KOSULU (vakum yasagi): en az biri GERCEKTEN siparis yazmis olmali.
+            yanitlar.Count(y => y.StatusCode == HttpStatusCode.Created).Should().Be(1,
+                "eszamanli iki istekten TAM BIRI siparisi olusturmali");
+
+            await using var ctx = NewContext();
+            (await ctx.Set<Order>().AsNoTracking().CountAsync(o => o.request_id == rid)).Should().Be(1,
+                "ayni request_id ile TEK siparis yazilmali");
+
+            var tanilama = string.Join(" | ", await Task.WhenAll(yanitlar.Select(async y =>
+                $"{(int)y.StatusCode}:{(await y.Content.ReadAsStringAsync())}")));
+            await using (var tctx = NewContext())
+            {
+                var kimlikler = await tctx.Set<Customer>().AsNoTracking()
+                    .Where(c => c.email == e1 || c.email == e2)
+                    .Select(c => new { c.id, c.email }).ToListAsync();
+                var idler = kimlikler.Select(k => k.id).ToList();
+                var adresSayisi = await tctx.Set<Address>().AsNoTracking()
+                    .CountAsync(ad => idler.Contains(ad.customer_id));
+                var siparisSayisi = await tctx.Set<Order>().AsNoTracking()
+                    .CountAsync(o => idler.Contains(o.customer_id));
+                tanilama += $" :: musteri={kimlikler.Count} adres={adresSayisi} siparis={siparisSayisi}";
+            }
+
+            var kazananSayisi = await MusteriSayisiAsync(e1) + await MusteriSayisiAsync(e2);
+            kazananSayisi.Should().Be(1, "TANILAMA=" + tanilama + " :: " +
+                "yarisi KAYBEDEN (ya da guard'a takilan) istek kendi yazdigi misafir musterisini "
+                + "TELAFI ETMELI - iki e-postadan yalniz BIRI musteri satiri birakmali, yetim KALMAMALI");
+
+            var musteri = await ctx.Set<Customer>().AsNoTracking()
+                .FirstAsync(c => c.email == e1 || c.email == e2);
+            (await ctx.Set<Address>().AsNoTracking().CountAsync(ad => ad.customer_id == musteri.id))
+                .Should().Be(1, "hayatta kalan musterinin TAM BIR adresi olmali - kaybedenin adresi de telafi edilmeli");
+        }
+
+        // (iii) FARKLI E-POSTA + AYNI request_id -> 400 GENEL, govde SIZDIRMAZ, kayit YOK.
+        [Fact]
+        public async Task K1_FARKLI_EPOSTA_AYNI_REQUESTID_400_ve_GOVDE_SIZDIRMAZ()
+        {
+            if (Skipped()) return;
+            var (urunId, beden) = await UrunHazirlaAsync();
+            var sahibi = $"gf1c1-{Guid.NewGuid():N}@example.com";
+            var yabanci = $"gf1c2-{Guid.NewGuid():N}@example.com";
+            var rid = Guid.NewGuid().ToString();
+
+            var ilk = await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesiRid(sahibi, urunId, beden, rid));
+            ilk.StatusCode.Should().Be(HttpStatusCode.Created, "on kosul: sahibinin siparisi olusmali");
+            var sahipNo = (await ilk.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>())
+                .GetProperty("data").GetProperty("order_number").GetString();
+            sahipNo.Should().StartWith("DVS", "on kosul: numara AYIRT EDICI bir bicimde olmali");
+
+            var yabanciYanit = await _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place",
+                MisafirGovdesiRid(yabanci, urunId, beden, rid));
+            var yabanciGovde = await yabanciYanit.Content.ReadAsStringAsync();
+
+            yabanciYanit.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+                $"baskasinin request_id'si ile gelen istek REDDEDILMELI. Govde: {yabanciGovde}");
+            // AYIRT EDICI SIZINTI ASSERT'I: numara "DVS" onekli, govdede tesadufen bulunamaz.
+            yabanciGovde.Should().NotContain(sahipNo,
+                "yanit BASKA bir siparisin order_number'ini SIZDIRMAMALI");
+            yabanciGovde.Should().NotContain("DVS",
+                "hicbir siparis numarasi sizmamali");
+
+            (await MusteriSayisiAsync(yabanci)).Should().Be(0,
+                "reddedilen istek HICBIR musteri satiri birakmamali (guard tum yazmalardan ONCE)");
+            (await SiparisSayisiAsync(sahibi)).Should().Be(1,
+                "sahibinin siparisi ETKILENMEMELI");
+        }
+
+        // GF-1 / K1: `request_id` tasiyan misafir govdesi. AYRI helper - mevcut `MisafirGovdesi`
+        // cagiranlarinin HICBIRI degismesin diye (23 cagri yeri).
+        private static object MisafirGovdesiRid(string eposta, int urunId, string beden, string requestId) => new
+        {
+            guest_name = "Misafir Musteri",
+            guest_email = eposta,
+            guest_phone = "5550000000",
+            city = "Istanbul",
+            district = "Kadikoy",
+            full_address = "Misafir Mah. 1",
+            zip_code = "34710",
+            coupon_code = "",
+            payment_method = KapidaOdeme,
+            request_id = requestId,
+            items = new[] { new { product_id = urunId, size = beden, quantity = 1 } }
+        };
+
         // MANTIK-FIX-1 / K3: `kuponKodu` parametresi EKLENDI (varsayilan "" - mevcut
         // cagiranlarin HICBIRI etkilenmez). Depoda misafir + kupon tasiyan tek bir fikstur
         // YOKTU; K3'un davranisi onsuz olculemezdi.

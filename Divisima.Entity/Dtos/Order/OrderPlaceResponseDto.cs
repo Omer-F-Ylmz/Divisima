@@ -14,5 +14,19 @@ namespace Divisima.Entity.Dtos.Order
     {
         public int id { get; set; }
         public string order_number { get; set; }
+
+        // ══ GF-1 / K1 (DV1) - "BU ISTEK SIPARISI OLUSTURDU MU" ═════════════════════════════
+        //
+        // OLCULEN ZARAR: `PlaceOrder`in IKI replay dali da `Success=TRUE` donuyordu
+        // (`OrderManager` :122-132 request_id dedup, :478-485 unique-index yaris kaybi) ve
+        // `GuestCheckoutManager`in telafi kosulu `!siparisSonuc.Success` idi - yani replay
+        // dalinda telafi ATESLEMIYOR, akisin ONCEDEN yazdigi misafir musterisi + adresi
+        // YETIM KALIYORDU. Cagiranin ihtiyaci "basarili mi" DEGIL, "BU CAGRI YENI BIR SIPARIS
+        // YAZDI MI" - iki soru bugune kadar tek bayrakta cakisikti.
+        //
+        // `false` = bu cagri siparisi OLUSTURDU · `true` = var olan siparis DONDURULDU.
+        // Yeni alan EKLENDI, mevcut iki alan DEGISMEDI: istemci sozlesmesi geriye donuk uyumlu
+        // (vitrin `id` + `order_number` okuyor, fazladan alan yok sayilir).
+        public bool replayed { get; set; }
     }
 }
