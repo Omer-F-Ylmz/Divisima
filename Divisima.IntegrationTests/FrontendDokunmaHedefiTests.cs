@@ -2102,5 +2102,69 @@ namespace Divisima.IntegrationTests
             Regex.Matches(s, Regex.Escape("[dir=\"rtl\"]")).Count.Should().BeGreaterThan(12,
                 "RTL kural kumesi mevcut on iki kurali VE K6'nin ekledigi override'lari tasimali");
         }
+
+        // ── P-V7 (MANTIK-FIX-4 / K7): TELEFON KURALININ DORT KOPYASI AYRISAMAZ ──────────
+        // Ayni telefon regex'i DORT validator'da yaziliydi ve MANTIK-FIX-3'te "ayrisma
+        // SIFIR" olarak olculmustu - ama o olcumu KORUYAN hicbir sey yoktu. Bu depoda
+        // "ayni kuralin ikinci kopyasi" sinifinin bedeli ALTI KEZ odendi (B10 · D5 · K7/
+        // Faz-0 · D-SEMA · MFIX-3b cift `sepetImzasi` · MF-4/K5 esleme kopyasi).
+        // KAPSAM (E'nin olcumu): pin YALNIZ REGEX uzerinde kurulur. Mesaj metni
+        // ("Gecerli bir telefon girin." vs "Gecerli telefon giriniz.") ve NotEmpty
+        // kullanimi DORT SITEDE AYRISIYOR; "birebir ayni" diyen bir pin ILK KOSUMDA
+        // kirmizi verirdi. O ayrisma rapora yazildi, pine GIRMEDI.
+        // DOSYA LISTESI SABIT DEGIL, TARANIR: besinci bir kopya eklenirse pin onu da
+        // gorur.
+        // KACISSIZ: regex referans degeri pinde LITERAL yazilmaz (`\s` ve parantez bu
+        // depoda yazim zincirinde IKI KEZ kayboldu) - dosyalardan cikarilan degerler
+        // BIRBIRLERIYLE karsilastirilir, vakum kiricilar ayri tutulur.
+        [Fact]
+        public void KAYNAK_SOZLESMESI_TelefonKurali_DORT_VALIDATORDE_AYNI()
+        {
+            var dizin = Path.Combine(KokDizin.Value, "Divisima.Bussiness", "ValidationRules");
+            Directory.Exists(dizin).Should().BeTrue("validator dizini bulunmali: " + dizin);
+
+            var bulgu = new List<(string dosya, string regex)>();
+            foreach (var yol in Directory.GetFiles(dizin, "*.cs"))
+            {
+                var satirlar = File.ReadAllLines(yol);
+                for (var i = 0; i < satirlar.Length; i++)
+                {
+                    var j = satirlar[i].IndexOf(".Matches(@", StringComparison.Ordinal);
+                    if (j < 0) continue;
+                    // Telefon kurali mi: bu satirda ya da onceki iki satirda `phone` gecmeli.
+                    var pencere = string.Join("\n", satirlar.Skip(Math.Max(0, i - 2)).Take(3));
+                    if (pencere.IndexOf("phone", StringComparison.Ordinal) < 0) continue;
+
+                    var bas = satirlar[i].IndexOf('"', j);
+                    var son = satirlar[i].IndexOf('"', bas + 1);
+                    bas.Should().BeGreaterThan(-1, "regex acilis tirnagi bulunmali: " + yol);
+                    son.Should().BeGreaterThan(bas, "regex kapanis tirnagi bulunmali: " + yol);
+                    bulgu.Add((Path.GetFileName(yol), satirlar[i].Substring(bas + 1, son - bas - 1)));
+                }
+            }
+
+            // VAKUM KIRICI 1: tarama GERCEKTEN dosya okumus ve dort siteyi bulmus olmali.
+            bulgu.Count.Should().BeGreaterThan(3,
+                "telefon kurali en az DORT validator'da bulunmali - tarama bos donerse "
+                + "esitlik iddiasi BEDAVA dogru olurdu");
+
+            // VAKUM KIRICI 2: cikarilan deger gercekten bir telefon karakter sinifi olmali.
+            // (Referans metin LITERAL yazilmaz - yalniz ayirt edici iki parca aranir.)
+            foreach (var (dosya, rx) in bulgu)
+            {
+                rx.Should().NotBeNullOrWhiteSpace("regex bos okunmus olamaz: " + dosya);
+                rx.Should().Contain("0-9", "telefon kurali rakam sinifi tasimali: " + dosya);
+                rx.Should().Contain("{7,20}", "telefon kurali uzunluk niceleyicisi tasimali: " + dosya);
+            }
+
+            // ASIL IDDIA: dort kopya BIREBIR ayni olmali. Ihlalci dosya ADIYLA raporlanir.
+            var ilk = bulgu[0];
+            var ayrisan = bulgu.Where(x => !string.Equals(x.regex, ilk.regex, StringComparison.Ordinal))
+                               .Select(x => x.dosya).ToList();
+            ayrisan.Should().BeEmpty(
+                "telefon kuralinin TUM kopyalari BIREBIR ayni olmali (referans: " + ilk.dosya
+                + "). Ayrisan bir kopya, ayni girdiyi bir uctan kabul edip digerinden "
+                + "reddeden SESSIZ bir tutarsizlik uretir.");
+        }
     }
 }
