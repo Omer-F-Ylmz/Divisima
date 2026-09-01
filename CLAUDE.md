@@ -1087,7 +1087,7 @@ bicimde karsimiza cikti:
 
 ## Ortam tuzaklari
 
-kaynak: 37·MANTIK-FIX-1_MUHRU (sqlcmd -I · tireli rota · admin.html/api-client · 338/339)
+kaynak: 37·MANTIK-FIX-1_MUHRU (sqlcmd -I · tireli rota · 338/339)
 
 **ORTAM DERSLERI (kalici):** `sqlcmd` bu ortamda **QUOTED_IDENTIFIER kapali** baslar ve
 filtreli indeksi olan tabloya `UPDATE` **Msg 1934** ile duser -> **`-I` bayragi ZORUNLU** ·
@@ -1233,7 +1233,7 @@ DV3  429 UC AYRI KAYNAKTAN (cop-misafir guard'i · Redis rate-limit · yerlesik 
 
 
 **D-YAN bloklari kumulatiftir; en guncel liste 39·MANTIK-FIX-3'tedir. Onceki bloklar
-su arsiv dosyalarinda: 27 · 30 · 31 · 32 · 33 · 34 · 35 · 36 · 37 · 38 (INDEX.md ile
+su arsiv dosyalarinda: 26 · 27 · 30 · 31 · 32 · 33 · 34 · 35 · 36 · 37 · 38 (INDEX.md ile
 cozulur).**
 # B8 — BAGLAYICI KARARLAR ve ACIK SUPHELI
 
