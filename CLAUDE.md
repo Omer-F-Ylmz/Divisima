@@ -4,7 +4,7 @@
 
 a) Kapanmis dalga muhurleri docs/muhur/NN-*.md'de BAYT-AYNI ham dilimdir; docs/muhur/INDEX.md
    eski satir araliklarini dosyaya esler. Bu dosyalar acilista yuklenmez, `@` ile baglanmaz,
-   .claude/ altina tasinmaz. CLAUDE.md butcesi ≤75 KB; asilirsa siradaki ARSIV turu merkezden
+   .claude/ altina tasinmaz. CLAUDE.md butcesi ≤80 KB; asilirsa siradaki ARSIV turu merkezden
    acilir.
 b) Okuma kurali: arsive yalniz somut gerekceyle bakilir (hangi muhur + hangi baslik + neden);
    once INDEX.md, sonra grep ve dar aralik Read. Bir arsiv dosyasinin tamami okunmaz; "eski
@@ -730,7 +730,7 @@ Alti baslik, sirayla:
 
 ---
 
-# B4 — MIKRO-KURALLAR MK-1..MK-11 (son metinler)
+# B4 — MIKRO-KURALLAR MK-1..MK-10 (son metinler; MK-11 → B0)
 
 Her blok kaynagindan BAYT-AYNI kopyadir; kaynak etiketi arsiv dosyasini ve muhur
 basligini verir (MK-11/d: atif biçimi "muhur adi + baslik").
@@ -1033,12 +1033,6 @@ kaynak: 39·MANTIK-FIX-3_MUHRU
 - **FORM <-> DTO ALAN ESLEMESI BAGLAMADAN ONCE OLCULUR.** Formda FAZLA olan alan bir YALAN
   uretir (kullanici degistirir, sunucu gormez); EKSIK olan alan PUT-ez semantiginde SESSIZ
 
-**KACIS-KAYBI SAYACI: ALTINCI (a5add91).** `git log -S` ile olculdu: "DORDUNCU ORNEK" 1
-commit · "ALTINCI ORNEK" 1 commit · "BESINCI"/"YEDINCI" 0 (NEG kontrol `ZZZINCI` 0).
-MANTIK-FIX-4'un 8. hatasi (Edit'te Unicode kacis eslesmesi) aileye GIRMEZ - kaynakta
-kacis ZATEN yaziliydi, gercek karakter arandi: kayip degil, eslesme bicimi farki.
-kaynak: MF-4 push turu, muhurde CC HATALARI (8) maddesi 8 · ARSIV-1 kaydi
-
 ## Annotation salinimi (hipotezden olculmus olguya)
 
 kaynak: 39·MANTIK-FIX-3_MUHRU
@@ -1109,6 +1103,8 @@ ardisik kosum 339/339. En olasi aciklama paylasilan test veritabanlari (kural-uy
 `already exists` cakismasi olctu) **ama BU ISPAT DEGIL**.
 
 
+## Ortam tuzagi — rota asimetrisi
+
 kaynak: 39·MANTIK-FIX-3_MUHRU (rota asimetrisi)
 
 
@@ -1116,6 +1112,8 @@ kaynak: 39·MANTIK-FIX-3_MUHRU (rota asimetrisi)
    `price-drop`un GERCEKTEN tireli olmasi yaniltti. **SDP 1.7/2 - bu dalgada 1. dusus.**
 2. **P-H2 fiksturu** var olan bir urun ariyordu, sinif her testte DB'yi yeniden kuruyor.
 3. **BAYAT TOAST** - AR bacaginda ilk olcum Ingilizce metin gosterdi; toast sinifinda `on`
+
+## Ortam tuzagi — runtime sozluk enjeksiyonu
 
 kaynak: 36·MANTIK-AV-1_MUHRU (runtime sozluk enjeksiyonu)
 
@@ -1128,6 +1126,52 @@ anahtarla MASKELENIR. MFIX-3b muhrundeki `792/792` bir RUNTIME olcumudur; dogrud
 
 ---
 
+
+### Denetim duzeltmesi (ARSIV-1/C3) — eksik tasinan kalici kayitlar
+
+kaynak: 34·MFIX-B_MUHRU · ZORUNLU KAPSAM EKI (admin.html tuzagi)
+
+
+```
+admin.html:306  duzenleme formu stok satirlarini ANONIM detay ucundan dolduruyor
+admin.html:376  ayni degerleri geri POST ediyor
+ProductManager.cs:292  onu FIZIKSEL kolona yaziyor
+=> K1 TEK BASINA gonderilseydi: admin 937'yi acip YALNIZ ADINI degistirip kaydettiginde
+   fiziksel 10 -> 4 duser, rezerve 6 kalir, available -2 -> 0 olurdu.
+   Dalga B'nin "tam-varlik map -> sessiz veri kaybi" sinifinin BIREBIR tekrari.
+```
+
+#### admin.html tuzagi — KALICI KURAL (kapsam elestirmeni)
+
+kaynak: 34·MFIX-B_MUHRU · ZORUNLU KAPSAM EKI (kalici kural)
+
+**KALICI KURAL (bu vakadan dogdu): KAPSAM ELESTIRMENI ROLU, ON OLCUM FAN-OUT'UNUN
+ZORUNLU UYESIDIR.** Gorevi bulgu aramak degil, **verilen tarifin kendisinin acacagi kapiyi**
+aramaktir. Bu turda merkezin K1 tarifi, bes bagimsiz okuyucu ve ana akis - **dordu birden**
+kacirdi; tek eleştirmen rolu yakaladi.
+
+
+#### Isimsiz flake — durust kayit
+
+kaynak: 37·MANTIK-FIX-1_MUHRU · DURUST KAYIT - ISIMSIZ FLAKE (tam acilis)
+
+**DURUST KAYIT - ISIMSIZ FLAKE:** denetciler kosarken alinan BIR `Category=Sql` kosumunda
+**338/339** gorundu; ADI YAKALANMADI (grep deseni mesaji disarida birakti). Ayni anda alinan
+tam suit 575/578 (yani 4 degil 3 kirmizi) - **TUTARSIZ**. Worktree kaldirildiktan sonra iki
+ardisik kosum 339/339. En olasi aciklama paylasilan test veritabanlari (kural-uyum M2-2'de
+`already exists` cakismasi olctu) **ama BU ISPAT DEGIL**.
+
+
+#### Kacis-kaybi sayaci (HAM)
+
+kaynak: 40·MANTIK-FIX-4_MUHRU · CC HATALARI (kacis-kaybi sayaci, HAM)
+
+**8. HATA KACIS-KAYBI AILESINE GIRMEZ - OLCULDU.** O vakada kaynak dosyada `'⌂'`
+KACIS OLARAK yazili, ben gercek karakteri (⌂) aradim: **kayip yok, eslesme bicimi farki**.
+Ailenin sayaci `git log -S` ile olculdu: `"KACIS-KAYBI AILESI - DORDUNCU ORNEK"` 1 commit ·
+`"... ALTINCI ORNEK"` 1 commit (`a5add91`) · `"... BESINCI ORNEK"` ve `"... YEDINCI ORNEK"`
+**0 commit** (NEG kontrol `ZZZINCI` 0). **Sayac ALTINCI'da KALIR.**
+**KAYIT:** MK-4b denetcisinin MUT-3b turunda gercek bir kacis-kaybi yasandi (`sed` ters bolu
 # B7 — KURGU SABITLERI ve D-YAN
 
 ## Olcum duzenegi (goz1) — bes arguman
@@ -1179,12 +1223,18 @@ kaynak: 39·MANTIK-FIX-3_MUHRU · D-YAN TEMIZLIK LISTESINE
   fatura 102-110, 3 yetim outbox satiri.
 
 
+## D-YAN devri (MF-4)
+
 kaynak: 40·MANTIK-FIX-4_MUHRU · DV2 (D-YAN'a devredilen)
 
 DV2  Yetim musteri 153 ve 155 + siparis 270-275 (bozuk adresli, R-H5 ONCE kaniti) -> D-YAN
 DV3  429 UC AYRI KAYNAKTAN (cop-misafir guard'i · Redis rate-limit · yerlesik limiter -
 ---
 
+
+**D-YAN bloklari kumulatiftir; en guncel liste 39·MANTIK-FIX-3'tedir. Onceki bloklar
+su arsiv dosyalarinda: 27 · 30 · 31 · 32 · 33 · 34 · 35 · 36 · 37 · 38 (INDEX.md ile
+cozulur).**
 # B8 — BAGLAYICI KARARLAR ve ACIK SUPHELI
 
 Her satir HAM ilk cumle + kaynak atfi. Tam metin arsivde; MK-11/b geregi arsive
@@ -1231,6 +1281,23 @@ Asagidaki maddeler kayit olarak duruyor; her birinin basinda guncel durumu yazil
 - `00b:229` **BAGLAYICI** 16. **`Webhook:AllowedIps` ALLOWLIST'I VAR AMA BOS - VE PROXY ARKASINDA CALISMAZ.**
 ---
 
+
+### Denetim duzeltmesi (ARSIV-1/C3) — fragman alintilar tam cumle sinirina cekildi
+
+kaynak: 37·MANTIK-FIX-1_MUHRU · MF-3 SARTLARI (409 semantigi, tam blok)
+
+**MF-3 SARTLARI:** (a) musteri+adres yazimi `PlaceOrder` BASARISINA baglanacak (transaction
+ya da erteleme) · (b) cozumde **IKINCI kupon dogrulama noktasi ACILMAZ** ("ayni kuralin
+ikinci kopyasi" - bu depoda 7 kez bedeli odendi) · (c) **409 semantigi YENIDEN ACILMAZ**
+(GUVENLIK-2/#1 kabul edilmis karar) - satir hic yazilmazsa 409 sorunu zaten DOGMAZ ·
+(d) K3'un bu dali ulasilabilir kildigi gercegi MF-3 tarifinin GEREKCESINE girer.
+
+#### 64 bozuk invoice_items satiri
+
+kaynak: 36·MANTIK-AV-1_MUHRU · DALGA BOLUMLEMESI (64 fatura satiri, tam cumle)
+
+**MANTIK-FIX-2 `[FATURA]`** - kargo AYRI KALEM · KDV `invoices.tax_rate`'ten · fatura ekrani
+i18n. **64 bozuk `invoice_items` satiri D-YAN'a** (veri temizligi, fix degil).
 # B9 — KUYRUK · DEVIR · VITRIN-KALAN · ERTELENMIS-DEFTER
 
 ## Kuyruk
@@ -1317,3 +1384,20 @@ Acilmaz; yalniz HAM kalem basliklari + 00a atfi. Tam metin arsivde.
 - `40·MANTIK-FIX-4·DV3`      -> GUVENLIK-AV-1 girdisi
 - `40·MANTIK-FIX-4·VITRIN-KALAN` ortak RuleBuilder karari GUVENLIK-AV-1 SONRASINA (K7 mesaj/NotEmpty ayrismasi)
 - `39·MANTIK-FIX-3·FIX-1B DEVRI` F4 erisim jetonu iptali + F8 step-up zinciri
+
+## GUVENLIK-AV-1 girdileri (39·MANTIK-FIX-3, bayt-ayni)
+
+kaynak: 39·MANTIK-FIX-3_MUHRU · GUVENLIK-AV-1 GIRDILERI (bayt-ayni)
+
+### GUVENLIK-AV-1 GIRDILERI
+
+- **Access token iptali** - sifre degisiminden sonra eski access token YASIYOR
+  (`RevokeAsync` uretimde 0 cagri, `user_sessions`ta `jti` kolonu YOK).
+- **Hata kodu birlestirme** - TR serbest metin capalarinin kirilganligi (K3 + K3b ayni capa).
+- **K4 telafisinin ATOMIKLESTIRILMESI** - bugun iki ayri `SaveChanges`; kismi durum mumkun.
+- **`ExecuteDeleteAsync` <-> transaction ROLLBACK olcumu** - K2 `DeleteWhereAsync`i
+  transaction ICINDE cagiriyor; rollback davranisi SINANMADI (denetcinin kor noktasi).
+- **`guest_name` UZUNLUK DOGRULAMASI YOK** - uye yolu `MaximumLength(120)` istiyor, misafir
+  yolunda sinir yok ve `full_name` kolonu 150 karakter; uzun ad EF insert'te 500 uretir.
+  Manager'in KENDI dogrulama bolgesine ait oldugu icin bu dalgada dokunulmadi.
+  **FIX GUVENLIK-FIX ADAYI.**
