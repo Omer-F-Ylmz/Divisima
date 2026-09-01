@@ -175,13 +175,25 @@
       // effective_price alaninda gelir (ProductProfile). Buradaki yedek yalnizca alani
       // tasimayan ESKI bir yanit icindir.
       price: Number(p.effective_price ?? p.price) || 0,
-      // `old` = ustu cizili fiyat. Indirimliyken old_price BOSSA liste fiyati kullanilir;
-      // boylece mevcut discPct (index.html:2002) ve rozet makinesi CALISIR. Olculdu: 8
-      // indirimli urunun 7'sinde old_price BOS, yani bugun musteri HICBIR indirim isareti
-      // gormuyor. Uc fiyatli urunde (or. 123: price 299,90 / sale 249,90 / old 399,90)
-      // old_price kazanir - ikisi de GERCEK KAYITLI degerdir, uydurma yok.
-      old: p.old_price ? Number(p.old_price)
-         : ((Number(p.effective_price) || 0) > 0 && Number(p.effective_price) < Number(p.price) ? Number(p.price) : 0),
+      // `old` = ustu cizili fiyat VE "Indirim" suzgecinin TEK olcutu (index.html 2049/2054/
+      // 2118/2175 hepsi `p.old` okuyor). Bu yuzden KAPI once acilir, deger SONRA secilir:
+      //   KAPI  : yalnizca GERCEKTEN indirim varsa (etkin fiyat < liste fiyati) dolar.
+      //   DEGER : old_price kayitliysa O (uc fiyatli urun, or. 123: 299,90/249,90/399,90),
+      //           degilse liste fiyati.
+      // MANTIK-FIX-4 / K1 - OLCULEN KUSUR: eski bicimde old_price TEK BASINA yetiyordu,
+      // yani sale_price'i olmayan bir urun (or. 1: price 899,90 / old_price 1.299,90 /
+      // sale_price NULL) "Indirim"de LISTELENIYOR ve -%31 rozeti tasiyordu - GERCEK INDIRIM
+      // YOKKEN. Suzgec kumesi 9, DB'deki gercek indirim kumesi 8 idi. Kapinin one alinmasi
+      // o urunu kumeden CIKARIR (rozeti ve ustu cizili fiyati BILINCLI OLARAK gider) ve
+      // kalan 8 urunun degerine DOKUNMAZ - old_price'li 123 dahil (olculdu: 9 -> 8).
+      // NEDEN BURADA: `old` PAYLASILAN alandir (suzgec 4 + goruntu 7 tuketici). Ayri bir
+      // suzgec yuklemi acmak rozet ile kategoriyi AYRISTIRIRDI ("indirim rozetli ama
+      // Indirim kategorisinde olmayan urun" - [MANTIK] sinifi yeni kusur).
+      // SINIR: bu normalizasyon api-bridge SINIRINDA kalir, api-client'a TASINMAZ - orasi
+      // admin panelinin de paylastigi dosyadir ve admin formu `price`i TAM-VARLIK Update'e
+      // geri yazar (MFIX-B'de stok 10 -> 4 dusuren kusurun birebir kalibi).
+      old: ((Number(p.effective_price) || 0) > 0 && Number(p.effective_price) < Number(p.price))
+         ? (p.old_price ? Number(p.old_price) : Number(p.price)) : 0,
       // VITRIN-FIX-2 / F-D1: yildiz ve yorum sayisi SUNUCUDAN gelir. index.html eskiden
       // bunlari urunun id'sinden tohumlanan bir PRNG ile UYDURUYORDU. ProductListResponseDto
       // ve ProductDetailResponseDto ikisi de bu iki alani tasiyor (canli olculdu).

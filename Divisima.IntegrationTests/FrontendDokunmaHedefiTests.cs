@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 using Xunit;
@@ -1839,6 +1840,65 @@ namespace Divisima.IntegrationTests
                 if (onceki == ',' || onceki == '{' || onceki == ' ') n++;
             }
             return n;
+        }
+
+        // Bosluk-ayiklanmis karsilastirma. KACISSIZ - `\s` regex'i bu depoda yazim
+        // zincirinde IKI KEZ kayboldu (kacis-kaybi ailesi), bu yuzden karakter suzgeci.
+        private static string Bosluksuz(string s) =>
+            string.Concat(s.Where(c => !char.IsWhiteSpace(c)));
+
+        // ── P-V1 (MANTIK-FIX-4 / K1): "INDIRIM" SUZGECI GERCEK INDIRIMI GOSTERIR ─────────
+        // Suzgecin TEK olcutu `p.old` (index.html 2049 cip · 2054 kategori · 2118 serit ·
+        // 2175 sidebar sayaci). Bu pin o alanin KAPISINI tutar: `old` yalnizca ETKIN FIYAT
+        // LISTE FIYATINDAN KUCUKKEN dolar; `old_price` tek basina kumeye SOKMAZ, yalnizca
+        // DEGERI secer.
+        // OLCUT BICIMDEN BAGIMSIZ: kapinin once geldigi INDEKS KARSILASTIRMASIYLA olculur -
+        // bosluk, satir sonu ya da parantez duzeni degisse de ayni kusuru yakalar.
+        // DURUST ETIKET: KAYNAK SOZLESMESI pinidir, davranis pini DEGILDIR (depoda JS/DOM
+        // kosucusu YOK - Dalga 4'ten beri acik kalem). Davranis kaniti MANTIK-FIX-4'un
+        // once/sonra olcumudur: suzgec sayaci 9 -> 8, urun 1'in rozeti ve ustu cizili
+        // fiyati gitti, kalan 8 urunun old/pct degerleri BIREBIR AYNI kaldi.
+        [Fact]
+        public void KAYNAK_SOZLESMESI_IndirimSuzgeci_GERCEK_INDIRIM_Kumesini_Gosterir()
+        {
+            var b = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+            var govde = FonksiyonGovdesi(b, "function mapProduct(p)");
+
+            // VAKUM KIRICI 1: govde gercekten okunmus olmali.
+            govde.Length.Should().BeGreaterThan(200,
+                "mapProduct govdesi okunmus olmali - bos govde her iddiayi BEDAVA dogru yapardi");
+
+            var bas = govde.IndexOf("old:", StringComparison.Ordinal);
+            bas.Should().BeGreaterThan(-1, "mapProduct hala `old` alanini uretmeli");
+            var kalan = govde.Substring(bas);
+
+            var iKapi = kalan.IndexOf("effective_price", StringComparison.Ordinal);
+            var iDeger = kalan.IndexOf("old_price", StringComparison.Ordinal);
+
+            iKapi.Should().BeGreaterThan(-1,
+                "`old` kapisi ETKIN FIYATA bakmali - suzgec kumesi gercek indirimden turemeli");
+
+            // VAKUM KIRICI 2: old_price TUMDEN silinmis olamaz. Silinseydi kapi iddiasi
+            // bedava dogru olurdu, ama uc fiyatli urun (123: 299,90/249,90/399,90) ustu
+            // cizili fiyatini KAYBEDERDI.
+            iDeger.Should().BeGreaterThan(-1,
+                "old_price DEGER kaynagi olarak okunmaya devam etmeli");
+
+            iKapi.Should().BeLessThan(iDeger,
+                "KAPI DEGERDEN ONCE gelmeli: once 'gercekten indirim var mi' sorulur, SONRA "
+                + "hangi degerin ustu cizilecegi secilir. Ters sirada old_price TEK BASINA "
+                + "kumeye sokar ve indirimi olmayan urun 'Indirim'de rozetle listelenir.");
+
+            // CIFT-ANLAM KIRICI: `price` normalizasyonu (MF-1/K1) DEGISMEMELI - K1 yalniz
+            // `old` kapisini daraltir, etkin fiyati DEGISTIRMEZ.
+            Bosluksuz(govde).Should().Contain(Bosluksuz("price: Number(p.effective_price ?? p.price) || 0"),
+                "etkin fiyat normalizasyonu MANTIK-FIX-1'deki haliyle durmali");
+
+            // SINIR: normalizasyon api-bridge'de KALIR. api-client.js iki istemcinin
+            // PAYLASTIGI dosyadir ve admin formu `price`i TAM-VARLIK Update'e geri yazar;
+            // oraya tasinirsa indirim her kayitta bir kademe daha duser (MFIX-B kalibi).
+            Oku("frontend/api-client.js").Should().NotContain("effective_price",
+                "fiyat normalizasyonu admin panelinin de okudugu dosyaya TASINMAMALI");
         }
     }
 }
