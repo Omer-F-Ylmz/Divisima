@@ -47,8 +47,8 @@ jobs:
       # Runner locale'i değişirse grep sessizce eşleşmez -> locale SABİTLENDİ.
       DOTNET_CLI_UI_LANGUAGE: en
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
       - name: Restore
@@ -150,28 +150,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
         with:
           languages: csharp
           queries: security-extended
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
       - name: Build
         run: dotnet build Divisima-Backend.sln --configuration Release
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
 
   # 3) Secret taraması (koda sızmış API key/şifre)
   secret-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Gitleaks (secret taraması)
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -235,10 +235,10 @@ jobs:
       ConnectionStrings__DivisimaDb: "Server=localhost,1433;Database=master;User Id=sa;Password=Divisima_CI_Str0ng!Pass;TrustServerCertificate=True;Encrypt=False;"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: İş mantığı güvenlik simülasyonu
         run: python3 tests/business_logic_sim.py
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
 
