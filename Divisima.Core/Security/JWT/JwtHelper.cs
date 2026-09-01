@@ -20,7 +20,7 @@ namespace Divisima.Core.Security.JWT
         }
 
         // Açıklayıcı yorum: Kullanıcı için imzalı JWT üret (Customer tipi claim'leriyle)
-        public AccessToken CreateToken(IUser user)
+        public AccessToken CreateToken(IUser user, DateTime? authTime = null)
         {
             var expiration = DateTime.Now.AddMinutes(_tokenOptions.AccessTokenExpiration);
             var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_tokenOptions.SecurityKey));
@@ -37,11 +37,29 @@ namespace Divisima.Core.Security.JWT
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
                 new Claim(JwtRegisteredClaimNames.Iat,
                     DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64),
-                // Açıklayıcı yorum: auth_time - kimlik doğrulama zamanı (UTC unix saniye). RequireRecentAuth bunu okur
-                // (hassas işlemler için "yakın zamanda giriş" zorunlulugu). NOT: su an login+refresh ayni token uretimini
-                // kullandigindan refresh'te de yenilenir ("son aktiflik"); gercek step-up icin refresh'te orijinal auth_time tasinmali.
+                // ══ GF-1 / K3 (C-2) - auth_time ARTIK ZINCIR BOYUNCA TASINIYOR ═════════════
+                //
+                // Bu satirin ustundeki eski not sorunu ZATEN TARIF EDIYORDU: "su an login+refresh
+                // ayni token uretimini kullandigindan refresh'te de yenilenir; gercek step-up icin
+                // refresh'te orijinal auth_time TASINMALI". Olculen sonuc: `RequireRecentAuth(10)`
+                // step-up'i, calinmis bir refresh cerezi ile SURESIZ uzatilabiliyordu - her refresh
+                // saati sifirliyordu.
+                //
+                // ARTIK: cagiran oturumun GIRIS anini verir (`user_sessions.auth_time`). Login ve
+                // 2FA tamamlanmasi `null` gecer -> SIMDI (ikisi de kimlik dogrulamadir, step-up
+                // HAKLI olarak acilir). Refresh rotasyonu ESKI degeri gecer -> saat SIFIRLANMAZ.
+                // `null` ayrica GF-1 ONCESI oturumlarin (auth_time kolonu NULL) statuko davranisidir.
+                //
+                // KIND SABITLENIR - YOKSA PATLAR: `new DateTimeOffset(dt, TimeSpan.Zero)`
+                // `dt.Kind == Local` ise ArgumentException firlatir; EF Core `datetime2`
+                // kolonunu `Unspecified` olarak dondurur. Kolona UTC yazildigi icin (bkz.
+                // AuthManager) burada Kind ACIKCA Utc'ye sabitlenir - donusum YAPILMAZ.
                 new Claim("auth_time",
-                    DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
+                    new DateTimeOffset(
+                        authTime.HasValue
+                            ? DateTime.SpecifyKind(authTime.Value, DateTimeKind.Utc)
+                            : DateTime.UtcNow,
+                        TimeSpan.Zero).ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
             };
 
             var jwt = new JwtSecurityToken(

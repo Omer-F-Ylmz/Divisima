@@ -196,5 +196,78 @@ namespace Divisima.IntegrationTests
             (await musteri.Client.GetAsync(KorumaliUc)).StatusCode.Should().Be(HttpStatusCode.Unauthorized,
                 "pasiflestirme + anahtar dusurme sonrasi access token REDDEDILMELI");
         }
+
+        // ══ GF-1 / K3 (C-2) - STEP-UP SAATI REFRESH'TE SIFIRLANMAZ ═════════════════════════
+        //
+        // Bu pinler K2 ile AYNI SINIFTA duruyor cunku ikisi de ACCESS TOKEN YASAM DONGUSUNU
+        // olcuyor ve ayni fikstur/DB'yi paylasiyorlar. AYRI bir sinif AYRI bir test veritabani
+        // demekti; `TestDbKurulum`un basindaki olculmus `model` kilidi baskisi (SqlException
+        // 1807) gereksiz yere artardi.
+        private static long AuthTimeClaimi(string token) =>
+            long.Parse(new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler()
+                .ReadJwtToken(token).Claims.Single(c => c.Type == "auth_time").Value,
+                System.Globalization.CultureInfo.InvariantCulture);
+
+        [Fact]
+        public async Task K3_REFRESH_ESKI_AUTH_TIME_I_TASIR_STEP_UP_SAATI_SIFIRLANMAZ()
+        {
+            if (Skipped()) return;
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+
+            // Oturumun giris anini BILINEN ve UZAK bir gecmise cekiyoruz. Uyku YOK: fark
+            // 30 dakika oldugu icin "ayni saniye" belirsizligi OLUSMAZ ve olcum belirlenimcidir.
+            var gecmis = DateTime.UtcNow.AddMinutes(-30);
+            string refreshToken;
+            await using (var ctx = NewContext())
+            {
+                var oturum = await ctx.Set<UserSession>()
+                    .SingleAsync(s => s.customer_id == musteri.CustomerId && s.is_active);
+                oturum.auth_time.Should().NotBeNull(
+                    "on kosul: giris YENI kolonu doldurmus olmali (login = kimlik dogrulama)");
+                oturum.auth_time = gecmis;
+                await ctx.SaveChangesAsync();
+                refreshToken = oturum.refresh_token;
+            }
+
+            using var scope = _factory!.Services.CreateScope();
+            var auth = scope.ServiceProvider.GetRequiredService<Divisima.Bussiness.Abstract.IAuthService>();
+            var (durum, sonuc) = await auth.RefreshToken(
+                new Divisima.Entity.Dtos.Auth.RefreshTokenRequestDto { refresh_token = refreshToken });
+
+            durum.Should().Be(HttpStatusCode.OK, "on kosul: refresh basarili olmali");
+            var yeniToken = ((dynamic)sonuc).Data.token as string;
+            yeniToken.Should().NotBeNullOrEmpty("refresh yeni access token dondurmeli");
+
+            var beklenen = new DateTimeOffset(gecmis, TimeSpan.Zero).ToUnixTimeSeconds();
+            AuthTimeClaimi(yeniToken!).Should().Be(beklenen,
+                "refresh ESKI giris anini TASIMALI - sifirlarsa calinmis bir refresh cerezi "
+                + "step-up penceresini SURESIZ uzatir (C-2)");
+
+            // ALAN BAZLI: yeni oturum satiri da ayni degeri tasimali (zincir kopmasin).
+            await using (var ctx = NewContext())
+            {
+                var yeni = await ctx.Set<UserSession>()
+                    .Where(s => s.customer_id == musteri.CustomerId && s.is_active)
+                    .SingleAsync();
+                yeni.auth_time.Should().NotBeNull("yeni satir auth_time TASIMALI");
+                new DateTimeOffset(DateTime.SpecifyKind(yeni.auth_time!.Value, DateTimeKind.Utc), TimeSpan.Zero)
+                    .ToUnixTimeSeconds().Should().Be(beklenen, "zincir bir sonraki rotasyona da tasinmali");
+            }
+        }
+
+        // GIRIS bacagi: login KIMLIK DOGRULAMADIR - auth_time SIMDI olmali (step-up ACILIR).
+        // Bu, K3'un "sifirlamayi kaldirdik ama girisi de dondurduk" hatasina dusmedigini olcer.
+        [Fact]
+        public async Task K3_GIRIS_AUTH_TIME_I_SIMDI_YAPAR_STEP_UP_HAKLI_ACILIR()
+        {
+            if (Skipped()) return;
+            var oncesi = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+            var sonrasi = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+            AuthTimeClaimi(musteri.Token).Should().BeInRange(oncesi - 5, sonrasi + 5,
+                "giris auth_time'i SIMDI yapmali - aksi halde yeni giris yapan kullanici "
+                + "hassas islemlerde haksiz yere 401 alirdi");
+        }
     }
 }

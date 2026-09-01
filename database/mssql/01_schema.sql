@@ -3065,3 +3065,28 @@ GO
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260901230439_GF1K3UserSessionAuthTime'
+)
+BEGIN
+    ALTER TABLE [user_sessions] ADD [auth_time] datetime2 NULL;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260901230439_GF1K3UserSessionAuthTime'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20260901230439_GF1K3UserSessionAuthTime', N'8.0.30');
+END;
+GO
+
+COMMIT;
+GO
+

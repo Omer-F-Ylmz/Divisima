@@ -471,6 +471,9 @@ namespace Divisima.DataAccess.Concrete.Context
                 b.Property(u => u.expires_at).HasColumnName("expires_at");
                 b.Property(u => u.is_active).HasColumnName("is_active").HasDefaultValue(true);
                 b.Property(u => u.created_at).HasColumnName("created_at");
+                // GF-1 / K3: oturum zincirinin GIRIS ani. NULL BIRAKILIR - GF-1 oncesi satirlar
+                // icin geriye donuk doldurma YAPILMAZ (davranis statuko kalir). Gerekce entity'de.
+                b.Property(u => u.auth_time).HasColumnName("auth_time");
                 // Not: UserSession entity'sinde token/updated_at ALANI YOK -> map EDILMEZ (aksi halde CS1061 derleme hatasi).
                 b.HasIndex(u => u.customer_id);
                 b.HasIndex(u => u.refresh_token);   // refresh token ile hizli oturum lookup (RefreshToken/Logout)

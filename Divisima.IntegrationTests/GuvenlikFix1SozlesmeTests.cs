@@ -143,6 +143,38 @@ namespace Divisima.IntegrationTests
                 $"{yol}: K4 sonrasi bu dosyada 403 KALMAMALI");
         }
 
+        // ── K3 (C-2) 2FA BACAGI - KAYNAK SOZLESMESI ────────────────────────────────────────
+        //
+        // NEDEN DAVRANIS PINI DEGIL (durust kayit): `two_factor_enabled` uretimde HICBIR kod
+        // yolunda `true` yapilmiyor (AuthManager'in kendi aciklamasi da bunu soyluyor:
+        // "bugun zaten ulasilamaz bir dal"). Uctan uca olcum icin bayragi DB'den elle acmak
+        // gerekirdi - o da URUN DAVRANISINI degil KURGUYU olcerdi. Bu yuzden 2FA bacagi
+        // KAYNAK duzeyinde pinleniyor ve davranis kaniti OLMADIGI ACIKCA yaziliyor.
+        //
+        // OLCULEN SOZLESME: `IssueSessionAndTokenAsync` UC yolu birden besliyor.
+        //   login (:329) ve 2FA (:365) -> TEK argumanla cagrilir => auth_time = SIMDI
+        //   refresh (:487)             -> `session.auth_time` ile cagrilir => TASINIR
+        // Ikisi de KIMLIK DOGRULAMADIR; 2FA sonrasi step-up'in acilmasi DOGRUDUR.
+        [Fact]
+        public void K3_GIRIS_ve_2FA_AUTH_TIME_I_TASIMAZ_REFRESH_TASIR()
+        {
+            var kod = KodSatirlari(Oku("Divisima.Bussiness/Concrete/AuthManager.cs"));
+
+            // login + 2FA: TASIMAYAN cagri TAM IKI kez.
+            var tasimayan = kod.Split("IssueSessionAndTokenAsync(customer);").Length - 1;
+            tasimayan.Should().Be(2,
+                "login ve 2FA yollarinin IKISI de auth_time'i SIMDI yapmali (kimlik dogrulama); "
+                + "bu sayi 3 olursa refresh de sifirliyor demektir - C-2 GERI GELMIS olur");
+
+            // refresh: TASIYAN cagri TAM BIR kez.
+            (kod.Split("IssueSessionAndTokenAsync(customer, session.auth_time);").Length - 1)
+                .Should().Be(1, "refresh rotasyonu ESKI giris anini TASIMALI");
+
+            // NEG kontrol: sayaclar gercekten dizgeye bagli.
+            (kod.Split("IssueSessionAndTokenAsyncZZZ(customer);").Length - 1)
+                .Should().Be(0, "NEG kontrol: uydurma dizge 0 dondurmeli");
+        }
+
         // ── K5 (a) VARSAYILAN-KAPALI KURALIN TASIYICISI ────────────────────────────────────
         //
         // Merkez karari: "MapGet=0" asserti YAZILMAZ (vakum - bugun zaten 0, hicbir sey

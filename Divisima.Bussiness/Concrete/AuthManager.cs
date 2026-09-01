@@ -370,9 +370,23 @@ namespace Divisima.Bussiness.Concrete
         // JWT + kriptografik refresh_token üretir, oturumu KAYDEDER (refresh_token + refresh penceresi expiry), response döner.
         // Önceden 3 yerde tekrarlanıyordu ve refresh_token HİÇ set edilmiyordu (refresh mekanizması ölüydü).
         private const int RefreshTokenDays = 7;
-        private async Task<CustomerLoginResponseDto> IssueSessionAndTokenAsync(Customer customer)
+        // ══ GF-1 / K3 (C-2) - `devralinanAuthTime` ═════════════════════════════════════════
+        //
+        // Bu helper UC yolu birden besliyor: login, 2FA dogrulamasi ve REFRESH ROTASYONU.
+        //   login / 2FA  -> `null` gecilir  => auth_time = SIMDI (ikisi de KIMLIK DOGRULAMADIR;
+        //                   2FA sonrasi step-up'in acilmasi DOGRUDUR, haksiz degil)
+        //   refresh      -> ESKI oturumun auth_time'i gecilir => step-up saati SIFIRLANMAZ
+        // `created_at` bu isi GOREMEZ: bu metot her cagrida YENI satir ekler, yani rotasyondan
+        // sonra `created_at` ROTASYON anidir. (Ilk olcumumde bunu yanlis degerlendirmistim.)
+        //
+        // UTC YAZILIR: `RequireRecentAuth` karsilastirmayi `DateTime.UtcNow` ile yapiyor.
+        // Dosyanin geri kalani `DateTime.Now` (yerel) kullaniyor - bu alan BILINCLI OLARAK
+        // AYRISIYOR ve jeton tarafinda Kind Utc'ye sabitleniyor (bkz. JwtHelper).
+        private async Task<CustomerLoginResponseDto> IssueSessionAndTokenAsync(Customer customer,
+            DateTime? devralinanAuthTime = null)
         {
-            var accessToken = _tokenHelper.CreateToken(customer);
+            var authTime = devralinanAuthTime ?? DateTime.UtcNow;
+            var accessToken = _tokenHelper.CreateToken(customer, authTime);
             var refreshToken = SecureTokenGenerator.Generate();
             await _userSessionDal.AddAsync(new UserSession
             {
@@ -380,7 +394,8 @@ namespace Divisima.Bussiness.Concrete
                 refresh_token = refreshToken,
                 expires_at = DateTime.Now.AddDays(RefreshTokenDays),
                 is_active = true,
-                created_at = DateTime.Now
+                created_at = DateTime.Now,
+                auth_time = authTime
             });
             return new CustomerLoginResponseDto
             {
@@ -465,7 +480,11 @@ namespace Divisima.Bussiness.Concrete
             // Eski refresh token artık geçersiz (replay engeli); istemci yeni refresh_token'ı cookie'den alır.
             session.is_active = false;
             await _userSessionDal.UpdateAsync(session);
-            var response = await IssueSessionAndTokenAsync(customer);
+
+            // GF-1 / K3: ESKI oturumun giris ani YENI satira TASINIR - refresh step-up saatini
+            // SIFIRLAMAZ. `null` (GF-1 oncesi acilmis oturum) ise IssueSession `simdi` kullanir,
+            // yani o satirlarda davranis STATUKO kalir; geriye donuk doldurma YAPILMAZ.
+            var response = await IssueSessionAndTokenAsync(customer, session.auth_time);
             return (HttpStatusCode.OK, new SuccessDataResult<CustomerLoginResponseDto>(response, Messages.TokenRefreshed));
         }
 
