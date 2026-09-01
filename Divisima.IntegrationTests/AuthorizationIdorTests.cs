@@ -482,6 +482,107 @@ namespace Divisima.IntegrationTests
             (await A.Client.GetAsync($"/api/Invoice/order/{orderId}")).StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
+        // ══ GF-1 / K4 (B-1) - SOZLESMEYI IHLAL EDEN UC NOKTA ══════════════════════════════
+        //
+        // `SecureControllerBase` "sahiplik ihlalinde tek sozlesme 404" diyor; UC yer 403
+        // donuyordu ve ucu de varligi ELE VERIYORDU:
+        //   ReturnManager.cs:67          (tarifte anilan)
+        //   IyzicoPaymentManager.cs:84   (isim olarak birebir kardes, tarifte YOKTU)
+        //   OrderManager.cs:148          (adres sahipligi, tarifte YOKTU)
+        // Ucu de bu turda 404'e cekildi. Ustteki bes-uc testinin AYNI kalibi.
+        [Fact]
+        public async Task K4_UC_SAHIPLIK_NOKTASI_404_DONER_ve_GOVDE_SIZDIRMAZ()
+        {
+            if (Skipped()) return;
+            var (orderId, itemId, urunId) = await PlaceOrderForAAsync();
+            var orderNumber = await ReadOrderNumberAsync(orderId);
+
+            var upsert = await A.Client.PostAsJsonAsync("/api/Address/upsert", new AddressRequestDto
+            {
+                customer_id = A.CustomerId,
+                title = "Ev",
+                full_name = "A Musteri",
+                phone = "5551112233",
+                city = "Istanbul",
+                district = "Kadikoy",
+                full_address = "K4 sahiplik testi adresi",
+                is_default = true
+            });
+            upsert.IsSuccessStatusCode.Should().BeTrue("on kosul: A adres ekleyebilmeli");
+            int aAdresId;
+            await using (var ctx = NewContext())
+                aAdresId = (await ctx.Set<Address>().AsNoTracking()
+                    .SingleAsync(a => a.customer_id == A.CustomerId)).id;
+
+            var bUrunId = await NewProductAsync();
+
+            var denemeler = new (string ad, Func<Task<HttpResponseMessage>> cagri)[]
+            {
+                ("iade olusturma (ReturnManager:67)", () => B.Client.PostAsJsonAsync("/api/Return/create", new
+                {
+                    order_id = orderId, product_id = urunId, size = "M", quantity = 1,
+                    reason = (byte)0, description = "", return_type = (byte)0
+                })),
+                ("odeme baslatma (IyzicoPaymentManager:84)", () => B.Client.PostAsJsonAsync("/api/Payment/initialize", new
+                {
+                    order_id = orderId
+                })),
+                ("baskasinin adresine siparis (OrderManager:148)", () => B.Client.PostAsJsonAsync("/api/Order/place", new OrderCreateRequestDto
+                {
+                    customer_id = B.CustomerId,
+                    address_id = aAdresId,
+                    coupon_code = "",
+                    use_store_credit = 0m,
+                    payment_method = 1,
+                    items = new() { new OrderItemRequestDto { product_id = bUrunId, size = "M", quantity = 1 } }
+                })),
+            };
+
+            foreach (var (ad, cagri) in denemeler)
+            {
+                var resp = await cagri();
+                var body = await resp.Content.ReadAsStringAsync();
+                resp.StatusCode.Should().Be(HttpStatusCode.NotFound,
+                    $"{ad}: sahiplik ihlalinde tek sozlesme 404. Govde: {body}");
+
+                // ALAN BAZLI SIZINTI ASSERT'I (P19 dersi): "403 gelmedi" YETMEZ - govde
+                // varligi ELE VERMEMELI. `NotYourOrder` metinleri bu turda SILINDI.
+                body.Should().NotContain(orderNumber, $"{ad}: siparis numarasi SIZMAMALI");
+                body.Should().NotContain(A.Email, $"{ad}: sahibin e-postasi SIZMAMALI");
+                body.Should().NotContain("size ait değil", $"{ad}: 'sahiplik' ima eden metin SIZMAMALI");
+                body.Should().NotContain("K4 sahiplik testi adresi", $"{ad}: adres metni SIZMAMALI");
+            }
+
+            // ISLEM GERCEKTEN OLMADI
+            await using (var son = NewContext())
+            {
+                (await son.Set<ReturnRequest>().AsNoTracking().CountAsync(r => r.order_id == orderId))
+                    .Should().Be(0, "B'nin iade talebi OLUSMAMALI");
+                (await son.Set<Order>().AsNoTracking().CountAsync(o => o.customer_id == B.CustomerId))
+                    .Should().Be(0, "B'nin siparisi OLUSMAMALI");
+                (await son.Set<OrderItem>().AsNoTracking().SingleAsync(i => i.id == itemId))
+                    .is_cancelled.Should().BeFalse("A'nin kalemi ETKILENMEMELI");
+            }
+
+            // VAKUM KIRICI: ayni uclar SAHIBI icin 404 DEGIL - yani 404'un sebebi "uc bozuk" degil.
+            // (Sahibi icin 400/409 vb. donebilir; olculen sey 404'UN AYIRT EDICI oldugudur.)
+            var aOdeme = await A.Client.PostAsJsonAsync("/api/Payment/initialize", new { order_id = orderId });
+            aOdeme.StatusCode.Should().NotBe(HttpStatusCode.NotFound,
+                "sahibi icin uc 404 DONMEMELI - aksi halde 404 sahiplikten degil ucun kendisinden gelirdi");
+
+            var aSiparis = await A.Client.PostAsJsonAsync("/api/Order/place", new OrderCreateRequestDto
+            {
+                customer_id = A.CustomerId,
+                address_id = aAdresId,
+                coupon_code = "",
+                use_store_credit = 0m,
+                payment_method = 1,
+                items = new() { new OrderItemRequestDto { product_id = urunId, size = "M", quantity = 1 } }
+            });
+            aSiparis.StatusCode.Should().NotBe(HttpStatusCode.NotFound,
+                "A KENDI adresiyle siparis verebilmeli - adres sahiplik dali sahibini engellememeli");
+        }
+
         // =====================================================================
         // GRUP 2 - Anonim (401) ile kimlikli-yetkisiz (403) AYRI durumlardir
         // =====================================================================

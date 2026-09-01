@@ -143,9 +143,13 @@ namespace Divisima.Bussiness.Concrete
             // Aksi halde başkasının kayıtlı adresine sipariş verilebilir / adres bilgisi sızabilirdi.
             if (dto.address_id.HasValue)
             {
+                // GF-1 / K4 (B-1): SAHIPLIK IHLALI 404, 403 DEGIL - `SecureControllerBase`teki
+                // tek sozlesme. Bu dal "yok" ile "senin degil"i ZATEN tek yanitta birlestiriyordu
+                // (dogru desen), yalniz DURUM KODU sozlesmeye aykiriydi: 403, adresin VAR
+                // oldugunu ima ediyordu. Mesaj DEGISMEDI - zaten varlik sizdirmiyor.
                 var addr = await _addressDal.GetAsync(a => a.id == dto.address_id.Value);
                 if (addr == null || addr.customer_id != dto.customer_id)
-                    return (HttpStatusCode.Forbidden, new ErrorResult(Messages.OrderInvalidAddress));
+                    return (HttpStatusCode.NotFound, new ErrorResult(Messages.OrderInvalidAddress));
             }
 
             // Açıklayıcı yorum: 2) Tüm kalemler için ürün + stok kontrolü (overselling engeli)

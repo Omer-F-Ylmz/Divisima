@@ -62,9 +62,18 @@ namespace Divisima.Bussiness.Concrete
             if (order == null)
                 return (HttpStatusCode.NotFound, new ErrorResult(Messages.OrderNotFound));
 
-            // Açıklayıcı yorum: SAHİPLİK - yalnız kendi siparişi (IDOR engeli)
+            // ══ GF-1 / K4 (B-1) - SAHIPLIK IHLALI 404, 403 DEGIL ══════════════════════════
+            //
+            // TEK SOZLESME `SecureControllerBase`te YAZILI: "sahiplik ihlalinde artik tek
+            // sozlesme 404 (varlik sizdirilmaz)". Bu satir onu ihlal ediyordu: 403 + "Bu
+            // siparis size ait degil." yaniti, siparisin VAR OLDUGUNU ve BASKASINA ait
+            // oldugunu soyluyor - saldirgan id araligini tarayarak hangi id'lerin gercek
+            // siparis oldugunu sayabilirdi.
+            //
+            // YANIT USTTEKI "yok" DALIYLA BIREBIR AYNI (durum VE mesaj): ayirt edilebilir
+            // kalan tek bir alan bile sizintinin kendisidir.
             if (order.customer_id != dto.customer_id)
-                return (HttpStatusCode.Forbidden, new ErrorResult(Messages.ReturnNotYourOrder));
+                return (HttpStatusCode.NotFound, new ErrorResult(Messages.OrderNotFound));
 
             // Açıklayıcı yorum: Yalnız teslim edilmiş sipariş iade edilebilir
             if (order.status != (byte)OrderStatusEnum.Delivered)

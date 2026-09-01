@@ -181,7 +181,12 @@ namespace Divisima.Core.Utilities.Constants
 
         public static string PaymentTooManyAttempts = "Çok fazla ödeme denemesi. Lütfen birkaç dakika sonra tekrar deneyin.";
 
-        public static string PaymentNotYourOrder = "Bu sipariş size ait değil.";
+        // GF-1 / K4: odeme yolunun sahiplik-ihlali mesaji KALDIRILDI. Sahiplik ihlalinde tek
+        // sozlesme 404 + `OrderNotFound` (varlik sizdirilmaz); "size ait degil" diyen bir metni
+        // burada birakmak, bir gun "hazir var" diye kullanilip sizintiyi GERI GETIRMEK demekti -
+        // `SecureControllerBase`teki olu `EnsureOwner` yardimcisi da ayni gerekceyle silinmisti.
+        // KALDIRILAN SABITIN ADI BURAYA YAZILMAZ: adi yazmak, o adi arayan pini KIRLETIR
+        // (ARSIV-2'de kayitli ders; ilk yazimda birebir dusuldu). Adlar yalniz muhurde durur.
         public static string PaymentOrderNotPayable = "Bu sipariş ödeme için uygun durumda değil.";
         public static string PaymentInvalidAmount = "Geçersiz sipariş tutarı.";
         public static string PaymentPendingExists = "Bu sipariş için zaten bekleyen bir ödeme var.";
@@ -203,7 +208,7 @@ namespace Divisima.Core.Utilities.Constants
         public static string DataExported = "Verileriniz dışa aktarıldı.";
 
         // ── İade/değişim ──
-        public static string ReturnNotYourOrder = "Bu sipariş size ait değil.";
+        // GF-1 / K4: iade yolunun sahiplik-ihlali mesaji KALDIRILDI - gerekce odeme bolumunde.
         public static string ReturnOrderNotDelivered = "Yalnızca teslim edilmiş siparişler iade edilebilir.";
         public static string ReturnWindowExpired = "İade süresi (14 gün) doldu.";
         public static string ReturnInvalidItem = "Geçersiz iade kalemi veya adet.";

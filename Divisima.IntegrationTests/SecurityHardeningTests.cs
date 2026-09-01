@@ -598,8 +598,17 @@ namespace Divisima.IntegrationTests
         // tarama bir gunun olcumudur, pin onu surekli kilar.
         //
         // KAPSAM NOTU: kural `MapControllers().RequireAuthorization()` ile CONTROLLER'LARA bagli
-        // (FallbackPolicy DEGIL - gerekcesi Program.cs'te olculerek yazildi). Bu yuzden ileride
-        // eklenecek bir minimal-API ucu runtime'da degil BURADA yakalanir.
+        // (FallbackPolicy DEGIL - gerekcesi Program.cs'te olculerek yazildi).
+        //
+        // ══ GF-1 / K5 - DUZELTME: BURADAKI ESKI IDDIA YANLISTI ═════════════════════════════
+        // Bu notta once "ileride eklenecek bir minimal-API ucu runtime'da degil BURADA
+        // yakalanir" yaziyordu. KAYNAKLA CELISIYORDU: asagidaki tarama
+        // `.OfType<ControllerActionDescriptor>()` ile suzuyor, yani minimal-API ucu (MapGet,
+        // MapHub, ...) bu listeye HIC GIRMEZ ve tarama onu GOREMEZ.
+        // Bugun `Program.cs`te MapGet/MapPost/... SIFIR (olculdu), dolayisiyla acik bir bosluk
+        // YOK; ama kapatan sey BU TARAMA DEGIL. Controller DISI yuzeylerin pinleri
+        // `GuvenlikFix1SozlesmeTests`tedir: MapControllers baglantisi (K5a) - NotificationHub
+        // sinif ozniteligi (K5b) - Hangfire panosunun admin-only filtresi (K5c).
         [Fact]
         [Trait("Category", "Sql")]
         public async Task VarsayilanKapali_ACIK_Uclari_KIRMAZ_ve_HER_UC_ACIKCA_ISARETLIDIR()

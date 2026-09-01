@@ -79,9 +79,14 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
             if (order == null)
                 return (HttpStatusCode.NotFound, new ErrorDataResult<PaymentInitResponseDto>(Messages.OrderNotFound));
 
-            // Açıklayıcı yorum: SAHİPLİK KONTROLÜ - kullanıcı yalnızca KENDİ siparişini ödeyebilir (IDOR engeli)
+            // ══ GF-1 / K4 (B-1) - SAHIPLIK IHLALI 404, 403 DEGIL ══════════════════════════
+            //
+            // `ReturnManager`dakinin IKIZI - `SecureControllerBase`teki tek sozlesme (404,
+            // varlik sizdirilmaz) burada da ihlal ediliyordu. Bu uc ODEME BASLATMA ucu, yani
+            // sizinti "hangi siparis id'leri gercek + odenmemis" sorusunu ANONIM'e yakin bir
+            // maliyetle yanitliyordu. Yanit ustteki "yok" daliyla BIREBIR ayni.
             if (order.customer_id != authenticatedCustomerId)
-                return (HttpStatusCode.Forbidden, new ErrorDataResult<PaymentInitResponseDto>(Messages.PaymentNotYourOrder));
+                return (HttpStatusCode.NotFound, new ErrorDataResult<PaymentInitResponseDto>(Messages.OrderNotFound));
 
             if (order.is_online_payment_done)
                 return (HttpStatusCode.BadRequest, new ErrorDataResult<PaymentInitResponseDto>(Messages.PaymentAlreadyDone));
