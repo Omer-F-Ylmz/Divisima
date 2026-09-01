@@ -292,3 +292,20 @@ yerine olcum yapmak tek guvenli yoldur.
 
 **SINIF:** bu, "belgenin kendi suzgecini metinlestirmesi" ailesinin **ikinci** vakasidir
 ve ikisi de AYNI TURDA olculdu. Ailenin adi: **kendine gonderme yapan capa kirlenmesi.**
+
+**KIRLENMENIN OMRU OLCULDU (gecici):**
+```
+git show d6f4460:CLAUDE.md | grep -o 'MK-77' | wc -l  -> 1   (kirli ara commit)
+git show 92f501a:CLAUDE.md | grep -o 'MK-77' | wc -l  -> 0   (duzeltilmis)
+HEAD'de capa durumu: MK-77 0 · MK-99 1 · MK-13 0 · MK-14 0
+```
+Yani yedek capa YALNIZ ara commit'te (`d6f4460`) kirliydi ve `92f501a` ile TEMIZLENDI;
+BUGUNKU CLAUDE.md'de kullanilabilir durumdadir. Kalici kirli olan tek capa, MK-10 blogunun
+kendi alintisindaki `MK-99`'dur. **Yine de kural degismez: her tur NEG capasini KULLANMADAN
+ONCE olcer** — capa "temiz" diye hatirlanmaz, olculur.
+
+**BIR DOGRULAMA HATASI DAHA (kayit):** duzeltmenin kendi kontrolu `'kural KENDINE DE ISLER'`
+diye kucuk harfle arandi, metin `**Kural KENDINE DE ISLER:**` oldugu icin **0** dondu ve
+bir an "eksik" sanildi. Buyuk/kucuk harf duyarli grep, yazilan metne karsi degil EZBERE
+kuruldugunda yanlis negatif verir — MK-7'nin ("capa HAM ciktidan kopyalanir") kucuk olcekli
+tekrari.
