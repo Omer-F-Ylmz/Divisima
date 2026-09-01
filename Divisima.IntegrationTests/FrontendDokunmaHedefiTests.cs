@@ -1900,5 +1900,43 @@ namespace Divisima.IntegrationTests
             Oku("frontend/api-client.js").Should().NotContain("effective_price",
                 "fiyat normalizasyonu admin panelinin de okudugu dosyaya TASINMAMALI");
         }
+
+        // ── P-V2 (MANTIK-FIX-4 / K2): SIPARIS KARTI TUTARIN NE OLDUGUNU SOYLER ──────────
+        // Kart `o.total` = orders.total_price basar; bu SIPARISIN BRUT toplamidir, magaza
+        // kredisi DUSULMEMISTIR (olculdu: 261 -> total 689,74 / kredi 200,00 / kasadan
+        // odenen 489,74). Etiketsiz rakam "odedigim tutar" diye okunabiliyordu.
+        // ETIKET KOSULSUZ: liste DTO'su krediyi TASIMIYOR, dolayisiyla kart "kredili mi"
+        // sorusunu YANITLAYAMAZ; kosullu bir etiket ya olu dal yazar ya da sunucudan yeni
+        // alan ister. Kosulsuz etiket iki durumda da DOGRUDUR.
+        // DURUST ETIKET: KAYNAK SOZLESMESI pinidir. Davranis kaniti muhurdeki uc dilli
+        // once/sonra olcumudur (261 ve kredisiz 260 AYNI etiketi tasiyor).
+        [Fact]
+        public void KAYNAK_SOZLESMESI_SiparisKarti_TutarEtiketini_KOSULSUZ_Tasir()
+        {
+            var b = YorumlariAyikla(Oku("frontend/api-bridge.js"));
+            var govde = FonksiyonGovdesi(b, "async function sekmeSiparisler(el)");
+
+            govde.Length.Should().BeGreaterThan(200, "sekmeSiparisler govdesi okunmus olmali");
+
+            var iMeta = govde.IndexOf("ao-meta", StringComparison.Ordinal);
+            iMeta.Should().BeGreaterThan(-1, "kart tutar bloku hala ao-meta ile cizilmeli");
+            var iTutar = govde.IndexOf("paraTL(o.total)", StringComparison.Ordinal);
+
+            // VAKUM KIRICI: tutarin kendisi HALA basiliyor olmali.
+            iTutar.Should().BeGreaterThan(iMeta, "tutar ao-meta blokunda basilmaya devam etmeli");
+
+            var arasi = govde.Substring(iMeta, iTutar - iMeta);
+            Bosluksuz(arasi).Should().Contain(Bosluksuz("ceviri(\"b_siparis_toplami\")"),
+                "tutardan ONCE, tutarin NE OLDUGUNU soyleyen etiket basilmali");
+
+            // CIFT-ANLAM KIRICI: etiket KOSULSUZ. Etiket ile tutar arasina bir kosul
+            // girerse kart bazen brut bazen net anlaminda okunur.
+            arasi.Should().NotContain("?",
+                "etiket ile tutar arasinda KOSUL olamaz - etiket her siparis icin AYNI olmali");
+
+            // Anahtar uc dilde de tanimli olmali (T + AR birer; T ciftinin ikinci elemani EN).
+            AnkrajliSayim(Index, "b_siparis_toplami").Should().Be(2,
+                "yeni anahtar T ve AR sozluklerinde BIRER kez tanimli olmali");
+        }
     }
 }

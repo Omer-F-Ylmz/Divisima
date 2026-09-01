@@ -2637,7 +2637,18 @@
           '<div class="ao-head"><div class="ao-hl"><span class="ao-no">' + esc(o.order_number) + "</span>" +
           '<span class="ao-date">' + trTarih(o.created_at) + "</span></div>" +
           '<span class="ao-badge">' + esc(durumEtiket(o.order_status)) + "</span></div>" +
-          '<div class="ao-body"><div class="ao-meta"><b>' + paraTL(o.total) + "</b></div></div>" +
+          // MANTIK-FIX-4 / K2: tutar ETIKETSIZ basiliyordu. `o.total` = orders.total_price,
+          // yani SIPARISIN BRUT TOPLAMI - magaza kredisi DUSULMEMIS haldir (olculdu: siparis
+          // 261 total 689,74 / kredi 200,00; musteri kasadan 489,74 odedi). Etiketsiz bir
+          // rakam kullanicinin "odedigim tutar" diye okumasina acikti. Liste DTO'su krediyi
+          // TASIMIYOR (OrderListResponseDto: id · order_number · order_status · total ·
+          // created_at) ve kalem/kredi ancak siparis ACILINCA tembel cekiliyor; bu yuzden
+          // cozum sunucudan yeni alan istemek DEGIL, tutarin NE OLDUGUNU soylemektir.
+          // ETIKET KOSULSUZ: kredili ve kredisiz siparis AYNI etiketi tasir - "bazen brut
+          // bazen net" diyen bir kart, okuyanin her seferinde hangisi oldugunu bilmesini
+          // gerektirirdi. Kredinin kendisi detayda ZATEN gorunuyor (MANTIK-FIX-1 / K2-A).
+          '<div class="ao-body"><div class="ao-meta"><span class="ao-lbl">' + ceviri("b_siparis_toplami") +
+          '</span> <b>' + paraTL(o.total) + "</b></div></div>" +
           '<div class="od-detail" hidden></div>' +
           '<div class="ao-actions"><button class="ao-btn" data-siparis-ac="' + o.id + '">' + esc(ceviri("ord_track")) + "</button></div>" +
           "</div>";
