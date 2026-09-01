@@ -1704,7 +1704,11 @@ function dvsLocale(){return lang==='en'?'en-GB':(lang==='ar'?'ar-EG-u-nu-latn':'
    toggle, fiyat bidi izolasyonu, breadcrumb aynalamasi, body hizalamasi - ve HEPSI OLU KODDU.
    `git log -S`: `setAttribute('dir','rtl')` HICBIR COMMIT'te gecmiyor; hem RTL CSS'i hem
    'ltr' sabitlemesi ILK COMMIT'ten beri yan yana duruyor. Yani yazar RTL destegini YAZMIS
-   ama ACMAMIS. Bu yardimci o anahtardir; uc noktanin ucu de buraya baglandi.
+   ama ACMAMIS. Bu yardimci o anahtardir.
+   KAPSAM (MK-4b denetim duzeltmesi): uc noktanin IKISI buraya baglandi (setLang ve dil
+   gostergesi). UCUNCUSU - <head> icindeki acilis betigi - kendi `setAttribute`'unu yazmaya
+   DEVAM EDER, cunku o blok fonksiyon tanimlarindan ONCE kosar ve yardimciyi CAGIRAMAZ.
+   Orada da yon AR'a KOSULLU verilir ('rtl'), yani sayfa ILK BOYAMADAN dogru yondedir.
    ONCE KIRICILAR KAPATILDI: `dir=rtl` acilir acilmaz masaustunde filtre panelini ekran
    disina iten medya-kapsam asimetrisi ve alti kalem daha ONCE duzeltildi (ayni commit). */
 function dvsYonUygula(l){document.documentElement.setAttribute('dir',l==='ar'?'rtl':'ltr');}

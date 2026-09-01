@@ -2099,8 +2099,49 @@ namespace Divisima.IntegrationTests
 
             // (6) VAKUM KIRICI: RTL kural kumesi GERCEKTEN dolu olmali - bos bir kume
             // "yon acildi" iddiasini anlamsiz kilardi.
-            Regex.Matches(s, Regex.Escape("[dir=\"rtl\"]")).Count.Should().BeGreaterThan(12,
-                "RTL kural kumesi mevcut on iki kurali VE K6'nin ekledigi override'lari tasimali");
+            // MK-4b DENETIM DUZELTMESI (BULGU-1): olcut GECIS degil SATIR sayar. Gecis
+            // sayimi ZEMINDE de 20 idi (bir satirda birden cok secici var), yani K6'nin
+            // TUM override'lari geri alinsa bile esigi gecerdi - kirici DEGILDI. Satir
+            // bazinda zemin 12, K6 sonrasi 17.
+            var rtlSatir = s.Split('\n').Count(x => x.Contains("[dir=\"rtl\"]", StringComparison.Ordinal));
+            rtlSatir.Should().BeGreaterThan(12,
+                "RTL kural kumesi ZEMINDEKI on iki kurali VE K6'nin ekledigi override "
+                + "satirlarini tasimali (zemin 12 satir -> K6 sonrasi 17)");
+        }
+
+        // ── P-V3 (MANTIK-FIX-4 / K3): CEKMECE ETIKETI TOPLADIGI SEYI ADLANDIRIR ────────
+        // MK-4b DENETIM DUZELTMESI (BULGU-2): K3 tek basina PINSIZ kalmisti - etiket
+        // sessizce `total`a donerse suit yesil kalirdi.
+        // Cekmecede toplanan sey urun satirlari (ETKIN fiyatla) eksi kupon indirimi;
+        // KARGO hicbir dalda eklenmiyor, MAGAZA KREDISI dusulmuyor. Bitisikteki odeme
+        // paneli ise "Toplam"i KARGO DAHIL gosteriyor - ayni kelime iki ekranda IKI
+        // FARKLI buyuklugu adlandiriyordu.
+        // DURUST ETIKET: KAYNAK SOZLESMESI pinidir. Davranis kaniti muhurdeki uc dilli
+        // olcumdur ("Toplam/Total/الإجمالي" -> "Ara Toplam/Subtotal/المجموع الفرعي").
+        [Fact]
+        public void KAYNAK_SOZLESMESI_CekmeceEtiketi_ARA_TOPLAM_ve_b_toplam_DEGERI_KORUNUR()
+        {
+            var s = YorumlariAyikla(Index);
+
+            // Cekmece satiri `subtotal` anahtarini kullanmali.
+            Bosluksuz(s).Should().Contain(Bosluksuz("class=\"cart-total\"><span>'+t('subtotal')"),
+                "cekmece etiketi topladigi seyi adlandirmali - kargo ve kredi HARIC bir ara toplam");
+            s.Should().NotContain("t('total')",
+                "cekmecenin eski `total` anahtari geri gelmemeli (kargoyu IMA ederdi)");
+
+            // VAKUM KIRICI: `subtotal` sozlukte T ve AR'da tanimli olmali - olmayan bir
+            // anahtara gecmek ekranda HAM ANAHTAR gosterirdi.
+            AnkrajliSayim(Index, "subtotal").Should().Be(2,
+                "`subtotal` T ve AR sozluklerinde BIRER kez tanimli olmali");
+
+            // CIFT-ANLAM KIRICI: `b_toplam` DOKUNULMAZ - o api-bridge'in PAYLASILAN
+            // anahtari (dort cagiran) ve odeme panelinde KARGO DAHIL toplami adlandiriyor.
+            // Degeri degistirilirse iki ekran yine ayni kelimeyi paylasirdi.
+            s.Should().Contain("b_toplam:[\"Toplam\",\"Total\"]",
+                "b_toplam'in DEGERI degistirilmemeli - K3 yalniz CEKMECE etiketini degistirir");
+            Regex.Matches(YorumlariAyikla(Oku("frontend/api-bridge.js")),
+                Regex.Escape("ceviri(\"b_toplam\")")).Count.Should().Be(4,
+                "b_toplam'in dort cagirani KORUNMALI");
         }
 
         // ── P-V7 (MANTIK-FIX-4 / K7): TELEFON KURALININ DORT KOPYASI AYRISAMAZ ──────────
