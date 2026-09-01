@@ -272,3 +272,23 @@ total_count 2 · job duzeyi failure 0 · cancelled 0 · NEG kontrol "ZZZfailure"
 
 **ACIK KALAN:** skill KESFI (`Skill` tool'unun `sdp`/`surec`i gormesi) **OLCULMEDI** —
 GUVENLIK-FIX kapisinda olculecek. Olculene kadar MK-12'nin `Read` fallback'i gecerlidir.
+
+---
+
+## 7. EK — MUHUR FAZINDA BULUNAN CC HATASI (6.) ve DUZELTMESI
+
+**Ders metni KENDI kuralini ayni cumlede IHLAL ETTI.** B6'ya eklenen ikinci ders
+("NEG capa dizesi belgeye yazilmaz") ilk yaziminda **yedek capanin adini metne koydu**.
+Olcum yakaladi: delta sonrasi dogrulamada `MK-77` taramasi **0 yerine 1** dondu.
+Yani ders, tarif ettigi kirlenmeyi **uygularken uretti** — `MK-99`'un basina geleni
+yedek capaya da yapmis oldu.
+
+**Duzeltme:** ders metni capa ADI TASIMAYACAK sekilde yeniden yazildi; capa adlari yalniz
+BU MUHURDE durur (`43·ARSIV-2 · CC HATALARI`), ve derse **"kural KENDINE DE ISLER"**
+cumlesi eklendi. Kirlenen capalar (kayit, CLAUDE.md'ye GIRMEZ): ilk NEG capasi MK-10
+blogunun kendi alintisiyla, yedek capa ise bu dersin ilk yazimiyla kirlendi.
+**Bundan sonra her tur NEG capasini KULLANMADAN ONCE olcer** — capa listesi tasimak
+yerine olcum yapmak tek guvenli yoldur.
+
+**SINIF:** bu, "belgenin kendi suzgecini metinlestirmesi" ailesinin **ikinci** vakasidir
+ve ikisi de AYNI TURDA olculdu. Ailenin adi: **kendine gonderme yapan capa kirlenmesi.**

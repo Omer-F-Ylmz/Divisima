@@ -750,10 +750,12 @@ icine dustu; dogrulama `grep -c ... = 1` ile yetindigi icin BIR TUR boyunca goru
 ARSIV-2'de satir numarasi karsilastirmasiyla (stub 263 < isaretci 265 < sonraki baslik 267)
 POZITIF dogrulandi.
 
-**NEG capa dizesi belgeye yazilmaz; NEG kontrolu raporda anilir, CLAUDE.md'ye girmez
-(MK-99 metinlesmesi).** Gerekce OLCULDU: MK-10 blogu kendi NEG kontrol cumlesini metin
-olarak tasidigi icin `MK-99` taramasi 0 yerine 1 dondu ve capa KIRLENDI; temiz capa
-`MK-77`'ye tasindi.
+**NEG capa dizesi belgeye YAZILMAZ; NEG kontrolu raporda/muhurde anilir, CLAUDE.md'ye
+girmez.** Gerekce OLCULDU: bir MK blogu kendi NEG kontrol cumlesini metin olarak tasidigi
+icin o capanin taramasi 0 yerine 1 dondu ve capa KIRLENDI. **Kural KENDINE DE ISLER:** bu
+dersin ilk yazimi yedek capanin adini metne koydu ve onu da KIRLETTI (olculdu, ayni turda
+duzeltildi) — capa adlari `43·ARSIV-2 · CC HATALARI`'nda durur. Her tur NEG capasini
+KULLANMADAN ONCE olcer.
 
 ## Iki ders — GUVENLIK-AV-1 (42·GUVENLIK-AV-1 · CC HATALARI)
 
