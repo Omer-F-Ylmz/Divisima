@@ -18,10 +18,18 @@ d) Atif bicimi: satir numarasi yazilmaz; "muhur adi + baslik" (or. MF-4 · KURGU
 e) Operatif delta isaretci disiplini: tablo/envanter/itiraz listeleri muhurde kalir, CLAUDE.md'ye tek satir
    isaretci (muhur adi + baslik); MAX, kuyruk ve sayac satirlari YERINE yazilir, eklenmez; her ders <=2 satir;
    INDEX.md toplam satiri her muhurde ureten ifadeyle yeniden olculur.
+f) **MK-12 PROSEDUR SKILL'LERI:** SDP ve SUREC `.claude/skills/` altinda proje skill'idir
+   (arsiv DEGILDIR; MK-11 a)'nin `.claude/` yasagi yalniz `docs/muhur/` icindir). Her
+   dalga/denetim tarifi "SDP ve SUREC skill'lerini yukle" satiriyla baslar; CC `Skill`
+   cagrisiyla yukler, donmezse `Read .claude/skills/<ad>/SKILL.md` ile yukler ve hangisiyle
+   yukledigini kapi bolumunde beyan eder (ad + govde bayt). Yuklenmeden olcum/uygulama
+   yapilmaz. Skill govdesi CLAUDE.md gibi delta alir (MK-11 c/e); surum baslikta.
 
-**BOLUM DUZENI:** B0 bu blok · B1 calisma kurallari · B2 SDP v1.3 · B3 dalga ici denetim kurali
-+ SUREC · B4 MK-1..MK-11 · B5 suzgec kutuphanesi · B6 dersler · B7 kurgu sabitleri + D-YAN ·
-B8 baglayici kararlar + acik SUPHELI · B9 kuyruk + devir. B1/B2/B3 kaynagindan BAYT-AYNIDIR.
+**BOLUM DUZENI:** B0 bu blok · B1 calisma kurallari · B2 SDP v1.3 -> skill `sdp` ·
+B3 DALGA ICI DENETIM (bayt-ayni) + SUREC -> skill `surec` · B4 MK-1..MK-10 (MK-11/12 B0'da) ·
+B5 suzgec kutuphanesi · B6 dersler · B7 kurgu sabitleri + D-YAN ·
+B8 baglayici kararlar + acik SUPHELI · B9 kuyruk + devir.
+B1 ve DALGA ICI DENETIM kaynagindan BAYT-AYNIDIR.
 
 # CLAUDE.md — Divisima Backend calisma kurallari
 
