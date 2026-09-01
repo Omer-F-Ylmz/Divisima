@@ -15,8 +15,11 @@ c) Yeni muhur usulu: dalga muhru docs/muhur/'a YENI dosya (NN siradaki, slug dal
    HAM'dan). Dosya-sonu guvenli-ekleme capa deseni EMEKLI. MK-8 surer.
 d) Atif bicimi: satir numarasi yazilmaz; "muhur adi + baslik" (or. MF-4 · KURGU). Muhur metni
    sonradan degistirilmez; duzeltme yeni muhrun ya da ilgili B-satirinin isidir.
+e) Operatif delta isaretci disiplini: tablo/envanter/itiraz listeleri muhurde kalir, CLAUDE.md'ye tek satir
+   isaretci (muhur adi + baslik); MAX, kuyruk ve sayac satirlari YERINE yazilir, eklenmez; her ders <=2 satir;
+   INDEX.md toplam satiri her muhurde ureten ifadeyle yeniden olculur.
 
-**BOLUM DUZENI:** B0 bu blok · B1 calisma kurallari · B2 SDP v1.2 · B3 dalga ici denetim kurali
+**BOLUM DUZENI:** B0 bu blok · B1 calisma kurallari · B2 SDP v1.3 · B3 dalga ici denetim kurali
 + SUREC · B4 MK-1..MK-11 · B5 suzgec kutuphanesi · B6 dersler · B7 kurgu sabitleri + D-YAN ·
 B8 baglayici kararlar + acik SUPHELI · B9 kuyruk + devir. B1/B2/B3 kaynagindan BAYT-AYNIDIR.
 
@@ -249,7 +252,7 @@ bicim (tablo/kalin/baglanti) kopyada bos dusuyor.
 
 ---
 
-# SDP — SAHADA DOGRULANMIS DENETIM PROTOKOLU v1.2 (KALICI; v1.1 27 Agustos 2026, v1.2 28 Agustos 2026)
+# SDP — SAHADA DOGRULANMIS DENETIM PROTOKOLU v1.3 (KALICI; v1.1 27 Agustos 2026, v1.2 28 Agustos 2026)
 
 **Bu bolum BAGLAYICIDIR: bundan sonraki her CC isi bu protokole uyar.**
 v1.0 MTUR-OLCUM turunda sahada surulda; her v1.1 maddesi O TURDA OLCULEN bir
@@ -726,6 +729,9 @@ Alti baslik, sirayla:
 - **Uretim kodu**: yalniz kullanicinin acikca izin verdigi kalemlerde. Kapsam disi
   bulgular duzeltilmez, **SUPHELI DAVRANISLAR** basligiyla raporlanir.
 
+**1.12 GUVENLIK modulu (SDP v1.3): tam metin `42·GUVENLIK-AV-1 · SDP 1.12` — guvenlik
+dalgalarinda arsivden okunur (MK-11 b somut gerekce).**
+
 ---
 
 ---
@@ -1180,6 +1186,22 @@ kontrol eder: `awk '/^kaynak: /{ if (p2 !~ /^#/) n++ } { p2=p1; p1=$0 } END{prin
 POZ (C2/2474135) 4 · NEG (`^ZZZkaynak:`) 0 · C4 sonrasi 0.
 kaynak: ARSIV-1 denetim turu, muhurde 41·ARSIV-1 · CC HATALARI 4
 
+## Iki ders — GUVENLIK-AV-1 (42·GUVENLIK-AV-1 · CC HATALARI)
+
+**BILINEN listesi B8 fragmanlarindan KURULMAZ; 00a/00b tam metni okunur (AV-1 hatasi 2).**
+Gerekce OLCULDU: AV-1'de ajanlara verilen B-01..B-18 listesi B8'in ilk-cumle
+fragmanlarindan kuruldu; `00a:101` (SellerAuthManager kilit kontrolu sifreden ONCE) ve
+`00a:108` (step-up `auth_time` refresh'te sifirlanmasi) DISARIDA kaldi ve IKI bulgu
+(C-3, C-2) yanlis olarak "YENI" sayildi. Rapor denetcisi yakaladi.
+
+**Sir hijyeni: ham yanit dokumleri diske MASKELI yazilir; ajan ortak kurali "basilmaz" +
+"diske yazilmaz" + maske aracini icerir (AV-1 hatasi 3).**
+Gerekce OLCULDU: AV-1'in ortak kurali yalniz "rapora/deftere/konsola basilmaz" diyordu;
+ham yanit dokumlerinin DISKE yazilmasi kapsanmadi -> dokuz dosyada ciplak canli jeton
+(6 access JWT + 3 refresh, biri ADMIN; oturumlar 7 gun gecerli, besi `is_active=1`).
+Ajanin KENDI kapanis iddiasi "jetonlar ilk 8 karaktere kirpildi" diyordu ve **CURUK** cikti
+— turun TEK curuyen kalemi bir bulgu degil, bir KAPANIS IDDIASIYDI.
+
 # B7 — KURGU SABITLERI ve D-YAN
 
 ## Olcum duzenegi (goz1) — bes arguman
@@ -1198,9 +1220,10 @@ kaynak: 40·MANTIK-FIX-4_MUHRU · KURGU KAYIT ENVANTERI (bayt-ayni KOPYA; muhurd
 
 ## KURGU KAYIT ENVANTERI
 
-**UYGULAMA FAZI HICBIR YENI KAYIT URETMEDI.** MAX'lar zeminle AYNI: musteri **158** ·
-siparis **286** · adres **118** · fatura **119**. `id > 210` Pending kumesi **10** (zemindeki
-10 - degismedi). Omer'in hesabi (musteri 10) ve kabul turu kayitlari KULLANILMADI.
+**MF-4 UYGULAMA FAZI HICBIR YENI KAYIT URETMEDI**; Omer'in hesabi (musteri 10) ve kabul
+turu kayitlari KULLANILMADI.
+MAX musteri **168** · siparis **286** · adres **119** · fatura **119** · Pending(id>210)
+**10** — kaynak `42·GUVENLIK-AV-1 · KURGU`
 
 **TEK YAZMA - URETIM YOLUNDAN:** K2 kanitini almak icin musteri 102'nin
 (`mfix1.once@example.com`, MANTIK-FIX-1 kurgusu) sifresi **uretim yolundan** sifirlandi:
@@ -1240,6 +1263,9 @@ DV3  429 UC AYRI KAYNAKTAN (cop-misafir guard'i · Redis rate-limit · yerlesik 
 ---
 
 
+D-YAN: AV-1 kurgusu m159-168 `gav1.*` · `user_sessions` 331-339 · `review_helpful_votes` 1 ·
+admin 118 sifre sifirlama · 14 satirlik yan etki tablosu -> `42·GUVENLIK-AV-1 · KURGU ENVANTERI`
+
 **D-YAN bloklari kumulatiftir; en guncel liste 39·MANTIK-FIX-3'tedir. Onceki bloklar
 su arsiv dosyalarinda: 26 · 27 · 30 · 31 · 32 · 33 · 34 · 35 · 36 · 37 · 38 (INDEX.md ile
 cozulur).**
@@ -1268,7 +1294,6 @@ yalniz somut gerekceyle bakilir.
 - `37·MANTIK-FIX-1·MF-2 ONCESI ARA DURUM` - **(a)** `InvoiceManager.cs:76`'nin **BRUT** toplama bagi MF-2'de ACIK HALE GETIRILIP
 - `38·MANTIK-FIX-2R·ACIK OLCUM (2)` **URETIM KAYNAGI SAYIMA GIRMEDI ve DOKUNULMADI** (C4): `InvoiceManager.cs:24` (`0.20m`)
 - `39·MANTIK-FIX-3·MERKEZ KARARLARI N2` | **N2** | Hata eslemesi once MAKINE-OKUNUR sinyal; yoksa HAM yanit capasi + cift bicim + kirilganlik kaydi | K3 ve K3b'nin ikisi de bu capaya dayaniyor - sunucu yanit sozlesmesi DEGISTIRILMEDI, istemcide politika kopyasi ACILMADI |
-- `24·FIX-1A` Migration/sema degisikligi YOK.
 - `36·MANTIK-AV-1·DALGA BOLUMLEMESI` i18n. **64 bozuk `invoice_items` satiri D-YAN'a** (veri temizligi, fix degil).
 - `37·MANTIK-FIX-1·MF-2 ONCESI ARA DURUM` **InvoiceManager KODUNA DOKUNULMADI (sart aynen korundu).**
 
@@ -1308,31 +1333,16 @@ kaynak: 36·MANTIK-AV-1_MUHRU · DALGA BOLUMLEMESI (64 fatura satiri, tam cumle)
 i18n. **64 bozuk `invoice_items` satiri D-YAN'a** (veri temizligi, fix degil).
 # B9 — KUYRUK · DEVIR · VITRIN-KALAN · ERTELENMIS-DEFTER
 
-## Kuyruk
+## Kuyruk (merkez metni, AV-1 muhru)
 
-kaynak: 40·MANTIK-FIX-4_MUHRU · KUYRUK (bayt-ayni KOPYA)
+1. GUVENLIK-FIX — bolumleme merkezden (oneri: `42·GUVENLIK-AV-1 · BOLUMLEME ONERISI`)   <- SIRADA
+2. GUVENLIK-AV-2 (dar olcum, ultracode YOK): at-rest sifreleme · 2FA/TOTP ·
+   TOCTOU/ExecuteUpdateAsync · A09 · olay isleyicileri · 13 anilmayan controller
+   (Comparison/Collection ham entity suphesi)
+3. VITRIN-KALAN (7 kalem)  4. FIX-1B  5. ADMIN-FIX  6. IMPORT-FIX  7. FIX-1C  8. LOG-FIX  9. FIX-2  10. FIX-3/B13
 
-## KUYRUK
-
-```
-1. ARSIV-1 (docs-only; tarif merkezden)                        <- SIRADA
-2. GUVENLIK-AV-1 (ultracode pilotu)
-3. GUVENLIK-FIX (DV1 bas kalem)
-4. VITRIN-KALAN
-5. FIX-1B
-6. ADMIN-FIX
-7. IMPORT-FIX
-8. FIX-1C
-9. LOG-FIX
-10. FIX-2
-11. FIX-3 / B13
-```
-
-**ARSIV-1 (bu tur) kuyrugun 1. maddesiydi ve TAMAMLANDI.** Siradaki: GUVENLIK-AV-1.
-
-**ARSIV-1 KAPANDI** - kod `7f8efa7` (dort commit tek push, cift yesil, Gitleaks adimi
-SUCCESS, annotation 39/failure 0); muhur `docs/muhur/41-arsiv-1.md`. CLAUDE.md 747.240 B
--> 78.773 B (~186.810 -> ~19.693 est.token). Siradaki kuyruk kalemi: GUVENLIK-AV-1.
+ARSIV-1 KAPANDI c6721b7 · GUVENLIK-AV-1 KAPANDI (zemin c6721b7 · muhur
+`docs/muhur/42-guvenlik-av-1.md`)
 
 ## Devir ID'leri
 
@@ -1374,6 +1384,7 @@ kaynak: 40·MANTIK-FIX-4_MUHRU · VITRIN-KALAN (bayt-ayni KOPYA)
 5. POPULAR_L - AR'da Turkce arama etiketleri (`POPULAR_L[lang]||POPULAR_L.tr`)
 6. showLegal CMS - AR kullanici sozlesme metnini Turkce goruyor; sebep SOZLUK DEGIL,
    `contents` tablosunda AR karsiliginin olmamasi (icerik isi, i18n isi degil)
+7. A-1 arama collation/LOWER() — `42·GUVENLIK-AV-1 · A-1`
 ```
 
 ## ERTELENMIS-DEFTER (yeni sinif, ARSIV-1/S5)
