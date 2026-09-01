@@ -2616,7 +2616,15 @@ function renderCart(){validateCoupon();
   var pct=Math.min(100,Math.round(total/FREE_SHIP*100));
   var note=remain>0?('<span>'+(lang==='en'?'<b>'+tl(remain)+'</b> away from free shipping':'Ücretsiz kargoya <b>'+tl(remain)+'</b> kaldı')+'</span>'):'<span style="color:var(--ok)">'+t('free_won')+'</span>';
   var _disc=couponDiscount(total),_net=total-_disc;
-  cartFoot.innerHTML='<div class="progress"><div class="ship-note">'+note+'</div><div class="progress-bar"><i style="width:'+pct+'%"></i></div></div>'+couponUI()+(_disc>0?'<div class="cart-line"><span>'+t('cp_discount')+' ('+coupon.code+')</span><span class="cp-minus">−'+tl(_disc)+'</span></div>':'')+'<div class="cart-total"><span>'+t('total')+'</span><b>'+tl(_net)+'</b></div><button class="btn" id="checkoutBtn">'+t('cart_confirm')+'</button>'+
+  /* MANTIK-FIX-4 / K3: cekmecedeki satir "Toplam" DEGIL "Ara toplam"dir. Olculdu: burada
+     toplanan sey urun satirlari (ETKIN fiyatla) eksi kupon indirimi; KARGO HICBIR DALDA
+     eklenmiyor (kargo yalniz ilerleme cubugunun METNINDE gecer) ve MAGAZA KREDISI de
+     dusulmuyor. Bitisikteki odeme paneli ise "Toplam"i KARGO DAHIL gosteriyor - yani ayni
+     kelime iki ekranda IKI FARKLI buyuklugu adlandiriyordu.
+     RELABEL KOSULSUZ: cekmeceye kargo EKLENMEZ (o ayri bir karar ve bu dalganin disinda),
+     dolayisiyla "kargoluysa Toplam" gibi bir dal OLU DAL olurdu. `subtotal` anahtari
+     sozlukte T ve AR'da ZATEN vardi, yalnizca cagirani yoktu. */
+  cartFoot.innerHTML='<div class="progress"><div class="ship-note">'+note+'</div><div class="progress-bar"><i style="width:'+pct+'%"></i></div></div>'+couponUI()+(_disc>0?'<div class="cart-line"><span>'+t('cp_discount')+' ('+coupon.code+')</span><span class="cp-minus">−'+tl(_disc)+'</span></div>':'')+'<div class="cart-total"><span>'+t('subtotal')+'</span><b>'+tl(_net)+'</b></div><button class="btn" id="checkoutBtn">'+t('cart_confirm')+'</button>'+
   /* GOZ-FIX / F-Ö5: sepeti tek hamlede bosaltma. Onay sorulur; hem YEREL hem SUNUCU
      sepeti temizlenir (sunucu tarafi api-bridge'in sagladigi kanca ile - yeni backend
      ucu ACILMADI, mevcut DELETE /api/cart/clear kullaniliyor). */
