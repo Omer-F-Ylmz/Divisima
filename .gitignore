@@ -140,3 +140,7 @@ found.txt
 allow.txt
 deprecated.txt
 Divisima.API/wwwroot/uploads/
+
+# ARSIV-2 (merkez onayli config istisnasi): denetim worktree artiklari agac-0 kapisini
+# kirmasin. .claude/skills/** IZLENIR - bilerek DISLANMADI.
+.claude/worktrees/
