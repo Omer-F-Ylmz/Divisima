@@ -1143,9 +1143,19 @@ namespace Divisima.IntegrationTests
             // ── F-M2 EK: AR sozlugu T ile TAM ORTUSMELI ────────────────────────
             // MTUR'da olculen iki eksik anahtar ('sort_price-asc' / 'sort_price-desc')
             // AD-TABANLI taramalarda TIRE yuzunden gozden kaciyordu; burada tire de kapsamda.
+            // MANTIK-FIX-4 / K4: ortusme kontrolu TEK YONLUYDU (yalniz "T'de olup AR'da
+            // olmayan"). O halde bir anahtari T'den silip AR'da BIRAKMAK - ya da yalniz
+            // AR'a bir anahtar EKLEMEK - pinden SESSIZCE gecerdi ve sozlukte olu yuk
+            // birikirdi. Kontrol CIFT YONLU yapildi.
             var eksik = new List<string>();
             foreach (var k in tAnahtar) if (!arAnahtar.Contains(k)) eksik.Add(k);
             eksik.Should().BeEmpty("AR sozlugu T ile TAM ortusmeli (tireli anahtarlar DAHIL)");
+
+            var fazla = new List<string>();
+            foreach (var k in arAnahtar) if (!tAnahtar.Contains(k)) fazla.Add(k);
+            fazla.Should().BeEmpty(
+                "AR sozlugunde T'de KARSILIGI OLMAYAN anahtar kalmamali - tek yonlu kontrol "
+                + "T'den silinip AR'da unutulan anahtari GORMEZ");
         }
 
         // Sozluk blogunu (basi/sonu isaretleriyle) cikarir.
@@ -1743,10 +1753,16 @@ namespace Divisima.IntegrationTests
             // AKISTA kullanilmaz" diyordu - EKSIK IFADE. Olculdu: `pf_pass_short` (ve mock
             // sokumuyle olu kalan `pf_err` / `pf_pass_ok`) HICBIR akista kullanilmiyor; uc
             // dosyada da cagiran sayisi 0, gecisleri YALNIZ T ve AR sozluk tanimlari.
-            // ANAHTARLAR KALDIRILMADI: dalganin sinirlari MEVCUT sozluk anahtarlarini
-            // DOKUNULMAZ ilan ediyor. Uc olu anahtar rapora ve devir listesine yazildi.
+            // MANTIK-FIX-4 / K4: uc olu anahtar (pf_err / pf_pass_ok / pf_pass_short) T ve
+            // AR sozluklerinden KALDIRILDI - MF-3'te "dokunulmaz" olmalarinin sebebi o
+            // dalganin sinirlariydi, kusurun kendisi degil. Bu satir artik yalnizca
+            // "hatali kural anlatan anahtar bu akista kullanilmaz" degil, "sozlukte de
+            // YOK" anlamina gelir; ikinci iddia asagida ayrica assert ediliyor.
             hSik.Should().NotContain("pf_pass_short",
                 "6 karakter diyen anahtar sifre degistirme akisinda KULLANILMAMALI");
+            foreach (var olu in new[] { "pf_err", "pf_pass_ok", "pf_pass_short" })
+                AnkrajliSayim(index, olu).Should().Be(0,
+                    $"'{olu}' olu anahtari sozlukten kaldirilmis olmali (cagirani 0'di)");
         }
         // ── P-H6) MANTIK-FIX-3 / K3b - PROFIL KAYDETME SUNUCUYA GIDER ────────────────
         //
