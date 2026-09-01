@@ -72,6 +72,97 @@ namespace Divisima.IntegrationTests
             HashingHelper.CreatePasswordHash("DogruSifre!", out var hash, out var salt);
             HashingHelper.VerifyPasswordHash("YanlisSifre!", hash, salt).Should().BeFalse();
         }
+
+        // ══ GF-1 / K6 (C-4) PINLERI ════════════════════════════════════════════════════════
+        //
+        // 64/128 SOZLESMESI BU TURA KADAR HICBIR PINLE KORUNMUYORDU (olculdu: uzunluk assert'i
+        // 0). Yani algoritma degisse ustteki uc test de YESIL kalirdi - "round-trip calisiyor"
+        // demek "is faktoru var" demek DEGILDIR.
+
+        // v1 kaydini URETIMDEKI eski algoritmayla (HMAC-SHA512) kurar. Bu, testin kendi
+        // fikstur uretecidir - uretim kodu ARTIK boyle yazmiyor, ama boyle YAZILMIS kayitlari
+        // DOGRULAMAYA devam etmek ZORUNDA.
+        private static void V1KaydiUret(string sifre, out byte[] hash, out byte[] tuz)
+        {
+            using var hmac = new System.Security.Cryptography.HMACSHA512();
+            tuz = hmac.Key;
+            hash = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(sifre));
+        }
+
+        [Fact]
+        public void K6_V1_KAYITLARI_BAYT_DEGISMEZ_DOGRULANMAYA_DEVAM_EDER()
+        {
+            V1KaydiUret("EskiSifre!1", out var hash, out var tuz);
+
+            // SOZLESME PINI: eski bicim 64/128 (bu tura kadar pinsizdi).
+            hash.Length.Should().Be(HashingHelper.BeklenenV1HashUzunlugu, "v1 hash 64 bayt olmali");
+            tuz.Length.Should().Be(HashingHelper.BeklenenV1TuzUzunlugu, "v1 tuz 128 bayt olmali");
+
+            var hashKopya = (byte[])hash.Clone();
+            var tuzKopya = (byte[])tuz.Clone();
+
+            HashingHelper.VerifyPasswordHash("EskiSifre!1", hash, tuz).Should().BeTrue(
+                "v1 kayitlari DOGRULANMAYA devam etmeli - aksi halde mevcut TUM kullanicilar kilitlenirdi");
+            HashingHelper.VerifyPasswordHash("YanlisSifre!1", hash, tuz).Should().BeFalse(
+                "v1 yolunda yanlis sifre yine REDDEDILMELI");
+
+            // BAYT-DEGISMEZ: dogrulama kaydi YENIDEN YAZMAZ (yeniden yazim kararI cagirandadir).
+            hash.Should().Equal(hashKopya, "dogrulama hash baytlarina DOKUNMAMALI");
+            tuz.Should().Equal(tuzKopya, "dogrulama tuz baytlarina DOKUNMAMALI");
+
+            HashingHelper.SurumGuncelGerekiyorMu(hash).Should().BeTrue(
+                "v1 kaydi 'guncellenmeli' olarak isaretlenmeli - login sessizce v2'ye tasir");
+        }
+
+        [Fact]
+        public void K6_YENI_KAYITLAR_V2_ZARFI_URETIR_ve_GUNCELLEME_ISTEMEZ()
+        {
+            HashingHelper.CreatePasswordHash("YeniSifre!1", out var hash, out var tuz);
+
+            hash.Length.Should().Be(HashingHelper.BeklenenV2HashUzunlugu,
+                "v2 zarfi surum bayti + iterasyon + 64 baytlik anahtar tasimali");
+            tuz.Length.Should().Be(HashingHelper.BeklenenV2TuzUzunlugu, "v2 tuzu 16 bayt olmali");
+
+            // AYIRT EDICILIK: v2 uzunlugu v1'inkiyle CAKISMAMALI - zarf ayrimi UZUNLUKLA kesin.
+            hash.Length.Should().NotBe(HashingHelper.BeklenenV1HashUzunlugu,
+                "v1 ve v2 uzunluklari AYRISMALI, yoksa surum tespiti onek baytina (1/256) kalirdi");
+
+            // IS FAKTORU zarfin ICINDE ve merkezin verdigi degerde.
+            System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(hash.AsSpan(1, 4))
+                .Should().Be(HashingHelper.BeklenenIterasyon, "iterasyon sayisi zarfta TASINMALI");
+            HashingHelper.BeklenenIterasyon.Should().Be(100_000, "merkez karari: 100k");
+
+            HashingHelper.VerifyPasswordHash("YeniSifre!1", hash, tuz).Should().BeTrue();
+            HashingHelper.SurumGuncelGerekiyorMu(hash).Should().BeFalse("v2 kaydi zaten guncel");
+        }
+
+        // KVKK anonimlestirmesi hash/salt alanlarini BOSALTIYOR (olculdu: 6 satir, hepsi
+        // is_active=0). O satirlar PATLAMAMALI ve HICBIR sifreyle eslesMEMELI.
+        [Theory]
+        [InlineData(0, 0)]
+        [InlineData(0, 16)]
+        [InlineData(69, 0)]
+        public void K6_SIFIR_BAYT_KAYITLAR_GUVENLI_RED_PATLAMAZ(int hashUzunlugu, int tuzUzunlugu)
+        {
+            var hash = new byte[hashUzunlugu];
+            var tuz = new byte[tuzUzunlugu];
+
+            Action cagri = () => HashingHelper.VerifyPasswordHash("HerhangiSifre1", hash, tuz);
+            cagri.Should().NotThrow("anonimlestirilmis kayit istisna FIRLATMAMALI");
+            HashingHelper.VerifyPasswordHash("HerhangiSifre1", hash, tuz).Should().BeFalse(
+                "bos hash/tuz HICBIR sifreyle eslesMEMELI");
+            HashingHelper.SurumGuncelGerekiyorMu(Array.Empty<byte>()).Should().BeFalse(
+                "anonimlestirilmis kayit yeniden yazilmaya CALISILMAMALI");
+        }
+
+        // NULL de patlatmamali (savunma derinligi - cagiranlar entity alanlarini dogrudan geciriyor).
+        [Fact]
+        public void K6_NULL_GIRDI_GUVENLI_RED_PATLAMAZ()
+        {
+            Action cagri = () => HashingHelper.VerifyPasswordHash("x", null!, null!);
+            cagri.Should().NotThrow();
+            HashingHelper.VerifyPasswordHash("x", null!, null!).Should().BeFalse();
+        }
     }
 
     public class InputSanitizerExtraTests

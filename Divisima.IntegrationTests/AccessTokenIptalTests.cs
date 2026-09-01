@@ -255,6 +255,64 @@ namespace Divisima.IntegrationTests
             }
         }
 
+        // ══ GF-1 / K6 (C-4) - LOGIN v1 KAYDINI SESSIZCE v2'YE TASIR ═══════════════════════
+        //
+        // Uctan uca: eski (HMAC-SHA512, iterasyonsuz) bir kayitla GIRIS YAPILABILMELI ve o
+        // giris sirasinda kayit PBKDF2'ye TASINMALI. Kullanicidan hicbir sey istenmez.
+        [Fact]
+        public async Task K6_LOGIN_V1_KAYDINI_DOGRULAR_ve_SESSIZCE_V2_YE_TASIR()
+        {
+            if (Skipped()) return;
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+
+            // Kaydi ESKI bicime dusur (uretim artik boyle yazmiyor - bu testin fiksturu).
+            byte[] v1Hash, v1Tuz;
+            using (var hmac = new System.Security.Cryptography.HMACSHA512())
+            {
+                v1Tuz = hmac.Key;
+                v1Hash = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(TestAuthHelper.TestPassword));
+            }
+            v1Hash.Length.Should().Be(64, "on kosul: fikstur v1 bicimini uretmeli");
+            v1Tuz.Length.Should().Be(128, "on kosul: fikstur v1 tuzunu uretmeli");
+
+            await using (var ctx = NewContext())
+            {
+                var c = await ctx.Set<Customer>().SingleAsync(x => x.id == musteri.CustomerId);
+                c.password_hash = v1Hash;
+                c.password_salt = v1Tuz;
+                await ctx.SaveChangesAsync();
+            }
+
+            // ESKI kayitla GIRIS - v1 dogrulamasi CALISMALI.
+            var giris = await _factory!.CreateClient().PostAsJsonAsync("/api/auth/login", new
+            {
+                email = musteri.Email,
+                password = TestAuthHelper.TestPassword
+            });
+            var girisGovde = await giris.Content.ReadAsStringAsync();
+            giris.IsSuccessStatusCode.Should().BeTrue(
+                $"v1 kaydiyla giris CALISMALI - aksi halde mevcut TUM kullanicilar kilitlenirdi. Govde: {girisGovde}");
+
+            // SESSIZ YUKSELTME OLDU MU.
+            await using (var ctx = NewContext())
+            {
+                var c = await ctx.Set<Customer>().AsNoTracking().SingleAsync(x => x.id == musteri.CustomerId);
+                c.password_hash.Length.Should().Be(69,
+                    "giris sonrasi kayit v2 zarfina tasinmis olmali");
+                c.password_hash[0].Should().Be(0x02, "v2 surum bayti");
+                c.password_salt.Length.Should().Be(16, "v2 tuzu 16 bayt");
+                c.password_hash.Should().NotEqual(v1Hash, "hash GERCEKTEN degismis olmali");
+            }
+
+            // YUKSELTME SIFREYI DEGISTIRMEDI: ayni sifreyle TEKRAR giris yapilabilmeli.
+            (await _factory!.CreateClient().PostAsJsonAsync("/api/auth/login", new
+            {
+                email = musteri.Email,
+                password = TestAuthHelper.TestPassword
+            })).IsSuccessStatusCode.Should().BeTrue(
+                "yukseltme kullanicinin sifresini DEGISTIRMEMELI - v2 kaydiyla giris de calismali");
+        }
+
         // GIRIS bacagi: login KIMLIK DOGRULAMADIR - auth_time SIMDI olmali (step-up ACILIR).
         // Bu, K3'un "sifirlamayi kaldirdik ama girisi de dondurduk" hatasina dusmedigini olcer.
         [Fact]

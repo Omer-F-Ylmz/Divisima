@@ -267,6 +267,24 @@ namespace Divisima.Bussiness.Concrete
             bool kilitli = customer.lockout_end.HasValue && customer.lockout_end.Value > DateTime.Now;
             bool sifreDogru = HashingHelper.VerifyPasswordHash(dto.password, customer.password_hash, customer.password_salt);
 
+            // ══ GF-1 / K6 (C-4) - SESSIZ v1 -> v2 YENIDEN YAZIM ════════════════════════════
+            //
+            // Eski (HMAC-SHA512, iterasyonsuz) kayitlar DOGRULANMAYA devam eder; kullanici
+            // DOGRU sifresini girdigi ANDA - yani duz sifre elimizdeyken - kayit PBKDF2'ye
+            // tasinir. Kullanicidan hicbir sey istenmez, sifre DEGISMEZ.
+            //
+            // SIRA KRITIK: yalniz `sifreDogru` dalinda. Yanlis sifreyle cagrilsaydi elimizde
+            // dogru parola OLMAZDI ve hesap KILITLENIRDI.
+            // Anonimlestirilmis (0 bayt) kayitlar `SurumGuncelGerekiyorMu` tarafindan ZATEN
+            // disarida birakiliyor - onlara DOKUNULMAZ.
+            if (sifreDogru && HashingHelper.SurumGuncelGerekiyorMu(customer.password_hash))
+            {
+                HashingHelper.CreatePasswordHash(dto.password, out var yeniHash, out var yeniTuz);
+                customer.password_hash = yeniHash;
+                customer.password_salt = yeniTuz;
+                await _customerDal.UpdateAsync(customer);
+            }
+
             // Açıklayıcı yorum: Şifre yanlışsa başarısız sayacını artır, 5'te 15 dk kilitle.
             if (!sifreDogru)
             {

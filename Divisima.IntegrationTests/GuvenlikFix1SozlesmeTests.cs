@@ -143,6 +143,55 @@ namespace Divisima.IntegrationTests
                 $"{yol}: K4 sonrasi bu dosyada 403 KALMAMALI");
         }
 
+        // ── K6 (C-4) ZAMANLAMA: HER YOL AYNI MALIYETI ODER ─────────────────────────────────
+        //
+        // GUVENLIK-FIX-2/#19'un kapattigi oracle sinifi, K6 dikkatsiz yapilsaydi GERI GELIRDI:
+        // v2'ye gecmis hesap 100k iterasyon oderken v1'de kalmis GERCEK hesap mikrosaniyede
+        // yanitlansaydi, HIZLI YANIT "bu hesap eski/kayitli" bilgisini ele verirdi. Ayni sey
+        // kayitsiz adreste kosan KUKLA dogrulama icin de gecerli.
+        //
+        // DAVRANIS KANITI DA VAR (bu tur, .NET 8 uretim kod yolu, 5 tekrar):
+        //   v2 ort 32,5 ms  ·  v1 ort 33,2 ms  -> fark olcum gurultusu icinde.
+        // Bu pin o davranisin KAYNAK sozlesmesini korur: uc yolun UCU de turetmeyi cagirmali.
+        [Fact]
+        public void K6_DOGRULAMA_HER_DALDA_AYNI_MALIYETI_ODER()
+        {
+            var kod = KodSatirlari(Oku("Divisima.Core/Security/Hashing/HashingHelper.cs"));
+
+            // `Turet(` cagrilari: 0-bayt dali + v2 dali + v1 dalinin ESITLEYICISI + uretim
+            // (CreatePasswordHash) = 4. Bu sayi 3'e duserse esitleyici SOKULMUS demektir.
+            var turetCagrilari = kod.Split("Turet(").Length - 1;
+            turetCagrilari.Should().Be(5,
+                "dort cagri yeri + bir tanim bekleniyor: uretim, 0-bayt dali, v2 dali, v1 "
+                + "ESITLEYICISI ve metodun kendi tanimi. Azalirsa zamanlama kanali ACILIR.");
+
+            // ALAN BAZLI: v1 dali esitleyiciyi ACIKCA cagirmali (sayi tesadufen tutabilir).
+            kod.Should().Contain("_ = Turet(password, KuklaTuz, Iterasyon);",
+                "v1 dali ve 0-bayt dali sonucu ATILAN bir turetme kosmali - yoksa hizli yanit "
+                + "hesabin eski/anonimlestirilmis oldugunu ELE VERIR");
+
+            // NEG kontrol.
+            (kod.Split("TuretZZZ(").Length - 1).Should().Be(0, "NEG kontrol: uydurma dizge 0");
+        }
+
+        // ── K6 (C-4) SELLER: YAZIM YOK (merkez sarti - Seller DOKUNULMAZ) ──────────────────
+        //
+        // Paylasilan yardimci yuzunden satici KAYIT yolu artik v2 uretir (kacinilmaz ve
+        // zararsiz: `sellers` 0 SATIR, modul veri duzeyinde kapali - `00a:92`). Yasak olan sey
+        // satici DOGRULAMA yoluna sessiz YENIDEN YAZIM eklemektir.
+        [Fact]
+        public void K6_SELLER_YOLUNA_SESSIZ_YENIDEN_YAZIM_EKLENMEZ()
+        {
+            var seller = KodSatirlari(Oku("Divisima.Bussiness/Concrete/SellerAuthManager.cs"));
+            seller.Should().NotContain("SurumGuncelGerekiyorMu",
+                "Seller GF-1'de DOKUNULMAZ - surum yukseltme YALNIZ musteri login yolunda");
+
+            // POZ kontrol: musteri yolunda GERCEKTEN var (yoksa bu NotContain bedava dogru olurdu).
+            KodSatirlari(Oku("Divisima.Bussiness/Concrete/AuthManager.cs"))
+                .Should().Contain("SurumGuncelGerekiyorMu",
+                    "musteri login yolu v1 kayitlari sessizce v2'ye tasimali");
+        }
+
         // ── K3 (C-2) 2FA BACAGI - KAYNAK SOZLESMESI ────────────────────────────────────────
         //
         // NEDEN DAVRANIS PINI DEGIL (durust kayit): `two_factor_enabled` uretimde HICBIR kod
