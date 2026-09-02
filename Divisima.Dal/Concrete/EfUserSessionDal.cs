@@ -45,6 +45,16 @@ namespace Divisima.DataAccess.Concrete.EntityFramework
                 .FirstOrDefaultAsync(s => s.refresh_token == ozet);
         }
 
+        // GF-1b / K4: ATOMIK kapatma. `WHERE is_active = 1` sartini VERITABANINA birakir -
+        // check-then-act yarisi OLUSMAZ. Donen sayi 1 ise bu cagri kazandi, 0 ise oturum
+        // ZATEN kapatilmisti (yani ayni jeton bir kez daha sunuldu).
+        public async Task<int> DeactivateIfActiveAsync(int sessionId)
+        {
+            return await Context.Set<UserSession>()
+                .Where(s => s.id == sessionId && s.is_active)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(s => s.is_active, false));
+        }
+
         // Aciklayici yorum: TEK atomik UPDATE - tum aktif oturumlari kapatir (foreach yerine).
         public async Task<int> InvalidateAllForCustomerAsync(int customerId)
         {

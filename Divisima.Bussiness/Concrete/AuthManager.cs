@@ -521,10 +521,36 @@ namespace Divisima.Bussiness.Concrete
             if (customer == null || !customer.is_active)
                 return (HttpStatusCode.Unauthorized, new ErrorResult(Messages.RefreshTokenInvalid));
 
-            // Açıklayıcı yorum: ROTATION - eski oturumu kapat, yeni oturum+JWT+refresh token üret (merkezi helper).
-            // Eski refresh token artık geçersiz (replay engeli); istemci yeni refresh_token'ı cookie'den alır.
-            session.is_active = false;
-            await _userSessionDal.UpdateAsync(session);
+            // ══ GF-1b / K4 (GF1-B5) - ROTASYON ARTIK ATOMIK (CAS) ═════════════════════════
+            //
+            // OLCULEN ONCE-DURUM: eski satir `session.is_active = false` + TRACKED tam-varlik
+            // `UpdateAsync` ile kapatiliyordu; kosul YOKTU. Iki es zamanli refresh ISTEGI de
+            // ayni satiri "aktif" gorup gecebiliyor ve TEK jetondan IKI GECERLI OTURUM
+            // doguyordu - ustelik bu, hirsizlik sinyalini de ATESLEMIYORDU.
+            // (Iki ayri SaveChanges, transaction YOK, `IsRowVersion` YOK - hepsi olculdu.)
+            //
+            // COZUM: kapatma `WHERE is_active = 1` sartiyla VERITABANINDA yapilir. Etkilenen
+            // satir 1 DEGILSE yaris kaybedilmistir - yani ayni jeton bir kez daha sunulmus
+            // demektir ve bu, YENIDEN KULLANIM sinyalinin ta kendisidir.
+            //
+            // IKINCI KOPYA ACILMADI: kaybeden yol, YUKARIDA ZATEN VAR OLAN reuse dalina
+            // gider (`InvalidateAllForCustomerAsync` + `RefreshTokenReuse` Critical olayi).
+            //
+            // DIKKAT (CLAUDE.md tuzagi): `ExecuteUpdateAsync` change-tracker'i ATLAR, yani
+            // elimizdeki TRACKED `session` nesnesi BAYAT kalir. Bu noktadan sonra o nesne
+            // uzerinden TAM-VARLIK yazma YAPILMAZ - yalnizca `auth_time` degeri OKUNUR.
+            var kapatildi = await _userSessionDal.DeactivateIfActiveAsync(session.id);
+            if (kapatildi != 1)
+            {
+                var yarisKaybi = await _userSessionDal.InvalidateAllForCustomerAsync(session.customer_id);
+                if (yarisKaybi > 0)
+                {
+                    await _securityEvents.LogAsync("RefreshTokenReuse", "Critical", session.customer_id, null, null,
+                        "Es zamanli refresh yarisi kaybedildi - ayni jeton iki kez sunuldu, "
+                        + $"oturum zinciri iptal edildi (kapatilan oturum: {yarisKaybi})");
+                }
+                return (HttpStatusCode.Unauthorized, new ErrorResult(Messages.RefreshTokenInvalid));
+            }
 
             // GF-1 / K3: ESKI oturumun giris ani YENI satira TASINIR - refresh step-up saatini
             // SIFIRLAMAZ. `null` (GF-1 oncesi acilmis oturum) ise IssueSession `simdi` kullanir,

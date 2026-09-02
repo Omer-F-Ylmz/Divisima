@@ -287,6 +287,55 @@ namespace Divisima.IntegrationTests
                 + "ve kullanici KILITLENIRDI");
         }
 
+        // ══ GF-1b / K4 (R-1b3 · R-1b4) - ROTASYON YARISI ═══════════════════════════════════
+        //
+        // OLCULEN ONCE-DURUM: rotasyonda CAS YOKTU - iki es zamanli refresh ayni satiri
+        // "aktif" gorup gecebiliyor ve TEK jetondan IKI GECERLI OTURUM doguyordu; ustelik
+        // hirsizlik sinyali ATESLEMIYORDU. (PINSIZDI.)
+        [Fact]
+        public async Task K4B_AYNI_REFRESH_IKI_KEZ_ESZAMANLI_TEK_BASARI_ve_ZINCIR_IPTAL()
+        {
+            if (Skipped()) return;
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+
+            var duzJeton = "gf1b-yaris-" + Guid.NewGuid().ToString("N");
+            await using (var ctx = NewContext())
+            {
+                var oturum = await ctx.Set<UserSession>()
+                    .SingleAsync(s => s.customer_id == musteri.CustomerId && s.is_active);
+                oturum.refresh_token = Divisima.Core.Security.Tokens.JetonOzeti.Hesapla(duzJeton);
+                await ctx.SaveChangesAsync();
+            }
+
+            async Task<HttpStatusCode> YenileAsync()
+            {
+                using var s = _factory!.Services.CreateScope();
+                var auth = s.ServiceProvider.GetRequiredService<Divisima.Bussiness.Abstract.IAuthService>();
+                var (durum, _) = await auth.RefreshToken(
+                    new Divisima.Entity.Dtos.Auth.RefreshTokenRequestDto { refresh_token = duzJeton });
+                return durum;
+            }
+
+            var sonuclar = await Task.WhenAll(YenileAsync(), YenileAsync());
+
+            // R-1b4: TEK basari. Ikisi de gecerse TEK jetondan IKI oturum dogmus olurdu.
+            sonuclar.Count(k => k == HttpStatusCode.OK).Should().Be(1,
+                "es zamanli iki refresh'ten YALNIZ BIRI basarili olmali");
+            sonuclar.Count(k => k == HttpStatusCode.Unauthorized).Should().Be(1,
+                "kaybeden istek 401 almali");
+
+            // R-1b3: kaybeden yol YENIDEN KULLANIM sayilir -> ZINCIRIN TUMU iptal edilir.
+            await using var son = NewContext();
+            (await son.Set<UserSession>().AsNoTracking()
+                .CountAsync(s => s.customer_id == musteri.CustomerId && s.is_active))
+                .Should().Be(0, "yaris kaybi YENIDEN KULLANIM sinyalidir - zincirin TUMU iptal edilmeli");
+
+            // ALAN BAZLI: sinyal GERCEKTEN yazilmis olmali ("401 dondu" tek basina yetmez).
+            (await son.Set<Divisima.Entity.Entities.SecurityEvent>().AsNoTracking()
+                .CountAsync(e => e.customer_id == musteri.CustomerId && e.event_type == "RefreshTokenReuse"))
+                .Should().BeGreaterThan(0, "yeniden kullanim olayi YAZILMALI - sessiz iptal YETMEZ");
+        }
+
         // ══ GF-1b / K3 (R-1b5) - DB'DE DUZ METIN JETON YOK ════════════════════════════════
         //
         // OLCULEN ONCE-DURUM: `user_sessions.refresh_token` ve `customers.password_reset_token`

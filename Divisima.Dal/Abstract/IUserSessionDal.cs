@@ -20,5 +20,11 @@ namespace Divisima.DataAccess.Abstract
         // seydir - refresh token hirsizliginin klasik sinyalidir. Bu metot filtreyi kaldirir
         // ki AuthManager iki durumu ayirip zinciri iptal edebilsin.
         Task<UserSession> GetByRefreshTokenAnyStateAsync(string refreshToken);
+
+        // ══ GF-1b / K4 (GF1-B5) - ATOMIK KAPATMA (CAS) ══════════════════════════════════════
+        // Oturumu YALNIZCA hala aktifken kapatir. Donen deger ETKILENEN SATIR SAYISIDIR:
+        // 1 = bu cagri kazandi · 0 = baska bir istek onceden kapatti (YARIS KAYBEDILDI).
+        // Cagiran 0 gorurse bunu YENIDEN KULLANIM sayar ve zincir iptali yoluna girer.
+        Task<int> DeactivateIfActiveAsync(int sessionId);
     }
 }
