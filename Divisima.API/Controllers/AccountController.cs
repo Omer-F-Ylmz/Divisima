@@ -1,8 +1,10 @@
 using Divisima.Bussiness.Abstract;
 using Divisima.Core.Security.Authorization;
+using Divisima.Core.Security.RateLimiting;
 using Divisima.Core.Utilities.Enums;
 using Divisima.Entity.Dtos.Account;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace Divisima.API.Controllers
@@ -38,6 +40,23 @@ namespace Divisima.API.Controllers
         }
 
         [HttpPost("change-password")]
+        // ══ GF-1b / K2 (GF1-B2) - UC KONTROL BIRDEN ═══════════════════════════════════════
+        //
+        // OLCULEN ONCE-DURUM: bu uc mevcut-sifre dogrulamasi yapiyordu ama HIZ SINIRI
+        // gevsekti (global kova 100/dk, IP basina), HESAP KILIDI YOKTU ve STEP-UP YOKTU.
+        // Yani calinan bir access token ile hesabin GERCEK sifresi sozluk saldirisiyla
+        // aranabiliyordu; "Mevcut sifre hatali." ile 200 arasindaki ayrim TAM BIR ORACLE.
+        // Ayni sirri dogrulayan `/api/auth/login` UC KORUMAYI DA tasiyordu - iki yuzeyden
+        // biri korunuyor, digeri korunmuyordu.
+        //
+        // HIZ SINIRI ACTION DUZEYINDE (sinif duzeyinde DEGIL - olculen gerekce): sinifa
+        // konsaydi `summary` / `profile` / `notification-preferences` de ayni 10/dk kovaya
+        // girerdi VE o kova `/api/auth/login` ile ORTAK oldugu icin normal gezinme girisi
+        // 429'a itebilirdi. Precedent: PriceDropController action-duzeyi kullanimi.
+        // SINIR (kayit): `auth` kovasinin bolumleme anahtari IP'DIR, kimlik degil - IP havuzu
+        // olan bir saldirgan limiti carpar. Kaba kuvveti kesen asil kontrol KILIT + STEP-UP.
+        [EnableRateLimiting(RateLimitPolitikasi.AuthKapsami)]
+        [RequireRecentAuth(10)]
         [SwaggerOperation(Summary = "Şifre değiştir", Description = "Mevcut şifre doğrulaması ile yeni şifre.")]
         public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequestDto dto)
         {

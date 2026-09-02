@@ -59,6 +59,13 @@ namespace Divisima.IntegrationTests
             protected override void ConfigureWebHost(IWebHostBuilder builder)
             {
                 TestHostConfig.Apply(builder);
+                // ══ GF-1b / K2 - RIG AYARI, DISLAMA DEGIL ═════════════════════════════════
+                // K2 `change-password` ucunu `auth` hiz siniri kovasina soktu (10/dk, IP
+                // basina) ve bu sinif TEK bir kovadan onlarca auth istegi atiyor - olculdu:
+                // `GECERLI_SIFRE_UC_UCTA_DA_KABUL_EDILIR` 429 aldi. Limit YUKSELTILIR ki
+                // olculen sey SIFRE POLITIKASI olsun, rigin kovasi olmasin.
+                // Bu, depoda ZATEN kullanilan bir kalip (yedi sinif ayni ayari tasiyor).
+                builder.UseSetting("RateLimit:AuthPermitLimit", "1000");
                 builder.ConfigureServices(services =>
                 {
                     var d = services.SingleOrDefault(x => x.ServiceType == typeof(DbContextOptions<DivisimaDbContext>));

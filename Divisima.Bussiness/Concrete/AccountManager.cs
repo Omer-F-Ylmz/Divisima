@@ -134,9 +134,43 @@ namespace Divisima.Bussiness.Concrete
             var c = await _customerDal.GetAsync(x => x.id == customerId);
             if (c == null) return (HttpStatusCode.NotFound, new ErrorResult(Messages.LoginFailed));
 
+            // ══ GF-1b / K2 (GF1-B2) - MEVCUT SIFRE ARTIK LOGIN KILIDINE TABI ═══════════════
+            //
+            // OLCULEN ONCE-DURUM: bu yolda hesap kilidi HIC calismiyordu - `IncrementFailedLogin`
+            // cagrisi 0'di. Ayni sirri (kullanicinin sifresi) dogrulayan `/api/auth/login`
+            // 5-yanlista-15dk kilidi tasirken bu uc SINIRSIZ deneme kabul ediyordu.
+            // Kilit AYNI mekanizmadir - yeni bir sayac/kural KOPYASI ACILMADI (`ICustomerDal`
+            // uzerindeki atomik metotlar dogrudan cagriliyor).
+            //
+            // KILIT KONTROLU DOGRULAMADAN ONCE: aksi halde kilitli hesapta her istek yine bir
+            // TAM PBKDF2 kosturur ve kilit CPU-DoS'u ENGELLEMEZDI.
+            // YANIT KODU LOGIN ILE AYNI: login "dogru sifre + kilitli -> 403 AccountLocked"
+            // diyor. Burada cagiran ZATEN KIMLIK DOGRULAMIS durumda, yani hesabin var oldugunu
+            // BILIYOR - 403 bir SIZINTI DEGIL, kullanicinin bilmesi gereken sey.
+            var kilitli = c.lockout_end.HasValue && c.lockout_end.Value > DateTime.Now;
+            if (kilitli)
+                return (HttpStatusCode.Forbidden, new ErrorResult(Messages.AccountLocked));
+
             // Açıklayıcı yorum: Mevcut şifre doğrulaması (yetkisiz değişim engeli)
             if (!HashingHelper.VerifyPasswordHash(dto.current_password ?? "", c.password_hash, c.password_salt))
+            {
+                // ATOMIK artis (login ile AYNI metot): paralel denemeler artisi KAYBETMEZ.
+                // Bu dal `UpdateAsync`ten ONCE DONUYOR, yani CLAUDE.md bolum 5'teki
+                // "ExecuteUpdateAsync + tam-varlik UpdateAsync" cakismasi BURADA OLUSMAZ.
+                var deneme = await _customerDal.IncrementFailedLoginAsync(customerId);
+                var simdiKilitlendi = deneme >= 5;
+                if (simdiKilitlendi)
+                    await _customerDal.LockAccountAsync(customerId, DateTime.Now.AddMinutes(15));
+
+                // Guvenlik olayi: bu yolda ONCEDEN HIC olay yazilmiyordu (olculdu).
+                await _securityEvents.LogAsync(simdiKilitlendi ? "AccountLocked" : "ChangePasswordFailed",
+                    simdiKilitlendi ? "Critical" : "Warning", customerId, null, null,
+                    simdiKilitlendi
+                        ? "Sifre degistirmede 5 basarisiz mevcut-sifre denemesi - hesap kilitlendi"
+                        : "Sifre degistirmede hatali mevcut sifre");
+
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.CurrentPasswordWrong));
+            }
 
             HashingHelper.CreatePasswordHash(dto.new_password, out var hash, out var salt);
             c.password_hash = hash;

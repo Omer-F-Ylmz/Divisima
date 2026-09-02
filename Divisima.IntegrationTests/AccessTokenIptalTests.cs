@@ -287,6 +287,107 @@ namespace Divisima.IntegrationTests
                 + "ve kullanici KILITLENIRDI");
         }
 
+        // ══ GF-1b / K2 (R-1b2) - CHANGE-PASSWORD ARTIK KILITLENIYOR ═══════════════════════
+        //
+        // OLCULEN ONCE-DURUM: bu uc mevcut-sifre dogrulamasi yapiyor ama hesap kilidi YOKTU
+        // (`IncrementFailedLogin` cagrisi 0). Calinan bir access token ile hesabin GERCEK
+        // sifresi SINIRSIZ denemeyle aranabiliyordu; ayni sirri dogrulayan `/api/auth/login`
+        // ise 5-yanlista-15dk kilidi TASIYORDU.
+        [Fact]
+        public async Task K2B_CHANGE_PASSWORD_BES_YANLISTA_KILITLENIR()
+        {
+            if (Skipped()) return;
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+
+            // POZITIF OLAY KOSULU (vakum yasagi): dogru sifreyle uc CALISIYOR olmali.
+            // (Once YANLIS denemeler yapilirsa hesap kilitlenir; bu yuzden once DOGRULAMA.)
+            (await musteri.Client.GetAsync(KorumaliUc)).StatusCode.Should().Be(HttpStatusCode.OK,
+                "on kosul: jeton gecerli olmali");
+
+            HttpStatusCode? sonKod = null;
+            for (var i = 1; i <= 5; i++)
+            {
+                var yanit = await musteri.Client.PostAsJsonAsync("/api/Account/change-password", new
+                {
+                    current_password = "YanlisSifre" + i + "x",
+                    new_password = "Ffffff66"
+                });
+                sonKod = yanit.StatusCode;
+                yanit.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+                    $"{i}. yanlis deneme mevcut-sifre hatasi donmeli (429 gorulurse hiz siniri "
+                    + "kilitten ONCE devreye girmis demektir)");
+            }
+
+            // ALTINCI deneme: artik KILIT devrede. Login ile AYNI sozlesme -> 403 AccountLocked.
+            var altinci = await musteri.Client.PostAsJsonAsync("/api/Account/change-password", new
+            {
+                current_password = TestAuthHelper.TestPassword,   // DOGRU sifre bile olsa
+                new_password = "Ffffff66"
+            });
+            var altinciGovde = await altinci.Content.ReadAsStringAsync();
+            altinci.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+                $"bes yanlistan sonra hesap KILITLENMELI (login ile AYNI kod). Govde: {altinciGovde}");
+
+            // ALAN BAZLI: kilit DB'ye GERCEKTEN yazilmis olmali - "403 dondu" tek basina yetmez.
+            await using var ctx = NewContext();
+            var c = await ctx.Set<Customer>().AsNoTracking().SingleAsync(x => x.id == musteri.CustomerId);
+            c.lockout_end.Should().NotBeNull("kilit bitis zamani YAZILMALI");
+            c.lockout_end!.Value.Should().BeAfter(DateTime.Now, "kilit HALA gecerli olmali");
+
+            // CIFT-ANLAM KIRICI: sifre DEGISMEMIS olmali (kilitli istek yazma YAPMAMALI).
+            (await _factory!.CreateClient().PostAsJsonAsync("/api/auth/login",
+                new { email = musteri.Email, password = "Ffffff66" })).IsSuccessStatusCode
+                .Should().BeFalse("yeni sifre HIC yazilmamali - kilitli istek dogrulamaya bile varmadi");
+        }
+
+        // K-7: miras (auth_time NULL) oturumlarda step-up FAIL-CLOSED olmali.
+        [Fact]
+        public async Task K2B_MIRAS_OTURUMDA_STEP_UP_YENIDEN_GIRIS_ISTER()
+        {
+            if (Skipped()) return;
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+
+            // Oturumu MIRAS haline getir (GF-1 oncesi acilmis oturumlarin durumu).
+            await using (var ctx = NewContext())
+            {
+                var oturum = await ctx.Set<UserSession>()
+                    .SingleAsync(s => s.customer_id == musteri.CustomerId && s.is_active);
+                oturum.auth_time = null;
+                await ctx.SaveChangesAsync();
+                _refreshJeton = oturum.refresh_token;
+            }
+
+            using var scope = _factory!.Services.CreateScope();
+            var auth = scope.ServiceProvider.GetRequiredService<Divisima.Bussiness.Abstract.IAuthService>();
+            var (durum, sonuc) = await auth.RefreshToken(
+                new Divisima.Entity.Dtos.Auth.RefreshTokenRequestDto { refresh_token = _refreshJeton! });
+            durum.Should().Be(HttpStatusCode.OK, "on kosul: miras oturum refresh EDEBILMELI (statuko)");
+
+            var yeniJeton = ((dynamic)sonuc).Data.token as string;
+            AuthTimeClaimi(yeniJeton!).Should().Be(0,
+                "miras oturumda auth_time BILINMIYOR -> epoch yazilmali (fail-closed)");
+
+            var mirasIstemci = _factory!.CreateClient();
+            mirasIstemci.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", yeniJeton);
+
+            // STATUKO: sıradan uclar CALISMAYA devam eder.
+            (await mirasIstemci.GetAsync(KorumaliUc)).StatusCode.Should().Be(HttpStatusCode.OK,
+                "miras jeton siradan uclarda CALISMALI - yalnizca HASSAS islem engellenir");
+
+            // FAIL-CLOSED: step-up isteyen uc yeniden giris ister.
+            var hassas = await mirasIstemci.PostAsJsonAsync("/api/Account/change-password", new
+            {
+                current_password = TestAuthHelper.TestPassword,
+                new_password = "Gggggg77"
+            });
+            hassas.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+                "miras oturumda step-up YENIDEN GIRIS istemeli - aksi halde ilk refresh "
+                + "step-up saatini sifirlar ve kontrol ETKISIZ kalirdi");
+        }
+
+        private string? _refreshJeton;
+
         // ══ GF-1 / K3 (C-2) - STEP-UP SAATI REFRESH'TE SIFIRLANMAZ ═════════════════════════
         //
         // Bu pinler K2 ile AYNI SINIFTA duruyor cunku ikisi de ACCESS TOKEN YASAM DONGUSUNU

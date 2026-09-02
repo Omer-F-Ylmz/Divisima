@@ -350,7 +350,7 @@ namespace Divisima.Bussiness.Concrete
             }
 
             // Açıklayıcı yorum: Oturum + JWT + refresh token üret (merkezi helper - DRY)
-            var response = await IssueSessionAndTokenAsync(customer);
+            var response = await IssueSessionAndTokenAsync(customer, DateTime.UtcNow);
             return (HttpStatusCode.OK, new SuccessDataResult<CustomerLoginResponseDto>(response, Messages.LoginSuccess));
         }
 
@@ -386,7 +386,7 @@ namespace Divisima.Bussiness.Concrete
             }
 
             // Doğru - oturum + JWT + refresh token (merkezi helper - DRY)
-            var response = await IssueSessionAndTokenAsync(customer);
+            var response = await IssueSessionAndTokenAsync(customer, DateTime.UtcNow);
             return (HttpStatusCode.OK, new SuccessDataResult<CustomerLoginResponseDto>(response, Messages.LoginSuccess));
         }
 
@@ -406,11 +406,30 @@ namespace Divisima.Bussiness.Concrete
         // UTC YAZILIR: `RequireRecentAuth` karsilastirmayi `DateTime.UtcNow` ile yapiyor.
         // Dosyanin geri kalani `DateTime.Now` (yerel) kullaniyor - bu alan BILINCLI OLARAK
         // AYRISIYOR ve jeton tarafinda Kind Utc'ye sabitleniyor (bkz. JwtHelper).
+        // ══ GF-1b / K-7 - MIRAS (NULL) auth_time ARTIK FAIL-CLOSED ════════════════════════
+        //
+        // OLCULEN BOSLUK: `auth_time` NULL olan oturumlarda bu metot `DateTime.UtcNow`a
+        // dusuyordu, yani NULL'lu bir oturumun ILK refresh'i step-up saatini SIFIRLIYOR ve
+        // TAM 10 dakikalik pencere aciyordu. Canli olcum: aktif ve suresi dolmamis 70
+        // oturumun 69'u (%98,6) NULL. Ustelik istemci 401'de otomatik refresh yaptigi icin
+        // step-up SESSIZCE atlatiliyordu - yani K2'nin step-up bacagi bugunku oturumlarin
+        // neredeyse tamaminda ETKISIZ olurdu.
+        //
+        // COZUM (merkez karari, secenek 3): NULL "BILINMIYOR" demektir ve jetona EPOCH
+        // yazilir -> step-up filtresi bunu "sonsuz eski" gorup 401 verir (FAIL-CLOSED).
+        // DIGER YOLLARDA STATUKO: satir NULL KALIR (geriye donuk doldurma YOK) ve jeton
+        // her sey icin gecerlidir; yalnizca HASSAS islemler yeniden giris ister.
+        // `JwtHelper` DEGISMEDI - epoch'u cagiran taraf veriyor, yani `SellerAuthManager`in
+        // (DOKUNULMAZ) jeton uretimi ETKILENMEZ.
+        //
+        // CAGRI YERLERI ARTIK ACIK: login ve 2FA `DateTime.UtcNow` GECER (ikisi de KIMLIK
+        // DOGRULAMADIR), refresh `session.auth_time` gecer (NULL olabilir = bilinmiyor).
+        private static readonly DateTime BilinmeyenAuthTime = DateTime.UnixEpoch;
+
         private async Task<CustomerLoginResponseDto> IssueSessionAndTokenAsync(Customer customer,
-            DateTime? devralinanAuthTime = null)
+            DateTime? authTime)
         {
-            var authTime = devralinanAuthTime ?? DateTime.UtcNow;
-            var accessToken = _tokenHelper.CreateToken(customer, authTime);
+            var accessToken = _tokenHelper.CreateToken(customer, authTime ?? BilinmeyenAuthTime);
             var refreshToken = SecureTokenGenerator.Generate();
             await _userSessionDal.AddAsync(new UserSession
             {

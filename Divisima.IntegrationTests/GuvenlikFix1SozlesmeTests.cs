@@ -99,11 +99,19 @@ namespace Divisima.IntegrationTests
             isKatmani.Should().BeGreaterThan(0, "POZ kontrol: sayaci gercekten esleme buluyor");
             UretimdeSay("HttpStatusCode.ForbiddenZZZ").Should().Be(0, "NEG kontrol: uydurma desen 0 dondurmeli");
 
-            (isKatmani + altyapi).Should().Be(11,
-                "GF-1 sonrasi uretimdeki 403 yuzeyi TAM 11 olmali (is katmani 8 + altyapi 3). "
+            // ══ GF-1b GUNCELLEMESI: 11 -> 12, BILINCLI (merkez karari K-4) ═══════════════
+            // GF-1b/K2 `change-password` ucuna LOGIN KILIDININ AYNISINI tasidi. Login'in
+            // kilit sozlesmesi 403'tur (`AuthManager` "dogru sifre + kilitli hesap -> 403
+            // AccountLocked"); tutarlilik icin change-password da AYNI kodu doner ve is
+            // katmani 8 -> 9 olur.
+            // BU BIR SAHIPLIK IHLALI DEGILDIR - K4'un "sahiplik ihlali 404" sozlesmesi
+            // DEGISMEDI. Eklenen 403 bir HESAP DURUMU yanitidir (kilit), tipki
+            // `AccountLocked` / `EmailNotVerified` / `SellerSuspended` gibi.
+            (isKatmani + altyapi).Should().Be(12,
+                "GF-1b sonrasi uretimdeki 403 yuzeyi TAM 12 olmali (is katmani 9 + altyapi 3). "
                 + $"Olculen: is={isKatmani} altyapi={altyapi}. "
-                + "ARTARSA: yeni bir sahiplik ihlali 403 donuyor olabilir (sozlesme 404). "
-                + "AZALIRSA: rol/CSRF/IP korumalarindan biri kaldirilmis olabilir.");
+                + "ARTARSA: yeni bir SAHIPLIK ihlali 403 donuyor olabilir (sozlesme 404). "
+                + "AZALIRSA: rol/CSRF/IP/kilit korumalarindan biri kaldirilmis olabilir.");
 
             // ALAN BAZLI (P19 dersi): sayinin dogru olmasi yetmez - K4'un DOKUNDUGU uc mesaj
             // sabiti GERCEKTEN gitmis olmali, yoksa "11" tesadufen de tutabilirdi.
@@ -220,15 +228,28 @@ namespace Divisima.IntegrationTests
         {
             var kod = KodSatirlari(Oku("Divisima.Bussiness/Concrete/AuthManager.cs"));
 
-            // login + 2FA: TASIMAYAN cagri TAM IKI kez.
-            var tasimayan = kod.Split("IssueSessionAndTokenAsync(customer);").Length - 1;
-            tasimayan.Should().Be(2,
+            // ══ GF-1b GUNCELLEMESI - NIYET AYNI, CAGRI BICIMI DEGISTI ════════════════════
+            // ONCE: login/2FA `IssueSessionAndTokenAsync(customer);` (varsayilan null = SIMDI)
+            // SONRA: `IssueSessionAndTokenAsync(customer, DateTime.UtcNow);` (ACIK SIMDI)
+            // GEREKCE: GF-1b/K-7'de `null` artik "SIMDI" degil "BILINMIYOR" demek zorundaydi
+            // (miras oturumlarda step-up FAIL-CLOSED olsun diye). Iki anlam ayni varsayilana
+            // sigmadigi icin cagri yerleri ACIK hale getirildi.
+            // PININ OLCTUGU SEY DEGISMEDI: login ve 2FA auth_time'i SIMDI yapar, refresh TASIR.
+
+            // login + 2FA: SIMDI yazan cagri TAM IKI kez.
+            var simdiYazan = kod.Split("IssueSessionAndTokenAsync(customer, DateTime.UtcNow);").Length - 1;
+            simdiYazan.Should().Be(2,
                 "login ve 2FA yollarinin IKISI de auth_time'i SIMDI yapmali (kimlik dogrulama); "
                 + "bu sayi 3 olursa refresh de sifirliyor demektir - C-2 GERI GELMIS olur");
 
             // refresh: TASIYAN cagri TAM BIR kez.
             (kod.Split("IssueSessionAndTokenAsync(customer, session.auth_time);").Length - 1)
                 .Should().Be(1, "refresh rotasyonu ESKI giris anini TASIMALI");
+
+            // ESKI BICIM KALMAMALI: varsayilan-argumanli cagri geri gelirse `null`in iki anlami
+            // yeniden cakisir ve miras oturumlar step-up'i SESSIZCE atlatir.
+            (kod.Split("IssueSessionAndTokenAsync(customer);").Length - 1)
+                .Should().Be(0, "varsayilan-argumanli cagri KALMAMALI (GF-1b/K-7)");
 
             // NEG kontrol: sayaclar gercekten dizgeye bagli.
             (kod.Split("IssueSessionAndTokenAsyncZZZ(customer);").Length - 1)
