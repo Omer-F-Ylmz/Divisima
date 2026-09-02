@@ -229,6 +229,8 @@ builder.Services.AddScoped<IIyzicoClient, IyzicoClient>();
 builder.Services.AddScoped<Divisima.Core.Security.TwoFactor.ITwoFactorService, Divisima.Core.Security.TwoFactor.TotpService>();
 builder.Services.AddSingleton<Divisima.Core.Security.Encryption.IEncryptionProvider, Divisima.Core.Security.Encryption.AesEncryptionProvider>();
 builder.Services.AddScoped<Divisima.Core.Security.JWT.ITokenBlacklist, Divisima.Core.Security.JWT.CacheTokenBlacklist>();
+// GF-1b / K1: kullanici basina TOPLU access token iptali (revoked_before esigi).
+builder.Services.AddScoped<Divisima.Core.Security.JWT.IUserTokenRevocation, Divisima.Core.Security.JWT.CacheUserTokenRevocation>();
 builder.Services.AddSingleton<Divisima.Core.Utilities.Secrets.ISecretProvider, Divisima.Core.Utilities.Secrets.ConfigurationSecretProvider>();
 // Aciklayici yorum: DAYANIKLILIK (#6) - dis servis cagrilarinda gecici hatalar icin retry + circuit-breaker.
 // Yavas/coken bir dis servis (captcha/push/SMS/kargo) tum sistemi asagi cekmesin; ardisik hatada devre acilir.

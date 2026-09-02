@@ -197,6 +197,96 @@ namespace Divisima.IntegrationTests
                 "pasiflestirme + anahtar dusurme sonrasi access token REDDEDILMELI");
         }
 
+        // ══ GF-1b / K1 (R-1b1) - COKLU CIHAZ IPTALI ════════════════════════════════════════
+        //
+        // GF-1'in BILINEN SINIRI buydu ve OLCULMUSTU: cihaz1 sifreyi degistirince cihaz1
+        // 401 aliyor ama IKINCI CIHAZ 200 almaya devam ediyordu (`jti` kara listesi yalniz
+        // SUNULAN jetonu oldurur). GF-1b'de `revoked_before` esigi o boslugu kapatti.
+        private async Task<(string Jeton, HttpClient Istemci)> IkinciCihazAcAsync(string eposta)
+        {
+            var giris = await _factory!.CreateClient().PostAsJsonAsync("/api/auth/login",
+                new { email = eposta, password = TestAuthHelper.TestPassword });
+            giris.IsSuccessStatusCode.Should().BeTrue("on kosul: ikinci cihaz girisi basarili olmali");
+            var jeton = (await giris.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>())
+                .GetProperty("data").GetProperty("token").GetString()!;
+
+            var istemci = _factory!.CreateClient();
+            istemci.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", jeton);
+            return (jeton, istemci);
+        }
+
+        [Fact]
+        public async Task K1B_SIFRE_DEGISIMI_IKINCI_CIHAZI_DA_DUSURUR()
+        {
+            if (Skipped()) return;
+            var cihaz1 = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+            var (_, cihaz2) = await IkinciCihazAcAsync(cihaz1.Email);
+
+            // POZITIF OLAY KOSULU (vakum yasagi): ikinci cihaz GERCEKTEN calisiyor.
+            (await cihaz2.GetAsync(KorumaliUc)).StatusCode.Should().Be(HttpStatusCode.OK,
+                "on kosul: ikinci cihazin jetonu sifre degisiminden ONCE gecerli olmali");
+
+            // ══ SANIYE COZUNURLUGU - OLCULEN ZORUNLULUK, KEYFI BEKLEME DEGIL ══════════════
+            //
+            // `iat` claim'i UNIX SANIYESIDIR ve esik kosulu bilerek `<`tir (`<=` DEGIL):
+            // `<=` olsaydi iptalle AYNI saniyede alinan YENI jeton da olur ve kullanici
+            // KILITLENIRDI (bunu `K1B_IPTALDEN_SONRA_ALINAN_YENI_JETON_CALISIR` pinliyor).
+            // Bedeli: iptalle AYNI saniyede uretilmis bir jeton HAYATTA KALIR - penceresi
+            // 1 saniyeden KUCUK, mekanizmanin dogal cozunurlugu.
+            // Test bu cozunurluge UYMAK ZORUNDA: adimlar aksi halde ayni saniyeye dusuyor
+            // (ilk yazimda dustu ve pin YANLIS SEBEPLE kirmizi verdi - kayit).
+            await Task.Delay(1100);
+
+            var degis = await cihaz1.Client.PostAsJsonAsync("/api/Account/change-password", new
+            {
+                current_password = TestAuthHelper.TestPassword,
+                new_password = "Dddddd44"
+            });
+            var degisGovde = await degis.Content.ReadAsStringAsync();
+            degis.IsSuccessStatusCode.Should().BeTrue($"sifre degisimi basarili olmali. Govde: {degisGovde}");
+
+            (await cihaz1.Client.GetAsync(KorumaliUc)).StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+                "sifreyi DEGISTIREN cihaz da reddedilmeli (GF-1'den beri boyle)");
+            (await cihaz2.GetAsync(KorumaliUc)).StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+                "IKINCI CIHAZ da reddedilmeli - GF-1'in BILINEN SINIRI GF-1b'de kapandi");
+
+            // CIFT-ANLAM KIRICI: 401'in sebebi iptal esigi, "hesap pasif" dali DEGIL.
+            await using var ctx = NewContext();
+            (await ctx.Set<Customer>().AsNoTracking().SingleAsync(c => c.id == cihaz1.CustomerId))
+                .is_active.Should().BeTrue("hesap AKTIF kalmali");
+        }
+
+        // Esik, iptalden SONRA alinan YENI jetonu OLDURMEMELI - aksi halde kullanici
+        // KILITLENIRDI. (Skew esige eklenseydi bu test kirmizi verirdi.)
+        [Fact]
+        public async Task K1B_IPTALDEN_SONRA_ALINAN_YENI_JETON_CALISIR()
+        {
+            if (Skipped()) return;
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+
+            (await musteri.Client.PostAsJsonAsync("/api/Account/change-password", new
+            {
+                current_password = TestAuthHelper.TestPassword,
+                new_password = "Eeeeee55"
+            })).IsSuccessStatusCode.Should().BeTrue("on kosul: sifre degisimi basarili olmali");
+
+            // YENI sifreyle YENI giris -> yeni jetonun `iat`i esikten BUYUK ya da ESIT.
+            var yeniGiris = await _factory!.CreateClient().PostAsJsonAsync("/api/auth/login",
+                new { email = musteri.Email, password = "Eeeeee55" });
+            yeniGiris.IsSuccessStatusCode.Should().BeTrue("yeni sifreyle giris CALISMALI");
+            var yeniJeton = (await yeniGiris.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>())
+                .GetProperty("data").GetProperty("token").GetString();
+
+            var yeniIstemci = _factory!.CreateClient();
+            yeniIstemci.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", yeniJeton);
+
+            (await yeniIstemci.GetAsync(KorumaliUc)).StatusCode.Should().Be(HttpStatusCode.OK,
+                "iptalden SONRA alinan jeton CALISMALI - skew esige eklenseydi burasi 401 olurdu "
+                + "ve kullanici KILITLENIRDI");
+        }
+
         // ══ GF-1 / K3 (C-2) - STEP-UP SAATI REFRESH'TE SIFIRLANMAZ ═════════════════════════
         //
         // Bu pinler K2 ile AYNI SINIFTA duruyor cunku ikisi de ACCESS TOKEN YASAM DONGUSUNU

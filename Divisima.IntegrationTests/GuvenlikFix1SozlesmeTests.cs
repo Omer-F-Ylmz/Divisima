@@ -337,6 +337,39 @@ namespace Divisima.IntegrationTests
                 "cikis ve sifre degisimi yollarinin IKISI de access token'i iptal etmeli");
         }
 
+        // ── GF-1b / K1 - IPTAL YOLU CACHE-ASIDE KULLANMAZ ──────────────────────────────────
+        //
+        // GF-1'de olculen ZEHIRLENME sinifi `revoked_before` yolunda GERI GELMEMELI:
+        // `GetOrSetAsync` OKURKEN YAZAR. Yeni esik deposu `SetAsync` (deger yaz) +
+        // `GetAsync` (salt oku) kullanir. Bu pin, iptal ailesinin TUM dosyalarini tarar.
+        [Fact]
+        public void K1B_IPTAL_YOLU_CACHE_ASIDE_KULLANMAZ()
+        {
+            var esikDeposu = KodSatirlari(Oku("Divisima.Core/Security/JWT/CacheUserTokenRevocation.cs"));
+            var karaListe = KodSatirlari(Oku("Divisima.Core/Security/JWT/CacheTokenBlacklist.cs"));
+
+            esikDeposu.Should().NotContain("GetOrSetAsync",
+                "esik deposu cache-aside KULLANMAMALI - `GetOrSetAsync` okurken YAZAR ve "
+                + "GF-1'de olculen zehirlenme sinifini geri getirirdi");
+            karaListe.Should().NotContain("GetOrSetAsync",
+                "kara liste de (GF-1'den beri) cache-aside kullanmamali");
+
+            // POZ kontrol: dosyalar GERCEKTEN okundu ve beklenen primitifler yerinde.
+            esikDeposu.Should().Contain("SetAsync", "esik yazimi `SetAsync` ile olmali");
+            esikDeposu.Should().Contain("GetAsync", "esik okumasi SALT-OKUMA `GetAsync` ile olmali");
+
+            // ALAN BAZLI - ESIK "<" OLMALI, "<=" DEGIL. `<=` iptalle AYNI saniyede alinan
+            // YENI jetonu da oldurur ve kullaniciyi KILITLER (davranis pini:
+            // AccessTokenIptalTests.K1B_IPTALDEN_SONRA_ALINAN_YENI_JETON_CALISIR).
+            esikDeposu.Should().Contain("iatUnixSeconds < esik.Value",
+                "kosul KESIN OLARAK `<` olmali - `<=` kilitlenme uretir");
+
+            // SKEW ESIGE DEGIL TTL'E EKLENIR: `esik` satirinda `Skew` GECMEMELI.
+            var esikSatiri = esikDeposu.Split('\n').Single(s => s.Contains("var esik = DateTimeOffset", StringComparison.Ordinal));
+            esikSatiri.Should().NotContain("Skew",
+                "skew ESIGE eklenirse iptalden sonraki YENI jeton da 401 alir = KILITLENME");
+        }
+
         // ── K5 (c) HANGFIRE PANOSU ─────────────────────────────────────────────────────────
         //
         // OLCULDU: filtre ZATEN VAR ve admin-only. Merkez tarifi "yoksa bu dalgada eklenir"

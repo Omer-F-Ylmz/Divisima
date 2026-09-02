@@ -50,12 +50,20 @@ namespace Divisima.Bussiness.Concrete
         private readonly ICacheService _cache;
         // GF-1 / K2: sifre degisiminde SUNULAN access token'i iptal etmek icin.
         private readonly Divisima.Core.Security.JWT.ITokenBlacklist _tokenBlacklist;
+        // GF-1b / K1: TUM cihazlardaki access token'lari tek yazimla dusurmek icin.
+        private readonly Divisima.Core.Security.JWT.IUserTokenRevocation _tokenRevocation;
+
+        // Access token omru - iptal kaydinin TTL'i bundan turer. `TokenOptions`tan okumak
+        // bu yardimciyi yapilandirmaya baglardi; deger `appsettings.json:8` ile AYNI ve
+        // sapma olursa kayit yalnizca DAHA KISA yasar (guvenli taraf).
+        private const int AccessTokenOmruDk = 15;
 
         public AccountManager(ICustomerDal customerDal, IUserSessionDal userSessionDal, IAddressDal addressDal,
             IStockNotificationRequestDal stockNotificationDal, IPriceDropSubscriptionDal priceDropDal,
             ICustomerDeviceDal deviceDal, IAuditLogDal auditLogDal, ISecurityEventService securityEvents,
             IUnitOfWork unitOfWork, ICacheService cache,
-            Divisima.Core.Security.JWT.ITokenBlacklist tokenBlacklist)
+            Divisima.Core.Security.JWT.ITokenBlacklist tokenBlacklist,
+            Divisima.Core.Security.JWT.IUserTokenRevocation tokenRevocation)
         {
             _customerDal = customerDal;
             _userSessionDal = userSessionDal;
@@ -68,6 +76,7 @@ namespace Divisima.Bussiness.Concrete
             _unitOfWork = unitOfWork;
             _cache = cache;
             _tokenBlacklist = tokenBlacklist;
+            _tokenRevocation = tokenRevocation;
         }
 
         public async Task<(HttpStatusCode, Result)> GetSummary(int customerId)
@@ -152,6 +161,18 @@ namespace Divisima.Bussiness.Concrete
             // fazla 15 dk.
             if (!string.IsNullOrEmpty(jti))
                 await _tokenBlacklist.RevokeAsync(jti, jtiExpiresAt ?? DateTime.UtcNow.AddMinutes(15));
+
+            // ══ GF-1b / K1 - ARTIK TUM CIHAZLAR DUSUYOR ═══════════════════════════════════
+            //
+            // GF-1'in BILINEN SINIRI buydu ve OLCULMUSTU: sifre degisiminden sonra cihaz1
+            // 401 alirken IKINCI CIHAZ 200 almaya devam ediyordu (ustteki `jti` iptali
+            // yalniz SUNULAN jetonu oldurur). Esik yazimi o boslugu kapatir: bu andan ONCE
+            // uretilmis TUM access token'lar reddedilir.
+            // Ustteki `InvalidateAllForCustomerAsync` REFRESH tarafini zaten kapatiyordu;
+            // eksik olan ACCESS tarafiydi.
+            await _tokenRevocation.RevokeAllBeforeNowAsync(
+                (int)Divisima.Core.Utilities.Enums.UserTypeEnum.Customer, customerId,
+                TimeSpan.FromMinutes(AccessTokenOmruDk));
 
             return (HttpStatusCode.OK, new SuccessResult(Messages.PasswordChanged));
         }

@@ -20,6 +20,22 @@ namespace Divisima.Core.Utilities.Caching
         // okuma yolu buna gecti; boylece okuma artik yazma uretmiyor ve `TryAddAsync`
         // (atomik set-if-not-exists) iptal icin DOGRU primitif haline geldi.
         Task<bool> ExistsAsync(string key);
+
+        // ══ GF-1b / K1 - DEGER YAZ + SALT OKU (merkez onayi) ═══════════════════════════════
+        //
+        // NEDEN IKI YENI UYE GEREKTI (olculdu): GF-1'de eklenen `ExistsAsync` yalnizca
+        // VARLIK sorar - `revoked_before` ise bir ZAMAN DAMGASIDIR ve DEGERI okunmalidir.
+        // Mevcut uyelerin hicbiri bunu KALDIRMIYOR:
+        //   `GetOrSetAsync` OKURKEN YAZAR  -> GF-1'de olculen ZEHIRLENME sinifi geri gelirdi
+        //   `ExistsAsync`   yalniz VARLIK  -> esigi dondurmez
+        //   `TryAddAsync`   DEGER ALMAZ    -> zaman damgasi yazilamaz
+        // Alternatif `customers` uzerinde KOLON olurdu; o da IKINCI MIGRATION demekti ve
+        // GF-1'de reddedilmisti.
+        //
+        // `SetAsync` her cagrida degeri EZER (set-if-not-exists DEGIL): iptal esigi ileri
+        // tasinabilmelidir. `GetAsync` HICBIR SEY YAZMAZ; anahtar yoksa `default` doner.
+        Task SetAsync<T>(string key, T value, TimeSpan ttl);
+        Task<T?> GetAsync<T>(string key);
         // Aciklayici yorum: ATOMIK set-if-not-exists (Redis SETNX / in-memory lock). true = BU cagri anahtari ekledi
         // (yoktu); false = zaten vardi. "Yalniz ilk kazanir" senaryolari (idempotency, kilit) icin - check-then-act race YOK.
         Task<bool> TryAddAsync(string key, TimeSpan ttl);

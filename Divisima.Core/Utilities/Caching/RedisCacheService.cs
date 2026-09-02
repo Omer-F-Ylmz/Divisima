@@ -77,6 +77,19 @@ namespace Divisima.Core.Utilities.Caching
             return await db.KeyExistsAsync(key);
         }
 
+        // GF-1b / K1: DEGER YAZ. `GetOrSetAsync` ile AYNI serilestirmeyi (JSON) kullanir ki
+        // iki yol ayni anahtari okuyabilsin. Var olan anahtari EZER (SETNX DEGIL).
+        public async Task SetAsync<T>(string key, T value, TimeSpan ttl) =>
+            await _cache.SetStringAsync(key, JsonSerializer.Serialize(value),
+                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = ttl });
+
+        // GF-1b / K1: SALT-OKUMA. Anahtar yoksa `default` doner; HICBIR SEY YAZILMAZ.
+        public async Task<T?> GetAsync<T>(string key)
+        {
+            var ham = await _cache.GetStringAsync(key);
+            return ham == null ? default : JsonSerializer.Deserialize<T>(ham);
+        }
+
         // Aciklayici yorum: ATOMIK SETNX (SET key val NX) - Redis'in kendi atomik islemi, race YOK.
         // true = eklendi (yoktu); false = zaten vardi. IDistributedCache InstanceName bos oldugundan raw key Remove ile tutarli.
         public async Task<bool> TryAddAsync(string key, TimeSpan ttl)

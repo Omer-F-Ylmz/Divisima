@@ -80,6 +80,20 @@ namespace Divisima.Core.Utilities.Caching
         // ICacheService'te.
         public Task<bool> ExistsAsync(string key) => Task.FromResult(_cache.TryGetValue(key, out _));
 
+        // GF-1b / K1: DEGER YAZ. `TryAddAsync`ten farki - VAR OLAN anahtari da EZER
+        // (iptal esigi ileri tasinabilmeli). Takip sozlugune de eklenir ki TTL dolunca
+        // tahliye geri-cagrisi anahtari dusurebilsin (H49 bellek sizintisi dersi).
+        public Task SetAsync<T>(string key, T value, TimeSpan ttl)
+        {
+            _cache.Set(key, value, TrackedOptions(ttl));
+            _keys.TryAdd(key, 0);
+            return Task.CompletedTask;
+        }
+
+        // GF-1b / K1: SALT-OKUMA. HICBIR SEY YAZMAZ; anahtar yoksa `default` doner.
+        public Task<T?> GetAsync<T>(string key) =>
+            Task.FromResult(_cache.TryGetValue(key, out T? deger) ? deger : default);
+
         // Aciklayici yorum: ATOMIK set-if-not-exists (lock ile tek-process). check-then-set bolunmez -> race yok.
         public Task<bool> TryAddAsync(string key, TimeSpan ttl)
         {

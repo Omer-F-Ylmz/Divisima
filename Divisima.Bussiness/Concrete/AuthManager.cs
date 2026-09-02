@@ -53,6 +53,10 @@ namespace Divisima.Bussiness.Concrete
 
         // GF-1 / K2: access token iptali icin kara liste. Program.cs'te AddScoped ile kayitli.
         private readonly Divisima.Core.Security.JWT.ITokenBlacklist _tokenBlacklist;
+        // GF-1b / K1: "tum cihazlardan cik" dalinda toplu iptal esigini yazar.
+        private readonly Divisima.Core.Security.JWT.IUserTokenRevocation _tokenRevocation;
+        // Access token omru - iptal kaydinin TTL'i bundan turer (appsettings.json:8 ile AYNI).
+        private const int AccessTokenOmruDk = 15;
 
         // Jeton bitisi okunamazsa kullanilan TTL. Access token omru 15 dk oldugundan bu
         // ust siniri ASLA gecmez; iptal kaydi jetonun kendisinden UZUN yasamaz.
@@ -61,9 +65,11 @@ namespace Divisima.Bussiness.Concrete
         public AuthManager(ICustomerDal customerDal, IUserSessionDal userSessionDal, ITokenHelper tokenHelper, IMailService mailService, ISecurityEventService securityEvents,
             IReferralService referralService, IConsentRecordDal consentDal,
             IMailLinkBuilder links, Divisima.Bussiness.Outbox.IOutboxService outboxService,
-            Divisima.Core.Security.JWT.ITokenBlacklist tokenBlacklist)
+            Divisima.Core.Security.JWT.ITokenBlacklist tokenBlacklist,
+            Divisima.Core.Security.JWT.IUserTokenRevocation tokenRevocation)
         {
             _tokenBlacklist = tokenBlacklist;
+            _tokenRevocation = tokenRevocation;
             _outboxService = outboxService;
             _links = links;
             _referralService = referralService;
@@ -678,6 +684,18 @@ namespace Divisima.Bussiness.Concrete
             {
                 // Tum aktif oturumlari TEK atomik sorgu ile kapat (foreach N+1 yerine - DRY + performans)
                 await _userSessionDal.InvalidateAllForCustomerAsync(customerId);
+
+                // ══ GF-1b / K1 - "TUM CIHAZLARDAN CIK" ═══════════════════════════════════
+                //
+                // Bu dal (refresh token VERILMEDI) TUM oturumlari kapatmayi AMACLIYOR, ama
+                // ustteki satir yalniz REFRESH tarafini dusuruyordu; diger cihazlarin
+                // ACCESS token'lari 15 dakikaya kadar CALISMAYA DEVAM ediyordu.
+                // Esik yazimi o boslugu kapatir.
+                //
+                // TEK OTURUM CIKISI (refresh token VERILEN dal) BILINCLI OLARAK KAPSAM DISI:
+                // orada kullanici yalniz O cihazdan cikmak istiyor - statuko (merkez karari).
+                await _tokenRevocation.RevokeAllBeforeNowAsync(
+                    (int)UserTypeEnum.Customer, customerId, TimeSpan.FromMinutes(AccessTokenOmruDk));
             }
             return (HttpStatusCode.OK, new SuccessResult(Messages.LogoutSuccess));
         }

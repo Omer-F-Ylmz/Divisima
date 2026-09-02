@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 using Divisima.Core.Security.JWT;
 using Divisima.Core.Utilities.Caching;
@@ -25,10 +26,35 @@ namespace Divisima.API.Middlewares
         public TokenBlacklistMiddleware(RequestDelegate next) => _next = next;
 
         public async Task InvokeAsync(HttpContext context, ITokenBlacklist blacklist,
-            ICacheService cache, ICustomerDal customerDal)
+            ICacheService cache, ICustomerDal customerDal, IUserTokenRevocation revocation)
         {
             var jti = context.User?.FindFirst("jti")?.Value;
             if (!string.IsNullOrEmpty(jti) && await blacklist.IsRevokedAsync(jti))
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await context.Response.WriteAsJsonAsync(new { Success = false, Message = "Oturum sonlandırılmış. Lütfen tekrar giriş yapın." });
+                return;
+            }
+
+            // ══ GF-1b / K1 - KULLANICI BASINA TOPLU IPTAL ESIGI ═══════════════════════════
+            //
+            // `jti` kara listesi YALNIZ SUNULAN jetonu oldurur; kullanicinin BASKA
+            // cihazlardaki jetonlari icin `jti` elimizde YOKTUR. Esik kontrolu o boslugu
+            // kapatir: jetonun `iat`i, kullanicinin son toplu iptalinden ONCEYSE reddedilir.
+            //
+            // `iat` KISA AD OLARAK OKUNUR - olculdu: `JwtSecurityTokenHandler`in varsayilan
+            // inbound haritasinda `iat` ESLESMESI YOKTUR (POZ kontrol: `email` ESLESIYOR),
+            // dolayisiyla claim tipi kisa kalir. Deger TIRNAKSIZ SAYIDIR (Integer64).
+            //
+            // KAPSAM: musteri VE admin (ikisi de `customers` tablosunda, `user_type` ile
+            // ayrisir) ile satici. Anahtar `user_type` tasidigi icin kimlik CAKISMASI YOK.
+            var iatClaim = context.User?.FindFirst("iat")?.Value;
+            if (context.User?.Identity?.IsAuthenticated == true
+                && long.TryParse(iatClaim, NumberStyles.Integer, CultureInfo.InvariantCulture, out var iat)
+                && int.TryParse(context.User.FindFirst("user_type")?.Value, out var userType)
+                && int.TryParse(context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var uid)
+                && uid > 0
+                && await revocation.IsRevokedAsync(userType, uid, iat))
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 await context.Response.WriteAsJsonAsync(new { Success = false, Message = "Oturum sonlandırılmış. Lütfen tekrar giriş yapın." });
