@@ -3090,3 +3090,37 @@ GO
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260902090025_GF1bK3RefreshTokenOzetUnique'
+)
+BEGIN
+    DROP INDEX [IX_user_sessions_refresh_token] ON [user_sessions];
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260902090025_GF1bK3RefreshTokenOzetUnique'
+)
+BEGIN
+    EXEC(N'CREATE UNIQUE INDEX [IX_user_sessions_refresh_token] ON [user_sessions] ([refresh_token]) WHERE [refresh_token] IS NOT NULL');
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260902090025_GF1bK3RefreshTokenOzetUnique'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20260902090025_GF1bK3RefreshTokenOzetUnique', N'8.0.30');
+END;
+GO
+
+COMMIT;
+GO
+

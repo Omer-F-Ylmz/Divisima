@@ -434,7 +434,9 @@ namespace Divisima.Bussiness.Concrete
             await _userSessionDal.AddAsync(new UserSession
             {
                 customer_id = customer.id,
-                refresh_token = refreshToken,
+                // GF-1b / K3: DB'de OZET durur, istemciye DUZ jeton doner (asagida).
+                // DB okuma yetkisi ya da bir yedek dosyasi artik CANLI oturum jetonu VERMEZ.
+                refresh_token = JetonOzeti.Hesapla(refreshToken),
                 expires_at = DateTime.Now.AddDays(RefreshTokenDays),
                 is_active = true,
                 created_at = DateTime.Now,
@@ -613,14 +615,18 @@ namespace Divisima.Bussiness.Concrete
             var customer = await _customerDal.GetByEmailAsync(dto.email);
             if (customer != null && customer.is_active)
             {
-                customer.password_reset_token = SecureTokenGenerator.Generate();
+                // ══ GF-1b / K3 - DUZ JETON MAILE, OZET DB'YE ═══════════════════════════════
+                // DUZ deger YALNIZ kullanicinin gelen kutusuna gider; DB'de yalniz ozeti
+                // durur. Boylece DB okuma yetkisi tek basina HESAP ELE GECIRMEYE yetmez.
+                var sifirlamaJetonu = SecureTokenGenerator.Generate();
+                customer.password_reset_token = JetonOzeti.Hesapla(sifirlamaJetonu);
                 customer.password_reset_expiry = DateTime.Now.AddMinutes(30); // kısa ömür
                 await _customerDal.UpdateAsync(customer);
                 await _outboxService.WriteAsync("EmailNotification", new MailMessageDto
                 {
                     To = customer.email,
                     Subject = "Divisima - Şifre sıfırlama",
-                    Body = SifreSifirlamaGovdesi(customer.password_reset_token)
+                    Body = SifreSifirlamaGovdesi(sifirlamaJetonu)
                 });
             }
             // Açıklayıcı yorum: Her durumda aynı yanıt (hesap var mı bilgisini sızdırma)
@@ -648,7 +654,8 @@ namespace Divisima.Bussiness.Concrete
             if (sifreHatasi != null)
                 return (HttpStatusCode.BadRequest, new ErrorResult(sifreHatasi));
 
-            var customer = await _customerDal.GetAsync(c => c.password_reset_token == dto.token);
+            var jetonOzeti = JetonOzeti.Hesapla(dto.token);
+            var customer = await _customerDal.GetAsync(c => c.password_reset_token == jetonOzeti);
             if (customer == null)
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.PasswordResetInvalid));
             if (!customer.password_reset_expiry.HasValue || customer.password_reset_expiry.Value < DateTime.Now)

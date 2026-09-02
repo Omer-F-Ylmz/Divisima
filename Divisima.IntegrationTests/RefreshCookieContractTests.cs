@@ -203,7 +203,7 @@ namespace Divisima.IntegrationTests
             var cerezDegeri = CerezDegeri(refreshCookie);
             await using var ctx = NewContext();
             (await ctx.Set<UserSession>().AsNoTracking()
-                .AnyAsync(s => s.customer_id == customerId && s.is_active && s.refresh_token == cerezDegeri))
+                .AnyAsync(s => s.customer_id == customerId && s.is_active && s.refresh_token == Divisima.Core.Security.Tokens.JetonOzeti.Hesapla(cerezDegeri)))
                 .Should().BeTrue("cookie'ye yazilan deger DB'deki AKTIF oturumun ta kendisi olmali");
         }
 
@@ -227,7 +227,7 @@ namespace Divisima.IntegrationTests
             gecerliToken.Should().NotBeNullOrWhiteSpace("token gercekten uretilmis olmali - vakum kirici");
             await using (var on = NewContext())
                 (await on.Set<UserSession>().AsNoTracking()
-                    .AnyAsync(s => s.customer_id == customerId && s.is_active && s.refresh_token == gecerliToken))
+                    .AnyAsync(s => s.customer_id == customerId && s.is_active && s.refresh_token == Divisima.Core.Security.Tokens.JetonOzeti.Hesapla(gecerliToken)))
                     .Should().BeTrue("token DB'de AKTIF bir oturuma karsilik gelmeli");
 
             var anon = HamIstemci(_factory!);
@@ -242,7 +242,7 @@ namespace Divisima.IntegrationTests
 
             await using var son = NewContext();
             (await son.Set<UserSession>().AsNoTracking()
-                .AnyAsync(s => s.customer_id == customerId && s.is_active && s.refresh_token == gecerliToken))
+                .AnyAsync(s => s.customer_id == customerId && s.is_active && s.refresh_token == Divisima.Core.Security.Tokens.JetonOzeti.Hesapla(gecerliToken)))
                 .Should().BeTrue("reddedilen istekler oturumu DONDURMEMELI (rotasyon tetiklenmemeli)");
         }
 

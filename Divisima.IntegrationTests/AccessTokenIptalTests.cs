@@ -287,6 +287,45 @@ namespace Divisima.IntegrationTests
                 + "ve kullanici KILITLENIRDI");
         }
 
+        // ══ GF-1b / K3 (R-1b5) - DB'DE DUZ METIN JETON YOK ════════════════════════════════
+        //
+        // OLCULEN ONCE-DURUM: `user_sessions.refresh_token` ve `customers.password_reset_token`
+        // DUZ METIN duruyordu (GF1-B4 · GF1-B3). DB okuma yetkisi ya da bir yedek dosyasi,
+        // CANLI oturum jetonlarini ve sifre sifirlama jetonlarini DOGRUDAN veriyordu.
+        [Fact]
+        public async Task K3B_DB_DE_DUZ_METIN_JETON_TUTULMAZ()
+        {
+            if (Skipped()) return;
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+
+            await using var ctx = NewContext();
+
+            // (1) OTURUM JETONU
+            var oturumlar = await ctx.Set<UserSession>().AsNoTracking()
+                .Where(s => s.customer_id == musteri.CustomerId).ToListAsync();
+            // POZITIF OLAY KOSULU (vakum yasagi): satir GERCEKTEN yazilmis olmali.
+            oturumlar.Should().NotBeEmpty("on kosul: giris bir oturum satiri yazmis olmali");
+            foreach (var s in oturumlar)
+            {
+                s.refresh_token.Length.Should().Be(Divisima.Core.Security.Tokens.JetonOzeti.OzetUzunlugu,
+                    "oturum jetonu DB'de 64 karakterlik SHA-256 hex OZET olarak durmali");
+                s.refresh_token.Should().MatchRegex("^[0-9a-f]{64}$",
+                    "KUCUK HARF hex olmali - base64 secilseydi Turkish_CI_AS katlanmasi "
+                    + "jetonun HARF VARYANTINI da kabul ederdi");
+            }
+
+            // (2) SIFRE SIFIRLAMA JETONU
+            (await _factory!.CreateClient().PostAsJsonAsync("/api/auth/forgot-password",
+                new { email = musteri.Email })).StatusCode.Should().Be(HttpStatusCode.OK,
+                "on kosul: sifirlama istegi kabul edilmeli");
+
+            await using var ctx2 = NewContext();
+            var m = await ctx2.Set<Customer>().AsNoTracking().SingleAsync(c => c.id == musteri.CustomerId);
+            m.password_reset_token.Should().NotBeNullOrWhiteSpace("jeton uretilmis olmali");
+            m.password_reset_token!.Should().MatchRegex("^[0-9a-f]{64}$",
+                "sifirlama jetonu da DB'de OZET olarak durmali");
+        }
+
         // ══ GF-1b / K2 (R-1b2) - CHANGE-PASSWORD ARTIK KILITLENIYOR ═══════════════════════
         //
         // OLCULEN ONCE-DURUM: bu uc mevcut-sifre dogrulamasi yapiyor ama hesap kilidi YOKTU
@@ -353,8 +392,13 @@ namespace Divisima.IntegrationTests
                 var oturum = await ctx.Set<UserSession>()
                     .SingleAsync(s => s.customer_id == musteri.CustomerId && s.is_active);
                 oturum.auth_time = null;
+                // GF-1b / K3 UYARLAMASI: kolon artik DUZ jeton degil SHA-256 OZET tutuyor,
+                // yani DB'den okunan deger jeton olarak KULLANILAMAZ. Test BILINEN bir duz
+                // jeton belirleyip ozetini yaziyor - iki tarafi da kendi kontrol ediyor.
+                // NIYET DEGISMEDI: miras (auth_time NULL) oturumun refresh davranisi olculuyor.
+                _refreshJeton = "gf1b-miras-" + Guid.NewGuid().ToString("N");
+                oturum.refresh_token = Divisima.Core.Security.Tokens.JetonOzeti.Hesapla(_refreshJeton);
                 await ctx.SaveChangesAsync();
-                _refreshJeton = oturum.refresh_token;
             }
 
             using var scope = _factory!.Services.CreateScope();
@@ -416,8 +460,11 @@ namespace Divisima.IntegrationTests
                 oturum.auth_time.Should().NotBeNull(
                     "on kosul: giris YENI kolonu doldurmus olmali (login = kimlik dogrulama)");
                 oturum.auth_time = gecmis;
+                // GF-1b / K3 UYARLAMASI (gerekce ustteki pinle AYNI): DB ozet tutuyor,
+                // test BILINEN duz jetonun ozetini yaziyor. NIYET DEGISMEDI.
+                refreshToken = "gf1b-tasima-" + Guid.NewGuid().ToString("N");
+                oturum.refresh_token = Divisima.Core.Security.Tokens.JetonOzeti.Hesapla(refreshToken);
                 await ctx.SaveChangesAsync();
-                refreshToken = oturum.refresh_token;
             }
 
             using var scope = _factory!.Services.CreateScope();

@@ -329,11 +329,24 @@ namespace Divisima.IntegrationTests
         {
             (await anon.PostAsJsonAsync("/api/auth/forgot-password", new { email = eposta }))
                 .StatusCode.Should().Be(HttpStatusCode.OK);
+            // ══ GF-1b / K3 UYARLAMASI ═════════════════════════════════════════════════════
+            // Kolon artik DUZ jeton degil SHA-256 OZET tutuyor, yani DB'den okunan deger
+            // jeton olarak KULLANILAMAZ (duz jeton YALNIZ maile gider - bu sinif mail
+            // yakalamiyor). Test BILINEN bir duz jeton belirleyip ozetini yaziyor.
+            // GERCEK URETIM YOLU YINE KOSUYOR: ustteki `forgot-password` cagrisi 200
+            // donduruyor ve satirin GERCEKTEN doldugu asagida DOGRULANIYOR.
+            // NIYET DEGISMEDI: elde GECERLI bir sifirlama jetonu olmasi.
             await using var ctx = NewContext();
-            var m = await ctx.Set<Customer>().AsNoTracking()
+            var m = await ctx.Set<Customer>()
                 .FirstAsync(c => c.email == eposta.ToLowerInvariant());
             m.password_reset_token.Should().NotBeNullOrWhiteSpace("sifirlama jetonu uretilmis olmali");
-            return m.password_reset_token!;
+            m.password_reset_token!.Length.Should().Be(Divisima.Core.Security.Tokens.JetonOzeti.OzetUzunlugu,
+                "DB'de OZET durmali (64 hex) - duz jeton DURMAMALI");
+
+            var duzJeton = "gf1b-reset-" + Guid.NewGuid().ToString("N");
+            m.password_reset_token = Divisima.Core.Security.Tokens.JetonOzeti.Hesapla(duzJeton);
+            await ctx.SaveChangesAsync();
+            return duzJeton;
         }
     }
 }

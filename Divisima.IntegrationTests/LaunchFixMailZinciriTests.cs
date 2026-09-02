@@ -243,12 +243,26 @@ namespace Divisima.IntegrationTests
             mail.Should().NotBeNull("sifre sifirlama maili gonderilmis olmali");
             mail!.To.Should().Be(eposta.ToLowerInvariant());
 
-            string jeton;
+            // ══ GF-1b / K3 UYARLAMASI - NIYET GUCLENDI ════════════════════════════════════
+            // ONCE: DB'deki jeton mail govdesinde ARANIYORDU (ikisi de DUZ metindi).
+            // SONRA: DB OZET tutuyor, mail DUZ jeton tasiyor - ikisi ARTIK AYNI DEGIL.
+            // Pin bu ayrimin TA KENDISINI olcuyor: maildeki DUZ jetonun OZETI, DB'deki
+            // degere ESIT olmali. Yani hem link dogru, hem DB'de duz jeton YOK.
+            var link = mail.Body.Split('\n').Single(s => s.Contains("/#/sifre-sifirla/", StringComparison.Ordinal)).Trim();
+            var maildekiJeton = Uri.UnescapeDataString(link.Substring(link.LastIndexOf('/') + 1));
+            maildekiJeton.Should().NotBeNullOrWhiteSpace("mail DUZ jetonu tasimali");
+
+            string dbdekiDeger;
             await using (var ctx = NewContext())
-                jeton = (await ctx.Set<Customer>().AsNoTracking()
+                dbdekiDeger = (await ctx.Set<Customer>().AsNoTracking()
                     .FirstAsync(c => c.email == eposta.ToLowerInvariant())).password_reset_token!;
 
-            mail.Body.Should().Contain($"{VitrinTabani}/#/sifre-sifirla/{Uri.EscapeDataString(jeton)}",
+            dbdekiDeger.Should().Be(Divisima.Core.Security.Tokens.JetonOzeti.Hesapla(maildekiJeton),
+                "DB maildeki jetonun OZETINI tutmali");
+            dbdekiDeger.Should().NotBe(maildekiJeton,
+                "DB'de DUZ jeton DURMAMALI - GF1-B3'un ta kendisi");
+
+            mail.Body.Should().Contain($"{VitrinTabani}/#/sifre-sifirla/{Uri.EscapeDataString(maildekiJeton)}",
                 "link TAM olarak sifirlama rotasina ve o jetona gitmeli");
             mail.Body.Should().Contain("30 dakika", "sure siniri kullaniciya soylenmeli");
         }

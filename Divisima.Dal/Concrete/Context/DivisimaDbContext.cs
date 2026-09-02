@@ -476,7 +476,14 @@ namespace Divisima.DataAccess.Concrete.Context
                 b.Property(u => u.auth_time).HasColumnName("auth_time");
                 // Not: UserSession entity'sinde token/updated_at ALANI YOK -> map EDILMEZ (aksi halde CS1061 derleme hatasi).
                 b.HasIndex(u => u.customer_id);
-                b.HasIndex(u => u.refresh_token);   // refresh token ile hizli oturum lookup (RefreshToken/Logout)
+                // ══ GF-1b / K3 - FILTRELI UNIQUE ══════════════════════════════════════════
+                // Kolon artik DUZ JETON degil SHA-256 hex OZET tutuyor. UNIQUE olmasi iki isi
+                // birden yapar: (a) ayni ozetin iki satirda bulunmasini ENGELLER, (b) refresh
+                // rotasyonunun CAS'ini (K4) veritabani duzeyinde destekler.
+                // FILTRELI (merkez karari DUR-3): SQL Server UNIQUE indeksi NULL'lari ESIT
+                // sayar; kolon modelde nullable oldugu icin filtresiz bir UNIQUE ileride
+                // NULL'lu bir satir olustugunda PATLARDI.
+                b.HasIndex(u => u.refresh_token).IsUnique().HasFilter("[refresh_token] IS NOT NULL");
             });
 
             // Açıklayıcı yorum: Content tablo konfigürasyonu (çok dilli legal sayfalar)

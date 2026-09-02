@@ -153,10 +153,18 @@ namespace Divisima.IntegrationTests
             if (Skipped()) return;
             var a = await TestAuthHelper.CreateCustomerClientAsync(_host!);
 
-            string eskiRefresh;
+            // GF-1b / K3 UYARLAMASI: kolon artik SHA-256 OZET tutuyor, DB'den okunan deger
+            // jeton olarak KULLANILAMAZ. Test BILINEN bir duz jeton belirleyip ozetini
+            // yaziyor - iki tarafi da kendi kontrol ediyor. NIYET DEGISMEDI: rotasyonun eski
+            // jetonu kapattigi ve yeni cift urettigi olculuyor.
+            var eskiRefresh = "gf1b-rot-" + Guid.NewGuid().ToString("N");
             await using (var ctx = NewContext())
-                eskiRefresh = (await ctx.Set<UserSession>().AsNoTracking()
-                    .SingleAsync(s => s.customer_id == a.CustomerId && s.is_active)).refresh_token;
+            {
+                var oturum = await ctx.Set<UserSession>()
+                    .SingleAsync(s => s.customer_id == a.CustomerId && s.is_active);
+                oturum.refresh_token = Divisima.Core.Security.Tokens.JetonOzeti.Hesapla(eskiRefresh);
+                await ctx.SaveChangesAsync();
+            }
 
             // POZITIF OLAY: gecerli refresh yeni bir cift uretiyor.
             var ilk = await WithScopeAsync(sp => sp.GetRequiredService<IAuthService>()
@@ -166,7 +174,7 @@ namespace Divisima.IntegrationTests
             await using (var ctx = NewContext())
             {
                 (await ctx.Set<UserSession>().AsNoTracking()
-                    .SingleAsync(s => s.refresh_token == eskiRefresh)).is_active
+                    .SingleAsync(s => s.refresh_token == Divisima.Core.Security.Tokens.JetonOzeti.Hesapla(eskiRefresh))).is_active
                     .Should().BeFalse("ESKI oturum kapatilmali (rotasyon)");
                 (await ctx.Set<UserSession>().CountAsync(s => s.customer_id == a.CustomerId && s.is_active))
                     .Should().Be(1, "yerine YENI bir aktif oturum gelmeli");
@@ -185,10 +193,16 @@ namespace Divisima.IntegrationTests
             if (Skipped()) return;
             var a = await TestAuthHelper.CreateCustomerClientAsync(_host!);
 
-            string refresh;
+            // GF-1b / K3 UYARLAMASI (gerekce ustteki pinle AYNI): DB OZET tutuyor, test
+            // BILINEN duz jetonun ozetini yaziyor. NIYET DEGISMEDI - olculen sey HESAP DURUMU.
+            var refresh = "gf1b-pasif-" + Guid.NewGuid().ToString("N");
             await using (var ctx = NewContext())
-                refresh = (await ctx.Set<UserSession>().AsNoTracking()
-                    .SingleAsync(s => s.customer_id == a.CustomerId && s.is_active)).refresh_token;
+            {
+                var oturum = await ctx.Set<UserSession>()
+                    .SingleAsync(s => s.customer_id == a.CustomerId && s.is_active);
+                oturum.refresh_token = Divisima.Core.Security.Tokens.JetonOzeti.Hesapla(refresh);
+                await ctx.SaveChangesAsync();
+            }
 
             // Hesabi pasiflestir (oturum satiri AKTIF kaliyor - kontrol edilen sey hesap durumu).
             await using (var ctx = NewContext())

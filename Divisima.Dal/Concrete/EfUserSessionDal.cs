@@ -13,11 +13,24 @@ namespace Divisima.DataAccess.Concrete.EntityFramework
         {
         }
 
+        // ══ GF-1b / K3 - ARAMA OZET UZERINDEN YAPILIR ═══════════════════════════════════════
+        //
+        // `refresh_token` kolonu artik DUZ METIN DEGIL, SHA-256 hex OZET tutuyor. Cagiranlar
+        // istemciden gelen DUZ jetonu verir; ozetleme BURADA, TEK YERDE yapilir.
+        // NEDEN DAL'DA: iki arama metodu ve gelecekteki her cagiran icin TEK KAYNAK - cagri
+        // yerinde ozetlemek "ayni kuralin ikinci kopyasi" ailesini acardi (bu depoda YEDI KEZ
+        // bedeli odendi). Cagiran DUZ jetondan baska bir sey BILMEK ZORUNDA DEGIL.
+        //
+        // MEVCUT DUZ METIN SATIRLAR (merkez karari): geriye donuk ozetleme YAPILMADI; o
+        // satirlar ozet aramasiyla ESLESMEZ ve fiilen OLU oturuma doner. Launch oncesi kabul.
+        private static string Ozet(string duzJeton) => Divisima.Core.Security.Tokens.JetonOzeti.Hesapla(duzJeton);
+
         // Açıklayıcı yorum: Refresh token ile AKTIF oturum
         public async Task<UserSession> GetByRefreshTokenAsync(string refreshToken)
         {
+            var ozet = Ozet(refreshToken);
             return await Context.Set<UserSession>()
-                .FirstOrDefaultAsync(s => s.refresh_token == refreshToken && s.is_active);
+                .FirstOrDefaultAsync(s => s.refresh_token == ozet && s.is_active);
         }
 
         // ══ GUVENLIK-FIX (G1) - DURUM FILTRESIZ ARAMA ═══════════════════════════════════════
@@ -27,8 +40,9 @@ namespace Divisima.DataAccess.Concrete.EntityFramework
         // NoTracking DEGIL: cagiran ayni context icinde InvalidateAllForCustomerAsync cagiriyor.
         public async Task<UserSession> GetByRefreshTokenAnyStateAsync(string refreshToken)
         {
+            var ozet = Ozet(refreshToken);
             return await Context.Set<UserSession>()
-                .FirstOrDefaultAsync(s => s.refresh_token == refreshToken);
+                .FirstOrDefaultAsync(s => s.refresh_token == ozet);
         }
 
         // Aciklayici yorum: TEK atomik UPDATE - tum aktif oturumlari kapatir (foreach yerine).
