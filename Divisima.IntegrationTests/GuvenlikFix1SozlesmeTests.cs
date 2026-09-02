@@ -150,9 +150,20 @@ namespace Divisima.IntegrationTests
         // yanitlansaydi, HIZLI YANIT "bu hesap eski/kayitli" bilgisini ele verirdi. Ayni sey
         // kayitsiz adreste kosan KUKLA dogrulama icin de gecerli.
         //
-        // DAVRANIS KANITI DA VAR (bu tur, .NET 8 uretim kod yolu, 5 tekrar):
-        //   v2 ort 32,5 ms  ·  v1 ort 33,2 ms  -> fark olcum gurultusu icinde.
-        // Bu pin o davranisin KAYNAK sozlesmesini korur: uc yolun UCU de turetmeyi cagirmali.
+        // OLCUM (.NET 8 uretim kod yolu, 10 tekrar, defter `olcum/k6-zamanlama.txt`):
+        //   v2 ort 32,5 ms · v1 ort 32,6 ms · 0-bayt ort 32,9 ms · v1/v2 orani 1,003
+        //
+        // ══ TEK KANAL - ACIKCA ISARETLI (denetci karari (e)) ══════════════════════════════
+        // Bu pin KAYNAK SAYIMIDIR; zamanlamanin KENDISI CI'da pinli DEGILDIR (sure olcumu
+        // makineye baglidir, esik pini flake uretirdi). Yani zamanlama iddiasinin kanit
+        // kanali TEKTIR: kaynak + defterdeki tek seferlik olcum. Cok kanalli bir bulguyla
+        // AYNI siraya konmaz (SDP 1.12.10-b).
+        //
+        // ── PININ GORMEDIGI DAL (denetci karari (b), durust kayit) ───────────────────────
+        // `HashingHelper.cs:89` `if (iterasyon <= 0) return false;` HIC TURETME YAPMADAN
+        // doner - yani "her dal ayni maliyeti oder" iddiasi O DAL ICIN GECERSIZDIR. Dal
+        // URETIMDEN ULASILAMAZ (zarfa her zaman 100k yazilir; bozuk zarf ancak elle
+        // uretilirse olusur), ama pin saf kaynak sayimi oldugu icin bunu GOREMEZ.
         [Fact]
         public void K6_DOGRULAMA_HER_DALDA_AYNI_MALIYETI_ODER()
         {
@@ -311,6 +322,13 @@ namespace Divisima.IntegrationTests
                 "okuma yolu SALT-OKUMA primitifini kullanmali");
             kaynak.Should().Contain("TryAddAsync",
                 "yazma yolu ATOMIK set-if-not-exists kullanmali");
+
+            // ══ TEK KANAL - ACIKCA ISARETLI (denetci karari (e)) ══════════════════════════
+            // `RedisCacheService.ExistsAsync` HICBIR DAVRANIS PINIYLE KORUNMUYOR: ortamda
+            // Redis kapali (`Redis:Enabled` yok -> MemoryCacheService secilir) ve CI'da Redis
+            // kosucusu YOK. `AccessTokenIptalTests` davranis kaniti YALNIZ bellek-ici dal
+            // icindir. Redis dalinin kaniti TEK KANALDIR (kaynak) ve cok kanalli bir
+            // bulguyla ayni siraya KONMAZ (SDP 1.12.10-b).
 
             // Iptalin YAZMA tarafi uretimde GERCEKTEN bagli olmali (once SIFIR cagri vardi).
             // ANKRAJLI: ciplak `RevokeAsync` ACIKLAMA satirlarinda da geciyor - `_tokenBlacklist.`

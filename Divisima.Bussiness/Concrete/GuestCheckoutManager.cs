@@ -107,29 +107,8 @@ namespace Divisima.Bussiness.Concrete
             // ORDINAL esitlikle karar veriyor. Kanonik kutu YALNIZ kotuye kullanim SAYACININ
             // eksenidir (bkz. PostaKutusu dosyasinin basi) - burada kullanilsaydi iki AYRI
             // hesabin siparisleri birbirinin replay'i sayilirdi.
-            if (!string.IsNullOrWhiteSpace(dto.request_id))
-            {
-                var oncekiler = await _orderDal.GetListNoTrackingAsync(o => o.request_id == dto.request_id);
-                var onceki = oncekiler.FirstOrDefault();
-                if (onceki != null)
-                {
-                    var sahipler = await _customerDal.GetListNoTrackingAsync(c => c.id == onceki.customer_id);
-                    var sahip = sahipler.FirstOrDefault();
-                    if (sahip != null && string.Equals(sahip.email, email, StringComparison.Ordinal))
-                        return (HttpStatusCode.OK, new SuccessDataResult<OrderPlaceResponseDto>(
-                            new OrderPlaceResponseDto
-                            {
-                                id = onceki.id,
-                                order_number = onceki.order_number,
-                                replayed = true
-                            },
-                            Messages.OrderAlreadyPlaced));
-
-                    _logger.LogWarning("MISAFIR REPLAY GUARD'I: request_id BASKA bir siparise ait "
-                        + "(siparis {OrderId}) - istek reddedildi, hicbir kayit yazilmadi.", onceki.id);
-                    return (HttpStatusCode.BadRequest, new ErrorResult(Messages.OrderPlaceFailed));
-                }
-            }
+            var guardSonucu = await ReplayGuardiAsync(dto.request_id, email);
+            if (guardSonucu != null) return guardSonucu.Value;
 
             // Açıklayıcı yorum: E-posta zaten kayıtlıysa misafir checkout'a izin verme - giriş yapsın (hesap ele geçirme önleme)
             var existing = await _customerDal.GetAsync(c => c.email == email);
@@ -221,7 +200,35 @@ namespace Divisima.Bussiness.Concrete
                 notify_sms = false,
                 notify_push = false
             };
-            await _customerDal.AddAsync(guest);
+            // ══ GF-1 / K1-ek (S-1) - `IX_customers_email` IHLALI YAKALANIR ═══════════════════
+            //
+            // OLCULEN ZARAR (L3 denetcisi, ONCE ve SONRA surumlerinde AYNI - dalga URETMEDI):
+            // ayni e-postayla ESZAMANLI iki misafir checkout'ta ikisi de yukaridaki 409
+            // kapisini gecebiliyor (henuz satir YOK), sonra ikisi de buraya geliyor ve
+            // kaybeden `customers.email` TEKIL INDEKSINE (`DivisimaDbContext.cs:320`
+            // `HasIndex(c => c.email).IsUnique()`) toslayip ISLENMEYEN ISTISNA firlatiyordu.
+            // Kullanici genel 500 goruyordu. Yetim satir birakmiyordu (kaybeden `PlaceOrder`a
+            // HIC VARMIYOR - identity boslugu ile olculdu) ama 500 bir kusurdur.
+            //
+            // CARE: ihlal YAKALANIR ve karar YENIDEN, ayni yuklemlerle verilir:
+            //   ayni request_id  -> replay yolu (200 + replayed:true)  - guard TEK KAYNAK
+            //   diger her durum  -> 409, yani MEVCUT misafir semantigi (degismedi)
+            // Tekil indeks yarisi, 409 kapisinin "yarissiz" halinin ta kendisidir; kaybedene
+            // 409 donmek o kapinin ZATEN verdigi yanittir.
+            try
+            {
+                await _customerDal.AddAsync(guest);
+            }
+            catch (Exception ex) when (TekilEpostaIhlaliMi(ex))
+            {
+                _logger.LogWarning(ex, "MISAFIR EPOSTA YARISI: ayni e-posta icin eszamanlı ikinci "
+                    + "istek tekil indekse takildi - karar yeniden veriliyor (500 DONDURULMEZ).");
+
+                var yarisSonucu = await ReplayGuardiAsync(dto.request_id, email);
+                if (yarisSonucu != null) return yarisSonucu.Value;
+
+                return (HttpStatusCode.Conflict, new ErrorResult(Messages.GuestEmailExists));
+            }
 
             // Açıklayıcı yorum: Teslimat adresi oluştur
             var address = new Address
@@ -336,6 +343,54 @@ namespace Divisima.Bussiness.Concrete
             }
 
             return (siparisDurum, siparisSonuc);
+        }
+
+        // GF-1 / K1-ek: SQL Server tekil-indeks ihlali (2601 tekil indeks, 2627 tekil kisit).
+        // DAR TUTULDU: baska hicbir DB hatasi yutulmaz - `IX_customers_email` disindaki bir
+        // ihlal de bu numaralari uretebilecegi icin KISIT ADI da aranir. Ad eslesmezse
+        // istisna OLDUGU GIBI yukari cikar (sessiz gecistirme YOK).
+        private static bool TekilEpostaIhlaliMi(Exception ex)
+        {
+            for (var e = ex; e != null; e = e.InnerException)
+            {
+                if (e is Microsoft.Data.SqlClient.SqlException sql
+                    && (sql.Number == 2601 || sql.Number == 2627)
+                    && sql.Message.Contains("IX_customers_email", StringComparison.Ordinal))
+                    return true;
+            }
+            return false;
+        }
+
+        // ══ GF-1 / K1 - REPLAY GUARD'I TEK KAYNAK ═════════════════════════════════════════
+        //
+        // Akisin BASINDA ve `customers.email` tekil indeks ihlali YAKALANDIGINDA ayni yuklem
+        // sorulur. AYRI iki kopya YAZILMADI: "ayni kuralin ikinci kopyasi" bu depoda YEDI KEZ
+        // bedeli odenmis bir ailedir (37-MANTIK-FIX-1 / MF-3 sarti b).
+        //
+        // Donus: `null` = guard karar VERMEDI, akis DEVAM etsin.
+        private async Task<(HttpStatusCode, Result)?> ReplayGuardiAsync(string? requestId, string email)
+        {
+            if (string.IsNullOrWhiteSpace(requestId)) return null;
+
+            var oncekiler = await _orderDal.GetListNoTrackingAsync(o => o.request_id == requestId);
+            var onceki = oncekiler.FirstOrDefault();
+            if (onceki == null) return null;
+
+            var sahipler = await _customerDal.GetListNoTrackingAsync(c => c.id == onceki.customer_id);
+            var sahip = sahipler.FirstOrDefault();
+            if (sahip != null && string.Equals(sahip.email, email, StringComparison.Ordinal))
+                return (HttpStatusCode.OK, new SuccessDataResult<OrderPlaceResponseDto>(
+                    new OrderPlaceResponseDto
+                    {
+                        id = onceki.id,
+                        order_number = onceki.order_number,
+                        replayed = true
+                    },
+                    Messages.OrderAlreadyPlaced));
+
+            _logger.LogWarning("MISAFIR REPLAY GUARD'I: request_id BASKA bir siparise ait "
+                + "(siparis {OrderId}) - istek reddedildi, hicbir kayit yazilmadi.", onceki.id);
+            return (HttpStatusCode.BadRequest, new ErrorResult(Messages.OrderPlaceFailed));
         }
 
         // GF-1 / K1: bastaki replay guard'inin sahiplik yukleminin AYNISI - yaris dalinda

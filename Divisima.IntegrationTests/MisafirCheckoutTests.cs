@@ -836,27 +836,31 @@ namespace Divisima.IntegrationTests
             (await SiparisSayisiAsync(eposta)).Should().Be(siparisOnce, "replay YENI siparis YAZMAMALI");
         }
 
-        // (ii) ESZAMANLI: guard'i iki istek de gecer; biri unique-index yarisini KAYBEDER ve
-        // `OrderManager.cs:478-485`ten replayed=true doner -> kendi yazdigi satirlari TELAFI ETMELI.
+        // (ii) ESZAMANLI, FARKLI E-POSTA: iki istek de 409 kapisini gecer, ikisi de KENDI
+        // musterisini yazar, biri `orders.request_id` tekil indeks yarisini KAYBEDER ve
+        // `OrderManager.cs:478-485`ten replayed=true alir -> kendi satirlarini TELAFI ETMELI.
         [Fact]
-        public async Task K1_AYNI_REQUESTID_ESZAMANLI_TEK_SIPARIS_ve_YETIM_KALMAZ()
+        public async Task K1_FARKLI_EPOSTA_AYNI_REQUESTID_ESZAMANLI_TEK_SIPARIS_ve_YETIM_KALMAZ()
         {
             if (Skipped()) return;
             var (urunId, beden) = await UrunHazirlaAsync();
             var rid = Guid.NewGuid().ToString();
-            // ══ RIG OLCUMU - NEDEN AYNI E-POSTA DEGIL (durust kayit, SDP 1.12.12/1) ═══════
-            // Ilk kurulum AYNI e-postayla `Task.WhenAll` kullaniyordu. OLCULDU: bu rigde iki
-            // istek FIILEN ORTUSMUYOR (isitma eklendikten sonra da) - ikincisi birincinin 409
-            // kapisina takiliyor ve `OrderManager.cs:478-485` yaris dali HIC KOSMUYOR; pin
-            // GERI ALINMIS uretim kodunda 3/3 YESIL kaldi, yani OLCMUYORDU.
-            // (`customers.email` uzerinde tekil indeks YOK - DivisimaDbContext.cs:290 ve indeks
-            //  listesi; yani yesillik "ikinci insert patladi"dan DEGIL, ortusmemekten geliyor.)
-            // FARKLI e-postalar ayni `request_id` ile: iki istek de 409 kapisini GECER, ikisi de
-            // kendi musterisini YAZAR, biri `orders.request_id` tekil indeks yarisini KAYBEDER.
-            // Bu kurulum HER IKI serpilmede de dogru olcer:
-            //   ortusurlerse  -> kaybeden :480'den replayed=true alir -> telafi ETMELI
-            //   ortusmezlerse -> ikincisi bastaki guard'a takilir -> 400, HIC yazmamali
-            // Ikisinde de degismeyen YUKLEM: 1 siparis, 0 yetim.
+            // ══ RIG OLCUMU - NEDEN BU PIN FARKLI E-POSTA KULLANIYOR ═══════════════════════
+            //
+            // DUZELTME (GF-1 K1-ek, rapor denetcisi bulgusu): bu yorumun ILK YAZIMI "ayni
+            // e-postali kurulum yesil kaldi CUNKU `customers.email` uzerinde tekil indeks YOK"
+            // diyordu. **BU YANLISTI.** Tekil indeks VARDIR ve dalga oncesinde de vardi:
+            // `DivisimaDbContext.cs:320` `b.HasIndex(c => c.email).IsUnique()` (ayrica
+            // `01_schema.sql` `CREATE UNIQUE INDEX [IX_customers_email]`). Ilk olcum
+            // `Entity<Customer>` blogunu 30 satirlik bir pencereyle taradigi icin indeksi
+            // BES SATIR farkla kacirmisti; `:290` atfi bir KOLON ESLEMESIDIR, indeks degil.
+            //
+            // GERCEK MEKANIZMA (L3 denetcisi ONCE ve SONRA surumlerinde AYNI sekilde olctu):
+            // ayni e-postali eszamanli istekte KAYBEDEN, `IX_customers_email` ihlaline
+            // toslar - `orders.request_id` yarisina HIC VARMAZ. Yani o kurulum bu pinin
+            // olcmek istedigi dali (OrderManager yaris dali) hicbir zaman calistirmiyordu.
+            // Ayni e-postali yol ARTIK AYRI bir pinle olculuyor (K1EK_...); burasi FARKLI
+            // e-posta kullanir cunku olctugu sey `orders.request_id` yarisidir.
             var e1 = $"gf1b1-{Guid.NewGuid():N}@example.com";
             var e2 = $"gf1b2-{Guid.NewGuid():N}@example.com";
 
@@ -898,6 +902,54 @@ namespace Divisima.IntegrationTests
                 .FirstAsync(c => c.email == e1 || c.email == e2);
             (await ctx.Set<Address>().AsNoTracking().CountAsync(ad => ad.customer_id == musteri.id))
                 .Should().Be(1, "hayatta kalan musterinin TAM BIR adresi olmali - kaybedenin adresi de telafi edilmeli");
+        }
+
+        // ══ GF-1 / K1-ek (S-1) - AYNI E-POSTA + AYNI request_id, ESZAMANLI ════════════════
+        //
+        // ONCE-DURUM (L3 denetcisi olctu, dalga ONCESINDE de vardi): kaybeden istek
+        // `IX_customers_email` tekil indeksine toslayip ISLENMEYEN ISTISNA firlatiyor ve
+        // kullanici GENEL 500 goruyordu. Yetim satir birakmiyordu, ama 500 bir kusurdur.
+        // SONRA: ihlal yakalanir, karar AYNI yuklemlerle yeniden verilir - ayni request_id
+        // ise replay (200), degilse 409 (mevcut misafir semantigi). 500 URETILMEZ.
+        [Fact]
+        public async Task K1EK_AYNI_EPOSTA_AYNI_REQUESTID_ESZAMANLI_500_URETMEZ()
+        {
+            if (Skipped()) return;
+            var (urunId, beden) = await UrunHazirlaAsync();
+            var eposta = $"gf1ek-{Guid.NewGuid():N}@example.com";
+            var rid = Guid.NewGuid().ToString();
+            var govde = MisafirGovdesiRid(eposta, urunId, beden, rid);
+
+            var a = _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place", govde);
+            var b = _factory!.CreateClient().PostAsJsonAsync("/api/guest-checkout/place", govde);
+            var yanitlar = await Task.WhenAll(a, b);
+
+            var kodlar = yanitlar.Select(y => (int)y.StatusCode).OrderBy(k => k).ToArray();
+            var tanilama = string.Join(" | ", await Task.WhenAll(yanitlar.Select(async y =>
+                $"{(int)y.StatusCode}:{await y.Content.ReadAsStringAsync()}")));
+
+            // ASIL KABUL: 500 SAYISI 0.
+            kodlar.Count(k => k >= 500).Should().Be(0,
+                "tekil indeks yarisi ISLENMEYEN ISTISNAYA donmemeli. TANILAMA=" + tanilama);
+
+            // POZITIF OLAY KOSULU (vakum yasagi): biri GERCEKTEN siparis olusturmali.
+            kodlar.Should().Contain(201, "eszamanli iki istekten biri siparisi OLUSTURMALI");
+
+            // Kaybedenin yaniti: replay (200) ya da mevcut misafir semantigi (409). Ikisi de
+            // DOGRUDUR ve hangisinin dondugu KAZANANIN NE KADAR ILERLEDIGINE baglidir -
+            // siparis satiri henuz yazilmadiysa replay GORUNMEZ ve 409 dogru yanittir.
+            kodlar.Where(k => k != 201).Should().OnlyContain(k => k == 200 || k == 409,
+                "kaybeden ya replay ya da 409 almali - baska hicbir kod DOGRU DEGIL. TANILAMA=" + tanilama);
+
+            await using var ctx = NewContext();
+            (await ctx.Set<Order>().AsNoTracking().CountAsync(o => o.request_id == rid))
+                .Should().Be(1, "ayni request_id ile TEK siparis yazilmali");
+            (await MusteriSayisiAsync(eposta)).Should().Be(1,
+                "TAM BIR musteri satiri kalmali - kaybeden yetim BIRAKMAMALI");
+
+            var musteri = await ctx.Set<Customer>().AsNoTracking().FirstAsync(c => c.email == eposta);
+            (await ctx.Set<Address>().AsNoTracking().CountAsync(ad => ad.customer_id == musteri.id))
+                .Should().Be(1, "TAM BIR adres kalmali - yetim adres YOK");
         }
 
         // (iii) FARKLI E-POSTA + AYNI request_id -> 400 GENEL, govde SIZDIRMAZ, kayit YOK.
