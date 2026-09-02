@@ -539,6 +539,33 @@ namespace Divisima.Bussiness.Concrete
         // geldiginde HEPSINI kapat. BEDELI ACIK: kullanicinin DIGER cihazlari da cikis yapar.
         // Hirsizlik sinyalinde bu DOGRU taraftir - saldirganin elindeki zinciri ayakta birakmak
         // yerine kullaniciyi bir kez yeniden giris yapmaya zorlar.
+        // ══ YENIDEN KULLANIM KURALI - TEK KAYNAK ══════════════════════════════════════════
+        //
+        // Refresh jetonunun yeniden kullanildigini IKI ayri yol tespit edebilir:
+        //   (a) sunulan jeton ZATEN pasif  -> jeton daha once dondurulmus/cikis yapilmis
+        //   (b) atomik kapatma yarisi KAYBEDILDI (K4) -> ayni jeton AYNI ANDA iki kez sunuldu
+        // Ikisinin de yanIti AYNIDIR ve o yanit BURADA, TEK YERDE durur. Ilk K4 yaziminda
+        // (b) icin satir ici bir kopya acilmisti; MK-4b denetcisi olcup yakaladi (ITIRAZ-2).
+        //
+        // ALARM YALNIZ GERCEKTEN IPTAL VARSA - OLCUMLE EKLENDI.
+        // Ilk yazimda kosulsuz Critical yaziliyordu; pin "2 olay" buldu. Sebep: zincir
+        // iptal edildikten SONRA ayni musterinin HERHANGI bir jetonu artik pasif oldugu
+        // icin her yeni deneme "yeniden kullanim" gibi gorunuyor. Kosulsuz alarm, tekrar
+        // deneyen bir istemcide admin bildirimini SPAM'a cevirirdi ve gercek sinyal
+        // gurultuye gomulurdu. `kapatilan == 0` demek "zincir zaten olu" demektir: 401
+        // yine doner, ama YENI bir alarm URETILMEZ. Musteri tekrar giris yapip yeni bir
+        // aktif oturum acarsa, sonraki bir sizma yine ALARM URETIR.
+        private async Task<(HttpStatusCode, Result)> YenidenKullanimiIsleAsync(int customerId, string sebep)
+        {
+            var kapatilan = await _userSessionDal.InvalidateAllForCustomerAsync(customerId);
+            if (kapatilan > 0)
+            {
+                await _securityEvents.LogAsync("RefreshTokenReuse", "Critical", customerId, null, null,
+                    $"{sebep} - oturum zinciri iptal edildi (kapatilan oturum: {kapatilan})");
+            }
+            return (HttpStatusCode.Unauthorized, new ErrorResult(Messages.RefreshTokenInvalid));
+        }
+
         public async Task<(HttpStatusCode, Result)> RefreshToken(RefreshTokenRequestDto dto)
         {
             // DIKKAT: bu cagri `is_active` FILTRESIZ - "kullanilmis jeton" sinyali burada dogar.
@@ -550,22 +577,8 @@ namespace Divisima.Bussiness.Concrete
             {
                 // YENIDEN KULLANIM: bu jeton daha once dondurulmus (ya da cikis yapilmis).
                 // Mesru istemci dondurulmus bir jetonu ASLA ikinci kez sunmaz - bu bir sizma isaretidir.
-                var kapatilan = await _userSessionDal.InvalidateAllForCustomerAsync(session.customer_id);
-
-                // ALARM YALNIZ GERCEKTEN IPTAL VARSA - OLCUMLE EKLENDI.
-                // Ilk yazimda kosulsuz Critical yaziliyordu; pin "2 olay" buldu. Sebep: zincir
-                // iptal edildikten SONRA ayni musterinin HERHANGI bir jetonu artik pasif oldugu
-                // icin her yeni deneme "yeniden kullanim" gibi gorunuyor. Kosulsuz alarm, tekrar
-                // deneyen bir istemcide admin bildirimini SPAM'a cevirirdi ve gercek sinyal
-                // gurultuye gomulurdu. `kapatilan == 0` demek "zincir zaten olu" demektir: 401
-                // yine doner, ama YENI bir alarm URETILMEZ. Musteri tekrar giris yapip yeni bir
-                // aktif oturum acarsa, sonraki bir sizma yine ALARM URETIR.
-                if (kapatilan > 0)
-                {
-                    await _securityEvents.LogAsync("RefreshTokenReuse", "Critical", session.customer_id, null, null,
-                        $"Dondurulmus refresh token yeniden sunuldu - oturum zinciri iptal edildi (kapatilan oturum: {kapatilan})");
-                }
-                return (HttpStatusCode.Unauthorized, new ErrorResult(Messages.RefreshTokenInvalid));
+                return await YenidenKullanimiIsleAsync(session.customer_id,
+                    "Dondurulmus refresh token yeniden sunuldu");
             }
 
             // Açıklayıcı yorum: Refresh token süresi dolmuş mu
@@ -588,24 +601,23 @@ namespace Divisima.Bussiness.Concrete
             // satir 1 DEGILSE yaris kaybedilmistir - yani ayni jeton bir kez daha sunulmus
             // demektir ve bu, YENIDEN KULLANIM sinyalinin ta kendisidir.
             //
-            // IKINCI KOPYA ACILMADI: kaybeden yol, YUKARIDA ZATEN VAR OLAN reuse dalina
-            // gider (`InvalidateAllForCustomerAsync` + `RefreshTokenReuse` Critical olayi).
+            // ── DUZELTME (MK-4b rapor denetcisi / ITIRAZ-2) ────────────────────────────────
+            // ILK YAZIMDA BURAYA SU YAZILMISTI: "IKINCI KOPYA ACILMADI - kaybeden yol YUKARIDA
+            // ZATEN VAR OLAN reuse dalina gider." **BU IDDIA YANLISTI ve KOD ONU YALANLIYORDU:**
+            // kaybeden yol o dala GITMIYORDU, kuralin (iptal + kosullu Critical + 401) SATIR ICI
+            // IKINCI BIR KOPYASINI kosuyordu. Olculdu: Critical olay yazan cagri sayisi
+            // b857fd3'te 1, ilk K4 yaziminda 2. Yani bu depoda YEDI KEZ bedeli odenmis
+            // "ayni kuralin ikinci kopyasi" ailesinin YENI bir ornegi acilmisti - ustelik
+            // acmadigini SOYLEYEN bir yorumla birlikte.
+            // SIMDI GERCEKTEN TEK KAYNAK: iki yol da `YenidenKullanimiIsleAsync`i cagirir.
             //
             // DIKKAT (CLAUDE.md tuzagi): `ExecuteUpdateAsync` change-tracker'i ATLAR, yani
             // elimizdeki TRACKED `session` nesnesi BAYAT kalir. Bu noktadan sonra o nesne
             // uzerinden TAM-VARLIK yazma YAPILMAZ - yalnizca `auth_time` degeri OKUNUR.
             var kapatildi = await _userSessionDal.DeactivateIfActiveAsync(session.id);
             if (kapatildi != 1)
-            {
-                var yarisKaybi = await _userSessionDal.InvalidateAllForCustomerAsync(session.customer_id);
-                if (yarisKaybi > 0)
-                {
-                    await _securityEvents.LogAsync("RefreshTokenReuse", "Critical", session.customer_id, null, null,
-                        "Es zamanli refresh yarisi kaybedildi - ayni jeton iki kez sunuldu, "
-                        + $"oturum zinciri iptal edildi (kapatilan oturum: {yarisKaybi})");
-                }
-                return (HttpStatusCode.Unauthorized, new ErrorResult(Messages.RefreshTokenInvalid));
-            }
+                return await YenidenKullanimiIsleAsync(session.customer_id,
+                    "Es zamanli refresh yarisi kaybedildi - ayni jeton iki kez sunuldu");
 
             // GF-1 / K3: ESKI oturumun giris ani YENI satira TASINIR - refresh step-up saatini
             // SIFIRLAMAZ. `null` (GF-1 oncesi acilmis oturum) ise IssueSession `simdi` kullanir,

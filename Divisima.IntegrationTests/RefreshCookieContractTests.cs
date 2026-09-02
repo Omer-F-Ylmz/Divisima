@@ -386,7 +386,7 @@ namespace Divisima.IntegrationTests
         // "hangi cihaz / hangi IP" sorusu YANITSIZ kaliyordu.
         [Fact]
         [Trait("Category", "Sql")]
-        public async Task K6B_OTURUM_SATIRI_CIHAZ_ve_IP_TASIR()
+        public async Task K6B_OTURUM_SATIRI_ISTEGIN_CIHAZINI_TASIR()
         {
             if (Skipped()) return;
 
@@ -411,11 +411,17 @@ namespace Divisima.IntegrationTests
             oturum.device.Should().Be(kurguAjan,
                 "oturum satiri istegin User-Agent'ini TASIMALI");
 
-            // IP: test sunucusunda RemoteIpAddress uretilmeyebilir (Program.cs:361'de KAYITLI
-            // ortam gercegi). Bu yuzden burada DEGER degil, KOLONUN BESLENDIGI YOL pinlenir:
-            // uretimde ayni ifadeden gelir. Deger varsa kolon sinirini asmamali.
-            (oturum.ip_address == null || oturum.ip_address.Length <= 64).Should().BeTrue(
-                "ip_address kolonu 64 karakter - kirpilmadan yazilirsa insert 500 uretir");
+            // ══ IP YARISI BU PINDE OLCULMUYOR - DURUST KAYIT (MK-4b denetcisi, BULGU-5) ═══
+            // Ilk yazimda burada `(ip == null || ip.Length <= 64)` asserti vardi: IP HIC
+            // yazilmasa da YESIL kalirdi - yani VAKUM (CLAUDE.md bolum 6). Ustelik testin ADI
+            // "..._CIHAZ_ve_IP_TASIR" idi, yani OLCMEDIGI bir seyi VAAT EDIYORDU. Assert
+            // kaldirildi ve ad daraltildi; "ip_address de doluyor" iddiasinin DAVRANIS KANITI
+            // BU PINDE YOKTUR.
+            // SEBEP OLCULDU: `WebApplicationFactory` test sunucusunda `RemoteIpAddress`
+            // uretilmez (Program.cs'te KAYITLI ortam gercegi) - deger her zaman null gelir,
+            // dolayisiyla ayirt edici bir assert bu rig ile KURULAMIYOR.
+            // Kolon siniri (64) yine de korunuyor: kirpma `IstemciIp()` icinde, kaynak
+            // duzeyinde. Uctan uca kanit, IP tasiyan bir rig gerektirir -> GF-2a/GF-3 adayi.
         }
     }
 }

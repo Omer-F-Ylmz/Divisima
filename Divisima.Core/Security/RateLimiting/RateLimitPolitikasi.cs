@@ -72,13 +72,23 @@ namespace Divisima.Core.Security.RateLimiting
         // ayrisan sey kovanin PAYLASIMIYDI.
         //
         // ══ GF-1b / K9 (GF1-B12) - BU YORUMUN SAYISI BAYATLAMISTI ═════════════════════════
-        // Yukarida "6 dosya 9 yer" yaziyordu; o gun DOGRUYDU ama SAYI SABITLENDIGI icin
-        // kodla birlikte YASLANDI. Bugun OLCULDU (`grep -rn "^[[:space:]]*\[EnableRateLimiting("
-        // Divisima.API/`): **7 dosya, 9 yer**. Ikisi birden degisti - PaymentController'daki
-        // UC action-duzeyi oznitelik SINIF duzeyinde TEKE indirildi (-2) ve GF-1b/K2
-        // AccountController'a `account/change-password` icin BIR tane ekledi (+1), yani dosya
-        // sayisi 6'dan 7'ye cikti, yer sayisi 9'da KALDI - toplam ayni oldugu icin fark
-        // "toplama bakan" bir okuyucuya GORUNMEZDI.
+        // Yukarida "6 dosya 9 yer" yaziyordu. BUGUNKU DEGER, URETEN IFADESIYLE:
+        //   git grep -c "^[[:space:]]*\[EnableRateLimiting(" <ref> -- 'Divisima.API/*'
+        //   -> 9 yer / 7 dosya   (NEG kontrol: ayni ifade "ZZZEnableRateLimiting" ile 0)
+        //
+        // AYNI IFADEYLE OLCULEN TARIHSEL ZINCIR (tahmin degil):
+        //   d434906^ : 10 yer / 6 dosya
+        //   d434906  :  8 yer / 6 dosya   <- PaymentController 3 -> 1; YORUM BU COMMIT'TE YAZILDI
+        //   b44dc72  :  9 yer / 7 dosya   <- GF-1b/K2, AccountController +1
+        //   bugun    :  9 yer / 7 dosya
+        // Yani "9" degeri YAZILDIGI GUN DE YANLISTI (dogrusu 8 idi); K2'nin ekledigi +1,
+        // yanlis sayiyi TESADUFEN bugun dogru hale getirdi. Bayatlama degil, DOGDUGU GUN
+        // BIR FAZLA yazilmis bir sayi.
+        //
+        // Bu duzeltmenin ILK YAZIMI da bir "-2 / +1 / 9'da kaldi" anlatisi kurmustu; MK-4b
+        // rapor denetcisi olcup CURUTTU (9-2+1=8, ustelik -2 tabanin ICINDE). Bayat bir sayiyi
+        // duzeltirken YERINE YENI VE YANLIS bir sayi konmustu - K9'un kendi dersinin ihlali.
+        //
         // `account/change-password` da yukaridaki AYRISAN UCLAR listesine girer: oznitelikte
         // "auth", `KapsamSec`te "global" (asagidaki dort alt-dizgeden hicbiri eslesmiyor).
         // DERS: yoruma SAYI yazilacaksa URETEN IFADESIYLE yazilir (MK-3); aksi halde yorum,
