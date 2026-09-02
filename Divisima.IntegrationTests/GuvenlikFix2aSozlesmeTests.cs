@@ -137,13 +137,37 @@ namespace Divisima.IntegrationTests
             govde.Should().Contain("guvenliRenk(col)", "renk NITELIK baglamindadir - allowlist'ten gecmeli");
             govde.Should().NotContain("(col||'#d9cfc2')", "ham renk yazimi GERI GELMEMELI");
 
-            // Allowlist BACKEND ile AYNI KUMEYI kabul etmeli: ProductAddRequestValidator
-            // `[0-9a-fA-F]` kullaniyor; kucuk-harf-only bir desen GECERLI veriyi reddederdi.
+            // ══ MK-6 BOSLUGU KAPATILDI (IKI DENETCI BAGIMSIZ BULDU) ═══════════════════
+            //
+            // ILK YAZIMDA assert `kaynak.Should().Contain("0-9a-fA-F")` idi - DOSYA GENELI.
+            // Dizge kaynakta 13 kez geciyor (`_HEX_RE` 4 + `_COLORMIX_RE` 8 + 1), dolayisiyla
+            // `_HEX_RE`yi TEK BASINA bozan bir mutasyon PINDEN GECIYORDU. L3 denetcisi bunu
+            // CALISTIRARAK gosterdi: `_HEX_RE`yi `/^#.*$/` yapan mutasyon 10/10 pini YESIL
+            // gecti - ve o mutasyon ZARARSIZ DEGIL: `#fff" onload="alert(1)` girdisi
+            // mutantta CANLI `onload="alert(1)"` niteligi uretiyor. Yani davranis saglamdi
+            // ama KORUYAN PIN YOKTU. (MK-6'nin `effective_price` kalibinin birebir tekrari.)
+            // COZUM: assert SABITIN KENDI TANIM SATIRINA baglaniyor, dosya geneline degil.
+            var hexTanim = kaynak.Split('\n').Single(s => s.TrimStart().StartsWith("var _HEX_RE"));
+            hexTanim.Should().Contain("0-9a-fA-F",
+                "hex deseni BUYUK HARFI de kabul etmeli - backend `[0-9a-fA-F]` kullaniyor");
+            foreach (var hane in new[] { "{3}", "{4}", "{6}", "{8}" })
+                hexTanim.Should().Contain(hane, $"gecerli CSS hex uzunlugu {hane} kabul edilmeli");
+            hexTanim.Should().NotContain("{3,8}", "acik aralik 5 ve 7 haneyi (GECERSIZ CSS) de gecirirdi");
+            hexTanim.Should().NotContain(".*", "serbest desen HER SEYI gecirirdi - allowlist olmaktan cikardi");
+
             var renkGovde = FonksiyonGovdesi(kaynak, "guvenliRenk");
             renkGovde.Should().Contain("_HEX_RE", "hex deseni TEK sabitten gelmeli");
-            kaynak.Should().Contain("0-9a-fA-F", "desen BUYUK HARFI de kabul etmeli (backend kumesi)");
-            // 5/7 hane GECERSIZ CSS'tir; desen yalniz 3/4/6/8 haneye izin vermeli.
-            kaynak.Should().NotContain("[0-9a-fA-F]{3,8}", "acik aralik 5 ve 7 haneyi de gecirirdi");
+
+            // ══ UZUNLUK KUMESI BACKEND'DEN GENIS - BILINCLI, GEREKCESI OLCULDU ════════
+            // Commit mesajinda "backend'le AYNI KUMEYI kabul eder" yazilmisti; UZUNLUK
+            // kumesi olarak YANLIS (backend {6,8}, burasi {3,4,6,8}). AYNI olan KARAKTER
+            // SINIFIDIR. Genislik BILINCLI: `ProductUpdateRequestValidator` YOK ve CSV
+            // ice aktarma yolu `color_hex`i DOGRULAMIYOR (olculdu), yani 3/4 haneli hex
+            // DB'ye girebilir; 3/4 hane GECERLI CSS'tir ve render'da reddetmek CALISAN bir
+            // gorunumu bozardi. Genislik savunmayi ZAYIFLATMAZ - hala YALNIZ hex.
+            var beValidator = Oku("Divisima.Bussiness/ValidationRules/ProductAddRequestValidator.cs");
+            beValidator.Should().Contain("0-9a-fA-F",
+                "karakter sinifi IKI TARAFTA da ayni olmali - bu pin ayrismayi yakalar");
         }
 
         // ── KOK-3: GORSEL URL SEMA ALLOWLIST'I (D-4) ────────────────────────────────────
@@ -252,6 +276,21 @@ namespace Divisima.IntegrationTests
             Sayim(index, "href=\"#/kategori/'+n.slug+'").Should().Be(0, "ham slug GERI GELMEMELI");
 
             bridge.Should().Contain("esc(n.slug)", "api-bridge yarisindaki slug da kacisli olmali");
+
+            // ══ KARSILASTIRMA TABLOSU - ILK YAZIMDA ATLANDI (denetci + kendi taramam) ══
+            // `row()` (index.html) hucreyi HAM birlestirip `cmpBody.innerHTML`e veriyor.
+            // Iki hucre DIS VERI tasiyordu ve ILK KAPANISTA GOZDEN KACTI:
+            //   `t('cat_'+p.cat)`  -> KOK-6 (rapor denetcisi buldu; bir ALT SATIRI bu
+            //                         dalgada duzeltilmisti, yani komsu kod duzenlenirken kacti)
+            //   `p.sizes.join(...)` -> KOK-8 (denetciler ISARETLEMEDI; row() hucrelerinin
+            //                         tamami tek tek taranirken ana akis buldu)
+            index.Should().Contain("esc(t('cat_'+p.cat))", "karsilastirma tablosu kategorisi kacisli olmali");
+            Sayim(KodSatirlari(index), "return t('cat_'+p.cat);").Should().Be(0,
+                "ham kategori hucresi GERI GELMEMELI");
+            index.Should().Contain("p.sizes.map(function(s){return esc(String(s));})",
+                "karsilastirma tablosu bedenleri kacisli olmali");
+            Sayim(KodSatirlari(index), "p.sizes.join(' · ')").Should().Be(0,
+                "ham beden birlestirmesi GERI GELMEMELI");
         }
 
         // ── KOK-7: ADMIN ALANLARI + JS BAGLAMI ──────────────────────────────────────────
@@ -354,8 +393,20 @@ namespace Divisima.IntegrationTests
 
             // Depodaki TEK uzak script Chart.js; surume PINLI oldugu icin sabit hash gecerli.
             admin.Should().Contain("chart.js@4.4.1", "Chart.js surume PINLI kalmali");
-            admin.Should().Contain("integrity=\"sha384-", "uzak script SRI tasimali");
             admin.Should().Contain("crossorigin=\"anonymous\"", "SRI icin CORS gerekli");
+
+            // ══ HASH DEGERI PINLENIYOR, YALNIZ ONEK DEGIL (denetci bulgusu) ═══════════
+            // Ilk yazimda assert `Contain("integrity=\"sha384-")` idi - YANLIS bir hash de
+            // bu pinden GECERDI ve sonuc "SRI var ama script YUKLENMIYOR" olurdu (sessiz
+            // kirilma: panel grafikleri kaybolur, kimse pinin yesil oldugunu sorgulamaz).
+            // Deger URETEN IFADEYLE alindi:
+            //   curl -sS <url> | openssl dgst -sha384 -binary | openssl base64 -A
+            // ve tarayicida AYIRT EDICI olarak dogrulandi: dogru hash ile `window.Chart`
+            // YUKLENDI, yanlis hash ile BLOKLANDI.
+            admin.Should().Contain(
+                "integrity=\"sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4\"",
+                "SRI hash DEGERI pinlenmeli - surum degisirse bu pin KIRILIR ve hash "
+                + "yeniden uretilmeye ZORLAR");
 
             // NEG KONTROL - KABUL EDILMIS RISK: Google Fonts `css2` yaniti User-Agent'a gore
             // DEGISIR, sabit hash YOKTUR; integrity eklemek SITEYI KIRARDI.
@@ -380,6 +431,14 @@ namespace Divisima.IntegrationTests
             kaynak.Should().Contain(".request(\"divisima-refresh\"",
                 "refresh ORIGIN GENELINDE kilitlenmeli - sekmeler arasi esgudum");
             kaynak.Should().Contain("navigator.locks", "kilit primitifi navigator.locks olmali");
+
+            // ══ S1 - KILIT REDDI YUTULMALI (denetci bulgusu, REGRESYON KAPATILDI) ═════
+            // Eski govde bir IIFE + try/catch idi ve ASLA REDDEDEMEZDI. `navigator.locks
+            // .request` reddedebilir; cagiran `_request` onu try/catch SIZ await ediyor,
+            // yani red 401 yolunu DUSURUP istisna firlatirdi - eski kodda IMKANSIZ bir
+            // davranis. Sozlesme: bu metot HER ZAMAN true/false doner.
+            kaynak.Should().Contain(".catch(() => false)",
+                "kilit reddi YUTULMALI - metot true/false sozlesmesini KORUMALI");
 
             // FAIL-SAFE: destek yoksa ORNEK-ICI single-flight'a duser (davranis eskisiyle ayni).
             kaynak.Should().Contain("navigator.locks && navigator.locks.request",

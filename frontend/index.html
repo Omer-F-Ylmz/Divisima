@@ -3065,8 +3065,15 @@ function renderCmpModal(){cmpTitleEl.textContent=t('cmp_title');var ps=compare.m
   var body=row(t('cmp_price'),function(p,i){var old=p.old?'<span class="cmp-price-old">'+tl(p.old)+'</span>':'';var best=(i===bestP&&ps.length>1)?'<div class="cmp-best">✓ '+t('cmp_best_price')+'</div>':'';return '<span class="cmp-price-now'+(p.old?' red':'')+'">'+tl(p.price)+'</span>'+old+best;},function(p){return p.price;})
     +row(t('cmp_rating'),function(p,i){var rv=reviewsOf(p);var best=(i===bestR&&ps.length>1)?'<div class="cmp-best">✓ '+t('cmp_best_rating')+'</div>':'';return rv.count>0?(starsHTML(rv.avg,'sm')+'<span class="cmp-rate-c">'+rv.avg.toFixed(1)+' ('+rv.count+')</span>'+best):'<span class="cmp-rate-c">&mdash;</span>';},function(p){return reviewsOf(p).avg;})
     +row(t('cmp_brand'),function(p){return esc(p.brand);},function(p){return p.brand;})
-    +row(t('cmp_cat'),function(p){return t('cat_'+p.cat);},function(p){return p.cat;})
-    +row(t('cmp_sizes'),function(p){return (p.sizes&&p.sizes.length)?p.sizes.join(' · '):t('free_one');},function(p){return (p.sizes&&p.sizes.length)?p.sizes.join(','):'';})
+    /* GF-2a DENETIM / B2: KOK-6'nin ATLANAN sink'i. `row()` hucreyi HAM birlestirip
+       `cmpBody.innerHTML`e veriyor; `t('cat_*')` ise (kategoriEtiketiKaydet yuzunden)
+       HAM DB METNIDIR. Bir ALT SATIRI bu dalgada duzeltirken bunu KACIRDIM - rapor
+       denetcisi olcup buldu. */
+    +row(t('cmp_cat'),function(p){return esc(t('cat_'+p.cat));},function(p){return p.cat;})
+    +row(t('cmp_sizes'),function(p){/* GF-2a DENETIM: KOK-8'in KARSILASTIRMA TABLOSU YARISI. `cartMeta`yi duzeltirken bu
+   yolu gormedim; denetciler de isaretlemedi, row() hucrelerini tek tek tararken KENDIM
+   buldum. `p.sizes` DB kaynakli ve HAM birlestiriliyordu. */
+return (p.sizes&&p.sizes.length)?p.sizes.map(function(s){return esc(String(s));}).join(' · '):t('free_one');},function(p){return (p.sizes&&p.sizes.length)?p.sizes.join(','):'';})
     +row(t('cmp_color'),function(p){return '<span class="cmp-swatch" style="background:'+guvenliRenk(p.col)+'"></span>'+esc(t('c_'+colorName(p.col)));},function(p){return p.col;})
     +row(t('cmp_stock'),function(p){var s=stockOf(p);if(s<=0)return '<span class="cmp-out">'+t('cmp_outstock')+'</span>';if(s<=5)return '<span class="cmp-low">'+t('cmp_lowstock')+'</span>';return '<span class="cmp-in">'+t('cmp_instock')+'</span>';},function(p){var s=stockOf(p);return s<=0?'out':(s<=5?'low':'in');})
     +row('',function(p){var sold=stockOf(p)<=0;return '<button class="cmp-add" type="button" '+(sold?'disabled':'')+' data-cmp-add="'+p.id+'">'+(sold?t('cmp_outstock'):t('cmp_add_cart'))+'</button>';});

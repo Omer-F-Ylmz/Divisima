@@ -648,6 +648,15 @@ function guvenliHTML(ham){
   });
 }
 // Cizim yardimcisi: null gelirse (purify yok) icerik YAZILMAZ, uyari metni yazilir.
+//
+// ══ BRIDGE SURUMUNDEN UC NOKTADA AYRISIR - BILINCLI, DENETCI OLCTU ══════════════════
+// `api-bridge.js`teki `guvenliYaz(el, ham, hataMetni)` ile karsilastirildiginda:
+//   (1) ARITE 2 vs 3 - panelde cagiranin ozel hata metni gecirecegi bir yol YOK.
+//   (2) FAIL-CLOSED DALI `textContent` vs `innerHTML` - bridge surumu `hataMetni`yi
+//       KACISSIZ `innerHTML`e koyuyor; burasi BILEREK daha dar (metin dugumu).
+//   (3) METIN KAYNAGI sabit literal vs `ceviri(...)` - `ceviri()` panelde TANIMLI DEGIL.
+// POLITIKA (`guvenliHTML`) IKISINDE DE OZDES - onemli olan odur. Ayrisan sey CIZIM
+// yardimcisidir ve bu surum STRICT OLARAK DAHA GUVENLIDIR. Sessiz kalmasin diye yazildi.
 function guvenliYaz(el, ham){
   const temiz = guvenliHTML(ham);
   if (temiz === null) { el.textContent = "Icerik guvenlik dogrulamasindan gecemedi."; return false; }

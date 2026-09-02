@@ -105,25 +105,35 @@
     //
     // ══ GF-2a / K3 (D-4) - SEMA ALLOWLIST'I POLITIKANIN TEK YERIDIR ═══════════════════
     //
-    // OLCULEN ONCE-DURUM: bu metot `javascript:` semasini GECIRIYORDU. `p.image_url` API'den
-    // geliyor ve `mapProduct` (api-bridge.js:294) tam da buradan gecirip `img` alanina
-    // koyuyor; o alan `index.html`de ALTI ayri yerde `<img src="'+...+'">` icine KACISSIZ
-    // yaziliyor (1684 imgFill · 1686 media · 1687 thumb · 2124 · 2596 thumbC · 3122).
-    // Yani urun gorseli alanina `javascript:alert(1)` yazan bir admin/satici, vitrinde
-    // calisan kod elde ediyordu.
+    // ── DUZELTILMIS GEREKCE (ilk yazim CURUDU - MK-4b rapor denetcisi olctu) ──────────
+    // ILK YAZIMDA "bu metot `javascript:` semasini GECIRIYORDU ... vitrinde calisan kod
+    // elde ediyordu" yazmistim. **YANLIS.** Eski kosullar:
+    //     if (/^(https?:)?\/\//i.test(u) || /^data:/i.test(u)) return u;
+    //     return this.baseUrl... + (u.startsWith("/") ? u : "/" + u);
+    // `javascript:alert(1)` IKISINE DE uymaz, dorduncu dala duser ve
+    // `http://host/javascript:alert(1)` olur - bu bir YOLDUR, calisan kod DEGIL.
+    //
+    // OLCULEN GERCEK ONCE-DURUM (iki acik, ikisi de kapatildi):
+    //  (1) PROTOKOL-GORELI `//evil.com/x.png` HAM DONUYORDU - `^(https?:)?\/\/` deseni
+    //      protokolu istege bagli birakiyor. Sayfa https ise saldirganin sunucusundan
+    //      kaynak yuklenir (izleme pikseli / veri sizdirma).
+    //  (2) `data:` KOSULSUZDU - her tip kabul ediliyordu, `data:image/svg+xml` dahil.
+    //      SVG bir GORUNTU DEGIL, `<script>` tasiyabilen bir BELGEDIR.
+    //
+    // Bu metodun ciktisi `mapProduct` (api-bridge.js) uzerinden `p.img` alanina gidiyor ve
+    // o alan `index.html`de ALTI ayri `<img src="...">` yazimini besliyor - yani politika
+    // burada olmazsa ALTI kopya gerekirdi.
     //
     // NEDEN BURADA, RENDER KATMANINDA DEGIL: bu metot o ALTI yolun TEK ORTAK NOKTASIDIR.
     // Politikayi render tarafina koymak ALTI KOPYA acardi - "ayni kuralin ikinci kopyasi"
     // ailesi bu depoda YEDI KEZ bedeli odendi. Cagiran hicbir sey BILMEK ZORUNDA DEGIL.
     //
-    // `data:` KABULU DARALTILDI, KALDIRILMADI (olculdu: `index.html:55` favicon'u fiilen
-    // `data:image/svg+xml;base64` kullaniyor ve urun gorsellerinde base64 kucuk resim
-    // mesru bir kalip). Yalniz RASTER GORUNTU tipleri ve yalniz `;base64` bicimi kabul
-    // edilir: `data:text/html` ve `data:image/svg+xml` REDDEDILIR - SVG icinde `<script>`
-    // calisir, yani o bir GORUNTU DEGIL KOD tasiyicisidir.
-    //
-    // PROTOKOL-GORELI (`//evil.com/x.png`) DE REDDEDILIR: eski kosul onu "mutlak URL" sayip
-    // gecirıyordu, oysa sayfa https ise saldirganin sunucusuna cikar.
+    // `data:` KABULU DARALTILDI, KALDIRILMADI: urun gorsellerinde base64 kucuk resim mesru
+    // bir kaliptir. Yalniz RASTER GORUNTU tipleri ve yalniz `;base64` bicimi kabul edilir;
+    // `data:text/html` ve `data:image/svg+xml` REDDEDILIR.
+    // (ILK YAZIMDAKI FAVICON GEREKCESI SOKULDU - KENDINI CURUTUYORDU: `index.html:55`
+    //  favicon'u gercekten `data:image/svg+xml` kullaniyor ama (a) o tip artik REDDEDILIYOR,
+    //  (b) favicon bu metottan HIC GECMIYOR. Ornek yanlis secilmisti.)
     //
     // RED = BOS DIZGE. `null`/atma DEGIL: cagiranlar donen degeri dogrudan `src`e koyuyor;
     // bos dizge kirik-gorsel ikonu gosterir, akisi DUSURMEZ (fail-closed ama fail-soft).
@@ -254,6 +264,13 @@
             if (taze && taze !== oncekiToken) { this.setAccessToken(taze); return true; }
             return this._refreshAgCagrisi();
           })
+          // ══ GF-2a DENETIM / S1 - BU `catch` BIR REGRESYONU KAPATIR ══════════════════
+          // L3 denetcisi olctu: eski govde bir IIFE + try/catch idi ve ASLA REDDEDEMEZDI;
+          // `navigator.locks.request` ise reddedebilir (opak origin, sandboxed iframe,
+          // kilit iptali). Cagiran `_request` onu try/catch SIZ await ediyor, yani red
+          // 401 yolunu DUSURUR ve istisna disari cikardi - eski kodda IMKANSIZ olan bir
+          // davranis. Sozlesme geri getiriliyor: bu metot HER ZAMAN true/false doner.
+          .catch(() => false)
           .finally(() => { this._refreshing = null; });
         return this._refreshing;
       }
