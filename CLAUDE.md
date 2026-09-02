@@ -346,7 +346,7 @@ kaynak: 34·MFIX-B_MUHRU
 ## MK-4 (YENI KALICI MIKRO-KURAL)
 
 **Denetim dagitimindan ONCE is LOKAL COMMIT'e alinir; L3 ve kural-uyum denetcileri AYRI bir
-`git worktree`'de o commit uzerinde kosar.** Boylece cift-kor TEKNIK izolasyon (SDP 1.9)
+`git worktree`'de o commit uzerinde kosar.** Boylece cift-kor TEKNIK izolasyon (skill `sdp` · 1.9)
 lokal islerde de saglanir.
 
 Gerekce OLCULDU: MFIX-B'de is commit EDILMEMIS oldugu icin bir worktree calisma agacindaki
@@ -570,7 +570,7 @@ POZ  git show HEAD:CLAUDE.md                   -> 0   (blob da LF)
 SATIRI esliyor; ayni NEG girdide (saf LF) de 2 dondu, yani dedektor BOZUKTU. Ilk ARSIV-1
 olcumunde CLAUDE.md "12434 satirin 12434'unde CR" gorundu ve "kabul kriteri CR 0 ile
 CELISIYOR" sanildi; `tr -cd` ile yeniden olculunce CR baytinin 0 oldugu, celiskinin
-OLMADIGI cikti. SDP 1.7/1'in bu turdaki kazanci.
+OLMADIGI cikti. skill `sdp` · 1.7/1'in bu turdaki kazanci.
 ---
 
 # B6 — DERSLER: AILE SAYACLARI · SALINIM · TUZAKLAR · RIG KOR NOKTALARI
@@ -671,7 +671,7 @@ kaynak: 39·MANTIK-FIX-3_MUHRU (rota asimetrisi)
 
 
 1. **ROTA TAHMINI** - `stock-notification` sanildi, dogrusu `api/StockNotification`.
-   `price-drop`un GERCEKTEN tireli olmasi yaniltti. **SDP 1.7/2 - bu dalgada 1. dusus.**
+   `price-drop`un GERCEKTEN tireli olmasi yaniltti. **skill `sdp` · 1.7/2 - bu dalgada 1. dusus.**
 2. **P-H2 fiksturu** var olan bir urun ariyordu, sinif her testte DB'yi yeniden kuruyor.
 3. **BAYAT TOAST** - AR bacaginda ilk olcum Ingilizce metin gosterdi; toast sinifinda `on`
 
@@ -757,6 +757,17 @@ dersin ilk yazimi yedek capanin adini metne koydu ve onu da KIRLETTI (olculdu, a
 duzeltildi) — capa adlari `43·ARSIV-2 · CC HATALARI`'nda durur. Her tur NEG capasini
 KULLANMADAN ONCE olcer.
 
+## Bir ders — GUVENLIK-FIX-1 (44·GUVENLIK-FIX-1 · CC HATALARI 11)
+
+**Indeks/kisit sayimi DOSYA-GENELI grep ile yapilir; blok penceresiyle degil.** Gerekce
+OLCULDU: `customers.email` uzerinde tekil indeks olup olmadigi `Entity<Customer>` blogunun
+**30 satirlik penceresiyle** tarandi ve indeks **BES SATIR farkla** kacirildi; sonucta bir
+commit metnine ve bir test yorumuna "tekil indeks YOK" diye YANLIS gerekce yazildi. Indeks
+tanimi blogun ILERISINDE duruyordu ve atif olarak verilen satir bir KOLON ESLEMESIYDI.
+Rapor denetcisi DORT kanaldan curuttu (Fluent config · uretilen sema · InitialCreate ·
+dalganin KENDI defteri). **Kural:** indeks/kisit varligi `grep -n "HasIndex" <dosya>` ya da
+uretilen sema uzerinden DOSYA GENELINDE olculur; "blokta gormedim" bir YOKLUK KANITI DEGILDIR.
+
 ## Iki ders — GUVENLIK-AV-1 (42·GUVENLIK-AV-1 · CC HATALARI)
 
 **BILINEN listesi B8 fragmanlarindan KURULMAZ; 00a/00b tam metni okunur (AV-1 hatasi 2).**
@@ -795,6 +806,11 @@ kaynak: 40·MANTIK-FIX-4_MUHRU · KURGU KAYIT ENVANTERI (bayt-ayni KOPYA; muhurd
 turu kayitlari KULLANILMADI.
 MAX musteri **168** · siparis **286** · adres **119** · fatura **119** · Pending(id>210)
 **10** — kaynak `42·GUVENLIK-AV-1 · KURGU`
+**GF-1 KOD FAZI hicbir kurgu kaydi uretmedi** (MAX'lar ve MK-3 uclusu push aninda BIREBIR).
+Kapanis fazinda goz1'de TEK kayit uretildi: musteri **169** `gf1.1@example.com` (uretim
+yolundan: register -> verify -> login) + `consent_records` 1 + `user_sessions` 340-342.
+**MAX musteri 168 -> 169**; siparis/adres/fatura/Pending DEGISMEDI.
+Tek sema degisikligi `user_sessions.auth_time` kolonudur (`44·GUVENLIK-FIX-1`).
 
 **TEK YAZMA - URETIM YOLUNDAN:** K2 kanitini almak icin musteri 102'nin
 (`mfix1.once@example.com`, MANTIK-FIX-1 kurgusu) sifresi **uretim yolundan** sifirlandi:
@@ -867,6 +883,11 @@ yalniz somut gerekceyle bakilir.
 - `39·MANTIK-FIX-3·MERKEZ KARARLARI N2` | **N2** | Hata eslemesi once MAKINE-OKUNUR sinyal; yoksa HAM yanit capasi + cift bicim + kirilganlik kaydi | K3 ve K3b'nin ikisi de bu capaya dayaniyor - sunucu yanit sozlesmesi DEGISTIRILMEDI, istemcide politika kopyasi ACILMADI |
 - `36·MANTIK-AV-1·DALGA BOLUMLEMESI` i18n. **64 bozuk `invoice_items` satiri D-YAN'a** (veri temizligi, fix degil).
 - `37·MANTIK-FIX-1·MF-2 ONCESI ARA DURUM` **InvoiceManager KODUNA DOKUNULMADI (sart aynen korundu).**
+- `44·GUVENLIK-FIX-1·K1` **Ayni `request_id` replay'i misafir 409'undan MUAF**; 409 semantigi BASKA HER YOLDA degismez. Replay yalniz e-posta ORDINAL eslesirse 200 doner, eslesmezse genel 400 (varlik da `order_number` da sizmaz). Tekil e-posta indeksi yarisi da bu yuklemle karara baglanir.
+- `44·GUVENLIK-FIX-1·K3` **`user_sessions.auth_time` = oturum zincirinin GIRIS ani**; login ve 2FA tamamlanmasi onu `now` yapar, refresh rotasyonu ESKI satirdan KOPYALAR. NULL (GF-1 oncesi satirlar) -> jeton uretim ani (statuko), geriye donuk doldurma YOK.
+- `44·GUVENLIK-FIX-1·K4` **Sahiplik ihlali 404** — uc nokta (`ReturnManager` · `IyzicoPaymentManager` · `OrderManager` adres dali); kalan **11** rol/CSRF/IP 403'u SABIT ve negatif kontrol piniyle korunuyor.
+- `44·GUVENLIK-FIX-1·K6` **Sifre ozeti v2 zarfi**: `[0x02] + [iterasyon BE] + PBKDF2-SHA512(100k)` = 69 bayt, tuz 16 bayt; v1 (64/128) BAYT-DEGISMEZ dogrulanir ve giriste SESSIZCE v2'ye tasinir. Dogrulama HER dalda ayni maliyeti oder (zamanlama oracle'i kapali). Surum KOLON DEGIL, degerin biciminden turer -> Seller kirilmaz, migration YOK.
+- `44·GUVENLIK-FIX-1·K5` **Controller DISI yuzeyler pinli**: `MapControllers().RequireAuthorization()` tek kaynak · `NotificationHub` SINIF ozniteligi · Hangfire panosu admin-only filtre. `SecurityHardeningTests` taramasi `ControllerActionDescriptor` suzdugu icin bu yuzeyleri GORMEZ.
 
 ## Acik SUPHELI (00b-supheli.md)
 
@@ -906,16 +927,31 @@ i18n. **64 bozuk `invoice_items` satiri D-YAN'a** (veri temizligi, fix degil).
 
 ## Kuyruk (merkez metni, AV-1 muhru)
 
-1. GUVENLIK-FIX — bolumleme merkezden (oneri: `42·GUVENLIK-AV-1 · BOLUMLEME ONERISI`)   <- SIRADA
-2. GUVENLIK-AV-2 (dar olcum, ultracode YOK): at-rest sifreleme · 2FA/TOTP ·
+**GUVENLIK-FIX BOLUMLEMESI (merkez karari — KAYIT):**
+```
+GF-1 KIMLIK/OTURUM [backend, migration olasi]: DV1 (BAS) · C-1 · C-2 · B-1 · B-2 · C-4
+GF-2a ISTEMCI KACIS [frontend]: D-1 · D-2 · D-3 · D-4 · D-5 · D-10 · D-11 · D-6 · D-8
+GF-3 SIZINTI/YAPILANDIRMA/LIMIT [backend config]: E-2 · E-3 · B-09 failed-jobs · E-1a ·
+     E-5 · E-4 · E-6 · F-1 · F-2 · A-3
+GF-2b CSP [frontend, D-7]: 11 satir ici script disa + unsafe-inline/unsafe-hashes/blob sokum
+GF-4 TEDARIK ZINCIRI [CI/paket]: G-2 · G-5 · G-6 · G-4 · G-3 · G-1 = 12.0.1 KALIR
+BILINEN/KABUL EDILMIS RISK: C-3 (00a:101) · D-9 · E-1b · Webhook:AllowedIps bos · hibrit jeton
+BASKA KUYRUGA: A-2 -> VITRIN-KALAN 8 · F-3 -> IMPORT-FIX
+```
+
+1. **GF-1b** (11 turev bulgu + coklu-cihaz jeton iptali; tarif merkezden)   <- SIRADA
+2. GF-2a ISTEMCI KACIS  3. GF-3 SIZINTI/YAPILANDIRMA/LIMIT  4. GF-2b CSP  5. GF-4 TEDARIK ZINCIRI
+6. GUVENLIK-AV-2 (dar olcum, ultracode YOK): at-rest sifreleme · 2FA/TOTP ·
    TOCTOU/ExecuteUpdateAsync · A09 · olay isleyicileri · 13 anilmayan controller
    (Comparison/Collection ham entity suphesi)
-3. VITRIN-KALAN (7 kalem)  4. FIX-1B  5. ADMIN-FIX  6. IMPORT-FIX  7. FIX-1C  8. LOG-FIX  9. FIX-2  10. FIX-3/B13
+7. VITRIN-KALAN (8 kalem)  8. FIX-1B  9. ADMIN-FIX  10. IMPORT-FIX  11. FIX-1C  12. LOG-FIX  13. FIX-2  14. FIX-3/B13
 
 ARSIV-1 KAPANDI c6721b7 · GUVENLIK-AV-1 KAPANDI (zemin c6721b7 · muhur
 `docs/muhur/42-guvenlik-av-1.md`)
 ARSIV-2 KAPANDI (kesif olcumu GUVENLIK-FIX kapisinda) · zemin 4c29f32 · muhur
 `docs/muhur/43-arsiv-2.md`
+**GUVENLIK-FIX-1 KAPANDI `189ce81`** (zemin ed1bcfe · muhur `docs/muhur/44-guvenlik-fix-1.md`) —
+alti kalem + K1-ek; 12 turev bulgu GF-1b'ye, GF1-B1 (govde ozeti) **GF-3**'e devredildi.
 
 ## Devir ID'leri
 

@@ -1,6 +1,6 @@
 ---
 name: sdp
-description: Divisima Sorun Dogrulama Protokolu v1.3 — her dalga/denetim tarifi basinda yuklenir
+description: Divisima Sahada Doğrulanmış Denetim Protokolü v1.3 — her dalga/denetim tarifi başında yüklenir
 ---
 
 # SDP — SAHADA DOGRULANMIS DENETIM PROTOKOLU v1.3 (KALICI; v1.1 27 Agustos 2026, v1.2 28 Agustos 2026)
