@@ -56,7 +56,9 @@ onlari bayatlatmaz. Okuma usulu: CLAUDE.md B0 · MK-11 (b).
 | 43 | `43-arsiv-2.md` | # 43 · ARSIV-2 MUHRU — PROSEDURLER SKILL'E (SDP + SUREC) (1 Eylul 2026) | — | 14858 | yeni usul |
 | 44 | `44-guvenlik-fix-1.md` | # 44 · GUVENLIK-FIX-1 (GF-1) MUHRU — KIMLIK / OTURUM (2 Eylul 2026) | — | 17076 | yeni usul |
 
-Toplam arsiv: 46 dosya · 796.052 B (OLCULDU: `ls -1 *.md | grep -v INDEX.md | xargs wc -c`).
+| 45 | `45-guvenlik-fix-1b.md` | # 45 · GUVENLIK-FIX-1b (GF-1b) MUHRU — OTURUM DERINLIGI (2 Eylul 2026) | — | 21848 | yeni usul |
+
+Toplam arsiv: 47 dosya · 817.900 B (OLCULDU: `ls -1 *.md | grep -v INDEX.md | xargs wc -c`).
 Bayt denklemi (TARIHSEL, d8f12dd zemini — GUNCELLENMEZ):
 747.240 = 44.393 (C1 sonrasi CLAUDE.md) + 702.847.
 NOT (AV-1'de olculdu): onceki "42 dosya · 702.847 B" satiri BAYATTI — `41-arsiv-1.md`

@@ -784,6 +784,16 @@ ham yanit dokumlerinin DISKE yazilmasi kapsanmadi -> dokuz dosyada ciplak canli 
 Ajanin KENDI kapanis iddiasi "jetonlar ilk 8 karaktere kirpildi" diyordu ve **CURUK** cikti
 — turun TEK curuyen kalemi bir bulgu degil, bir KAPANIS IDDIASIYDI.
 
+## Iki ders — GUVENLIK-FIX-1b (45·GUVENLIK-FIX-1b · HATA KAYDI)
+
+**`ExecuteUpdateAsync` `AuditInterceptor`i ATLAR; CAS yolunda denetim kaydi ELLE yazilir.**
+Gerekce OLCULDU: interceptor `ChangeTracker` uzerinden calisir, CAS `SaveChanges`i atlar —
+basarili sifre sifirlama HICBIR `audit_logs` satiri birakmiyordu (rapor denetcisi buldu).
+
+**Kirmizi-once geri almada untracked dosya: `git stash` KULLANILMAZ; olcum yedegi + elle
+geri alma + md5 dogrulamasi.** Gerekce OLCULDU: `git stash push -- <yol>` untracked
+dosyalari BIRAKIR, geri alma fixli kod uzerinde kostu ve YALANCI "0 kirmizi" verdi.
+
 # B7 — KURGU SABITLERI ve D-YAN
 
 ## Olcum duzenegi (goz1) — bes arguman
@@ -811,6 +821,11 @@ Kapanis fazinda goz1'de TEK kayit uretildi: musteri **169** `gf1.1@example.com` 
 yolundan: register -> verify -> login) + `consent_records` 1 + `user_sessions` 340-342.
 **MAX musteri 168 -> 169**; siparis/adres/fatura/Pending DEGISMEDI.
 Tek sema degisikligi `user_sessions.auth_time` kolonudur (`44·GUVENLIK-FIX-1`).
+**GF-1b HICBIR KURGU KAYDI URETMEDI** - testler ayri CI/sinif veritabanlarinda kostu, dev
+DB'ye YALNIZ OKUMA yapildi. MAX musteri **169** BIREBIR kaldi; `user_sessions` **342**
+(K3 geriye donuk ozetleme YAPMADI, bu satirlar fiilen OLU oturum - `45·GUVENLIK-FIX-1b`).
+Suit tabani `45·GUVENLIK-FIX-1b` kapanisinda **Sql 378/378 · tam 641/644** (3 kirmizi =
+bilinen Docker uclusu); ureten ifade `dotnet test ... --filter "Category=Sql"` ve filtresiz.
 
 **TEK YAZMA - URETIM YOLUNDAN:** K2 kanitini almak icin musteri 102'nin
 (`mfix1.once@example.com`, MANTIK-FIX-1 kurgusu) sifresi **uretim yolundan** sifirlandi:
@@ -888,6 +903,12 @@ yalniz somut gerekceyle bakilir.
 - `44·GUVENLIK-FIX-1·K4` **Sahiplik ihlali 404** — uc nokta (`ReturnManager` · `IyzicoPaymentManager` · `OrderManager` adres dali); kalan **11** rol/CSRF/IP 403'u SABIT ve negatif kontrol piniyle korunuyor.
 - `44·GUVENLIK-FIX-1·K6` **Sifre ozeti v2 zarfi**: `[0x02] + [iterasyon BE] + PBKDF2-SHA512(100k)` = 69 bayt, tuz 16 bayt; v1 (64/128) BAYT-DEGISMEZ dogrulanir ve giriste SESSIZCE v2'ye tasinir. Dogrulama HER dalda ayni maliyeti oder (zamanlama oracle'i kapali). Surum KOLON DEGIL, degerin biciminden turer -> Seller kirilmaz, migration YOK.
 - `44·GUVENLIK-FIX-1·K5` **Controller DISI yuzeyler pinli**: `MapControllers().RequireAuthorization()` tek kaynak · `NotificationHub` SINIF ozniteligi · Hangfire panosu admin-only filtre. `SecurityHardeningTests` taramasi `ControllerActionDescriptor` suzdugu icin bu yuzeyleri GORMEZ.
+- `45·GUVENLIK-FIX-1b·K1` **Coklu-cihaz access iptali `revoked_before` esigiyle**: kosul `iat < esik` (KASITLI olarak strictly less, esik kendi anini kapsamaz) · hesap KILIDI esigi YAZMAZ · sifre SIFIRLAMA yazar (F3) · migration YOK, kayit onbellekte ve TTL jeton omrunden turer.
+- `45·GUVENLIK-FIX-1b·K3` **Oturum ve sifirlama jetonlari DB'de SHA-256 HEX**: base64 DEGIL - `Turkish_CI_AS` altinda base64 alfabesi varyant kabulu acardi (etkin entropi ~227 bit). Kolon adlari KORUNDU, filtreli UNIQUE indeks eklendi; geriye donuk ozetleme YAPILMADI (mevcut satirlar olu oturuma doner).
+- `45·GUVENLIK-FIX-1b·K7` **Step-up saati `auth_time` NULL ise FAIL-CLOSED**: NULL "bilinmiyor" demektir, "simdi" DEGIL; miras oturumlarda hassas islem yeniden giris ister. Geriye donuk doldurma YOK.
+- `45·GUVENLIK-FIX-1b·K5` **Refresh cerezi ile oturum satiri AYNI ANDA biter**: ikisi de `OturumOmru.RefreshGun` (7) tek kaynagindan turer; onceki hal cerez 30 / oturum 7 idi ve cerez 23 GUN fazla yasiyordu.
+- `45·GUVENLIK-FIX-1b·F1` **Yeniden kullanim alarmi CAS yolunda KOSULSUZ, pasif-jeton yolunda KOSULLU**: yaris kaybi tekrar denemeyle uretilemez (spam riski yok), pasif jeton uretilebilir (spam riski var). **Aile iptali BEST-EFFORT** - es zamanli yarista tek turda garanti degil, kalici cozum GF-3 (rotasyon tek transaction).
+- `45·GUVENLIK-FIX-1b·GF1-B9` **CURUDU**: "step-up `auth_time` refresh'te sifirlaniyor" bulgusu GF-1/K3 ile ZATEN kapanmisti; GF-1b'de yeniden acilmadi.
 
 ## Acik SUPHELI (00b-supheli.md)
 
@@ -939,8 +960,12 @@ BILINEN/KABUL EDILMIS RISK: C-3 (00a:101) · D-9 · E-1b · Webhook:AllowedIps b
 BASKA KUYRUGA: A-2 -> VITRIN-KALAN 8 · F-3 -> IMPORT-FIX
 ```
 
-1. **GF-1b** (11 turev bulgu + coklu-cihaz jeton iptali; tarif merkezden)   <- SIRADA
-2. GF-2a ISTEMCI KACIS  3. GF-3 SIZINTI/YAPILANDIRMA/LIMIT  4. GF-2b CSP  5. GF-4 TEDARIK ZINCIRI
+1. **GF-2a ISTEMCI KACIS** (tarif merkezden) + K10 devri: `api-client` refresh
+   **single-flight** (`frontend/api-client.js:143`) - es zamanli 401'lerde tek yenileme.   <- SIRADA
+2. GF-3 SIZINTI/YAPILANDIRMA/LIMIT + GF-1b devri (3 kalem): **rotasyon TEK DB
+   transaction'i** (CAS + INSERT; aile iptalini deterministiklestirir) · **zaman kaynagi
+   TEK ve UTC** (`expires_at` yerel / cerez UTC ayrimi) · **GF1-B1 govde ozeti**
+3. GF-2b CSP  4. GF-4 TEDARIK ZINCIRI
 6. GUVENLIK-AV-2 (dar olcum, ultracode YOK): at-rest sifreleme · 2FA/TOTP ·
    TOCTOU/ExecuteUpdateAsync · A09 · olay isleyicileri · 13 anilmayan controller
    (Comparison/Collection ham entity suphesi)
@@ -952,6 +977,21 @@ ARSIV-2 KAPANDI (kesif olcumu GUVENLIK-FIX kapisinda) · zemin 4c29f32 · muhur
 `docs/muhur/43-arsiv-2.md`
 **GUVENLIK-FIX-1 KAPANDI `189ce81`** (zemin ed1bcfe · muhur `docs/muhur/44-guvenlik-fix-1.md`) —
 alti kalem + K1-ek; 12 turev bulgu GF-1b'ye, GF1-B1 (govde ozeti) **GF-3**'e devredildi.
+**GUVENLIK-FIX-1b KAPANDI `00b012f`** (zemin 8ca6634 · muhur `docs/muhur/45-guvenlik-fix-1b.md`) —
+K1..K10 (K7 GF-2a'ya devir, K8 dusuruldu) + MK-4b denetim duzeltmeleri + DUR cozumu F1-F4.
+
+### BILINEN — GF-1b (bes)
+1. **Ayni-saniye jeton penceresi**: `iat` saniye cozunurluklu, iptal kosulu KASITLI
+   `iat < esik`; ayni saniyeye dusen jeton iptal EDILMEZ. Pinler `Task.Delay(1100)` tasir.
+2. **Miras oturumda step-up yeniden giris ister**: GF-1 oncesi `auth_time` NULL =
+   "bilinmiyor" (fail-closed). Geriye donuk doldurma YOK.
+3. **342 olu oturum**: K3 geriye donuk ozetleme yapmadi; mevcut duz metin satirlar ozet
+   aramasiyla ESLESMEZ. Launch oncesi kabul.
+4. **IP davranis kaniti YOK**: `user_sessions.ip_address` uretimde doluyor ama
+   `WebApplicationFactory` `RemoteIpAddress` uretmiyor (L3 dort yoldan olctu, dordu null).
+   Uctan uca kanit gercek Kestrel/proxy ister -> GF-3.
+5. **K4 gecikmeli aile iptali**: es zamanli yarista kaybeden, kazananin INSERT'inden once
+   kosarsa aile iptali o turda gerceklesmez; ikinci denemede yakalanir. Kalici cozum GF-3.
 
 ## Devir ID'leri
 
