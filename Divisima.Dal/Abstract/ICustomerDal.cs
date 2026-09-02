@@ -33,5 +33,12 @@ namespace Divisima.DataAccess.Abstract
         Task LockAccountAsync(int customerId, DateTime until);
         // Aciklayici yorum: ATOMIK login durumu sifirla (basarili giris: sayac 0 + kilit yok + son giris).
         Task ResetLoginStateAsync(int customerId, DateTime lastLogin);
+
+        // ══ GF-1b / K10 (GF1-B10) - SIFIRLAMA JETONUNU ATOMIK TUKET ══════════════════════
+        // Jetonu YALNIZCA hala gecerliyken (dogru ozet + suresi dolmamis) harcar ve AYNI
+        // ifadede yeni sifreyi yazar. Donen deger ETKILENEN SATIR SAYISIDIR:
+        // 1 = bu cagri kazandi · 0 = jeton baska bir istek tarafindan ZATEN tuketildi.
+        // Ayni ailedendir: TryDecrementStoreCreditAsync / DeactivateIfActiveAsync.
+        Task<int> TryConsumeResetTokenAsync(string tokenOzeti, DateTime simdi, byte[] hash, byte[] salt);
     }
 }

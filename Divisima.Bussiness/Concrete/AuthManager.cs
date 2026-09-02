@@ -742,14 +742,32 @@ namespace Divisima.Bussiness.Concrete
             if (!customer.password_reset_expiry.HasValue || customer.password_reset_expiry.Value < DateTime.Now)
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.PasswordResetExpired));
 
+            // ══ GF-1b / K10 (GF1-B10) - JETON TUKETIMI ARTIK ATOMIK ═══════════════════════
+            //
+            // OLCULEN ONCE-DURUM (3/3 yeniden uretildi): yukaridaki okuma ile asagidaki yazma
+            // arasinda KOSUL YOKTU. Ayni jetonu AYNI ANDA sunan IKI istek de "gecerli" gorup
+            // geciyordu - ikisi de 200 donuyor, ikisi de sifre yaziyordu.
+            //   assert: es zamanli 2 istekten OK sayisi -> beklenen 1, OLCULEN **2**
+            // ZARAR: jetonu ele geciren saldirgan kurbanin sifirlama istegiyle YARISA girip
+            // SON YAZAN olabilir; kurban "sifremi degistirdim" der, hesap saldirgandadir.
+            // Ustelik "jeton TEK KULLANIMLIK" sozlesmesi tam da onemsedigi anda cokuyordu.
+            //
+            // COZUM K4 ile AYNI AILE: kosul VERITABANINA birakilir. Jetonun gecerliligi ve
+            // TUKETILMESI ve yeni sifrenin yazilmasi TEK ifadededir; etkilenen satir 1
+            // degilse jeton baska bir istek tarafindan ZATEN harcanmistir.
+            //
+            // YUKARIDAKI OKUMA KALDIRILMADI: hata mesajlarini ayirt etmek (GECERSIZ jeton mu,
+            // SURESI DOLMUS jeton mu) ve `customer.id`yi ogrenmek icin gerekli. Okuma artik
+            // KARAR VERMIYOR, yalnizca TESHIS uretiyor - karar asagidaki tek ifadede.
+            //
+            // DIKKAT (CLAUDE.md tuzagi): `ExecuteUpdateAsync` change-tracker'i ATLAR. Elimizdeki
+            // TRACKED `customer` nesnesi bu noktadan sonra BAYAT - uzerinden tam-varlik
+            // `UpdateAsync` CAGRILMAZ; cagrilsaydi jetonu ve eski sifreyi GERI YAZARDI.
             HashingHelper.CreatePasswordHash(dto.new_password, out var hash, out var salt);
-            customer.password_hash = hash;
-            customer.password_salt = salt;
-            customer.password_reset_token = null;
-            customer.password_reset_expiry = null;
-            customer.failed_login_attempts = 0;
-            customer.lockout_end = null;
-            await _customerDal.UpdateAsync(customer);
+            var tuketildi = await _customerDal.TryConsumeResetTokenAsync(
+                jetonOzeti, DateTime.Now, hash, salt);
+            if (tuketildi != 1)
+                return (HttpStatusCode.BadRequest, new ErrorResult(Messages.PasswordResetInvalid));
 
             // Açıklayıcı yorum: Şifre değişince mevcut tüm oturumları geçersiz kıl (çalınan token'ı öldür)
             // Tum aktif oturumlari TEK atomik sorgu ile kapat (foreach N+1 yerine - DRY + performans)

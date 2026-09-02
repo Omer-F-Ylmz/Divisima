@@ -230,6 +230,56 @@ namespace Divisima.IntegrationTests
                 .Should().Be(HttpStatusCode.OK, "reddedilen deneme jetonu TUKETMEMELI");
         }
 
+        // ══ GF-1b / K10 (GF1-B10) - SIFIRLAMA JETONU ES ZAMANLI DA TEK KULLANIMLIK ════════
+        //
+        // Ustteki pin jetonun SIRAYLA tek kullanimlik oldugunu sabitliyor. Bu pin ayni
+        // sozlesmenin ES ZAMANLI halini olcer: iki istek AYNI jetonu AYNI ANDA sunarsa.
+        //
+        // OLCULEN ONCE-DURUM (pinsizdi): oku-kontrol-et-yaz arasinda kosul YOKTU
+        // (`GetAsync(token)` -> expiry kontrolu -> tam-varlik `UpdateAsync`), yani iki istek
+        // de jetonu "gecerli" gorup gecebiliyordu. ZARAR: jetonu ele geciren saldirgan,
+        // kurbanin sifirlama istegiyle YARISA girip SON YAZAN olabilir - kurban "sifremi
+        // degistirdim" der, hesap saldirganin sifresindedir. Ayrica "TEK KULLANIMLIK"
+        // sozlesmesi, en cok onemsedigi anda (yaris) gecersiz oluyordu.
+        [Fact]
+        public async Task K10B_AYNI_SIFIRLAMA_JETONU_ESZAMANLI_TEK_KEZ_KULLANILIR()
+        {
+            if (Skipped()) return;
+            var anon = _factory!.CreateClient();
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+            var jeton = await SifirlamaJetonuAlAsync(anon, musteri.Email);
+
+            // AYRI istemciler: tek HttpClient uzerinden es zamanli gonderim, olcumu
+            // istemci tarafinda serilestirme riskine acardi.
+            var a = _factory!.CreateClient();
+            var b = _factory!.CreateClient();
+            const string sifreA = "YarisAlfa1!x";
+            const string sifreB = "YarisBeta1!x";
+
+            var sonuclar = await Task.WhenAll(
+                a.PostAsJsonAsync("/api/auth/reset-password", new { token = jeton, new_password = sifreA }),
+                b.PostAsJsonAsync("/api/auth/reset-password", new { token = jeton, new_password = sifreB }));
+
+            sonuclar.Count(r => r.StatusCode == HttpStatusCode.OK).Should().Be(1,
+                "AYNI jeton es zamanli sunuldugunda YALNIZ BIRI basarili olmali - "
+                + "jeton TEK KULLANIMLIK");
+
+            // ALAN BAZLI (vakum kirici): kazananin sifresi GERCEKTEN gecerli olmali ve
+            // kaybedenin sifresi hesaba YAZILMAMIS olmali. Yalniz durum koduna bakmak,
+            // "ikisi de yazdi ama biri 400 dondu" halini kaciririrdi.
+            var girisA = await anon.PostAsJsonAsync("/api/auth/login",
+                new { email = musteri.Email, password = sifreA });
+            var girisB = await anon.PostAsJsonAsync("/api/auth/login",
+                new { email = musteri.Email, password = sifreB });
+            new[] { girisA.StatusCode, girisB.StatusCode }.Count(k => k == HttpStatusCode.OK)
+                .Should().Be(1, "hesapta TEK sifre gecerli olmali - kaybeden yazma UYGULANMAMALI");
+
+            // Jeton TUKENMIS olmali (ucuncu bir deneme de gecmemeli).
+            (await anon.PostAsJsonAsync("/api/auth/reset-password",
+                new { token = jeton, new_password = "UcuncuDeneme1!x" })).StatusCode
+                .Should().Be(HttpStatusCode.BadRequest, "jeton yarisin ardindan TUKENMIS olmali");
+        }
+
 
         // ── P-H3) MANTIK-FIX-3 / K3 - SIFRE DEGISTIRME GERCEKTEN DEGISTIRIR ──────────
         //

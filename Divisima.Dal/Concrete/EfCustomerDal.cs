@@ -113,5 +113,32 @@ namespace Divisima.DataAccess.Concrete.EntityFramework
                     .SetProperty(c => c.lockout_end, (DateTime?)null)
                     .SetProperty(c => c.last_login_at, (DateTime?)lastLogin));
         }
+
+        // ══ GF-1b / K10 (GF1-B10) - SIFIRLAMA JETONUNU ATOMIK TUKET ══════════════════════
+        //
+        // Jetonun GECERLILIGI ve TUKETILMESI TEK ifadede olur: `WHERE ozet = @ozet AND
+        // expiry >= @simdi`. Boylece "oku - kontrol et - yaz" arasindaki pencere KAPANIR.
+        //
+        // SIFRE de AYNI ifadede yazilir. Ayri bir UPDATE'e birakilsaydi kaybeden istek
+        // jetonu tuketemez ama sifreyi YAZABILIRDI - yani yaris yine kaybedilirdi.
+        //
+        // GLOBAL FILTRE BILINCLI OLARAK ACIK BIRAKILDI (IgnoreQueryFilters YOK): cagri
+        // yerindeki okuma da ayni filtreye tabi; askiya alinmis bir hesap ORADA da
+        // bulunamaz. Iki tarafin AYNI kumeye bakmasi sarttir.
+        public async Task<int> TryConsumeResetTokenAsync(string tokenOzeti, DateTime simdi,
+            byte[] hash, byte[] salt)
+        {
+            return await Context.Set<Customer>()
+                .Where(c => c.password_reset_token == tokenOzeti
+                            && c.password_reset_expiry != null
+                            && c.password_reset_expiry >= simdi)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(c => c.password_hash, hash)
+                    .SetProperty(c => c.password_salt, salt)
+                    .SetProperty(c => c.password_reset_token, (string?)null)
+                    .SetProperty(c => c.password_reset_expiry, (DateTime?)null)
+                    .SetProperty(c => c.failed_login_attempts, 0)
+                    .SetProperty(c => c.lockout_end, (DateTime?)null));
+        }
     }
 }
