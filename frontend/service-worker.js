@@ -37,8 +37,20 @@
 // Bu depoda derleme adımı yok (statik dosyalar olduğu gibi sunuluyor), bu yüzden sürüm elle
 // bumplanan bir sabit. Dağıtım otomasyonu geldiğinde buraya commit SHA'sı yazılmalı; bump
 // unutulursa (a) ayağı devre dışı kalır ama (b) ayağı sayesinde düzeltmeler yine ulaşır.
-const VERSION = "2026-08-21-e3";
-const CACHE = "divisima-" + VERSION;
+const VERSION = "2026-09-03-gf2a";
+// ══ GF-2a / K8 (D-6) - IKI KOVA ═══════════════════════════════════════════════════════
+//
+// OLCULEN ONCE-DURUM: TEK kova vardi ve `/api/` yanitlari UYGULAMA KABUGUYLA AYNI kutuya
+// yaziliyordu (`caches.open(CACHE).put` dort yerde). Iki ayri zarar:
+//  (1) KIMLIKLI API YANITLARI DISKE DUSUYORDU. Backend her yanita `no-store` koyuyor
+//      (`SecurityHeadersMiddleware`), ama **Cache Storage API bu basligi UYGULAMAZ** -
+//      `cache.put()` kosulsuz depolar. Iki dogru parca birlesince koruma DUSTU.
+//      Ortak bilgisayarda cikis yapmis kullanicinin siparis/adres yaniti okunabilirdi.
+//  (2) Cikista `caches.delete(CACHE)` denseydi OFFLINE ACILISI DA silecekti.
+// COZUM: kabuk ve API AYRI kovalarda; `/api/` artik NETWORK-ONLY (hic yazilmiyor) ve
+// cikista silinecek bir sey KALMIYOR - kova bos kaliyor, yine de temizlik kancasi var.
+const CACHE = "divisima-shell-" + VERSION;
+const API_CACHE = "divisima-api-" + VERSION;
 
 // Açıklama: Uygulama kabuğu (offline açılış için gerekli çekirdek dosyalar)
 const SHELL = ["/", "/index.html", "/manifest.json", "/api-client.js", "/api-bridge.js"];
@@ -53,7 +65,7 @@ self.addEventListener("install", (e) => {
 self.addEventListener("activate", (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k !== API_CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -69,16 +81,19 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET") return; // yalnız GET önbelleklenir
 
-  // API: network-first (taze veri; offline'da önbellekten)
+  // GF-2a / K8: CAPRAZ-ORIGIN isteklere SW HIC dokunmaz. Onceki hal `pathname`e bakiyordu,
+  // yani baska bir origin'deki `/api/...` de eslesiyordu; ayrica CDN'den gelen `.js`
+  // dosyalari `kodTasiyorMu` dalina duesuep onbellege yaziliyordu (opak kopya SRI'yi
+  // dusurebilir). Kapi ONCE origin'e bakar.
+  if (url.origin !== self.location.origin) return;
+
+  // ══ GF-2a / K8 - API: NETWORK-ONLY. ONBELLEGE YAZILMAZ, ONBELLEKTEN OKUNMAZ ═════════
+  // Onceki hal "network-first" idi ve her API GET yanitini kaliciya yaziyordu; kimlik
+  // ayirt edici hicbir kosul yoktu (Authorization/Vary/Cache-Control 0 gecis).
+  // BILINCLI BEDEL: `/api/` icin offline yedek KALKTI. Kabuk (HTML/JS/ikon) hala
+  // onbellekte oldugu icin UYGULAMA OFFLINE ACILMAYA DEVAM EDER; yalniz veri gelmez.
   if (url.pathname.startsWith("/api/")) {
-    e.respondWith(
-      fetch(e.request).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy));
-        return res;
-      }).catch(() => caches.match(e.request))
-    );
-    return;
+    return; // respondWith YOK -> tarayicinin kendi agi, SW araya girmez
   }
 
   // Kod taşıyanlar: NETWORK-FIRST. Ağ yanıt verirse onu kullan ve önbelleği tazele;
@@ -110,6 +125,17 @@ self.addEventListener("fetch", (e) => {
       return res;
     }))
   );
+});
+
+// ══ GF-2a / K8 - CIKISTA API KOVASI SILINIR ═══════════════════════════════════════════
+// Uygulama cikis yaptiginda `postMessage({type:"divisima-logout"})` gonderir; burada
+// YALNIZ API kovasi silinir - KABUK KOVASINA DOKUNULMAZ, boylece offline acilis SURER.
+// (Bugun API kovasi zaten bos kaliyor cunku `/api/` network-only; bu kanca gelecekte
+// bir onbellekleme geri gelirse temizligin YERI belli olsun diye ve savunma derinligi
+// icin duruyor. Onceki halde HICBIR temizlik kancasi YOKTU - `caches.` gecisi 0 idi.)
+self.addEventListener("message", (e) => {
+  if (!e.data || e.data.type !== "divisima-logout") return;
+  e.waitUntil(caches.delete(API_CACHE));
 });
 
 // Push bildirimi (FCM data payload)

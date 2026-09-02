@@ -1679,7 +1679,20 @@ body{overflow-x:hidden}</style>
 
 <script>
 function hanger(){return '<svg viewBox="0 0 120 120" aria-hidden="true"><path d="M60 30c0-6 9-6 9 1 0 5-5 5-7 7l34 26c4 3 2 9-4 9H28c-6 0-8-6-4-9l34-26" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="60" cy="36" r="3" fill="#fff"/></svg>';}
-function ph(col,brand,cls){return '<div class="ph '+(cls||'')+'" style="--col:'+(col||'#d9cfc2')+'">'+hanger()+(brand?'<span class="ph-brand">'+brand+'</span>':'')+'</div>';}
+/* ══ GF-2a / K2+K4 (D-2, D-3) - MARKA ve RENK AYNI FONKSIYONDA KACISSIZDI ═══════════════
+   OLCULEN ONCE-DURUM: `ph()` HEM `col`u `style="--col:X"` icine HEM `brand`i <span> icine
+   HAM koyuyordu. Ikisi de API alani (`p.color_hex` / `p.brand`, api-bridge.js:240/293).
+   Iki kok TEK fonksiyonda oldugu icin TEK duzeltmeyle kapanir; ayri ayri yamamak
+   "ayni kuralin ikinci kopyasi" ailesini acardi.
+   RENK ALLOWLIST'I: backend `ProductAddRequestValidator.cs:15` `[0-9a-fA-F]` kabul ediyor,
+   bu yuzden desen BUYUK HARFI DE alir; 5/7 haneli (gecersiz CSS) degerler DISARIDA.
+   `color-mix(...)` bilesik degeri IKINCI DAR desenle kabul edilir - cagri yeri (:2436)
+   kendi `col` girdisini zaten hex desenden gecirir, yani bilesik deger GUVENLIDIR.
+   REDDEDILEN deger varsayilana duser (gorunum bozulur, KOD CALISMAZ).                    */
+var _HEX_RE=/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+var _COLORMIX_RE=/^color-mix\(in srgb,\s*#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\s+\d{1,3}%,\s*#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\)$/;
+function guvenliRenk(col){col=(col==null?'':String(col)).trim();if(_HEX_RE.test(col)||_COLORMIX_RE.test(col))return col;return '#d9cfc2';}
+function ph(col,brand,cls){return '<div class="ph '+(cls||'')+'" style="--col:'+guvenliRenk(col)+'">'+hanger()+(brand?'<span class="ph-brand">'+esc(brand)+'</span>':'')+'</div>';}
 function esc(s){return (s||'').toString().replace(/[&<>"']/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];});}
 function imgFill(src,alt,contain){return '<img src="'+src+'" alt="'+esc(alt)+'" loading="lazy" decoding="async" class="lz" onload="this.classList.add(\'lzok\')" onerror="this.classList.add(\'imgerr\')" style="width:100%;height:100%;object-fit:'+(contain?'contain':'cover')+';'+(contain?'background:var(--surface-2);padding:7%;':'')+'">';}
 function galleryOf(p){if(p.imgs&&p.imgs.length)return p.imgs.slice();if(p.img)return [p.img];return [];}
@@ -1905,11 +1918,11 @@ function byId(id){return PRODUCTS.find(function(p){return p.id===id;});}
 function isClothing(id){var _p=byId(id);return _p?_p.cat!=='aksesuar':false;}
 
 function renderNav(){document.getElementById('nav').innerHTML=NAV.map(function(item){
-  var link='<a class="nav-link'+(item.sale?' sale':'')+'" data-cat="'+item.slug+'" href="#/kategori/'+item.slug+'">'+t('cat_'+item.slug)+'</a>';
-  if(item.subs)return '<div class="nav-item">'+link+'<div class="mega">'+item.subs.map(function(s){return '<a href="#/kategori/'+item.slug+'/'+s.slug+'">'+t('sub_'+s.slug)+'</a>';}).join('')+'</div></div>';
+  var link='<a class="nav-link'+(item.sale?' sale':'')+'" data-cat="'+esc(item.slug)+'" href="#/kategori/'+esc(item.slug)+'">'+esc(t('cat_'+item.slug))+'</a>';
+  if(item.subs)return '<div class="nav-item">'+link+'<div class="mega">'+item.subs.map(function(s){return '<a href="#/kategori/'+esc(item.slug)+'/'+esc(s.slug)+'">'+esc(t('sub_'+s.slug))+'</a>';}).join('')+'</div></div>';
   return '<div class="nav-item">'+link+'</div>';
 }).join('');}
-function renderPills(){document.getElementById('homePills').innerHTML=MAINS.map(function(c){return '<a class="pill" href="#/kategori/'+c[0]+'">'+t('cat_'+c[0])+'</a>';}).join('');}
+function renderPills(){document.getElementById('homePills').innerHTML=MAINS.map(function(c){return '<a class="pill" href="#/kategori/'+esc(c[0])+'">'+esc(t('cat_'+c[0]))+'</a>';}).join('');}
 renderNav();renderPills();
 
 (function(){var anns=Array.prototype.slice.call(document.querySelectorAll('.ann'));var i=0;setInterval(function(){anns[i].classList.remove('on');i=(i+1)%anns.length;anns[i].classList.add('on');},4500);})();
@@ -2149,7 +2162,7 @@ function showCategory(cat,sub){
   var title=t('cat_'+cat),crumb=esc(t('cat_'+cat));
   if(sub&&navItem&&navItem.subs){var sObj=navItem.subs.find(function(s){return s.slug===sub;});if(sObj){title=t('cat_'+cat)+' · '+t('sub_'+sub);crumb=esc(t('cat_'+cat))+' &nbsp;/&nbsp; '+esc(t('sub_'+sub));}}
   var subRow='';
-  if(navItem&&navItem.subs)subRow='<div class="wrap subchips"><div class="pills"><a class="subchip'+(!sub?' on':'')+'" href="#/kategori/'+cat+'">'+t('cat_tumu')+'</a>'+navItem.subs.map(function(s){return '<a class="subchip'+(sub===s.slug?' on':'')+'" href="#/kategori/'+cat+'/'+s.slug+'">'+t('sub_'+s.slug)+'</a>';}).join('')+'</div></div>';
+  if(navItem&&navItem.subs)subRow='<div class="wrap subchips"><div class="pills"><a class="subchip'+(!sub?' on':'')+'" href="#/kategori/'+esc(cat)+'">'+t('cat_tumu')+'</a>'+navItem.subs.map(function(s){return '<a class="subchip'+(sub===s.slug?' on':'')+'" href="#/kategori/'+esc(cat)+'/'+esc(s.slug)+'">'+esc(t('sub_'+s.slug))+'</a>';}).join('')+'</div></div>';
   var dealBanner='';
   if(cat==='indirim'){var dps=base0.filter(function(x){return x.old;}),mx=0;dps.forEach(function(x){var pc=discPct(x);if(pc>mx)mx=pc;});/* MFIX-3b/(2): SAHTE ACILIYET SOKULDU. Geri sayim gece yarisina (gun sonuna sabitlenmis bir ana)
    sayiyordu ama gece yarisi HICBIR SEY BITMIYOR - urunun indirimini sonlandiran bir
@@ -2166,7 +2179,7 @@ function showCategory(cat,sub){
 dealBanner='<div class="deal-strip"><div class="wrap deal-inner"><div class="deal-left"><span class="deal-fire">🔥</span><div><b>'+t('deal_title')+'</b><small>'+dps.length+' '+t('deal_count')+' · '+t('deal_upto').replace('{n}',mx)+'</small></div></div></div></div>';}
   catView.innerHTML=
     '<div class="cat-banner"><div class="wrap"><div class="breadcrumb"><a href="#/">'+t('home')+'</a> &nbsp;/&nbsp; '+crumb+'</div><h1 class="serif">'+esc(title)+'</h1><p>'+esc(t('catd_'+cat))+'</p></div></div>'+dealBanner+
-    '<div class="wrap cat-pills"><div class="pills">'+MAINS.map(function(c){return '<a class="pill'+(c[0]===cat?' on':'')+'" href="#/kategori/'+c[0]+'">'+t('cat_'+c[0])+'</a>';}).join('')+'</div></div>'+subRow+
+    '<div class="wrap cat-pills"><div class="pills">'+MAINS.map(function(c){return '<a class="pill'+(c[0]===cat?' on':'')+'" href="#/kategori/'+esc(c[0])+'">'+esc(t('cat_'+c[0]))+'</a>';}).join('')+'</div></div>'+subRow+
     '<div class="cat-layout">'+
       '<div class="fil-backdrop" id="filBackdrop"></div>'+
       buildSidebar(base0,cat,sub)+
@@ -2433,7 +2446,7 @@ function openDetail(id){if(!byId(id))return;_pdTrig=document.activeElement;try{v
     mainHTML=ph(p.col,p.brand,'ph-lg');
     /* MFIX-3b/(1): uydurma renk kucuk gorselleri SOKULDU; kalan tonlar urunun KENDI
        color_hex degerinin acikligidir (uydurma DEGIL, tek gercek renkten turetilir). */
-    var shades=[60,38,52,46];thumbsHTML=shades.map(function(m,i){return '<div class="pd-thumb'+(i===0?' on':'')+'" data-shade="'+m+'">'+ph('color-mix(in srgb,'+p.col+' '+m+'%,#fff)','','')+'</div>';}).join('');
+    var shades=[60,38,52,46];thumbsHTML=shades.map(function(m,i){return '<div class="pd-thumb'+(i===0?' on':'')+'" data-shade="'+m+'">'+ph('color-mix(in srgb,'+guvenliRenk(p.col)+' '+m+'%,#fff)','','')+'</div>';}).join('');
   }
   var mySize=lsGet('dvs_size');var autoSize=(needsSize&&mySize&&ss&&ss[mySize]>0)?mySize:null;
   /* MFIX-3b/(7) T3: TEK BEDEN OTOMATIK SECILI GELIR.
@@ -2479,7 +2492,7 @@ function openDetail(id){if(!byId(id))return;_pdTrig=document.activeElement;try{v
   }
   /* MFIX-3b/(1): applyColor ve pdSwatches dinleyicisi SOKULDU - swatch DOM-a hic girmiyor.
      Kucuk gorsel (pd-thumb) tiklamalari yalniz data-shade yolunda kaldi. */
-  if(thumbsEl)thumbsEl.addEventListener('click',function(e){var th=e.target.closest('.pd-thumb');if(!th)return;/* MFIX-3b/(1): data-h dali OLU - kucuk gorseller artik yalniz data-shade tasiyor */thumbsEl.querySelectorAll('.pd-thumb').forEach(function(x){x.classList.toggle('on',x===th);});if(th.hasAttribute('data-i'))main.innerHTML=imgFill(imgs[+th.getAttribute('data-i')],p.name,p.cat==='aksesuar');else main.innerHTML=ph('color-mix(in srgb,'+p.col+' '+th.getAttribute('data-shade')+'%,#fff)',p.brand,'ph-lg');});
+  if(thumbsEl)thumbsEl.addEventListener('click',function(e){var th=e.target.closest('.pd-thumb');if(!th)return;/* MFIX-3b/(1): data-h dali OLU - kucuk gorseller artik yalniz data-shade tasiyor */thumbsEl.querySelectorAll('.pd-thumb').forEach(function(x){x.classList.toggle('on',x===th);});if(th.hasAttribute('data-i'))main.innerHTML=imgFill(imgs[+th.getAttribute('data-i')],p.name,p.cat==='aksesuar');else main.innerHTML=ph('color-mix(in srgb,'+guvenliRenk(p.col)+' '+th.getAttribute('data-shade')+'%,#fff)',p.brand,'ph-lg');});
   if(needsSize)modalCard.querySelector('.sizes').addEventListener('click',function(e){var b=e.target.closest('.size-chip');if(!b)return;var size=b.getAttribute('data-size');if(b.getAttribute('data-out')){openNotify(p,size);return;}selectedSize=size;_haptic(8);lsSet('dvs_size',size);var _mt=document.getElementById('mySizeTag');if(_mt)_mt.style.display=(size===autoSize)?'':'none';modalCard.querySelectorAll('.size-chip').forEach(function(x){x.classList.toggle('on',x===b);});document.getElementById('bedenSel').textContent=size;document.getElementById('sizeWarn').style.display='none';var nb=document.getElementById('notifyBox');if(nb)nb.style.display='none';var q=ss[size],st=document.getElementById('stockTxt'),sf=document.getElementById('stockFill');if(q<=2){st.className='stock-ok low';st.textContent=t('last_x').replace('{n}',q);sf.style.width=Math.max(14,Math.round(q/10*100))+'%';sf.style.background='#d89b3f';}else{st.className='stock-ok';st.textContent=t('in_stock');sf.style.width='100%';sf.style.background='';}});
   if(autoSize){var _asc=modalCard.querySelector('.size-chip[data-size="'+autoSize+'"]');if(_asc)_asc.click();}
   document.getElementById('pdLike').onclick=function(){toggleFav(id);this.classList.toggle('on',favs.has(id));this.textContent=favs.has(id)?'♥':'♡';};
@@ -2580,8 +2593,26 @@ function _toastStep(){if(!_toastQ.length){_toastRun=false;return;}_toastRun=true
   /* Eski kuyruk bicimi (duz dizge) da kabul edilir - toleransli okuma. */
   var msg=(e&&typeof e==='object')?e.m:e,tip=(e&&typeof e==='object'&&e.t)?e.t:'info';
   toastEl.classList.remove('t-ok','t-err','t-info');toastEl.classList.add('t-'+tip);
-  toastEl.innerHTML='<span class="'+tip+'">'+_TOAST_IKON[tip]+'</span> '+msg;toastEl.classList.add('on');clearTimeout(toastT);toastT=setTimeout(function(){toastEl.classList.remove('on');setTimeout(_toastStep,260);},2200);}
-function toastUndo(msg,cb){_toastRun=true;toastEl.innerHTML='<span class="ok">↩</span> '+msg+' <button class="toast-undo" type="button">'+t('toast_undo')+'</button>';toastEl.classList.add('on');clearTimeout(toastT);var b=toastEl.querySelector('.toast-undo'),done=false;var fin=function(restore){if(done)return;done=true;clearTimeout(toastT);toastEl.classList.remove('on');setTimeout(_toastStep,260);if(restore&&cb)cb();};if(b)b.onclick=function(){fin(true);};toastT=setTimeout(function(){fin(false);},4200);}
+  /* ══ GF-2a / K5 (D-5) - ISKELET DOM + textContent ════════════════════════════════════
+     OLCULEN ONCE-DURUM: `msg` HAM innerHTML'e giriyordu ve icerigi SUNUCU HATA METNIYDI
+     (api-bridge.js:74-75 `notify` -> `window.toast`; besleyen alti yol 3103/3137/3252/
+     3259/3468/3503). Duz `textContent`e cevirmek IKI SEYI KIRACAKTI: (1) ikon <span>'i,
+     (2) asagida `toastUndo`daki GERI AL butonu. Bu yuzden ISKELET DOM ile korunuyor:
+     yapisal parcalar `createElement` ile kuruluyor, YALNIZ mesaj dugumu `textContent`.
+     Ikon SABIT (`_TOAST_IKON`), dis veri DEGIL - guvenle innerHTML'siz konur.            */
+  toastEl.textContent='';
+  var _ik=document.createElement('span');_ik.className=tip;_ik.textContent=_TOAST_IKON[tip];
+  toastEl.appendChild(_ik);toastEl.appendChild(document.createTextNode(' '+(msg==null?'':String(msg))));
+  toastEl.classList.add('on');clearTimeout(toastT);toastT=setTimeout(function(){toastEl.classList.remove('on');setTimeout(_toastStep,260);},2200);}
+/* GF-2a / K5: ayni iskelet-DOM kalibi. GERI AL BUTONU KORUNUYOR - duz textContent onu
+   OLDURURDU (asagidaki `querySelector('.toast-undo')` null donerdi ve geri-al ozelligi
+   SESSIZCE olurdu). Buton `createElement` ile kuruluyor, mesaj metin dugumu olarak. */
+function toastUndo(msg,cb){_toastRun=true;
+  toastEl.textContent='';
+  var _ok=document.createElement('span');_ok.className='ok';_ok.textContent='↩';
+  var _bt=document.createElement('button');_bt.className='toast-undo';_bt.type='button';_bt.textContent=t('toast_undo');
+  toastEl.appendChild(_ok);toastEl.appendChild(document.createTextNode(' '+(msg==null?'':String(msg))+' '));toastEl.appendChild(_bt);
+  toastEl.classList.add('on');clearTimeout(toastT);var b=toastEl.querySelector('.toast-undo'),done=false;var fin=function(restore){if(done)return;done=true;clearTimeout(toastT);toastEl.classList.remove('on');setTimeout(_toastStep,260);if(restore&&cb)cb();};if(b)b.onclick=function(){fin(true);};toastT=setTimeout(function(){fin(false);},4200);}
 
 var cartEl=document.getElementById('cart'),cartItems=document.getElementById('cartItems'),cartFoot=document.getElementById('cartFoot');
 var favsEl=document.getElementById('favs'),favItems=document.getElementById('favItems'),favFoot=document.getElementById('favFoot');
@@ -2596,7 +2627,9 @@ function ckey(id,size,color){return id+'|'+(size||'')+'|'+(color||'');}
 function thumbC(p,color){if(p.img)return imgFill(p.img,p.name,p.cat==='aksesuar');return ph(color?color.h:p.col,'','');}
 /* MFIX-3b/(1): TOLERANSLI OKUMA. Eski surumlerde dvs_cart'a yazilmis `color` alani hala
    duruyor olabilir; ARTIK OKUNMAZ (uydurma renk adiydi) ama varligi sepeti KIRMAZ. */
-function cartMeta(it){var a=[];if(it.size)a.push(t('beden_label')+' '+it.size);return a.length?a.join(' · '):t('free_one');}
+/* GF-2a / KOK-8: `it.size` sepet satirindan gelir ve HTML'e yaziliyordu; kacisli ikizi
+   `api-bridge.js:1870` (`esc(String(it.size))`) idi - celiskili cift, burasi kapatildi. */
+function cartMeta(it){var a=[];if(it.size)a.push(t('beden_label')+' '+esc(String(it.size)));return a.length?a.join(' · '):t('free_one');}
 function popBadge(el){if(!el)return;_haptic(10);el.classList.remove('pop');void el.offsetWidth;el.classList.add('pop');}
 function cartBump(){var n=0;cart.forEach(function(it){n+=it.qty;});var prev=badge._last||0;badge.textContent=n;badge.style.display=n>0?'flex':'none';var mc=document.getElementById('mnavCart');if(mc){mc.textContent=n;mc.classList.toggle('on',n>0);}if(n!==prev&&n>0){popBadge(badge);popBadge(mc);}badge._last=n;saveCart();}
 /* MFIX-3 / F-M4: MISAFIR SEPETI CIHAZDA KALICI.
@@ -2617,7 +2650,7 @@ function saveCart(){try{var arr=[];cart.forEach(function(it){arr.push({id:it.id,
 function addToCart(id,size,qty,color){if(!byId(id))return;/* GOZ-FIX / F-G1: bu iki guard eskiden SESSIZCE return ediyordu - kullanici butona basiyor,
    HICBIR SEY olmuyordu (olculdu: urun 947 beden S, sepet 0 -> 0, toast bile yok). Sessiz
    basarisizlik yasak: sebep ADIYLA soylenir. */
-try{var _sp=byId(id);if(_sp&&stockOf(_sp)<=0){toast(esc(nameOf(_sp))+' şu an tükendi.','err');return;}if(_sp&&isClothing(id)&&size){var _ssz=sizeStockOf(_sp);if(_ssz&&_ssz[size]!==undefined&&_ssz[size]<=0){toast(esc(nameOf(_sp))+' · '+esc(String(size))+' bedeni tükendi. Başka beden seçebilirsin.','err');return;}}}catch(_sg){}try{var _ap=byId(id);if(_ap)_track('add_to_cart',{currency:'TRY',value:_ap.price*(qty||1),items:[_gitem(_ap,qty)]});}catch(e){}var cn=color?color.n:'';var k=ckey(id,size,cn);var it=cart.get(k);var _pp=byId(id),_avc;if(_pp&&isClothing(id)&&size){var _sc=sizeStockOf(_pp);_avc=(_sc&&_sc[size]!==undefined)?_sc[size]:stockOf(_pp);}else{_avc=_pp?stockOf(_pp):99;}if(it){it.qty+=qty;if(isFinite(_avc)&&_avc>=1&&it.qty>_avc)it.qty=_avc;}else{var _nq=qty;if(isFinite(_avc)&&_avc>=1&&_nq>_avc)_nq=_avc;cart.set(k,{id:id,size:size||'',color:color||null,qty:_nq});}cartBump();renderCart();var p=byId(id);var extra=[];if(color&&color.n)extra.push(t('c_'+color.n));if(size)extra.push(size);toast(esc(nameOf(p))+(extra.length?' · '+extra.join(' / '):'')+' '+t('toast_added_post'),'ok');}
+try{var _sp=byId(id);if(_sp&&stockOf(_sp)<=0){toast(nameOf(_sp)+' şu an tükendi.','err');return;}if(_sp&&isClothing(id)&&size){var _ssz=sizeStockOf(_sp);if(_ssz&&_ssz[size]!==undefined&&_ssz[size]<=0){toast(nameOf(_sp)+' · '+String(size)+' bedeni tükendi. Başka beden seçebilirsin.','err');return;}}}catch(_sg){}try{var _ap=byId(id);if(_ap)_track('add_to_cart',{currency:'TRY',value:_ap.price*(qty||1),items:[_gitem(_ap,qty)]});}catch(e){}var cn=color?color.n:'';var k=ckey(id,size,cn);var it=cart.get(k);var _pp=byId(id),_avc;if(_pp&&isClothing(id)&&size){var _sc=sizeStockOf(_pp);_avc=(_sc&&_sc[size]!==undefined)?_sc[size]:stockOf(_pp);}else{_avc=_pp?stockOf(_pp):99;}if(it){it.qty+=qty;if(isFinite(_avc)&&_avc>=1&&it.qty>_avc)it.qty=_avc;}else{var _nq=qty;if(isFinite(_avc)&&_avc>=1&&_nq>_avc)_nq=_avc;cart.set(k,{id:id,size:size||'',color:color||null,qty:_nq});}cartBump();renderCart();var p=byId(id);var extra=[];if(color&&color.n)extra.push(t('c_'+color.n));if(size)extra.push(size);toast(nameOf(p)+(extra.length?' · '+extra.join(' / '):'')+' '+t('toast_added_post'),'ok');}
 /* ===== KUPON / INDIRIM KODU (mock dogrulama) ===== */
 /* MFIX-1 / F-M3a: SAHTE KUPON TABLOSU KALDIRILDI. Burada dort uydurma kod gomuluydu ve applyCoupon YALNIZ bu yerel tabloya bakiyor, sunucuya HIC sormuyordu. Olculdu: cekmece o kodlari REKLAM ediyor, kod uygulaninca ekranda indirim gorunuyor, ayni kod /api/coupon/validate ucunda 400 "Gecersiz kupon kodu." aliyordu. Kupon dogrulamasi artik TEK KAYNAKTAN: window.divisimaValidateCoupon (api-bridge.js) -> POST /api/coupon/validate. (Kod adlari BILEREK yazilmadi: kaynak tarayan pin kendi belgeledigi kalibi da tarar - CLAUDE.md dersi.) */
 var coupon=null;
@@ -2660,7 +2693,7 @@ function renderCart(){validateCoupon();
      RELABEL KOSULSUZ: cekmeceye kargo EKLENMEZ (o ayri bir karar ve bu dalganin disinda),
      dolayisiyla "kargoluysa Toplam" gibi bir dal OLU DAL olurdu. `subtotal` anahtari
      sozlukte T ve AR'da ZATEN vardi, yalnizca cagirani yoktu. */
-  cartFoot.innerHTML='<div class="progress"><div class="ship-note">'+note+'</div><div class="progress-bar"><i style="width:'+pct+'%"></i></div></div>'+couponUI()+(_disc>0?'<div class="cart-line"><span>'+t('cp_discount')+' ('+coupon.code+')</span><span class="cp-minus">−'+tl(_disc)+'</span></div>':'')+'<div class="cart-total"><span>'+t('subtotal')+'</span><b>'+tl(_net)+'</b></div><button class="btn" id="checkoutBtn">'+t('cart_confirm')+'</button>'+
+  cartFoot.innerHTML='<div class="progress"><div class="ship-note">'+note+'</div><div class="progress-bar"><i style="width:'+pct+'%"></i></div></div>'+couponUI()+(_disc>0?'<div class="cart-line"><span>'+t('cp_discount')+' ('+esc(coupon.code)+')</span><span class="cp-minus">−'+tl(_disc)+'</span></div>':'')+'<div class="cart-total"><span>'+t('subtotal')+'</span><b>'+tl(_net)+'</b></div><button class="btn" id="checkoutBtn">'+t('cart_confirm')+'</button>'+
   /* GOZ-FIX / F-Ö5: sepeti tek hamlede bosaltma. Onay sorulur; hem YEREL hem SUNUCU
      sepeti temizlenir (sunucu tarafi api-bridge'in sagladigi kanca ile - yeni backend
      ucu ACILMADI, mevcut DELETE /api/cart/clear kullaniliyor). */
@@ -2964,7 +2997,7 @@ document.getElementById('curSelect').addEventListener('change',function(){setCur
 /* MOBIL MENU */
 var mob=document.createElement('div');
 mob.style.cssText='position:fixed;top:110px;left:0;right:0;background:var(--cream);border-bottom:1px solid var(--line);box-shadow:0 14px 30px rgba(60,45,35,.14);z-index:39;transform:translateY(-12px);opacity:0;visibility:hidden;transition:.2s;padding:8px 0';
-function renderMob(){mob.innerHTML=NAV.map(function(n){return '<a href="#/kategori/'+n.slug+'" style="display:block;padding:13px 28px;font-size:14px;color:#5f574f;border-bottom:1px solid #f0e8dd">'+t('cat_'+n.slug)+'</a>';}).join('');}
+function renderMob(){mob.innerHTML=NAV.map(function(n){return '<a href="#/kategori/'+esc(n.slug)+'" style="display:block;padding:13px 28px;font-size:14px;color:#5f574f;border-bottom:1px solid #f0e8dd">'+esc(t('cat_'+n.slug))+'</a>';}).join('');}
 renderMob();
 document.body.appendChild(mob);
 var mobOpen=false;
@@ -3034,7 +3067,7 @@ function renderCmpModal(){cmpTitleEl.textContent=t('cmp_title');var ps=compare.m
     +row(t('cmp_brand'),function(p){return esc(p.brand);},function(p){return p.brand;})
     +row(t('cmp_cat'),function(p){return t('cat_'+p.cat);},function(p){return p.cat;})
     +row(t('cmp_sizes'),function(p){return (p.sizes&&p.sizes.length)?p.sizes.join(' · '):t('free_one');},function(p){return (p.sizes&&p.sizes.length)?p.sizes.join(','):'';})
-    +row(t('cmp_color'),function(p){return '<span class="cmp-swatch" style="background:'+p.col+'"></span>'+esc(t('c_'+colorName(p.col)));},function(p){return p.col;})
+    +row(t('cmp_color'),function(p){return '<span class="cmp-swatch" style="background:'+guvenliRenk(p.col)+'"></span>'+esc(t('c_'+colorName(p.col)));},function(p){return p.col;})
     +row(t('cmp_stock'),function(p){var s=stockOf(p);if(s<=0)return '<span class="cmp-out">'+t('cmp_outstock')+'</span>';if(s<=5)return '<span class="cmp-low">'+t('cmp_lowstock')+'</span>';return '<span class="cmp-in">'+t('cmp_instock')+'</span>';},function(p){var s=stockOf(p);return s<=0?'out':(s<=5?'low':'in');})
     +row('',function(p){var sold=stockOf(p)<=0;return '<button class="cmp-add" type="button" '+(sold?'disabled':'')+' data-cmp-add="'+p.id+'">'+(sold?t('cmp_outstock'):t('cmp_add_cart'))+'</button>';});
   cmpBody.innerHTML='<div class="cmp-diff-bar"><label class="cmp-diff-tog"><input type="checkbox" id="cmpDiffChk"'+(od?' checked':'')+'><span class="cmp-tog-track"><span class="cmp-tog-dot"></span></span><span>'+t('cmp_only_diff')+'</span></label></div><table class="cmp-table'+(od?' only-diff':'')+(diffCount===0?' all-same':'')+'"><thead>'+head+'</thead><tbody>'+body+'</tbody></table><div class="cmp-diff-empty">'+t('cmp_all_same')+'</div>';

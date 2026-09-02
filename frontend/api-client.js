@@ -71,6 +71,17 @@
         if (token) localStorage.setItem("divisima_access_token", token);
         else localStorage.removeItem("divisima_access_token");
       } catch (_) {}
+      // ══ GF-2a / K8 - OTURUM BITTIGINDE SW'NIN API KOVASINI TEMIZLE ══════════════════
+      // Cikis TEK NOKTADAN gecmiyor (uc ayri yer jeton siliyor: bu metot, api-bridge
+      // logout sarmalayicisi, sifre sifirlama sonrasi). Ortak nokta BURASI: jeton
+      // null'lanmasi "oturum bitti"nin TEK guvenilir isaretidir. Kanca buraya konarak
+      // ucuncu bir cikis yolu acilmadan TUM yollar kapsaniyor.
+      if (!token) {
+        try {
+          if (navigator.serviceWorker && navigator.serviceWorker.controller)
+            navigator.serviceWorker.controller.postMessage({ type: "divisima-logout" });
+        } catch (_) {}
+      }
     }
     getAccessToken() { return this._accessToken; }
 
@@ -91,10 +102,43 @@
     // Göreli medya URL'ini API tabanına çöz. Backend Storage:PublicBaseUrl bosken
     // "/uploads/products/x.png" gibi GÖRELİ URL döndürüyor; storefront ayrı origin'de
     // çalıştığında bu kendi origin'ine çözülür ve 404 verir (E4a'da ölçüldü).
+    //
+    // ══ GF-2a / K3 (D-4) - SEMA ALLOWLIST'I POLITIKANIN TEK YERIDIR ═══════════════════
+    //
+    // OLCULEN ONCE-DURUM: bu metot `javascript:` semasini GECIRIYORDU. `p.image_url` API'den
+    // geliyor ve `mapProduct` (api-bridge.js:294) tam da buradan gecirip `img` alanina
+    // koyuyor; o alan `index.html`de ALTI ayri yerde `<img src="'+...+'">` icine KACISSIZ
+    // yaziliyor (1684 imgFill · 1686 media · 1687 thumb · 2124 · 2596 thumbC · 3122).
+    // Yani urun gorseli alanina `javascript:alert(1)` yazan bir admin/satici, vitrinde
+    // calisan kod elde ediyordu.
+    //
+    // NEDEN BURADA, RENDER KATMANINDA DEGIL: bu metot o ALTI yolun TEK ORTAK NOKTASIDIR.
+    // Politikayi render tarafina koymak ALTI KOPYA acardi - "ayni kuralin ikinci kopyasi"
+    // ailesi bu depoda YEDI KEZ bedeli odendi. Cagiran hicbir sey BILMEK ZORUNDA DEGIL.
+    //
+    // `data:` KABULU DARALTILDI, KALDIRILMADI (olculdu: `index.html:55` favicon'u fiilen
+    // `data:image/svg+xml;base64` kullaniyor ve urun gorsellerinde base64 kucuk resim
+    // mesru bir kalip). Yalniz RASTER GORUNTU tipleri ve yalniz `;base64` bicimi kabul
+    // edilir: `data:text/html` ve `data:image/svg+xml` REDDEDILIR - SVG icinde `<script>`
+    // calisir, yani o bir GORUNTU DEGIL KOD tasiyicisidir.
+    //
+    // PROTOKOL-GORELI (`//evil.com/x.png`) DE REDDEDILIR: eski kosul onu "mutlak URL" sayip
+    // gecirıyordu, oysa sayfa https ise saldirganin sunucusuna cikar.
+    //
+    // RED = BOS DIZGE. `null`/atma DEGIL: cagiranlar donen degeri dogrudan `src`e koyuyor;
+    // bos dizge kirik-gorsel ikonu gosterir, akisi DUSURMEZ (fail-closed ama fail-soft).
     resolveUrl(u) {
       u = String(u || "");
       if (!u) return "";
-      if (/^(https?:)?\/\//i.test(u) || /^data:/i.test(u)) return u;
+      // 1) MUTLAK http(s) - protokol-goreli "//" BILEREK DISARIDA
+      if (/^https?:\/\//i.test(u)) return u;
+      // 2) DAR data: - yalniz raster goruntu + base64 (SVG YOK: script tasir)
+      if (/^data:/i.test(u)) {
+        return /^data:image\/(png|jpeg|jpg|gif|webp);base64,/i.test(u) ? u : "";
+      }
+      // 3) Sema tasiyan her sey RED (javascript:, vbscript:, file:, //evil.com ...)
+      if (/^[a-z][a-z0-9+.-]*:/i.test(u) || u.startsWith("//")) return "";
+      // 4) GORELI yol - API tabanina cozulur
       return this.baseUrl.replace(/\/+$/, "") + (u.startsWith("/") ? u : "/" + u);
     }
     isLoggedIn() { return !!this._accessToken; }
@@ -176,37 +220,82 @@
     // AntiforgeryMiddleware devreye girer: "X-CSRF-Token" başlığı "csrf_token" cookie'siyle
     // eşleşmezse 403 gelir. Başlık bu yüzden burada AÇIKÇA ekleniyor - ortak _request yolundan
     // geçmediğimiz için otomatik eklenmiyor.
+    // ══ GF-2a / K10 (E-1) - SEKMELER ARASI TEK REFRESH ═══════════════════════════════
+    //
+    // OLCULEN ONCE-DURUM: alttaki `_refreshing` guard'i ORNEK (instance) BASINAYDI ve
+    // sekmeler arasi esgudum YOKTU - `BroadcastChannel` / `navigator.locks` /
+    // `storage` dinleyicisi / `SharedWorker` DORDU DE frontend agacinda 0 gecis
+    // (suzgec POZ/NEG sinandi). Oysa refresh cookie'si ve `divisima_access_token`
+    // AYNI ORIGIN'deki TUM sekmelerde PAYLASILIR.
+    //
+    // ZARAR (GF-1b/K4 ile birlesince): iki sekme ayni anda 401 alirsa AYNI refresh
+    // jetonu IKI KEZ sunulur; sunucu bunu YENIDEN KULLANIM sayar ve OTURUM ZINCIRININ
+    // TAMAMINI iptal eder - kullanici TUM CIHAZLARDAN cikar. Yani istemcinin esgudumsuzlugu
+    // sunucunun hirsizlik savunmasini kullaniciya karsi calistiriyordu.
+    // Gunluk tetikleyici hazirdi: `admin.html` ve `api-bridge.js` AYNI localStorage
+    // anahtarini kullaniyor, yani panel + vitrin ayni anda acikken.
+    //
+    // COZUM: `navigator.locks` ile ORIGIN GENELINDE tek kilit. Kilidi alan sekme refresh'i
+    // yapar, digerleri BEKLER ve kilit birakildiginda TAZE jetonu localStorage'dan okur -
+    // ikinci bir ag cagrisi YAPMAZ.
+    // FAIL-SAFE: `navigator.locks` desteklenmeyen tarayicida (Safari < 15.4, eski Firefox)
+    // mevcut ORNEK-ICI single-flight'a duser - davranis ESKISIYLE AYNI olur, KIRILMAZ.
     async _tryRefresh() {
       if (this._refreshing) return this._refreshing;
-      this._refreshing = (async () => {
-        try {
-          const headers = { "Accept": "application/json" };
-          const csrf = this._getCsrfToken();
-          if (csrf) headers["X-CSRF-Token"] = csrf;
-          const res = await fetch(this.baseUrl + "/api/auth/refresh", {
-            method: "POST",
-            headers,
-            credentials: "include",
-          });
-          if (!res.ok) { this.setAccessToken(null); this.setRefreshToken(null); return false; }
-          const data = await res.json();
-          const payload = (data && data.data) ? data.data : data;
-          const token = payload && (payload.token || payload.access_token);
-          if (token) {
-            this.setAccessToken(token);
-            // Rotasyon artik SUNUCU tarafinda: yeni refresh token cookie'ye yaziliyor,
-            // govdede gelmiyor. Istemcinin saklayacagi bir sey YOK.
-            return true;
-          }
-          return false;
-        } catch (_) {
-          this.setAccessToken(null);
-          return false;
-        } finally {
-          this._refreshing = null;
-        }
-      })();
+      if (typeof navigator !== "undefined" && navigator.locks && navigator.locks.request) {
+        // ONCE oku, SONRA kilidi iste: karsilastirma degeri kilidi BEKLEMEYE BASLAMADAN
+        // ONCEKI durumu temsil etmeli.
+        const oncekiToken = this._okuAccessToken();
+        this._refreshing = navigator.locks
+          .request("divisima-refresh", async () => {
+            // Kilidi BEKLERKEN baska bir sekme yenilemis olabilir. O durumda jeton
+            // depoda DEGISMIS olur; yeniden ag cagrisi YAPMADAN onu al.
+            const taze = this._okuAccessToken();
+            if (taze && taze !== oncekiToken) { this.setAccessToken(taze); return true; }
+            return this._refreshAgCagrisi();
+          })
+          .finally(() => { this._refreshing = null; });
+        return this._refreshing;
+      }
+      // KILITSIZ YOL (fail-safe): ayni AG GOVDESINI cagirir - ikinci bir kopya YOK.
+      this._refreshing = this._refreshAgCagrisi().finally(() => { this._refreshing = null; });
       return this._refreshing;
+    }
+
+    // Jetonu depodan OKU (bellekteki kopyayi DEGIL): kilidi bekleyen sekmenin, kilidi
+    // tutan sekmenin yazdigi TAZE degeri gorebilmesi icin gerekli.
+    _okuAccessToken() {
+      try { return localStorage.getItem("divisima_access_token"); } catch (_) { return null; }
+    }
+
+    // ══ REFRESH AG CAGRISI - TEK GOVDE ═══════════════════════════════════════════════
+    // Hem kilitli hem kilitsiz yol BURAYI cagirir. GF-2a'da kilit eklenirken bu govde
+    // KOPYALANMADI, CIKARILDI - "ayni kuralin ikinci kopyasi" ailesi (7 kez bedeli odendi).
+    async _refreshAgCagrisi() {
+      try {
+        const headers = { "Accept": "application/json" };
+        const csrf = this._getCsrfToken();
+        if (csrf) headers["X-CSRF-Token"] = csrf;
+        const res = await fetch(this.baseUrl + "/api/auth/refresh", {
+          method: "POST",
+          headers,
+          credentials: "include",
+        });
+        if (!res.ok) { this.setAccessToken(null); this.setRefreshToken(null); return false; }
+        const data = await res.json();
+        const payload = (data && data.data) ? data.data : data;
+        const token = payload && (payload.token || payload.access_token);
+        if (token) {
+          this.setAccessToken(token);
+          // Rotasyon artik SUNUCU tarafinda: yeni refresh token cookie'ye yaziliyor,
+          // govdede gelmiyor. Istemcinin saklayacagi bir sey YOK.
+          return true;
+        }
+        return false;
+      } catch (_) {
+        this.setAccessToken(null);
+        return false;
+      }
     }
 
     _get(p, o) { return this._request("GET", p, null, o); }

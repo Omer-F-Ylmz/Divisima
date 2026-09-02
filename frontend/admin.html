@@ -13,8 +13,18 @@
 <meta name="divisima-api-origin" content="http://localhost:5000">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Divisima Yönetim Paneli</title>
-<!-- SRI: yayına almadan önce jsdelivr SRI hash ekle (integrity="sha384-...") -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+<!-- ══ GF-2a / K9 (D-8) - SRI EKLENDI ══════════════════════════════════════════════════
+     Burada "yayina almadan once SRI ekle" TODO'su duruyordu; depodaki TEK uzak script
+     buydu ve gercek `integrity` sayisi SIFIRDI. Hash uzak dosyadan URETILDI:
+       curl -sS <url> | openssl dgst -sha384 -binary | openssl base64 -A
+     URL SURUME PINLI (`chart.js@4.4.1`) - jsdelivr surum yollari degismez, dolayisiyla
+     "CDN dosyasi degisirse sayfa kirilir" riski YOK.
+     GOOGLE FONTS'A SRI EKLENMEZ (index.html:66,:67): `css2` yaniti User-Agent'a gore
+     DEGISIR, sabit hash YOKTUR - eklemek SITEYI KIRAR. Bu KABUL EDILMIS RISK'tir ve
+     `font-src` allowlist'i GF-2b'nin isidir.                                          -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
+        integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4"
+        crossorigin="anonymous"></script>
 <style>
   :root{--bg:#faf8f5;--surface:#fff;--ink:#1a1a1a;--muted:#6b6b6b;--line:#e8e4de;--accent:#111;--ok:#0f6e56;--warn:#ba7517;--danger:#a32d2d;--radius:10px}
   *{box-sizing:border-box;margin:0;padding:0}
@@ -97,6 +107,16 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- ══ GF-2a / K1 (D-1) - PANELDE SANITIZER YOKTU ═══════════════════════════════════════
+     OLCULEN ONCE-DURUM: `admin.html` DOMPurify'i da `api-bridge.js`i de YUKLEMIYORDU
+     (grep: purify 0 · DOMPurify 0 · api-bridge 0), yani storefront'taki `guvenliHTML`
+     katmani panelde ERISILEBILIR DEGILDI. Panelin tek savunmasi kendi `esc()`i idi.
+     VENDOR KOPYASI ZATEN DEPODA (`frontend/vendor/purify.min.js`, DOMPurify 3.4.14) ve
+     nginx izin listesinde PINLI (`GuvenlikFix3SozlesmeTests`), CSP'si `'self'` -
+     dolayisiyla CDN'e YENI BAGIMLILIK ACILMADI ve CSP satirina DOKUNULMADI.
+     SIRA ONEMLI: purify `api-client.js`ten ve asagidaki satir ici bloktan ONCE gelir;
+     sonra gelseydi ilk cizimde fail-closed sarmalayici icerigi DUSURURDU.              -->
+<script src="/vendor/purify.min.js"></script>
 <script src="api-client.js"></script>
 <script>
 // ── Yapılandırma ── API adresini kendi ortamına göre değiştir
@@ -227,7 +247,7 @@ async function renderDashboard(el){
     </div>
     <div class="grid2">
       <div class="panel"><h3>En Çok Satan Ürünler</h3><table><thead><tr><th>Ürün</th><th>Adet</th><th>Ciro</th></tr></thead><tbody>
-        ${(top||[]).map(p=>`<tr><td>${p.product_name}</td><td>${p.total_quantity}</td><td>${money(p.total_revenue)}</td></tr>`).join("")||'<tr><td colspan=3 class=muted>Veri yok</td></tr>'}
+        ${(top||[]).map(p=>`<tr><td>${esc(p.product_name)}</td><td>${p.total_quantity}</td><td>${money(p.total_revenue)}</td></tr>`).join("")||'<tr><td colspan=3 class=muted>Veri yok</td></tr>'}
       </tbody></table></div>
       <div class="panel"><h3>Stok Uyarıları</h3><table><thead><tr><th>Ürün</th><th>Beden</th><th>Stok</th></tr></thead><tbody>
         ${(low||[]).map(s=>`<tr><td>${esc(s.product_name)}</td><td>${esc(s.size)}</td><td><span class="badge warn">${s.quantity}</span></td></tr>`).join("")||'<tr><td colspan=3 class=muted>Kritik stok yok</td></tr>'}
@@ -429,7 +449,7 @@ async function renderOrders(el){
       </div>
     </div>
     <div class="panel"><h3>Tüm Siparişler</h3><table><thead><tr><th>No</th><th>Müşteri</th><th>Tutar</th><th>Durum</th><th>Tarih</th></tr></thead><tbody>
-      ${orders.map(o=>{const st=ORDER_STATUS[o.status]||["?","muted"];return `<tr><td>${o.order_number||o.id}</td><td class=muted>#${o.customer_id}</td><td>${money(o.total_price)}</td><td><span class="badge ${st[1]}">${st[0]}</span></td><td class=muted>${new Date(o.created_at).toLocaleDateString("tr-TR")}</td></tr>`;}).join("")||'<tr><td colspan=5 class=muted>Sipariş yok</td></tr>'}
+      ${orders.map(o=>{const st=ORDER_STATUS[o.status]||["?","muted"];return `<tr><td>${esc(o.order_number||String(o.id))}</td><td class=muted>#${o.customer_id}</td><td>${money(o.total_price)}</td><td><span class="badge ${st[1]}">${st[0]}</span></td><td class=muted>${new Date(o.created_at).toLocaleDateString("tr-TR")}</td></tr>`;}).join("")||'<tr><td colspan=5 class=muted>Sipariş yok</td></tr>'}
     </tbody></table></div>`;
 }
 async function changeOrderStatus(){
@@ -445,7 +465,7 @@ async function renderReturns(el){
   const pending=unwrap(await api.admin.pendingReturns())||[];
   el.innerHTML=`<div class="topbar"><h2>Bekleyen İadeler (${pending.length})</h2><button class="btn ghost sm" onclick="render('returns')">↻</button></div>
     <div class="panel"><table><thead><tr><th>ID</th><th>Sipariş</th><th>Ürün</th><th>Adet</th><th>Tutar</th><th></th></tr></thead><tbody>
-      ${pending.map(r=>`<tr><td>${r.id}</td><td>${r.order_id}</td><td>${r.product_id} (${r.size})</td><td>${r.quantity}</td><td>${money(r.refund_amount)}</td>
+      ${pending.map(r=>`<tr><td>${r.id}</td><td>${r.order_id}</td><td>${r.product_id} (${esc(r.size)})</td><td>${r.quantity}</td><td>${money(r.refund_amount)}</td>
         <td class=row-actions><button class="btn ok sm" onclick="procReturn(${r.id},true)">Onayla</button><button class="btn danger sm" onclick="procReturn(${r.id},false)">Reddet</button></td></tr>`).join("")||'<tr><td colspan=6 class=muted>Bekleyen iade yok</td></tr>'}
     </tbody></table></div>`;
 }
@@ -604,6 +624,37 @@ let stockState = { productId: null, size: null, rows: [] };
 // HTML kaçışı - ürün adı/beden veritabanından geliyor, innerHTML'e girmeden önce nötrle.
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 
+// ══ GF-2a / K1 (D-1) - FAIL-CLOSED SANITIZE SARMALAYICI ════════════════════════════
+//
+// KAPSAM VE DURUST SINIR: bugun panelde SUNUCUDAN GELEN HTML CIZEN bir yuzey YOK -
+// 32 `innerHTML` yaziminin tamami sablon literali + `esc()`. Yani bu sarmalayici BUGUN
+// bir kusuru KAPATMIYOR; panele HTML cizen bir yuzey EKLENDIGINDE hazir olmasi ve
+// storefront'takiyle AYNI sozlesmeyi tasimasi icin konuyor. Raporda bu acikca yazildi -
+// "sarmalayici eklendi, cagiran yok" durumu GIZLENMIYOR.
+//
+// FAIL-CLOSED: purify yuklenmediyse `null` doner ve cagiran HAM HTML BASMAZ. Bu,
+// `api-bridge.js:2613 guvenliHTML` ile AYNI sozlesmedir - ikinci bir POLITIKA degil,
+// ayni politikanin panele tasinmis hali (panel `api-bridge.js`i yuklemiyor).
+function guvenliHTML(ham){
+  if (typeof window.DOMPurify === "undefined" || !window.DOMPurify.sanitize) {
+    console.error("DOMPurify yuklenmedi - HTML icerik CIZILMEDI (fail-closed).");
+    return null;
+  }
+  return window.DOMPurify.sanitize(ham || "", {
+    ALLOWED_TAGS: ["h1","h2","h3","h4","p","br","hr","strong","b","em","i","u",
+                   "ul","ol","li","a","span","div","table","thead","tbody","tr","th","td","small"],
+    ALLOWED_ATTR: ["href","title","colspan","rowspan","class"],
+    ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|tel:|#|\/)/i
+  });
+}
+// Cizim yardimcisi: null gelirse (purify yok) icerik YAZILMAZ, uyari metni yazilir.
+function guvenliYaz(el, ham){
+  const temiz = guvenliHTML(ham);
+  if (temiz === null) { el.textContent = "Icerik guvenlik dogrulamasindan gecemedi."; return false; }
+  el.innerHTML = temiz;
+  return true;
+}
+
 // Görsel URL'i API tabanına göre çöz. Backend, Storage:PublicBaseUrl boşken GÖRELİ URL
 // döndürüyor ("/uploads/products/x.png"). Panel API'den AYRI origin'de çalıştığında bu
 // göreli adres panelin kendi origin'ine çözülür ve 404 verir (ölçüldü: 5173 → 404).
@@ -655,8 +706,18 @@ async function loadStock(){
       ${rows.map(r=>`<tr><td><b>${esc(r.size)}</b></td><td>${r.stock_quantity}</td>
         <td class="${r.reserved_quantity>0?"warn":"muted"}">${r.reserved_quantity}</td>
         <td class="${r.available<=0?"danger":"ok"}"><b>${r.available}</b></td>
-        <td class=row-actions><button class="btn ghost sm" onclick="pickSize('${esc(r.size)}')">Düzelt</button></td></tr>`).join("")}
+        <td class=row-actions><button class="btn ghost sm" data-pick-size="${esc(r.size)}">Düzelt</button></td></tr>`).join("")}
     </tbody></table>`;
+    /* ══ GF-2a / SUPHE-2 - HTML KACISI JS BAGLAMINDA COZULUYORDU ═══════════════════════
+       ONCEKI HAL: onclick="pickSize('${esc(r.size)}')". `esc()` ' -> &#39; ceviriyordu ama
+       tarayici oznitelik degerini ONCE HTML-cozuyor, SONRA JS olarak calistiriyor: &#39;
+       yeniden ' oluyor ve tirnaktan CIKILIYOR. Kacis VARDI, BAGLAM YANLISTI.
+       COZUM: deger `data-*` niteliginde DURUYOR (orada HTML kacisi DOGRU baglamdir) ve
+       JS'e `dataset` uzerinden geciyor - hic ayristirilmiyor. Satir ici isleyici de
+       kalkiyor, bu GF-2b'nin CSP sokumune de hizmet eder. */
+    box.querySelectorAll("[data-pick-size]").forEach(function (b) {
+      b.addEventListener("click", function () { pickSize(b.dataset.pickSize); });
+    });
   }catch(e){
     // 403 = admin değil; ayırt edilebilir mesaj (401 "oturum yok" ile karıştırılmasın)
     box.innerHTML='<p class="muted">Stok okunamadı: '+esc(e.message||"hata")+'</p>';

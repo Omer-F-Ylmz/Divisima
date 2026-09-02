@@ -592,8 +592,12 @@
             : [{ slug: "tumu" }, { slug: "yeni" }, { slug: "indirim" }];
           var etiket = kutu.querySelector("span");
           kutu.innerHTML = (etiket ? etiket.outerHTML : "") + satir.map(function (n) {
-            return '<a href="#/kategori/' + n.slug + '">' +
-              (typeof window.t === "function" ? window.t("cat_" + n.slug) : n.label) + "</a>";
+            // GF-2a / KOK-6: `t("cat_*")` SABIT DEGIL - `kategoriEtiketiKaydet` (:465)
+            // veritabanindaki `c.name`i sozluge yaziyor, dolayisiyla bu cagri HAM DB METNI
+            // dondurur. Sozluge ve `kategoriEtiketiKaydet`e DOKUNULMADI (i18n dokunulmaz);
+            // kacis SINK'te yapiliyor. `n.slug` de DB kaynaklidir, nitelik icinde kacisli.
+            return '<a href="#/kategori/' + esc(n.slug) + '">' +
+              esc(typeof window.t === "function" ? window.t("cat_" + n.slug) : n.label) + "</a>";
           }).join("");
         } catch (e) { console.warn("Divisima: 404 kategori satiri tazelenemedi", e); }
       };
