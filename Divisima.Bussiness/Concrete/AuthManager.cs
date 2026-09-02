@@ -57,6 +57,8 @@ namespace Divisima.Bussiness.Concrete
         private readonly Divisima.Core.Security.JWT.IUserTokenRevocation _tokenRevocation;
         // GF-1b / K6: oturum satirina cihaz/IP yazmak icin (gerekce IssueSessionAndTokenAsync'te).
         private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor? _httpContextAccessor;
+        // GF-1b / F2: CAS yollarinda denetim izi (gerekce DenetimKaydiYazAsync'in basinda).
+        private readonly IAuditLogDal _auditLogDal;
         // Access token omru - iptal kaydinin TTL'i bundan turer (appsettings.json:8 ile AYNI).
         private const int AccessTokenOmruDk = 15;
 
@@ -69,10 +71,12 @@ namespace Divisima.Bussiness.Concrete
             IMailLinkBuilder links, Divisima.Bussiness.Outbox.IOutboxService outboxService,
             Divisima.Core.Security.JWT.ITokenBlacklist tokenBlacklist,
             Divisima.Core.Security.JWT.IUserTokenRevocation tokenRevocation,
+            IAuditLogDal auditLogDal,
             Microsoft.AspNetCore.Http.IHttpContextAccessor? httpContextAccessor = null)
         {
             _tokenBlacklist = tokenBlacklist;
             _tokenRevocation = tokenRevocation;
+            _auditLogDal = auditLogDal;
             _httpContextAccessor = httpContextAccessor;
             _outboxService = outboxService;
             _links = links;
@@ -547,22 +551,80 @@ namespace Divisima.Bussiness.Concrete
         // Ikisinin de yanIti AYNIDIR ve o yanit BURADA, TEK YERDE durur. Ilk K4 yaziminda
         // (b) icin satir ici bir kopya acilmisti; MK-4b denetcisi olcup yakaladi (ITIRAZ-2).
         //
-        // ALARM YALNIZ GERCEKTEN IPTAL VARSA - OLCUMLE EKLENDI.
-        // Ilk yazimda kosulsuz Critical yaziliyordu; pin "2 olay" buldu. Sebep: zincir
-        // iptal edildikten SONRA ayni musterinin HERHANGI bir jetonu artik pasif oldugu
-        // icin her yeni deneme "yeniden kullanim" gibi gorunuyor. Kosulsuz alarm, tekrar
-        // deneyen bir istemcide admin bildirimini SPAM'a cevirirdi ve gercek sinyal
-        // gurultuye gomulurdu. `kapatilan == 0` demek "zincir zaten olu" demektir: 401
-        // yine doner, ama YENI bir alarm URETILMEZ. Musteri tekrar giris yapip yeni bir
-        // aktif oturum acarsa, sonraki bir sizma yine ALARM URETIR.
-        private async Task<(HttpStatusCode, Result)> YenidenKullanimiIsleAsync(int customerId, string sebep)
+        // ══ GF-1b / F2 - CAS YOLLARINDA DENETIM KAYDI ELLE YAZILIR ════════════════════════
+        //
+        // OLCULEN ONCE-DURUM (MK-4b rapor denetcisi BULGU-3, kendi olcumumle dogrulandi):
+        // `AuditInterceptor` bir `SaveChangesInterceptor`tir ve `ChangeTracker.Entries()`
+        // uzerinden calisir. `ExecuteUpdateAsync` SaveChanges'i ATLAR - dolayisiyla bu
+        // dalganin actigi CAS yollari denetim izi BIRAKMIYORDU:
+        //   K10 basarili sifre sifirlama -> `audit_logs` satiri YOK (ve `security_events` de
+        //        YOKTU: `ResetPassword` olayi hic yazilmiyordu). Guvenlik acisindan EN
+        //        onemli olaylardan biri TAMAMEN IZSIZ kaliyordu.
+        //   K4 rotasyon kapatmasi        -> `audit_logs` satiri YOK
+        //   toplu oturum iptali          -> zaten yoktu (InvalidateAll ONCEDEN de ExecuteUpdate)
+        //
+        // COZUM YENI SOYUTLAMA ACMAZ: `IAuditLogDal` MEVCUT yazma API'sidir (`AddAsync`) ve
+        // `AuditInterceptor._ignored` ZATEN `AuditLog`u disliyor, yani bu yazim kendi kendini
+        // tetiklemez. Interceptor'a HIC dokunulmadi - o, tracked yazmalarda calismaya devam eder.
+        //
+        // `changes` alani JSON DEGIL duz aciklamadir: interceptor'in urettigi eski->yeni
+        // JSON'u burada TAKLIT etmek, CAS'in eski degeri OKUMADIGI gercegini gizlerdi.
+        // Kolon `nullable` ve serbest metin; okuyucu (AuditLogController) alani AYNEN gecirir.
+        //
+        // `action` KOLONU 20 KARAKTER (DivisimaDbContext.cs:620) - OLCULDU, TAHMIN EDILMEDI:
+        // ilk yazimda "session_chain_revoked" (21) kullanildi ve SQL Server
+        // "String or binary data would be truncated" ile DUSTU; K4B pini bunu yakaladi.
+        // Eylem adlari bu yuzden KISA tutulur ve asagida kirpma da vardir - sinir asilirsa
+        // denetim kaydi yazilamaz ve BUTUN AKIS duser (kayit yan etki degil, YOLUN PARCASI).
+        private const int EylemEnUzun = 20;
+
+        private async Task DenetimKaydiYazAsync(string tablo, int kayitId, string eylem, string aciklama)
+        {
+            await _auditLogDal.AddAsync(new AuditLog
+            {
+                table_name = tablo,
+                entity_id = kayitId.ToString(),
+                action = eylem.Length <= EylemEnUzun ? eylem : eylem.Substring(0, EylemEnUzun),
+                changes = aciklama,
+                user_id = kayitId.ToString(),
+                created_at = DateTime.Now
+            });
+        }
+
+        // ══ ALARM KOSULU IKI YOLDA FARKLIDIR - GF-1b/F1 (L3 DENETCISI OLCTU) ══════════════
+        //
+        // (a) PASIF JETON YOLU - alarm `kapatilan > 0` KOSULUNA baglidir. Gerekce OLCULDU:
+        //     zincir iptal edildikten SONRA o musterinin HER jetonu pasiftir, dolayisiyla
+        //     tekrar deneyen mesru bir istemci her seferinde "yeniden kullanim" gibi gorunur.
+        //     Kosulsuz alarm burada admin bildirimini SPAM'a cevirir ve gercek sinyali gomer.
+        //
+        // (b) CAS YARISI KAYBI YOLU - alarm KOSULSUZ yazilir. Gerekce: CAS'i kaybetmek,
+        //     "ayni jeton AYNI ANDA iki kez sunuldu"nun TEK BASINA KESIN kanitidir; tekrar
+        //     denemeyle uretilemez, dolayisiyla SPAM riski YOKTUR.
+        //     L3 DENETCISI OLCTU: kaybeden yol `InvalidateAllForCustomerAsync`i KAZANANIN yeni
+        //     oturumu INSERT edilmeden ONCE kosarsa etkilenen satir 0 olur; eski kosullu alarm
+        //     bu durumda HIC YAZILMIYORDU. Olculen sıklık: kapili duzenekte 23 turun 15'inde,
+        //     K4B deseninde 25 turun 19'unda. Yani hirsizlik sinyali TEK TURDA GARANTI DEGILDI.
+        //     Artik alarm HER ZAMAN yazilir - iptal sayisi kac olursa olsun.
+        //
+        // AILE IPTALI BEST-EFFORT'TUR (BILINEN, merkez karari): kaybeden kazananin INSERT'inden
+        // once kosarsa aile iptali O TURDA gecikir; kaybeden eski jetonla ikinci kez denedigin-
+        // de (a) yoluna duser ve zincir O ZAMAN kapanir. KALICI COZUM GF-3'e devredildi:
+        // rotasyon TEK DB TRANSACTION'i olacak (CAS + INSERT birlikte commit), boylece kaybeden
+        // CAS'i ancak commit SONRASI gorur ve supurme kazananin satirini DA kapsar.
+        private async Task<(HttpStatusCode, Result)> YenidenKullanimiIsleAsync(
+            int customerId, string sebep, bool alarmKosulsuz)
         {
             var kapatilan = await _userSessionDal.InvalidateAllForCustomerAsync(customerId);
-            if (kapatilan > 0)
+            if (alarmKosulsuz || kapatilan > 0)
             {
                 await _securityEvents.LogAsync("RefreshTokenReuse", "Critical", customerId, null, null,
                     $"{sebep} - oturum zinciri iptal edildi (kapatilan oturum: {kapatilan})");
             }
+            // GF-1b / F2: toplu iptal ExecuteUpdateAsync'tir, interceptor GORMEZ.
+            if (kapatilan > 0)
+                await DenetimKaydiYazAsync(nameof(UserSession), customerId, "chain_revoked",
+                    $"{sebep}; kapatilan oturum: {kapatilan}");
             return (HttpStatusCode.Unauthorized, new ErrorResult(Messages.RefreshTokenInvalid));
         }
 
@@ -578,7 +640,7 @@ namespace Divisima.Bussiness.Concrete
                 // YENIDEN KULLANIM: bu jeton daha once dondurulmus (ya da cikis yapilmis).
                 // Mesru istemci dondurulmus bir jetonu ASLA ikinci kez sunmaz - bu bir sizma isaretidir.
                 return await YenidenKullanimiIsleAsync(session.customer_id,
-                    "Dondurulmus refresh token yeniden sunuldu");
+                    "Dondurulmus refresh token yeniden sunuldu", alarmKosulsuz: false);
             }
 
             // Açıklayıcı yorum: Refresh token süresi dolmuş mu
@@ -617,7 +679,13 @@ namespace Divisima.Bussiness.Concrete
             var kapatildi = await _userSessionDal.DeactivateIfActiveAsync(session.id);
             if (kapatildi != 1)
                 return await YenidenKullanimiIsleAsync(session.customer_id,
-                    "Es zamanli refresh yarisi kaybedildi - ayni jeton iki kez sunuldu");
+                    "Es zamanli refresh yarisi kaybedildi - ayni jeton iki kez sunuldu",
+                    alarmKosulsuz: true);
+
+            // GF-1b / F2: rotasyon kapatmasi da CAS'tir (DeactivateIfActiveAsync ->
+            // ExecuteUpdateAsync), interceptor GORMEZ. Kapanan oturum kayda gecer.
+            await DenetimKaydiYazAsync(nameof(UserSession), session.id, "session_rotated",
+                $"refresh rotasyonu: oturum kapatildi (musteri: {session.customer_id})");
 
             // GF-1 / K3: ESKI oturumun giris ani YENI satira TASINIR - refresh step-up saatini
             // SIFIRLAMAZ. `null` (GF-1 oncesi acilmis oturum) ise IssueSession `simdi` kullanir,
@@ -783,7 +851,26 @@ namespace Divisima.Bussiness.Concrete
 
             // Açıklayıcı yorum: Şifre değişince mevcut tüm oturumları geçersiz kıl (çalınan token'ı öldür)
             // Tum aktif oturumlari TEK atomik sorgu ile kapat (foreach N+1 yerine - DRY + performans)
-            await _userSessionDal.InvalidateAllForCustomerAsync(customer.id);
+            var kapatilanOturum = await _userSessionDal.InvalidateAllForCustomerAsync(customer.id);
+
+            // ══ GF-1b / F3 - SIFIRLAMA DA BIR SIFRE DEGISIMIDIR ═══════════════════════════
+            //
+            // OLCULEN ONCE-DURUM: toplu access-token iptali uretimde IKI yerden cagriliyordu
+            // (AccountManager change-password ve AuthManager logout-all); SIFIRLAMA yolundan
+            // CAGRILMIYORDU. Oysa "sifremi unuttum" TAM DA hesabin ele gecirildigi supheli
+            // durumda kullanilan yoldur: ustteki satir REFRESH tarafini kapatiyor, ama
+            // saldirganin elindeki ACCESS token 15 dakikaya kadar CALISMAYA DEVAM ediyordu.
+            await _tokenRevocation.RevokeAllBeforeNowAsync(
+                (int)Divisima.Core.Utilities.Enums.UserTypeEnum.Customer, customer.id,
+                TimeSpan.FromMinutes(AccessTokenOmruDk));
+
+            // ══ GF-1b / F2 - CAS YOLUNDA DENETIM IZI ELLE YAZILIR ═════════════════════════
+            // Gerekce `DenetimKaydiYazAsync`in basinda.
+            await DenetimKaydiYazAsync(nameof(Customer), customer.id, "password_reset",
+                $"sifre sifirlama jetonuyla degistirildi; kapatilan oturum: {kapatilanOturum}");
+            await _securityEvents.LogAsync("ResetPassword", "Warning", customer.id, null, null,
+                $"Sifre sifirlama jetonuyla degistirildi - tum oturumlar kapatildi "
+                + $"({kapatilanOturum}) ve access token'lar iptal edildi");
 
             return (HttpStatusCode.OK, new SuccessResult(Messages.PasswordResetSuccess));
         }

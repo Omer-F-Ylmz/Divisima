@@ -317,7 +317,9 @@ namespace Divisima.IntegrationTests
                         customer_id = customerId,
                         refresh_token = Guid.NewGuid().ToString("N"),
                         device = $"cihaz-{i}",
-                        expires_at = DateTime.Now.AddDays(7),
+                        // GF-1b / F4: fikstur de TEK KAYNAKTAN turer - elle "7" yazilmaz,
+                        // yoksa uretim omru degistiginde bu satir SESSIZCE ayrisir.
+                        expires_at = DateTime.Now.AddDays(Divisima.Core.Security.Tokens.OturumOmru.RefreshGun),
                         is_active = true,
                         created_at = DateTime.Now
                     });

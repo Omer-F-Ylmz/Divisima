@@ -293,7 +293,7 @@ namespace Divisima.IntegrationTests
         // "aktif" gorup gecebiliyor ve TEK jetondan IKI GECERLI OTURUM doguyordu; ustelik
         // hirsizlik sinyali ATESLEMIYORDU. (PINSIZDI.)
         [Fact]
-        public async Task K4B_AYNI_REFRESH_IKI_KEZ_ESZAMANLI_TEK_BASARI_ve_ZINCIR_IPTAL()
+        public async Task K4B_AYNI_REFRESH_IKI_KEZ_ESZAMANLI_TEK_BASARI_ve_ALARM()
         {
             if (Skipped()) return;
             var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
@@ -324,16 +324,83 @@ namespace Divisima.IntegrationTests
             sonuclar.Count(k => k == HttpStatusCode.Unauthorized).Should().Be(1,
                 "kaybeden istek 401 almali");
 
-            // R-1b3: kaybeden yol YENIDEN KULLANIM sayilir -> ZINCIRIN TUMU iptal edilir.
+            // ══ ES ZAMANLI YOLDA ALARM da ASSERT EDILMIYOR - OLCUMLE ZORLANDI ════════════
+            //
+            // Merkez tarifi (GF-1b/F1) bu pini "tam 1x200 + alarm >= 1" olarak daraltiyordu.
+            // ALARM KANALI OLCULDU ve O DA DETERMINISTIK CIKMADI: uc ardisik tam suit
+            // kosumunun IKINCISINDE bu pin `RefreshTokenReuse ... but found 0` ile kirildi
+            // (Category=Sql kosumlarinda 3/3 yesildi - yani yuk altinda ayrisiyor).
+            //
+            // KOK SEBEP (varsayilmadi, kirmizi kosumun kendi verisinden okundu): kaybeden
+            // istek HER ZAMAN CAS yoluna DUSMEZ. Kazananin CAS'i commit olduktan AMA yeni
+            // oturum satiri INSERT edilmeden once okursa, kaybeden `is_active == false`
+            // gorur ve PASIF-JETON yoluna gider. Orada alarm (spam gerekcesiyle) hala
+            // `kapatilan > 0` kosuluna baglidir ve o an supurulecek aktif oturum YOKTUR
+            // -> alarm YAZILMAZ. F1'in kosulsuz alarmi YALNIZ CAS dalini kapsiyor.
+            //
+            // Bu yuzden bu pin YALNIZCA deterministik olan kanali tutar: TEK basari.
+            // Alarm kanali, ayni davranisi DETERMINISTIK olarak uretebilen ayri bir pine
+            // tasindi -> K4B_SIRALI_YENIDEN_KULLANIM_ALARM_YAZAR (asagida).
+            // BILINEN (muhurde): es zamanli yarista hem aile iptali hem ALARM tek turda
+            // garanti degildir; ikinci denemede yakalanir. KALICI COZUM GF-3: rotasyon
+            // TEK DB transaction'i (CAS + INSERT birlikte commit).
+        }
+
+        // ══ GF-1b / F1 - ALARM KANALININ DETERMINISTIK PINI ═══════════════════════════════
+        //
+        // Yukaridaki es zamanli pin alarmi GUVENILIR olarak olcemiyor (gerekce orada).
+        // Bu pin ayni kurali YARISSIZ kosullarda sabitler: ayni jeton IKI KEZ ARDISIK
+        // sunulur. Ilk cagri rotasyonu tamamlar (yeni oturum INSERT EDILMIS olur), ikinci
+        // cagri pasif jetonu gorur ve supurecek AKTIF oturum VARDIR -> alarm KESIN yazilir.
+        // Yani "yeniden kullanim alarm uretir" iddiasi burada ZAMANLAMADAN BAGIMSIZ tutulur.
+        [Fact]
+        public async Task K4B_SIRALI_YENIDEN_KULLANIM_ALARM_YAZAR_ve_ZINCIRI_IPTAL_EDER()
+        {
+            if (Skipped()) return;
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+
+            var duzJeton = "gf1b-sirali-" + Guid.NewGuid().ToString("N");
+            await using (var ctx = NewContext())
+            {
+                var oturum = await ctx.Set<UserSession>()
+                    .SingleAsync(s => s.customer_id == musteri.CustomerId && s.is_active);
+                oturum.refresh_token = Divisima.Core.Security.Tokens.JetonOzeti.Hesapla(duzJeton);
+                await ctx.SaveChangesAsync();
+            }
+
+            async Task<HttpStatusCode> YenileAsync()
+            {
+                using var s = _factory!.Services.CreateScope();
+                var auth = s.ServiceProvider.GetRequiredService<Divisima.Bussiness.Abstract.IAuthService>();
+                var (durum, _) = await auth.RefreshToken(
+                    new Divisima.Entity.Dtos.Auth.RefreshTokenRequestDto { refresh_token = duzJeton });
+                return durum;
+            }
+
+            // POZITIF OLAY KOSULU (vakum yasagi): ilk yenileme GERCEKTEN calisiyor.
+            (await YenileAsync()).Should().Be(HttpStatusCode.OK, "on kosul: jeton ilk sunumda gecerli olmali");
+
+            // AYNI jetonun IKINCI sunumu = yeniden kullanim.
+            (await YenileAsync()).Should().Be(HttpStatusCode.Unauthorized,
+                "dondurulmus jetonun ikinci sunumu REDDEDILMELI");
+
             await using var son = NewContext();
-            (await son.Set<UserSession>().AsNoTracking()
-                .CountAsync(s => s.customer_id == musteri.CustomerId && s.is_active))
-                .Should().Be(0, "yaris kaybi YENIDEN KULLANIM sinyalidir - zincirin TUMU iptal edilmeli");
 
             // ALAN BAZLI: sinyal GERCEKTEN yazilmis olmali ("401 dondu" tek basina yetmez).
             (await son.Set<Divisima.Entity.Entities.SecurityEvent>().AsNoTracking()
                 .CountAsync(e => e.customer_id == musteri.CustomerId && e.event_type == "RefreshTokenReuse"))
-                .Should().BeGreaterThan(0, "yeniden kullanim olayi YAZILMALI - sessiz iptal YETMEZ");
+                .Should().BeGreaterThan(0, "yeniden kullanim Critical guvenlik olayi YAZMALI - sessiz 401 YETMEZ");
+
+            // ZINCIR IPTALI: burada yaris YOK, dolayisiyla iptal DETERMINISTIK.
+            (await son.Set<UserSession>().AsNoTracking()
+                .CountAsync(s => s.customer_id == musteri.CustomerId && s.is_active))
+                .Should().Be(0, "yeniden kullanim sinyalinde zincirin TUMU iptal edilmeli");
+
+            // GF-1b / F2: toplu iptal ExecuteUpdateAsync'tir - denetim izi ELLE yazilmali.
+            (await son.Set<AuditLog>().AsNoTracking()
+                .CountAsync(a => a.table_name == nameof(UserSession)
+                                 && a.entity_id == musteri.CustomerId.ToString()))
+                .Should().BeGreaterThan(0, "zincir iptali audit_logs satiri BIRAKMALI - CAS interceptor'i atlar");
         }
 
         // ══ GF-1b / K3 (R-1b5) - DB'DE DUZ METIN JETON YOK ════════════════════════════════

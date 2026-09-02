@@ -280,6 +280,73 @@ namespace Divisima.IntegrationTests
                 .Should().Be(HttpStatusCode.BadRequest, "jeton yarisin ardindan TUKENMIS olmali");
         }
 
+        // ══ GF-1b / F2+F3 (R-1b9) - SIFIRLAMA IZ BIRAKIR ve ESKI JETONLARI OLDURUR ═══════
+        //
+        // OLCULEN ONCE-DURUM (ikisi de PINSIZDI):
+        //  (F2) Basarili sifirlama HICBIR denetim izi birakmiyordu. K10'un CAS'i
+        //       `ExecuteUpdateAsync` kullanir, o da `AuditInterceptor`in dayandigi
+        //       SaveChanges'i ATLAR -> `audit_logs` 0. Ustelik `ResetPassword` diye bir
+        //       `security_events` kaydi da HIC yazilmiyordu -> olay TAMAMEN IZSIZ.
+        //  (F3) Sifirlama `revoked_before` esigini YAZMIYORDU (change-password ve
+        //       logout-all yaziyordu). Yani "sifremi unuttum" ile hesabini geri alan
+        //       kullanicinin saldirgani, ELINDEKI ACCESS TOKEN ile 15 dakikaya kadar
+        //       ISLEM YAPMAYA DEVAM edebiliyordu.
+        [Fact]
+        public async Task R1b9_SIFIRLAMA_IZ_BIRAKIR_ve_ESKI_ACCESS_ile_REFRESHI_OLDURUR()
+        {
+            if (Skipped()) return;
+            var anon = _factory!.CreateClient();
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+
+            // POZITIF OLAY KOSULU (vakum yasagi): eski jeton sifirlamadan ONCE CALISIYOR.
+            (await musteri.Client.GetAsync("/api/Account/summary")).StatusCode
+                .Should().Be(HttpStatusCode.OK, "on kosul: access token sifirlamadan ONCE gecerli olmali");
+
+            int auditOnce, olayOnce;
+            await using (var ilk = NewContext())
+            {
+                auditOnce = await ilk.Set<AuditLog>().AsNoTracking()
+                    .CountAsync(a => a.entity_id == musteri.CustomerId.ToString());
+                olayOnce = await ilk.Set<SecurityEvent>().AsNoTracking()
+                    .CountAsync(e => e.customer_id == musteri.CustomerId && e.event_type == "ResetPassword");
+            }
+
+            // ══ AYNI-SANIYE JETON PENCERESI (BILINEN - K1B'de de birebir yasandi) ═══════
+            // `iat` claim'i SANIYE cozunurlukludur ve iptal kosulu KASITLI olarak
+            // `iat < esik` (strictly less). Jeton ile esik AYNI saniyeye duserse jeton
+            // iptal edilmez - bu bir kusur DEGIL, esigin kendi anini kapsamamasi icin
+            // bilincli secim. Testin butun adimlari milisaniyeler icinde kostugu icin
+            // bekleme ZORUNLU; olculdu: beklemesiz kosumda eski jeton 200 donuyor.
+            await Task.Delay(1100);
+
+            var jeton = await SifirlamaJetonuAlAsync(anon, musteri.Email);
+            const string yeniSifre = "SifirlamaSonrasi1!x";
+            (await anon.PostAsJsonAsync("/api/auth/reset-password",
+                new { token = jeton, new_password = yeniSifre })).StatusCode
+                .Should().Be(HttpStatusCode.OK, "sifirlama basarili olmali");
+
+            // ── F3: ESKI ACCESS TOKEN ARTIK REDDEDILIR ────────────────────────────────
+            (await musteri.Client.GetAsync("/api/Account/summary")).StatusCode
+                .Should().Be(HttpStatusCode.Unauthorized,
+                    "sifirlamadan SONRA eski access token REDDEDILMELI - once 200 doneriyordu");
+
+            // ── F2: IZ GERCEKTEN YAZILDI ("401 dondu" tek basina yetmez) ─────────────
+            await using var son = NewContext();
+            (await son.Set<AuditLog>().AsNoTracking()
+                .CountAsync(a => a.entity_id == musteri.CustomerId.ToString()))
+                .Should().BeGreaterThan(auditOnce,
+                    "basarili sifirlama audit_logs satiri BIRAKMALI - CAS interceptor'i atlar");
+            (await son.Set<SecurityEvent>().AsNoTracking()
+                .CountAsync(e => e.customer_id == musteri.CustomerId && e.event_type == "ResetPassword"))
+                .Should().BeGreaterThan(olayOnce,
+                    "basarili sifirlama ResetPassword guvenlik olayi YAZMALI - once HIC yazilmiyordu");
+
+            // ── CIFT-ANLAM KIRICI: yeni sifre GERCEKTEN gecerli (401 "hesap oldu" degil) ──
+            (await anon.PostAsJsonAsync("/api/auth/login",
+                new { email = musteri.Email, password = yeniSifre })).StatusCode
+                .Should().Be(HttpStatusCode.OK, "yeni sifreyle giris CALISMALI - hesap yasiyor");
+        }
+
 
         // ── P-H3) MANTIK-FIX-3 / K3 - SIFRE DEGISTIRME GERCEKTEN DEGISTIRIR ──────────
         //
