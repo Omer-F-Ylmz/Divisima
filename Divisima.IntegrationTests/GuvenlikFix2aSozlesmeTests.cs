@@ -240,6 +240,20 @@ namespace Divisima.IntegrationTests
             var meta = FonksiyonGovdesi(kaynak, "cartMeta");
             meta.Should().Contain("esc(String(it.size))", "sepet bedeni kacisli yazilmali");
             meta.Should().NotContain("' '+it.size)", "ham beden yazimi GERI GELMEMELI");
+
+            // ══ GF-2a / F1 - ckey NITELIK BAGLAMI (KOK-8'in son yarisi) ═══════════════
+            // `cart` bir Map (`var cart=new Map`), dolayisiyla `forEach(it,k)` DIZI INDEKSI
+            // DEGIL ANAHTAR verir; anahtar `ckey(id,size,color)` = `id|size|color` ve
+            // `size`/`color` DB kaynaklidir. Dort nitelik de bu dizgeyi HAM tasiyordu.
+            var sepet = FonksiyonGovdesi(kaynak, "renderCart");
+            foreach (var nitelik in new[] { "data-k", "data-dec", "data-inc", "data-rm" })
+                sepet.Should().Contain(nitelik + "=\"'+esc(k)+'\"",
+                    $"{nitelik} niteligi ckey'i KACISLI tasimali");
+            Sayim(KodSatirlari(sepet), "=\"'+k+'\"").Should().Be(0,
+                "ham ckey yazimi GERI GELMEMELI");
+            // Kokun kendisi: anahtar GERCEKTEN dis veri tasiyor mu (assert bos yere durmasin)
+            kaynak.Should().Contain("function ckey(id,size,color)",
+                "ckey dis veriden (size/color) kuruluyor - niteligin kacisi bu yuzden gerekli");
         }
 
         // ── KOK-6: KATEGORI ETIKETI SABIT DEGIL, VERITABANI METNI ───────────────────────
