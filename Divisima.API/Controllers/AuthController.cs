@@ -1,6 +1,7 @@
 using System.Net;
 using Divisima.Bussiness.Abstract;
 using Divisima.Core.Security.Authorization;
+using Divisima.Core.Security.Tokens;
 using Divisima.Core.Utilities.Enums;
 using Divisima.Core.Utilities.Results;
 using Divisima.Entity.Dtos.Auth;
@@ -214,10 +215,19 @@ namespace Divisima.API.Controllers
             var data = ok.Data;
             if (data == null || string.IsNullOrWhiteSpace(data.refresh_token)) return;
 
+            // ══ GF-1b / K5 (GF1-B6) - CEREZ OMRU = OTURUM OMRU ═══════════════════════════
+            //
             // Oturum omru: access token'in "expiration"i DEGIL - refresh token daha uzun yasar.
-            // UserSession kaydinin omruyle hizali olsun diye 30 gun (AuthManager'daki uretimle ayni
-            // mantik; cookie erken silinirse kullanici gereksiz yere cikis yapmis olur).
-            var expires = DateTime.UtcNow.AddDays(30);
+            //
+            // OLCULEN ONCE-DURUM: burada `AddDays(30)` yaziyordu ve YORUM "UserSession kaydinin
+            // omruyle hizali olsun diye" diyordu - oysa o kayit `RefreshTokenDays = 7` ile
+            // aciliyordu. Cerez, arkasindaki oturumdan 23 GUN DAHA UZUN yasiyordu: 8. gunden
+            // sonra tarayici hala gecerli gorunen bir cerez gonderiyor, sunucu 401 donuyordu.
+            // Yorum, kodun YAPMADIGI seyi anlatiyordu (bayat yorum, GF1-B6).
+            //
+            // ARTIK TEK KAYNAK: `OturumOmru.RefreshGun`. AuthManager de ayni sabiti kullanir,
+            // yani cerez ile `user_sessions.expires_at` AYNI ANDA biter.
+            var expires = DateTime.UtcNow.Add(OturumOmru.RefreshSuresi);
 
             Response.Cookies.Append(RefreshCookie, data.refresh_token, CerezSecenekleri(httpOnly: true, expires, RefreshPath));
 

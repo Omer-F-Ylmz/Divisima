@@ -325,5 +325,97 @@ namespace Divisima.IntegrationTests
                 "URETIMDE Secure ZORUNLU - cookie duz HTTP uzerinden gonderilmemeli");
             prodCookie.ToLowerInvariant().Should().Contain("httponly");
         }
+
+        // ══ GF-1b / K5 (GF1-B6) - CEREZ OMRU ile OTURUM OMRU AYNI ANDA BITER ══════════════
+        //
+        // OLCULEN ONCE-DURUM (pinsizdi): cerez `AddDays(30)`, oturum satiri `AddDays(7)`.
+        // Cerez, arkasindaki oturumdan **23 GUN** daha uzun yasiyordu; 8. gunden sonra
+        // tarayici hala gecerli gorunen bir cerez gonderiyor, sunucu 401 donuyordu.
+        //
+        // AYIRT EDICILIK: assert SURE FARKINA bakar, sabit bir gun sayisina degil - yani
+        // ikisi birlikte degistirilirse yesil kalir (dogru davranis), AYRISIRSA kirmizi olur.
+        // Ayrica 23 gunluk eski sapmanin geri gelmesini yakalayan UST SINIR da var.
+        [Fact]
+        [Trait("Category", "Sql")]
+        public async Task K5B_CEREZ_OMRU_OTURUM_OMRUYLE_AYNI_ANDA_BITER()
+        {
+            if (Skipped()) return;
+
+            var utcOnce = DateTime.UtcNow;
+            var yerelOnce = DateTime.Now;
+            var (login, customerId) = await GirisYapAsync(_factory!);
+            login.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            var satir = CerezSatiri(login, "refresh_token");
+            satir.Should().NotBeNull("login refresh cerezi yazmali");
+
+            // Set-Cookie'deki Expires RFC 1123 (GMT) bicimindedir.
+            var expiresParca = satir!.Split(';')
+                .Select(p => p.Trim())
+                .FirstOrDefault(p => p.StartsWith("expires=", StringComparison.OrdinalIgnoreCase));
+            expiresParca.Should().NotBeNull("cerez KALICI olmali - Expires tasimali");
+            DateTime.TryParse(expiresParca!.Substring("expires=".Length),
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AdjustToUniversal
+                    | System.Globalization.DateTimeStyles.AssumeUniversal,
+                out var cerezBitis).Should().BeTrue("Expires cozumlenebilmeli: " + expiresParca);
+
+            await using var ctx = NewContext();
+            var oturum = await ctx.Set<UserSession>().AsNoTracking()
+                .Where(s => s.customer_id == customerId && s.is_active)
+                .OrderByDescending(s => s.id).FirstAsync();
+
+            var cerezOmru = cerezBitis - utcOnce;
+            var oturumOmru = oturum.expires_at - yerelOnce;
+
+            // 1) IKISI AYNI: fark bir saatten kucuk olmali (ayni sabitten turuyorlar).
+            Math.Abs((cerezOmru - oturumOmru).TotalHours).Should().BeLessThan(1,
+                $"cerez ({cerezOmru.TotalDays:F2} gun) ve oturum ({oturumOmru.TotalDays:F2} gun) "
+                + "AYNI ANDA bitmeli - ikisi tek sabitten turer");
+
+            // 2) ESKI SAPMA GERI GELMESIN: 30 gunluk cerez ile 7 gunluk oturum arasindaki
+            //    23 gunluk pencere bu ust sinirla kapaniyor.
+            cerezOmru.TotalDays.Should().BeLessThan(oturumOmru.TotalDays + 1,
+                "cerez, arkasindaki oturumdan UZUN yasamamali");
+        }
+
+        // ══ GF-1b / K6 (GF1-B7) - OTURUM SATIRI CIHAZ ve IP TASIR ═════════════════════════
+        //
+        // OLCULEN ONCE-DURUM (pinsizdi): `device` ve `ip_address` kolonlari SEMADA vardi ama
+        // hicbir uretim yolu yazmiyordu - K4'un atesledigi `RefreshTokenReuse` KRITIK olayinda
+        // "hangi cihaz / hangi IP" sorusu YANITSIZ kaliyordu.
+        [Fact]
+        [Trait("Category", "Sql")]
+        public async Task K6B_OTURUM_SATIRI_CIHAZ_ve_IP_TASIR()
+        {
+            if (Skipped()) return;
+
+            var anon = HamIstemci(_factory!);
+            var user = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+
+            const string kurguAjan = "GF1bK6-Olcum-Tarayicisi/1.0";
+            var istek = new HttpRequestMessage(HttpMethod.Post, "/api/auth/login")
+            {
+                Content = JsonContent.Create(new { email = user.Email, password = TestAuthHelper.TestPassword })
+            };
+            istek.Headers.TryAddWithoutValidation("User-Agent", kurguAjan);
+            var login = await anon.SendAsync(istek);
+            login.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            await using var ctx = NewContext();
+            var oturum = await ctx.Set<UserSession>().AsNoTracking()
+                .Where(s => s.customer_id == user.CustomerId && s.is_active)
+                .OrderByDescending(s => s.id).FirstAsync();
+
+            // ALAN BAZLI (MK-6 dersi): "null degil" YETMEZ - GONDERDIGIMIZ deger yazilmali.
+            oturum.device.Should().Be(kurguAjan,
+                "oturum satiri istegin User-Agent'ini TASIMALI");
+
+            // IP: test sunucusunda RemoteIpAddress uretilmeyebilir (Program.cs:361'de KAYITLI
+            // ortam gercegi). Bu yuzden burada DEGER degil, KOLONUN BESLENDIGI YOL pinlenir:
+            // uretimde ayni ifadeden gelir. Deger varsa kolon sinirini asmamali.
+            (oturum.ip_address == null || oturum.ip_address.Length <= 64).Should().BeTrue(
+                "ip_address kolonu 64 karakter - kirpilmadan yazilirsa insert 500 uretir");
+        }
     }
 }

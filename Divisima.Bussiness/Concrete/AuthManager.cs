@@ -55,6 +55,8 @@ namespace Divisima.Bussiness.Concrete
         private readonly Divisima.Core.Security.JWT.ITokenBlacklist _tokenBlacklist;
         // GF-1b / K1: "tum cihazlardan cik" dalinda toplu iptal esigini yazar.
         private readonly Divisima.Core.Security.JWT.IUserTokenRevocation _tokenRevocation;
+        // GF-1b / K6: oturum satirina cihaz/IP yazmak icin (gerekce IssueSessionAndTokenAsync'te).
+        private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor? _httpContextAccessor;
         // Access token omru - iptal kaydinin TTL'i bundan turer (appsettings.json:8 ile AYNI).
         private const int AccessTokenOmruDk = 15;
 
@@ -66,10 +68,12 @@ namespace Divisima.Bussiness.Concrete
             IReferralService referralService, IConsentRecordDal consentDal,
             IMailLinkBuilder links, Divisima.Bussiness.Outbox.IOutboxService outboxService,
             Divisima.Core.Security.JWT.ITokenBlacklist tokenBlacklist,
-            Divisima.Core.Security.JWT.IUserTokenRevocation tokenRevocation)
+            Divisima.Core.Security.JWT.IUserTokenRevocation tokenRevocation,
+            Microsoft.AspNetCore.Http.IHttpContextAccessor? httpContextAccessor = null)
         {
             _tokenBlacklist = tokenBlacklist;
             _tokenRevocation = tokenRevocation;
+            _httpContextAccessor = httpContextAccessor;
             _outboxService = outboxService;
             _links = links;
             _referralService = referralService;
@@ -393,7 +397,9 @@ namespace Divisima.Bussiness.Concrete
         // Açıklayıcı yorum: MERKEZİ oturum+token üretimi (login / 2FA-doğrulama / refresh HEPSİ buradan - DRY).
         // JWT + kriptografik refresh_token üretir, oturumu KAYDEDER (refresh_token + refresh penceresi expiry), response döner.
         // Önceden 3 yerde tekrarlanıyordu ve refresh_token HİÇ set edilmiyordu (refresh mekanizması ölüydü).
-        private const int RefreshTokenDays = 7;
+        // GF-1b / K5: deger artik BURADA DEGIL - `OturumOmru.RefreshGun` tek kaynaktir ve
+        // refresh cerezinin omru de ORADAN turer (ikisi 7 / 30 diye AYRISIYORDU).
+        private const int RefreshTokenDays = OturumOmru.RefreshGun;
         // ══ GF-1 / K3 (C-2) - `devralinanAuthTime` ═════════════════════════════════════════
         //
         // Bu helper UC yolu birden besliyor: login, 2FA dogrulamasi ve REFRESH ROTASYONU.
@@ -426,6 +432,52 @@ namespace Divisima.Bussiness.Concrete
         // DOGRULAMADIR), refresh `session.auth_time` gecer (NULL olabilir = bilinmiyor).
         private static readonly DateTime BilinmeyenAuthTime = DateTime.UnixEpoch;
 
+        // ══ GF-1b / K6 (GF1-B7) - OTURUM SATIRI ARTIK KIMIN/NEREDEN OLDUGUNU TASIYOR ═══════
+        //
+        // OLCULEN ONCE-DURUM: `user_sessions.device` (nvarchar 200) ve `ip_address` (nvarchar 64)
+        // kolonlari SEMADA VARDI, migration'da VARDI, DbContext'te esleniyordu - ama HICBIR
+        // uretim yolu bu alanlara YAZMIYORDU (grep: tek yazan yer bir TEST fiksturuydu).
+        // Sonuc: "cihazlarim" turu bir ekran yapilamiyordu ve daha onemlisi, GF-1b/K4'un
+        // atesledigi `RefreshTokenReuse` KRITIK olayinda "hangi cihaz/IP" sorusu
+        // YANITSIZ kaliyordu - hirsizlik sinyali var, izi YOK.
+        //
+        // NEDEN IMZA DEGISMEDI: `IssueSessionAndTokenAsync` UC yolu birden besliyor ve GF-1/K3
+        // pini cagri bicimlerini KAYNAK duzeyinde tariyor. Degerleri parametreye tasimak o
+        // pinleri kirardi ve uc cagri yerinde AYNI okumanin UC KOPYASINI acardi. Bunun yerine
+        // deger, ZATEN kayitli olan `IHttpContextAccessor`dan TEK YERDE okunuyor.
+        //
+        // SINIR NOTU (bilincli): GF-1/K2'de "is katmani HTTP baglamini GORMEZ" siniri yazildi
+        // ve `jti`/`exp` controller'dan PARAMETRE olarak gecirildi. Burada aksi yapildi cunku
+        // (a) imza pinlerini kirmamak, (b) uc cagri yerinde kopya acmamak gerekiyordu; ayrica
+        // ayni kalip `AuditInterceptor`da (Divisima.Dal) ZATEN kullaniliyor. Bagimlilik
+        // TEK METODLA sinirli ve HttpContext YOKSA (arka plan isi, birim testi) alanlar
+        // sessizce null kalir - akis BOZULMAZ.
+        //
+        // MASKELEME/SINIR: user-agent DB kolonu 200, IP kolonu 64 karakter. Uzun degerler
+        // KIRPILIR - kirpmadan yazmak EF tarafinda insert-time 500 uretirdi (`guest_name`
+        // ailesinin ayni tuzagi). PII notu: ikisi de zaten `security_events` tablosunda
+        // TUTULUYOR; yeni bir veri sinifi ACILMIYOR.
+        private const int CihazEnUzun = 200;
+        private const int IpEnUzun = 64;
+
+        private string? KisaltUserAgent()
+        {
+            var ham = _httpContextAccessor?.HttpContext?.Request?.Headers["User-Agent"].ToString();
+            if (string.IsNullOrWhiteSpace(ham)) return null;
+            return ham.Length <= CihazEnUzun ? ham : ham.Substring(0, CihazEnUzun);
+        }
+
+        // X-Forwarded-For BURADA OKUNMAZ: `Program.cs` ForwardedHeaders middleware'i YALNIZ
+        // bilinen proxy'lerden gelen basligi kabul edip `RemoteIpAddress`i ZATEN duzeltiyor
+        // (spoofing engeli orada, tek yerde). Basligi burada ikinci kez okumak o korumayi
+        // ATLAR ve saldirganin yazdigi degeri DB'ye gecirirdi.
+        private string? IstemciIp()
+        {
+            var ham = _httpContextAccessor?.HttpContext?.Connection?.RemoteIpAddress?.ToString();
+            if (string.IsNullOrWhiteSpace(ham)) return null;
+            return ham.Length <= IpEnUzun ? ham : ham.Substring(0, IpEnUzun);
+        }
+
         private async Task<CustomerLoginResponseDto> IssueSessionAndTokenAsync(Customer customer,
             DateTime? authTime)
         {
@@ -440,7 +492,10 @@ namespace Divisima.Bussiness.Concrete
                 expires_at = DateTime.Now.AddDays(RefreshTokenDays),
                 is_active = true,
                 created_at = DateTime.Now,
-                auth_time = authTime
+                auth_time = authTime,
+                // GF-1b / K6 (GF1-B7): bu iki kolon VARDI ama HICBIR uretim yolu YAZMIYORDU.
+                device = KisaltUserAgent(),
+                ip_address = IstemciIp()
             });
             return new CustomerLoginResponseDto
             {

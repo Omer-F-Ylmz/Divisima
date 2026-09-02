@@ -64,12 +64,25 @@ namespace Divisima.Core.Security.RateLimiting
         //
         // OLCULEN ONCE-DURUM: limitler D5'te tek kaynaga indirilmisti ama YOL -> KOVA ESLESMESI
         // IKI AYRI EL YAZMASIYDI: (a) asagidaki `KapsamSec` dort alt-dizgesi (Redis yolu),
-        // (b) controller'lardaki [EnableRateLimiting] oznitelikleri (yerlesik yol, 6 dosya 9 yer).
+        // (b) controller'lardaki [EnableRateLimiting] oznitelikleri (yerlesik yol).
         // Ayrisan uclar (oznitelikte "auth", KapsamSec'te "global"): guest-checkout/place,
         // price-drop/subscribe|unsubscribe, stocknotification/subscribe|unsubscribe,
         // seller/auth/login|register, auth/reset-password|resend-verification|verify-2fa|
         // logout|refresh. Etkin limit min(10,100)=10 oldugu icin GOZLEMLENEBILIR SONUC AYNIYDI;
         // ayrisan sey kovanin PAYLASIMIYDI.
+        //
+        // ══ GF-1b / K9 (GF1-B12) - BU YORUMUN SAYISI BAYATLAMISTI ═════════════════════════
+        // Yukarida "6 dosya 9 yer" yaziyordu; o gun DOGRUYDU ama SAYI SABITLENDIGI icin
+        // kodla birlikte YASLANDI. Bugun OLCULDU (`grep -rn "^[[:space:]]*\[EnableRateLimiting("
+        // Divisima.API/`): **7 dosya, 9 yer**. Ikisi birden degisti - PaymentController'daki
+        // UC action-duzeyi oznitelik SINIF duzeyinde TEKE indirildi (-2) ve GF-1b/K2
+        // AccountController'a `account/change-password` icin BIR tane ekledi (+1), yani dosya
+        // sayisi 6'dan 7'ye cikti, yer sayisi 9'da KALDI - toplam ayni oldugu icin fark
+        // "toplama bakan" bir okuyucuya GORUNMEZDI.
+        // `account/change-password` da yukaridaki AYRISAN UCLAR listesine girer: oznitelikte
+        // "auth", `KapsamSec`te "global" (asagidaki dort alt-dizgeden hicbiri eslesmiyor).
+        // DERS: yoruma SAYI yazilacaksa URETEN IFADESIYLE yazilir (MK-3); aksi halde yorum,
+        // kodun bugun YAPMADIGI seyi anlatir hale gelir.
         //
         // COZUM: OZNITELIK TEK KAYNAK. Middleware kovayi ONCE endpoint metadata'sindaki
         // EnableRateLimitingAttribute.PolicyName'den alir; metadata YOKSA `KapsamSec` YEDEK
