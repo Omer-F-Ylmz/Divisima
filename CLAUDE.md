@@ -84,6 +84,10 @@ Kurallar kullanici tarafindan konulmustur; asistan bunlari kendi basina gevsetem
 - Run izleme **SHA bazlidir** (`head_sha=` ya da `?branch=main` + SHA eslesmesi).
   "En son run" ile calisilmaz — Dependabot kosulari araya girer ve yanlis run raporlanir.
 
+**RIG NOTU (46·GUVENLIK-FIX-2a):** `goz1` statik sunucusu `curl -I` (HEAD) istegini
+kaldiramiyor - baglantiyi resetliyor ve ayni zincirdeki sonraki istek de baglanamiyor.
+**`curl -I` KULLANILMAZ**, `curl -s -o /dev/null -w '%{http_code}'` ile GET yapilir.
+
 ### Izleyici adabi (GitHub API kotasi)
 
 Anonim GitHub API kotasi **60 istek/saat**. Izleyici bunu yakarsa hicbir kanit
@@ -388,6 +392,12 @@ kırılanlar ikisinde de aynı: `Divisima.IntegrationTests.OrderEndpointTests.Pl
 `Divisima.IntegrationTests.OrderEndpointTests.PlaceOrder_ValidCart_Returns`); isimsiz
 338/339 flake tekrarlamadı — paylaşılan test-DB açıklamasıyla TUTARLI gözlem, kanıt değil.
 
+**EK (46·GUVENLIK-FIX-2a):** worktree sokumu ajanin TAMAMLANMA SINYALIYLE yapilir, ARA
+RAPORLA degil. Gerekce OLCULDU: L3 denetcisi ilk raporunu verdikten SONRA da calisiyordu;
+worktree sokulunce dizini altindan kayboldu. Sonuc etkilenmedi (olcumler sokumden onceydi)
+ama servis edilen dosyalarin md5 kimligi IKINCI kez dogrulanamadi. "Rapor verdi" ile
+"BITTI" AYNI SEY DEGILDIR.
+
 
 ## MK-5
 
@@ -399,6 +409,12 @@ kesintisinde ajan cikti dosyalarinin **13/13'u 0 bayt** cikti (negatif kontrol: 
 `b*.output` 842 KB'a kadar dolu) ve alti defter satiri DAYANAKSIZ kaldi; MFIX-3b'nin MK-4
 turunda **AYNI olgu** yasanmisti. Rapor "yalnizca konusma baglaminda" var olursa defterin
 HAM/SHA butunlugu YAPISAL OLARAK saglanamaz.
+
+**EK (46·GUVENLIK-FIX-2a, denetci onerisi):** ajan HAM dosyasi ve denetci raporu OTURUM
+SCRATCHPAD'INE yazilir, **ASLA worktree ICINE**. Gerekce OLCULDU: worktree'nin icine yazilan
+denetci raporu, worktree sokulunce ONUNLA BIRLIKTE GITTI ve yeniden yazilmak zorunda kaldi.
+Kanit loglari scratchpad'de oldugu icin KURTULDU - rapor kurtulmadi. Omru olculen seye BAGLI
+bir yere kanit yazilmaz.
 
 ## MK-6
 
@@ -784,6 +800,16 @@ ham yanit dokumlerinin DISKE yazilmasi kapsanmadi -> dokuz dosyada ciplak canli 
 Ajanin KENDI kapanis iddiasi "jetonlar ilk 8 karaktere kirpildi" diyordu ve **CURUK** cikti
 — turun TEK curuyen kalemi bir bulgu degil, bir KAPANIS IDDIASIYDI.
 
+## Iki ders — GUVENLIK-FIX-2a (46·GUVENLIK-FIX-2a · HATA KAYDI)
+
+**AV-1 sink sayimi ESLESME BICIMI kusuru tasiyordu: atama isareti SATIR SONUNDA biten 14
+sink GORUNMUYORDU** (`innerHTML[[:space:]]*[+]?=[^=]` -> `([^=]|$)`; index +2 · bridge +12,
+131 -> 145 satir / 155 olay). AV-1 yanlis saymadi, IFADE eksikti.
+
+**RUNTIME SOZLUK = DB METNI: `t('cat_*')` ciktisi SINK'te kacirilir.**
+`kategoriEtiketiKaydet` DB'deki `c.name`i sozluge yaziyor; kaynak okuyana "sozluk = SABIT"
+gorunuyor, DEGIL. Sozluge DOKUNULMAZ (i18n), kacis sink tarafinda yapilir.
+
 ## Iki ders — GUVENLIK-FIX-1b (45·GUVENLIK-FIX-1b · HATA KAYDI)
 
 **`ExecuteUpdateAsync` `AuditInterceptor`i ATLAR; CAS yolunda denetim kaydi ELLE yazilir.**
@@ -826,6 +852,11 @@ DB'ye YALNIZ OKUMA yapildi. MAX musteri **169** BIREBIR kaldi; `user_sessions` *
 (K3 geriye donuk ozetleme YAPMADI, bu satirlar fiilen OLU oturum - `45·GUVENLIK-FIX-1b`).
 Suit tabani `45·GUVENLIK-FIX-1b` kapanisinda **Sql 378/378 · tam 641/644** (3 kirmizi =
 bilinen Docker uclusu); ureten ifade `dotnet test ... --filter "Category=Sql"` ve filtresiz.
+**GF-2a HICBIR KURGU KAYDI URETMEDI** (olculdu: `email LIKE 'gf2a%'` 0 · `name LIKE '%GF2A%'
+COLLATE Latin1_General_BIN2` 0). Olcumler tarayicida SENTETIK girdilerle yapildi, DB'ye
+YAZILMADI. MAX'lar BIREBIR: musteri **169** · urun **955** · siparis **286** ·
+`user_sessions` **342** · Pending(status=0, id<=210) **35/3837**.
+Suit tabani `46·GUVENLIK-FIX-2a` kapanisinda **Sql 378/378 · tam 651/654** (+10 pin).
 
 **TEK YAZMA - URETIM YOLUNDAN:** K2 kanitini almak icin musteri 102'nin
 (`mfix1.once@example.com`, MANTIK-FIX-1 kurgusu) sifresi **uretim yolundan** sifirlandi:
@@ -909,6 +940,11 @@ yalniz somut gerekceyle bakilir.
 - `45·GUVENLIK-FIX-1b·K5` **Refresh cerezi ile oturum satiri AYNI ANDA biter**: ikisi de `OturumOmru.RefreshGun` (7) tek kaynagindan turer; onceki hal cerez 30 / oturum 7 idi ve cerez 23 GUN fazla yasiyordu.
 - `45·GUVENLIK-FIX-1b·F1` **Yeniden kullanim alarmi CAS yolunda KOSULSUZ, pasif-jeton yolunda KOSULLU**: yaris kaybi tekrar denemeyle uretilemez (spam riski yok), pasif jeton uretilebilir (spam riski var). **Aile iptali BEST-EFFORT** - es zamanli yarista tek turda garanti degil, kalici cozum GF-3 (rotasyon tek transaction).
 - `45·GUVENLIK-FIX-1b·GF1-B9` **CURUDU**: "step-up `auth_time` refresh'te sifirlaniyor" bulgusu GF-1/K3 ile ZATEN kapanmisti; GF-1b'de yeniden acilmadi.
+- `46·GUVENLIK-FIX-2a·K3` **URL sema politikasi TEK YERDE (`api-client.js resolveUrl`)**: `http(s)://` ve GORELI yol KABUL · `data:image/(png|jpeg|jpg|gif|webp);base64,` KABUL · diger TUM semalar ve PROTOKOL-GORELI `//` **RED = bos dize**. `data:image/svg+xml` REDDEDILIR (SVG goruntu degil, script tasiyabilen BELGEDIR). Render katmaninda IKINCI KOPYA ACILMAZ - alti `<img src>` yolu buradan gecer.
+- `46·GUVENLIK-FIX-2a·K4` **Renk allowlist'i RENDER tarafinda `[0-9a-fA-F]{3,4,6,8}`**; backend `ProductAddRequestValidator` `{6,8}` kabul eder. KARAKTER SINIFI ayni, UZUNLUK kumesi **BILINCLI DAHA GENIS**: `ProductUpdateRequestValidator` YOK ve CSV yolu dogrulamiyor, yani 3/4 haneli hex DB'ye girebilir ve o GECERLI CSS'tir - render'da reddetmek CALISAN gorunumu bozardi.
+- `46·GUVENLIK-FIX-2a·K8` **Service worker IKI KOVA**: kabuk (`divisima-shell-*`) ve API (`divisima-api-*`). `/api/` **NETWORK-ONLY** - Cache Storage API sunucunun `no-store` basligini UYGULAMAZ, yani onbellekleme kimlikli yaniti diske dusururdu. Cikista YALNIZ api kovasi silinir; offline acilis SURER.
+- `46·GUVENLIK-FIX-2a·K10` **Refresh sekmeler arasi TEK**: `navigator.locks` ile origin genelinde kilit; desteklenmeyen tarayicida ornek-ici single-flight'a duser (FAIL-SAFE). Gerekce: iki sekme ayni refresh jetonunu sunarsa GF-1b/K4 yeniden-kullanim sinyali TUM oturumlari iptal eder.
+- `46·GUVENLIK-FIX-2a·K9` **Google Fonts'a SRI EKLENMEZ (KABUL EDILMIS RISK)**: `css2` yaniti User-Agent'a gore DEGISIR, sabit hash YOKTUR - eklemek SITEYI KIRAR. `font-src` allowlist'i GF-2b'nin isidir.
 
 ## Acik SUPHELI (00b-supheli.md)
 
@@ -960,12 +996,15 @@ BILINEN/KABUL EDILMIS RISK: C-3 (00a:101) · D-9 · E-1b · Webhook:AllowedIps b
 BASKA KUYRUGA: A-2 -> VITRIN-KALAN 8 · F-3 -> IMPORT-FIX
 ```
 
-1. **GF-2a ISTEMCI KACIS** (tarif merkezden) + K10 devri: `api-client` refresh
-   **single-flight** (`frontend/api-client.js:143`) - es zamanli 401'lerde tek yenileme.   <- SIRADA
-2. GF-3 SIZINTI/YAPILANDIRMA/LIMIT + GF-1b devri (3 kalem): **rotasyon TEK DB
+1. **GF-3 SIZINTI/YAPILANDIRMA/LIMIT** + GF-1b devri (3 kalem): **rotasyon TEK DB
    transaction'i** (CAS + INSERT; aile iptalini deterministiklestirir) · **zaman kaynagi
    TEK ve UTC** (`expires_at` yerel / cerez UTC ayrimi) · **GF1-B1 govde ozeti**
-3. GF-2b CSP  4. GF-4 TEDARIK ZINCIRI
+   + GF-2a devri: **`ProductUpdateRequestValidator` YOK ve CSV yolu `color_hex`i
+   DOGRULAMIYOR** (istemci TEK savunma) · **GF-2a GOZ TURU sonucu bu muhre**   <- SIRADA
+2. GF-2b CSP + GF-2a devri: **`embedCheckoutForm` `s.text` yeniden calistirici**
+   (D-9 KABUL EDILMIS RISK satiri "eval esdegeri dahil" diye genisler) · **`font-src`
+   allowlist'i** (Google Fonts'a SRI eklenemedigi icin)
+3. GF-4 TEDARIK ZINCIRI
 6. GUVENLIK-AV-2 (dar olcum, ultracode YOK): at-rest sifreleme · 2FA/TOTP ·
    TOCTOU/ExecuteUpdateAsync · A09 · olay isleyicileri · 13 anilmayan controller
    (Comparison/Collection ham entity suphesi)
@@ -992,6 +1031,21 @@ K1..K10 (K7 GF-2a'ya devir, K8 dusuruldu) + MK-4b denetim duzeltmeleri + DUR coz
    Uctan uca kanit gercek Kestrel/proxy ister -> GF-3.
 5. **K4 gecikmeli aile iptali**: es zamanli yarista kaybeden, kazananin INSERT'inden once
    kosarsa aile iptali o turda gerceklesmez; ikinci denemede yakalanir. Kalici cozum GF-3.
+
+**GUVENLIK-FIX-2a KAPANDI `1dd985b`** (zemin 2a74cbd · muhur `docs/muhur/46-guvenlik-fix-2a.md`) —
+8 kok / 26 kalem; uc denetci, bes bulgu (biri uretim kodunda CURUYEN IDDIA, biri MK-6 boslugu).
+**GOZ TURU BEKLIYOR (6 kalem) - sonuc GF-3 muhrune.**
+
+### BILINEN — GF-2a (uc)
+1. **Google Fonts SRI YASAK**: `css2` yaniti UA'ya gore degisir, sabit hash yok; eklemek
+   siteyi KIRAR. `font-src` allowlist'i GF-2b'nin isi.
+2. **`admin.html` kendi `imgUrl()` kopyasini tasiyor**: guvenlik acigi DEGIL (her sey
+   `API_BASE` onekiyle mutlaklasiyor) ama `resolveUrl`den AYRISIYOR (`data:image/png`
+   panelde bozulur) ve PINSIZ. Onceden vardi, kod yazilmadi.
+3. **Panelde `guvenliHTML`/`guvenliYaz` cagirani YOK**: sarmalayici bugun bir kusuru
+   KAPATMIYOR, sozlesmeyi hazir tutuyor. Kod bunu KENDISI beyan ediyor; L3 bagimsiz
+   olctu ve "iddia DURUST" dedi. `guvenliYaz` bridge surumunden UC noktada ayrisiyor
+   (arite · fail-closed sunumu · metin kaynagi) - panel surumu STRICT OLARAK DAHA GUVENLI.
 
 ## Devir ID'leri
 
@@ -1034,6 +1088,11 @@ kaynak: 40·MANTIK-FIX-4_MUHRU · VITRIN-KALAN (bayt-ayni KOPYA)
 6. showLegal CMS - AR kullanici sozlesme metnini Turkce goruyor; sebep SOZLUK DEGIL,
    `contents` tablosunda AR karsiliginin olmamasi (icerik isi, i18n isi degil)
 7. A-1 arama collation/LOWER() — `42·GUVENLIK-AV-1 · A-1`
+8. A-2 (AV-1'den) — `42·GUVENLIK-AV-1`
+9. `placeholder=ceviri("...")` ON DORT yerde DIZGE ICINDE kalmis — `ceviri(` CAGRILMIYOR,
+   duz metin basiliyor; 14 input'ta placeholder BOZUK. [MANTIK]/[UX], XSS DEGIL.
+   Ureten ifade: `grep -c 'placeholder=ceviri(' frontend/api-bridge.js` -> 14.
+   kaynak `46·GUVENLIK-FIX-2a · SUPHE-6`
 ```
 
 ## ERTELENMIS-DEFTER (yeni sinif, ARSIV-1/S5)

@@ -58,7 +58,9 @@ onlari bayatlatmaz. Okuma usulu: CLAUDE.md B0 · MK-11 (b).
 
 | 45 | `45-guvenlik-fix-1b.md` | # 45 · GUVENLIK-FIX-1b (GF-1b) MUHRU — OTURUM DERINLIGI (2 Eylul 2026) | — | 21848 | yeni usul |
 
-Toplam arsiv: 47 dosya · 817.900 B (OLCULDU: `ls -1 *.md | grep -v INDEX.md | xargs wc -c`).
+| 46 | `46-guvenlik-fix-2a.md` | # 46 · GUVENLIK-FIX-2a (GF-2a) MUHRU — ISTEMCI KACIS (3 Eylul 2026) | — | 17305 | yeni usul |
+
+Toplam arsiv: 48 dosya · 835.205 B (OLCULDU: `ls -1 *.md | grep -v INDEX.md | xargs wc -c`).
 Bayt denklemi (TARIHSEL, d8f12dd zemini — GUNCELLENMEZ):
 747.240 = 44.393 (C1 sonrasi CLAUDE.md) + 702.847.
 NOT (AV-1'de olculdu): onceki "42 dosya · 702.847 B" satiri BAYATTI — `41-arsiv-1.md`
