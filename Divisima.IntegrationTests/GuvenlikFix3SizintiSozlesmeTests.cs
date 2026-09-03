@@ -262,7 +262,16 @@ namespace Divisima.IntegrationTests
         {
             var k = KodSatirlari(Oku("Divisima.API/Program.cs"));
 
-            // POZ: liste var ve ALTI CHANGE_ME anahtarinin hepsini + jwtKey'i kapsiyor (7).
+            // POZ: liste YEDI anahtar tasiyor. ALTISI `appsettings.json`da CHANGE_ME degeri
+            // olan anahtarlardir (`ConnectionStrings:DivisimaDb` · `TokenOptions:SecurityKey` ·
+            // `MailSettings:Password` · `Iyzico:ApiKey` · `Iyzico:SecretKey` ·
+            // `Captcha:SecretKey`); YEDINCISI `Encryption:Key` ve o CHANGE_ME DEGIL, **BOS
+            // DIZE**dir (`appsettings.json:39`) - kapi bos degeri zaten ATLAR, liste ust-kume
+            // olsun diye dahil edildi.
+            // DUZELTME KAYDI: ilk yazimda burada "ALTI CHANGE_ME + jwtKey = 7" yaziyordu ve
+            // ARITMETIGI YANLISTI - `jwtKey` zaten `TokenOptions:SecurityKey`, yani o altinin
+            // ICINDE. Kural-uyum denetcisi olcup yakaladi (MK-3: yoruma sayi yazilacaksa
+            // URETEN IFADESIYLE yazilir).
             foreach (var anahtar in new[]
             {
                 "\"ConnectionStrings:DivisimaDb\"", "\"TokenOptions:SecurityKey\"", "\"Encryption:Key\"",
@@ -386,6 +395,16 @@ namespace Divisima.IntegrationTests
                 "yerlesik taraf da TEK KAYNAKTAN okumali - sabit deger yazilmamali");
         }
 
+        // PIN SINIRI - DURUST BEYAN (kural-uyum denetcisinin kor-nokta uyarisi uzerine yazildi):
+        // asagidaki pin KAYNAK METNI olcer. K10'un DAVRANIS kaniti BASKA yerdedir ve BEYAN
+        // EDILMEDEN birakilmamalidir:
+        //   * `AccessTokenIptalTests.K4B_AYNI_REFRESH_IKI_KEZ_ESZAMANLI_TEK_BASARI_ve_ALARM`
+        //     transaction sayesinde ALARM ve AILE IPTALI kanallarini artik DETERMINISTIK
+        //     olarak olcuyor (GF-1b'de ikisi de daraltilmisti) - uc ardisik kosumda 13/13.
+        //   * Logout yarisinin davranis kaniti YOKTUR: bayat cerezle cikis "200 doner ama
+        //     hicbir oturum kapanmaz" gozlemi SUPHELI olarak raporlandi ve bu dalgada
+        //     DAVRANIS DEGISTIRILMEDI; degisen yalniz YARIS PENCERESIDIR ve onu uretecek
+        //     deterministik bir kosum bu rig'de kurulamadi.
         [Fact]
         public void K10_ROTASYON_TEK_TRANSACTION_ve_LOGOUT_AYNI_CAS_YARDIMCISINDA()
         {
@@ -465,6 +484,13 @@ namespace Divisima.IntegrationTests
                 "coklu kume karsilastirmasi sira BAGIMSIZ olmali");
         }
 
+        // PIN SINIRI - DURUST BEYAN: bu pin KAYNAK METNI olcer. K13'un DAVRANIS kaniti bu
+        // dalgada UCTAN UCA ALINMADI - ne "gecersiz hex ile PUT -> 400" ne "CSV satiri
+        // reddedildi" kosuldu. Gerekce: ikisi de admin jetonu + coklu-parca yukleme isteyen
+        // yeni bir SQL sinifi acmayi gerektirirdi (10d794d dersi: her yeni sinif SQL Server'in
+        // `model` kilidinde bir katilimci daha). Dolayli kanit: validator kaydi OTOMATIKTIR
+        // (`AddValidatorsFromAssembly`) ve auto-validation ZATEN acik - yani sinifin varligi
+        // kaydini da kurar. Uctan uca kanit GOZ TURUNE devredildi.
         [Fact]
         public void K13_UPDATE_VALIDATORU_VAR_ve_KURALLARI_ADD_ILE_BIREBIR_AYNI()
         {

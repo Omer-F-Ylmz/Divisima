@@ -34,9 +34,16 @@ namespace Divisima.API.Middlewares
                 // ex.ToString()'tir: SmtpMailService once logaladigi istisnayi YUKARI FIRLATIR
                 // (`throw;`) ve MailKit'in adres ayrisma istisnalari ALICI ADRESINI mesajlarinda
                 // tasir. Bu yuzden nesne gecilmiyor, metni MASKEDEN gecirilip yaziliyor.
-                // MALIYETI OLCULDU: 113 gercek yigin satirinda maskeye takilan parca YALNIZ 5
-                // ve besi de derleyici uretimi ad (`c__DisplayClass28_0`, `2.GetListNoTrackingAsync`
-                // gibi) - teshis degeri korunuyor.
+                // MALIYETI OLCULDU - URETEN IFADESIYLE (MK-3):
+                //   korpus : `grep -h '^   at ' Divisima.API/logs/*.log | sort -u`  -> 113 satir
+                //   olcut  : ayni karakter sinifi kurali (uzunluk>=16 + rakam + kucuk harf)
+                //            113 satirin parcalarina awk ile uygulandi
+                //   sonuc  : maskeye takilan BENZERSIZ parca **5**, besi de derleyici uretimi
+                //            ad (`c__DisplayClass28_0`, `2.GetListNoTrackingAsync` gibi)
+                // Yani teshis degeri korunuyor. NOT: korpus depoda DEGIL (log dosyalari
+                // `.gitignore:22` ile disarida), bu yuzden sayi bagimsiz olarak ancak ayni
+                // ifadeyle YENIDEN URETILEREK dogrulanabilir - kural-uyum denetcisi bunu
+                // "OLCEMEDIM" olarak isaretledi ve ifade bu yuzden buraya yazildi.
                 // RFC 7807 GOVDESI DEGISMEZ: yanit `HandleExceptionAsync`te uretiliyor, dokunulmadi.
                 _logger.LogError("Beklenmeyen hata: {Path} | {Hata}", context.Request.Path,
                     Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(ex.ToString()));

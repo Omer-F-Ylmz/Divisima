@@ -98,8 +98,12 @@ var builder = WebApplication.CreateBuilder(args);
         //
         // ANAHTAR LISTESI NEDEN EXPLICIT: tum yapilandirmayi gezmek (`cfg.AsEnumerable()`)
         // MAKINENIN ORTAM DEGISKENLERINI de kapsardi - bir dosya yolundaki "TODO" ya da
-        // "xxxxx" acilisi engelleyebilirdi. Liste, `appsettings.json`daki alti CHANGE_ME
-        // degerinin ANAHTARLARINDAN grep ile OLCULEREK kuruldu, tahminle degil.
+        // "xxxxx" acilisi engelleyebilirdi.
+        // PROVENANS (ureten ifadeyle): alti giris `grep -n "CHANGE_ME" appsettings.json`
+        // ciktisindaki anahtarlardir; YEDINCI giris `Encryption:Key` CHANGE_ME DEGIL, BOS
+        // DIZEDIR (`appsettings.json:39`) ve listeye UST-KUME olsun diye eklendi - bos deger
+        // asagidaki dongude zaten atlanir. (Ilk yazimda "alti CHANGE_ME anahtarindan kuruldu"
+        // deniyordu; yedi girisin ALTISI icin dogru - kural-uyum denetcisi duzeltti.)
         var hassasAnahtarlar = new[]
         {
             "ConnectionStrings:DivisimaDb",
