@@ -7,6 +7,7 @@ using Divisima.Core.Utilities.Results;
 using Divisima.Entity.Dtos.ProductReview;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace Divisima.API.Controllers
@@ -28,6 +29,9 @@ namespace Divisima.API.Controllers
 
         [HttpPost("add")]
         [RequireUserType(UserTypeEnum.Customer)]
+        // GF-3/K9 (AV-1: F-1) - yorum yazma. Kimlik ISTER (F-1'in "KIMLIKSIZ-UZAK" etiketi
+        // bu uc icin DOGRU DEGIL, olculdu) ama tek hesapla spam uretmeye aciktir.
+        [EnableRateLimiting(Divisima.Core.Security.RateLimiting.RateLimitPolitikasi.HassasKapsami)]
         [SwaggerOperation(Summary = "Yorum ekle", Description = "Ürüne yorum ekler (onay bekler). Müşteri yetkisi gerekir.")]
         [ProducesResponseType(typeof(SuccessResult), (int)HttpStatusCode.Created)]
         public async Task<IActionResult> Add([FromBody] ProductReviewAddRequestDto dto)

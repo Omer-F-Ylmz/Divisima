@@ -4,6 +4,7 @@ using Divisima.Core.Security.Authorization;
 using Divisima.Core.Utilities.Enums;
 using Divisima.Entity.Dtos.GiftCard;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace Divisima.API.Controllers
@@ -24,6 +25,9 @@ namespace Divisima.API.Controllers
 
         [HttpGet("balance/{code}")]
         [RequireUserType(UserTypeEnum.Customer)]
+        // GF-3/K9 (AV-1: F-1) - kart KODU URL yolunda; kimlikli bir hesapla kod uzayi
+        // taranabilirdi. Rota TIRELIDIR (`api/gift-card`) - kaynaktan okundu.
+        [EnableRateLimiting(Divisima.Core.Security.RateLimiting.RateLimitPolitikasi.HassasKapsami)]
         [SwaggerOperation(Summary = "Kart bakiyesi sorgula")]
         public async Task<IActionResult> Balance(string code)
         { var r = await _giftCardService.CheckBalance(code); return StatusCode((int)r.Item1, r.Item2); }
@@ -31,6 +35,10 @@ namespace Divisima.API.Controllers
         [Idempotency]
         [HttpPost("redeem/{code}")]
         [RequireUserType(UserTypeEnum.Customer)]
+        // GF-3/K9: F-1 bu ucu de anmisti (`:32-33`). D4 metni "gift-card sorgu" diyor;
+        // KAPSAM FARKI RAPORDA - sorgu ile bozdurma AYNI kod uzayini tariyor, sorguyu sinirlayip
+        // bozdurmayi acik birakmak enumerasyon kanalini KAPATMAZDI.
+        [EnableRateLimiting(Divisima.Core.Security.RateLimiting.RateLimitPolitikasi.HassasKapsami)]
         [SwaggerOperation(Summary = "Kartı bozdur", Description = "Bakiye mağaza kredisine aktarılır.")]
         public async Task<IActionResult> Redeem(string code)
         { var r = await _giftCardService.Redeem(CurrentCustomerId, code); return StatusCode((int)r.Item1, r.Item2); }

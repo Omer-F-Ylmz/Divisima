@@ -325,6 +325,67 @@ namespace Divisima.IntegrationTests
                 "cozum kapsam daraltma DEGIL kimlik ayrimi olmali");
         }
 
+        // ══════════════════════ K9 (AV-1: F-1) - "HASSAS" KOVASI ═════════════════════════
+
+        [Fact]
+        public void K9_HASSAS_KOVASI_IKI_YOLDA_da_TANINIR_ayrisma_YOK()
+        {
+            // BIRIM PINI (davranis - saf fonksiyon). Ayirt edici degerler BILINCLI olarak
+            // varsayilanlardan FARKLI secildi: 20 varsayilani yanlislikla eslesirse pin
+            // "bedava dogru" olurdu.
+            var p = new Divisima.Core.Security.RateLimiting.RateLimitPolitikasi(
+                authLimiti: 37, odemeLimiti: 41, genelLimit: 43, pencereSaniye: 60, hassasLimiti: 29);
+
+            // (1) OZNITELIK YOLU - dagitik sayac oznitelikten okur.
+            p.KovaSec(Divisima.Core.Security.RateLimiting.RateLimitPolitikasi.HassasKapsami, "/api/olmayan")
+                .Should().Be((Divisima.Core.Security.RateLimiting.RateLimitPolitikasi.HassasKapsami, 29),
+                    "oznitelik 'hassas' derse dagitik sayac da 'hassas' kovasina yazmali");
+
+            // (2) YEDEK YOL - endpoint metadata'si cozulmemisse yol eslesmesi devreye girer.
+            foreach (var yol in new[]
+            {
+                "/api/Coupon/validate", "/api/gift-card/balance/ABC", "/api/gift-card/redeem/ABC",
+                "/api/Search/products", "/api/ProductReview/add",
+            })
+                p.KovaSec(null, yol).Should()
+                    .Be((Divisima.Core.Security.RateLimiting.RateLimitPolitikasi.HassasKapsami, 29),
+                        $"{yol} yedek yolda da hassas kovasina dusmeli");
+
+            // (3) CIFT-ANLAM KIRICI: kapsam DISI bir yol hala 'global'.
+            p.KovaSec(null, "/api/product/getlist").Should()
+                .Be((Divisima.Core.Security.RateLimiting.RateLimitPolitikasi.GenelKapsam, 43),
+                    "kapsam disi uclar GEVSEMEMELI ama SIKILASMAMALI da");
+
+            // (4) KULTURSUZ ESLESME (CLAUDE.md 6c): tr-TR'de 'I' -> 'ı' olur; buyuk harfli
+            // yol hassas kovasindan KACMAMALI.
+            p.KovaSec(null, "/API/SEARCH/PRODUCTS").Should()
+                .Be((Divisima.Core.Security.RateLimiting.RateLimitPolitikasi.HassasKapsami, 29));
+        }
+
+        [Fact]
+        public void K9_DORT_UC_GRUBU_OZNITELIK_TASIR_ve_YERLESIK_POLITIKA_KAYITLI()
+        {
+            // Oznitelik TEK KAYNAK oldugu icin (Faz0/K7) uclarin onu tasidigi pinlenir.
+            var hedefler = new (string Dosya, int Adet)[]
+            {
+                ("Divisima.API/Controllers/CouponController.cs", 1),
+                ("Divisima.API/Controllers/GiftCardController.cs", 2),   // balance + redeem
+                ("Divisima.API/Controllers/SearchController.cs", 1),
+                ("Divisima.API/Controllers/ProductReviewController.cs", 1),
+            };
+            foreach (var (dosya, adet) in hedefler)
+                Sayim(KodSatirlari(Oku(dosya)), "RateLimitPolitikasi.HassasKapsami)]").Should().Be(adet,
+                    $"{dosya}: hassas kovasi oznitelikleri TAM {adet} olmali");
+
+            // YERLESIK TARAF DA ACILDI - yalniz biri acilsaydi etkin limit ve yanit govdesi
+            // sessizce ayrisirdi (C'nin olctugu MK-6 boslugu).
+            var program = KodSatirlari(Oku("Divisima.API/Program.cs"));
+            Sayim(program, "options.AddPolicy(Divisima.Core.Security.RateLimiting.RateLimitPolitikasi.HassasKapsami").Should().Be(1,
+                "yerlesik limiter politikasi kayitli olmali");
+            Sayim(program, "PermitLimit = rateLimitPolitikasi.HassasLimiti").Should().Be(1,
+                "yerlesik taraf da TEK KAYNAKTAN okumali - sabit deger yazilmamali");
+        }
+
         [Fact]
         public void K2_ADMIN_EPOSTASI_MASKEDEN_GECER()
         {

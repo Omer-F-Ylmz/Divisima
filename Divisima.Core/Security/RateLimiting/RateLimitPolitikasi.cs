@@ -32,18 +32,31 @@ namespace Divisima.Core.Security.RateLimiting
         public const string OdemeKapsami = "payment";
         public const string GenelKapsam = "global";
 
+        // ══ GF-3 / K9 (AV-1: F-1) - "HASSAS" KOVASI ════════════════════════════════════════
+        // Kimlik/para uclarinda global 100/dk'dan BASKA sinir yoktu. En agir maruziyet kupon
+        // dogrulama ucunda: yanit gecerli/gecersiz kodu AYIRT EDIYOR (MFIX-B/K2 karari geregi
+        // yanit metni DOKUNULMAZ), yani limit YOKSA anonim kod enumerasyonu 100/dk hizinda
+        // kosabiliyordu. Kapatma yolu yanit degil LIMIT.
+        public const string HassasKapsami = "hassas";
+
         // Pencere iki yolda da 1 dakikaydi; tek yerde sabitlenir.
         public int PencereSaniye { get; }
         public int AuthLimiti { get; }
         public int OdemeLimiti { get; }
         public int GenelLimit { get; }
+        public int HassasLimiti { get; }
 
-        public RateLimitPolitikasi(int authLimiti, int odemeLimiti, int genelLimit, int pencereSaniye = 60)
+        // GF-3/K9: `hassasLimiti` EN SONA ve VARSAYILANLI eklendi. Gerekce olculdu - bu ctor
+        // dort yerde ISIMLI parametreyle cagriliyor; varsayilansiz bir parametre o dort yeri
+        // DERLEMEZDI. Sona konmasi konumsal cagrilari da korur.
+        public RateLimitPolitikasi(int authLimiti, int odemeLimiti, int genelLimit,
+            int pencereSaniye = 60, int hassasLimiti = 20)
         {
             AuthLimiti = authLimiti;
             OdemeLimiti = odemeLimiti;
             GenelLimit = genelLimit;
             PencereSaniye = pencereSaniye;
+            HassasLimiti = hassasLimiti;
         }
 
         // Varsayilanlar ONCEDEN YERLESIK YOLDA olan degerlerdir (10/10/100). Redis yolundaki
@@ -57,7 +70,13 @@ namespace Divisima.Core.Security.RateLimiting
             return new RateLimitPolitikasi(
                 authLimiti: Oku("RateLimit:AuthPermitLimit", 10),
                 odemeLimiti: Oku("RateLimit:PaymentPermitLimit", 10),
-                genelLimit: Oku("RateLimit:GlobalPermitLimit", 100));
+                genelLimit: Oku("RateLimit:GlobalPermitLimit", 100),
+                // GF-3/K9: varsayilan 20/dk. Deger OLCUME dayali - suit'in bu dort uc grubuna
+                // yaptigi EN YOGUN cagri sayisi TEK TEST METODUNDA 3 (arama; kupon/gift-card/
+                // yorum HTTP uzerinden HIC cagrilmiyor, servis katmanindan kosuluyor) ve kova
+                // omru tek test metodudur. 20, o tabanin 6.7 kati - suit'i kirmadan
+                // enumerasyonu 100/dk'dan 20/dk'ya indirir.
+                hassasLimiti: Oku("RateLimit:HassasPermitLimit", 20));
         }
 
         // ═══ FAZ 0 / K7 - KOVA SECIMININ TEK SAF FONKSIYONU ════════════════════════════════
@@ -124,6 +143,14 @@ namespace Divisima.Core.Security.RateLimiting
                     return (AuthKapsami, AuthLimiti);
                 if (string.Equals(policyAdi, OdemeKapsami, StringComparison.Ordinal))
                     return (OdemeKapsami, OdemeLimiti);
+                // GF-3/K9 - BU DAL OLMADAN DUZELTME YARIM KALIR VE SESSIZ DUSER:
+                // "hassas" YALNIZ yerlesik tarafa (AddPolicy) eklenseydi `KovaSec` onu TANIMAZ,
+                // asagidaki yedege duser ve dagitik sayac "global" (100/dk) uygulardi. Etkin
+                // limiti o zaman GOVDESI BOS olan yerlesik limiter verirdi - yani hem sayi hem
+                // yanit govdesi degisirdi. Ayrisma D5'te YAPISAL olarak imkansiz kilinmisti;
+                // bu dal o invariant'i korur.
+                if (string.Equals(policyAdi, HassasKapsami, StringComparison.Ordinal))
+                    return (HassasKapsami, HassasLimiti);
                 // TANINMAYAN policy adi: sessizce yutulmaz da uydurulmaz da - yedege duser.
                 // (Yerlesik limiter zaten kendi policy'sini uygular; burada yalnizca DAGITIK
                 //  sayacin hangi kovaya yazacagini seciyoruz.)
@@ -149,6 +176,17 @@ namespace Divisima.Core.Security.RateLimiting
 
             if (yol.Contains("/payment/", StringComparison.OrdinalIgnoreCase))
                 return (OdemeKapsami, OdemeLimiti);
+
+            // GF-3/K9 - AV-1/F-1'in DORT UC GRUBU. Oznitelik birincil kaynaktir (yukarida);
+            // burasi endpoint metadata'si COZULMEDIGI durumun yedegi. Yollar KAYNAKTAN okundu,
+            // tahmin EDILMEDI - `gift-card` bu depoda TIRELIDIR (`api/gift-card`), digerleri
+            // controller adindan turer (`api/Coupon`, `api/Search`, `api/ProductReview`).
+            // KULTURSUZ ESLESME yukaridakiyle AYNI gerekceyle zorunlu (tr-TR 'I' -> 'ı').
+            if (yol.Contains("/coupon/validate", StringComparison.OrdinalIgnoreCase)
+                || yol.Contains("/gift-card/", StringComparison.OrdinalIgnoreCase)
+                || yol.Contains("/search/", StringComparison.OrdinalIgnoreCase)
+                || yol.Contains("/productreview/add", StringComparison.OrdinalIgnoreCase))
+                return (HassasKapsami, HassasLimiti);
 
             return (GenelKapsam, GenelLimit);
         }

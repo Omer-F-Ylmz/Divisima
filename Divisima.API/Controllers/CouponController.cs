@@ -8,6 +8,7 @@ using Divisima.Core.Utilities.Results;
 using Divisima.Entity.Dtos.Coupon;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace Divisima.API.Controllers
@@ -80,6 +81,10 @@ namespace Divisima.API.Controllers
         // Açıklayıcı yorum: Kupon doğrula (herkese açık - sepet ekranı). Frontend applyCoupon.
         [HttpPost("validate")]
         [AllowAnonymous]
+        // GF-3/K9 (AV-1: F-1) - F-1'in EN AGIR ucu. Yanit gecerli ve gecersiz kodu AYIRT
+        // EDIYOR ve o yanit metni MFIX-B/K2 karariyla DOKUNULMAZ; yani enumerasyon kanali
+        // yanit tarafindan kapatilamaz. Tek care LIMIT: 100/dk -> 20/dk (IP basina).
+        [EnableRateLimiting(Divisima.Core.Security.RateLimiting.RateLimitPolitikasi.HassasKapsami)]
         [SwaggerOperation(Summary = "Kupon doğrula", Description = "Kupon kodunu ve sepet tutarını alır; geçerliyse indirim tutarını döner.")]
         [ProducesResponseType(typeof(SuccessDataResult<CouponValidateResponseDto>), (int)HttpStatusCode.OK)]
         [ProducesResponseType(typeof(ErrorDataResult<CouponValidateResponseDto>), (int)HttpStatusCode.BadRequest)]

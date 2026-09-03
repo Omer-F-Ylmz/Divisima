@@ -435,6 +435,20 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("payment", context => RateLimitPartition.GetFixedWindowLimiter(
         partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         factory: _ => new FixedWindowRateLimiterOptions { PermitLimit = paymentPermitLimit, Window = TimeSpan.FromMinutes(1) }));
+
+    // GF-3/K9 (AV-1: F-1) - "hassas" kovasi. Kupon dogrulama, gift-card sorgu/kullanma,
+    // arama ve yorum yazma uclarinda global 100/dk'dan BASKA sinir yoktu.
+    // IKI TARAF BIRLIKTE ACILDI: bu kayit yerlesik limiter icin, `RateLimitPolitikasi.KovaSec`
+    // dali ise dagitik sayac icin. Yalniz biri acilsaydi diger yol "global" uygular ve etkin
+    // limit ile YANIT GOVDESI sessizce ayrisirdi (D5'in kapattigi ayrisma geri acilirdi).
+    options.AddPolicy(Divisima.Core.Security.RateLimiting.RateLimitPolitikasi.HassasKapsami,
+        context => RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = rateLimitPolitikasi.HassasLimiti,
+                Window = TimeSpan.FromMinutes(1),
+            }));
 });
 
 // B12: API versiyonlama
