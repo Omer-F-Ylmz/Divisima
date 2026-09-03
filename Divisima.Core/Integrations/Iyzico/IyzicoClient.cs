@@ -190,12 +190,19 @@ namespace Divisima.Core.Integrations.Iyzico
             // iade etmek yerine GURULTULU loglanir, kimlik yine ilk kirilimdan alinir.
             var itemTx = result.PaymentItems?.FirstOrDefault()?.PaymentTransactionId;
             var itemTxCount = result.PaymentItems?.Count ?? 0;
+            // GF-3/K1 (AV-1/E-2): odeme jetonu KanitMaskesi'nden GECMEDEN log'a yaziliyordu -
+            // "maskenin cagrilmasi gereken ama cagrilmayan yeri". MASKEYE SABLON DEGIL YALNIZ
+            // DEGER GECILIR: '=' bir jeton karakteridir, dolayisiyla "token={Token}" metnini
+            // maskeleseydik parca "token=<jeton>" olarak TEK sayilir ve cikti "token=30…"
+            // olurdu - yani ETIKET kirpmanin ICINE girer, jetonun ilk 8'i degil ilk 2'si
+            // gorunurdu. Deger tek basina gecirilince kirpma jetonun KENDI basindan olur.
             if (paid && itemTxCount != 1)
                 _logger.LogError("Iyzico retrieve BEKLENMEYEN kirilim sayisi: {Adet} (beklenen 1). " +
                                  "Iade kimligi ilk kirilimdan alindi - kismi iade tutari yanlis olabilir. token={Token}",
-                                 itemTxCount, token);
+                                 itemTxCount, Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(token));
             if (paid && string.IsNullOrWhiteSpace(itemTx))
-                _logger.LogError("Iyzico retrieve KIRILIM KIMLIGI BOS - bu odeme IADE EDILEMEZ. token={Token}", token);
+                _logger.LogError("Iyzico retrieve KIRILIM KIMLIGI BOS - bu odeme IADE EDILEMEZ. token={Token}",
+                                 Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(token));
 
             return new IyzicoPaymentResult
             {

@@ -26,7 +26,20 @@ namespace Divisima.API.Middlewares
             catch (Exception ex)
             {
                 // Açıklayıcı yorum: Hatayı logla (detay sunucuda kalır), istemciye RFC 7807 problem dön
-                _logger.LogError(ex, "Beklenmeyen hata: {Path}", context.Request.Path);
+                //
+                // GF-3/K2 - PII TASIYICI {Path} DEGIL, ISTISNA NESNESIDIR. AV-1/E-3 bu satiri
+                // dogru isaretledi ama mekanizmasi baska: `Request.Path` bir `PathString`tir ve
+                // SORGU DIZESINI ICERMEZ (o `Request.QueryString`), yani yoldan sizinti YOK.
+                // Sizan sey `LogError(ex, ...)`in Serilog {Exception} alanina HAM yazdigi
+                // ex.ToString()'tir: SmtpMailService once logaladigi istisnayi YUKARI FIRLATIR
+                // (`throw;`) ve MailKit'in adres ayrisma istisnalari ALICI ADRESINI mesajlarinda
+                // tasir. Bu yuzden nesne gecilmiyor, metni MASKEDEN gecirilip yaziliyor.
+                // MALIYETI OLCULDU: 113 gercek yigin satirinda maskeye takilan parca YALNIZ 5
+                // ve besi de derleyici uretimi ad (`c__DisplayClass28_0`, `2.GetListNoTrackingAsync`
+                // gibi) - teshis degeri korunuyor.
+                // RFC 7807 GOVDESI DEGISMEZ: yanit `HandleExceptionAsync`te uretiliyor, dokunulmadi.
+                _logger.LogError("Beklenmeyen hata: {Path} | {Hata}", context.Request.Path,
+                    Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(ex.ToString()));
                 await HandleExceptionAsync(context, ex);
             }
         }

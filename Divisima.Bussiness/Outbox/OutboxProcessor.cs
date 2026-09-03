@@ -125,9 +125,17 @@ namespace Divisima.Bussiness.Outbox
         // outbox dongusunu KIRMAZ (diger mesajlar islenmeye devam etmeli).
         private async Task KaliciHataylaBirakAsync(OutboxMessage msg, Exception ex)
         {
-            _logger.LogError(ex,
+            // GF-3/K2: ONCEDEN hem `ex` NESNESI hem ham `ex.Message` yaziliyordu. Ayni metin
+            // `DashboardManager:241`'de ZATEN maskeden geciyordu - yani depo ayni degeri bir
+            // yerde maskeleyip bir yerde HAM yaziyordu (ASIMETRI, GF-3 on olcum A).
+            // Istisna NESNESI de gecilmiyor: Serilog'un {Exception} alani ex.ToString()'i HAM
+            // yazar ve mail gonderim istisnalari ALICI ADRESINI tasir. Yigin izi kaybolmuyor,
+            // maskeden gecirilip metne konuyor (olculdu: 113 gercek yigin satirinda maskelenen
+            // parca YALNIZ 5 ve besi de derleyici uretimi ad).
+            _logger.LogError(
                 "OUTBOX KALICI HATA. id={Id} tip={Tip} deneme={Deneme} hata={Hata}",
-                msg.id, msg.event_type, msg.retry_count, ex.Message);
+                msg.id, msg.event_type, msg.retry_count,
+                Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(ex.ToString()));
 
             try
             {

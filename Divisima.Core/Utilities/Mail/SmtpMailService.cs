@@ -1,3 +1,4 @@
+using Divisima.Core.Utilities.Text;   // GF-3/K1+K4 - KanitMaskesi (maske + satir temizligi)
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using Microsoft.Extensions.Configuration;
@@ -39,7 +40,11 @@ namespace Divisima.Core.Utilities.Mail
             if (string.IsNullOrWhiteSpace(host))
             {
                 // Yalnızca Development'ta ulaşılabilir bir dal (bkz. sözleşme 3).
-                _logger.LogWarning("MAIL GONDERILMEDI (Host tanimsiz) -> {To} | {Subject}", message.To, message.Subject);
+                // GF-3/K1+K4: {To} musteri e-postasidir (KVKK) -> maskeden; {Subject} log'u
+                // PARCALAYABILIR (CRLF) -> satir temizliginden gecer. Ikisi de URETIM
+                // NOKTASINDA, cagirana birakilmadan.
+                _logger.LogWarning("MAIL GONDERILMEDI (Host tanimsiz) -> {To} | {Subject}",
+                    KanitMaskesi.Maskele(message.To), KanitMaskesi.SatirGuvenli(message.Subject));
                 return;
             }
 
@@ -53,7 +58,10 @@ namespace Divisima.Core.Utilities.Mail
             // Açıklayıcı yorum: "Divisima <no-reply@divisima.com>" biçimi de düz adres de kabul edilir.
             mime.From.Add(MailboxAddress.Parse(from));
             mime.To.Add(MailboxAddress.Parse(message.To));
-            mime.Subject = message.Subject ?? "";
+            // GF-3/K4 (AV-1/A-3): Subject'te CRLF -> posta basligi enjeksiyonu (MimeKit
+            // kodladigi icin SUPHE) ve log satiri parcalanmasi (OLCULEBILIR). Ikisi de AYNI
+            // yardimcidan kapatilir; basliga da log'a da ayni temiz deger gider.
+            mime.Subject = KanitMaskesi.SatirGuvenli(message.Subject) ?? "";
             mime.Body = new BodyBuilder
             {
                 HtmlBody = message.IsHtml ? message.Body : null,
@@ -78,7 +86,14 @@ namespace Divisima.Core.Utilities.Mail
             {
                 // LOGLA VE FIRLAT - yutma. Çağıranın telafisi (outbox yeniden deneme, bildirim
                 // claim'inin geri alınması) buna bağlı.
-                _logger.LogError(ex, "MAIL GONDERILEMEDI -> {To} | {Subject}", message.To, message.Subject);
+                // GF-3/K1+K2: (a) {To} maskeden, {Subject} satir temizliginden gecer;
+                // (b) ISTISNA NESNESI ARTIK GECILMIYOR - `LogError(ex, ...)` Serilog'un
+                // {Exception} alanina ex.ToString()'i HAM yazardi ve MailKit'in ayrisma
+                // istisnalari ALICI ADRESINI mesajlarinda tasir. Yigin izi KAYBOLMAZ:
+                // ex.ToString() maskeden gecirilip metne konuyor.
+                _logger.LogError("MAIL GONDERILEMEDI -> {To} | {Subject} | {Hata}",
+                    KanitMaskesi.Maskele(message.To), KanitMaskesi.SatirGuvenli(message.Subject),
+                    KanitMaskesi.Maskele(ex.ToString()));
                 throw;
             }
         }

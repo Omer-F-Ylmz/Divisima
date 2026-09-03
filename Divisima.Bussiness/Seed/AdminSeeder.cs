@@ -75,7 +75,9 @@ namespace Divisima.Bussiness.Seed
             {
                 existing.user_type = (byte)UserTypeEnum.Admin;
                 await _customerDal.UpdateAsync(existing);
-                _logger.LogInformation("Mevcut kullanıcı ({Email}) admin'e yükseltildi.", email);
+                // GF-3/K2: admin e-postasi da PII'dir ve log'a duz gidiyordu (KVKK).
+                _logger.LogInformation("Mevcut kullanıcı ({Email}) admin'e yükseltildi.",
+                    Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(email));
                 return;
             }
 
@@ -92,7 +94,9 @@ namespace Divisima.Bussiness.Seed
                 phone = "05000000000",   // customers.phone NOT NULL - seed bunu doldurmuyordu
                 created_at = DateTime.Now
             });
-            _logger.LogInformation("İlk admin oluşturuldu ({Email}).", email);
+            // GF-3/K2: yukaridakiyle AYNI kusur, ayni dosyada ikinci nokta.
+            _logger.LogInformation("İlk admin oluşturuldu ({Email}).",
+                Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(email));
         }
     }
 }
