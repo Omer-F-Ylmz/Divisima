@@ -55,6 +55,10 @@ namespace Divisima.Bussiness.Concrete
         private readonly Divisima.Core.Security.JWT.ITokenBlacklist _tokenBlacklist;
         // GF-1b / K1: "tum cihazlardan cik" dalinda toplu iptal esigini yazar.
         private readonly Divisima.Core.Security.JWT.IUserTokenRevocation _tokenRevocation;
+        // GF-3 / K10: refresh rotasyonunun UC yazmasini (CAS + denetim + yeni oturum) TEK
+        // transaction'a almak icin. Gerekce RefreshToken govdesinde.
+        private readonly Divisima.Core.DataAccess.IUnitOfWork _unitOfWork;
+
         // GF-1b / K6: oturum satirina cihaz/IP yazmak icin (gerekce IssueSessionAndTokenAsync'te).
         private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor? _httpContextAccessor;
         // GF-1b / F2: CAS yollarinda denetim izi (gerekce DenetimKaydiYazAsync'in basinda).
@@ -72,8 +76,10 @@ namespace Divisima.Bussiness.Concrete
             Divisima.Core.Security.JWT.ITokenBlacklist tokenBlacklist,
             Divisima.Core.Security.JWT.IUserTokenRevocation tokenRevocation,
             IAuditLogDal auditLogDal,
+            Divisima.Core.DataAccess.IUnitOfWork unitOfWork,
             Microsoft.AspNetCore.Http.IHttpContextAccessor? httpContextAccessor = null)
         {
+            _unitOfWork = unitOfWork;
             _tokenBlacklist = tokenBlacklist;
             _tokenRevocation = tokenRevocation;
             _auditLogDal = auditLogDal;
@@ -676,22 +682,52 @@ namespace Divisima.Bussiness.Concrete
             // DIKKAT (CLAUDE.md tuzagi): `ExecuteUpdateAsync` change-tracker'i ATLAR, yani
             // elimizdeki TRACKED `session` nesnesi BAYAT kalir. Bu noktadan sonra o nesne
             // uzerinden TAM-VARLIK yazma YAPILMAZ - yalnizca `auth_time` degeri OKUNUR.
-            var kapatildi = await _userSessionDal.DeactivateIfActiveAsync(session.id);
-            if (kapatildi != 1)
+            // ══ GF-3 / K10 (GF-1b BILINEN #5) - ROTASYON TEK TRANSACTION ═══════════════════
+            //
+            // OLCULEN ONCE-DURUM: basarili yolda UC AYRI COMMIT NOKTASI vardi ve transaction
+            // YOKTU - CAS kapatmasi, denetim satiri ve YENI OTURUM INSERT'i ayri ayri
+            // kalicilasiyordu. Sonucu GF-1b'de "BILINEN #5" olarak kaydedilmisti:
+            //   "es zamanli yarista KAYBEDEN, kazananin INSERT'inden ONCE kosarsa aile iptali
+            //    o turda gerceklesmez; ikinci denemede yakalanir" (BEST-EFFORT).
+            // Yani hirsizlik sinyali ateslenirken YENI acilan oturum HENUZ GORUNMUYOR olabilir
+            // ve iptal onu ISKALIYORDU.
+            //
+            // COZUM: uc yazma TEK transaction'da. Kaybeden istegin CAS'i, kazananin satir
+            // kilidinde BEKLER; kilit ancak COMMIT ile birakilir ve o an INSERT de kalicidir.
+            // Dolayisiyla kaybeden `YenidenKullanimiIsleAsync`e girdiginde yeni oturumu
+            // MUTLAKA gorur -> aile iptali DETERMINISTIK olur, best-effort degil.
+            //
+            // NEDEN `ExecuteInTransactionAsync` (BeginTransaction DEGIL): `EnableRetryOnFailure`
+            // ile uyumlu TEK yol odur (execution strategy begin->is->commit'i tek retriable
+            // delege olarak sarar). Bugun retry KAPALI ama sozlesme ileriye donuk korunur.
+            //
+            // DEADLOCK OLCUMU (TAVIZ kriteri): ic ice transaction YAPISAL OLARAK IMKANSIZ
+            // (`UnitOfWork` tek `_transaction` alani tutar) ve bu blok yalniz `user_sessions`
+            // (ayni satir) + `audit_logs` (INSERT) tabloIarina dokunur - kilit sirasi TEK YONLU,
+            // dongu olusmaz. Kaybeden yolun SignalR yayini ve aile iptali transaction'in
+            // DISINDA kalir (bilincli: ag cagrisi kilit altinda tutulmaz).
+            var yeniOturum = await _unitOfWork.ExecuteInTransactionAsync<CustomerLoginResponseDto?>(async () =>
+            {
+                var n = await _userSessionDal.DeactivateIfActiveAsync(session.id);
+                if (n != 1) return null;   // YARIS KAYBEDILDI - hicbir sey yazilmadi, commit no-op
+
+                // GF-1b / F2: rotasyon kapatmasi da CAS'tir (DeactivateIfActiveAsync ->
+                // ExecuteUpdateAsync), interceptor GORMEZ. Kapanan oturum kayda gecer.
+                await DenetimKaydiYazAsync(nameof(UserSession), session.id, "session_rotated",
+                    $"refresh rotasyonu: oturum kapatildi (musteri: {session.customer_id})");
+
+                // GF-1 / K3: ESKI oturumun giris ani YENI satira TASINIR - refresh step-up
+                // saatini SIFIRLAMAZ. `null` (GF-1 oncesi acilmis oturum) ise IssueSession
+                // `simdi` kullanir, yani o satirlarda davranis STATUKO kalir.
+                return await IssueSessionAndTokenAsync(customer, session.auth_time);
+            });
+
+            if (yeniOturum == null)
                 return await YenidenKullanimiIsleAsync(session.customer_id,
                     "Es zamanli refresh yarisi kaybedildi - ayni jeton iki kez sunuldu",
                     alarmKosulsuz: true);
 
-            // GF-1b / F2: rotasyon kapatmasi da CAS'tir (DeactivateIfActiveAsync ->
-            // ExecuteUpdateAsync), interceptor GORMEZ. Kapanan oturum kayda gecer.
-            await DenetimKaydiYazAsync(nameof(UserSession), session.id, "session_rotated",
-                $"refresh rotasyonu: oturum kapatildi (musteri: {session.customer_id})");
-
-            // GF-1 / K3: ESKI oturumun giris ani YENI satira TASINIR - refresh step-up saatini
-            // SIFIRLAMAZ. `null` (GF-1 oncesi acilmis oturum) ise IssueSession `simdi` kullanir,
-            // yani o satirlarda davranis STATUKO kalir; geriye donuk doldurma YAPILMAZ.
-            var response = await IssueSessionAndTokenAsync(customer, session.auth_time);
-            return (HttpStatusCode.OK, new SuccessDataResult<CustomerLoginResponseDto>(response, Messages.TokenRefreshed));
+            return (HttpStatusCode.OK, new SuccessDataResult<CustomerLoginResponseDto>(yeniOturum, Messages.TokenRefreshed));
         }
 
 
@@ -897,12 +933,28 @@ namespace Divisima.Bussiness.Concrete
 
             if (!string.IsNullOrEmpty(refreshToken))
             {
-                var session = await _userSessionDal.GetByRefreshTokenAsync(refreshToken);
+                // ══ GF-3 / K10 - LOGOUT'TA CHECK-THEN-ACT KALDIRILDI ═══════════════════════
+                //
+                // ONCEKI HAL: satir OKUNUYOR, bellekte `is_active=false` yapiliyor ve TAM-VARLIK
+                // `UpdateAsync` ile yaziliyordu. Uc kusuru vardi:
+                //  (1) OKU-SONRA-YAZ arasinda baska bir istek ayni satiri dondurebilir; iki yol
+                //      da "kapattim" der ve rotasyonun CAS invariant'i BU YOLDAN delinir.
+                //  (2) TAM-VARLIK yazma TUM kolonlari basar - `ExecuteUpdateAsync` ile atomik
+                //      guncellenmis bir kolon bu yoldan SESSIZCE GERI ALINABILIR
+                //      (CLAUDE.md bolum 5'te kayitli tuzak).
+                //  (3) Kuralin IKINCI KOPYASIYDI: rotasyon CAS kullanirken logout kendi
+                //      kopyasini tasiyordu.
+                // Artik rotasyonla AYNI yardimci: `DeactivateIfActiveAsync` (tek atomik CAS).
+                //
+                // `GetByRefreshTokenAnyStateAsync` KULLANILIYOR: `GetByRefreshTokenAsync`
+                // `is_active` FILTRELI oldugu icin bayat/rotasyonlanmis bir cerezle gelen cikis
+                // istegi satiri HIC BULAMIYOR ve sessizce 200 donuyordu. Filtresiz okuma +
+                // CAS ile davranis ayni (zaten kapali satir icin CAS 0 doner) ama YARIS YOK.
+                // NOT: "bayat cerezle cikis 200 doner" gozlemi SUPHELI olarak raporlandi -
+                // semantik karar merkezin, bu dalgada DAVRANIS DEGISTIRILMEDI.
+                var session = await _userSessionDal.GetByRefreshTokenAnyStateAsync(refreshToken);
                 if (session != null && session.customer_id == customerId)
-                {
-                    session.is_active = false;
-                    await _userSessionDal.UpdateAsync(session);
-                }
+                    await _userSessionDal.DeactivateIfActiveAsync(session.id);
             }
             else
             {

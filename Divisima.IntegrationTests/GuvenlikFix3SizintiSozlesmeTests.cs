@@ -387,6 +387,29 @@ namespace Divisima.IntegrationTests
         }
 
         [Fact]
+        public void K10_ROTASYON_TEK_TRANSACTION_ve_LOGOUT_AYNI_CAS_YARDIMCISINDA()
+        {
+            var k = KodSatirlari(Oku("Divisima.Bussiness/Concrete/AuthManager.cs"));
+
+            // POZ: rotasyonun uc yazmasi TEK transaction'da.
+            Sayim(k, "_unitOfWork.ExecuteInTransactionAsync<CustomerLoginResponseDto?>").Should().Be(1,
+                "CAS + denetim + yeni oturum INSERT'i TEK transaction'da olmali");
+            // `BeginTransactionAsync` DEGIL: retry stratejisiyle uyumlu tek yol Execute...'tir.
+            Sayim(k, "_unitOfWork.BeginTransactionAsync()").Should().Be(0);
+
+            // POZ: logout artik rotasyonla AYNI CAS yardimcisini kullaniyor.
+            Sayim(k, "_userSessionDal.DeactivateIfActiveAsync(session.id)").Should().Be(2,
+                "rotasyon + logout - IKI cagri, AYNI yardimci (ikinci kopya YOK)");
+            // NEG: check-then-act tam-varlik yazmasi KALKTI. Bu desen kalsaydi
+            // `ExecuteUpdateAsync` ile atomik guncellenen bir kolon SESSIZCE geri alinabilirdi.
+            Sayim(k, "_userSessionDal.UpdateAsync(session)").Should().Be(0,
+                "logout'taki tam-varlik yazmasi CAS ile degistirilmis olmali");
+            // NEG: logout artik `is_active` FILTRELI okumayi kullanmiyor (yaris penceresi).
+            Sayim(k, "GetByRefreshTokenAsync(refreshToken)").Should().Be(0,
+                "filtreli okuma + bellekte degistir + yaz zinciri KALMAMALI");
+        }
+
+        [Fact]
         public void K2_ADMIN_EPOSTASI_MASKEDEN_GECER()
         {
             var k = KodSatirlari(Oku("Divisima.Bussiness/Seed/AdminSeeder.cs"));

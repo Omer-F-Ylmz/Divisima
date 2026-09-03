@@ -324,26 +324,39 @@ namespace Divisima.IntegrationTests
             sonuclar.Count(k => k == HttpStatusCode.Unauthorized).Should().Be(1,
                 "kaybeden istek 401 almali");
 
-            // ══ ES ZAMANLI YOLDA ALARM da ASSERT EDILMIYOR - OLCUMLE ZORLANDI ════════════
+            // ══ GF-3 / K10 - ALARM ve AILE KANALLARI GERI EKLENDI ════════════════════════
             //
-            // Merkez tarifi (GF-1b/F1) bu pini "tam 1x200 + alarm >= 1" olarak daraltiyordu.
-            // ALARM KANALI OLCULDU ve O DA DETERMINISTIK CIKMADI: uc ardisik tam suit
-            // kosumunun IKINCISINDE bu pin `RefreshTokenReuse ... but found 0` ile kirildi
-            // (Category=Sql kosumlarinda 3/3 yesildi - yani yuk altinda ayrisiyor).
+            // GF-1b'DE NEDEN DARALTILMISTI (kayit korunuyor): kaybeden istek HER ZAMAN CAS
+            // yoluna DUSMUYORDU. Kazananin CAS'i commit olduktan AMA yeni oturum satiri
+            // INSERT edilmeden ONCE okursa, kaybeden `is_active == false` gorup PASIF-JETON
+            // yoluna gidiyordu; orada alarm `kapatilan > 0` kosuluna bagliydi ve supurulecek
+            // aktif oturum YOKTU -> alarm YAZILMIYORDU. Uc ardisik tam suit kosumunun
+            // IKINCISINDE bu pin `RefreshTokenReuse ... but found 0` ile kirilmisti.
             //
-            // KOK SEBEP (varsayilmadi, kirmizi kosumun kendi verisinden okundu): kaybeden
-            // istek HER ZAMAN CAS yoluna DUSMEZ. Kazananin CAS'i commit olduktan AMA yeni
-            // oturum satiri INSERT edilmeden once okursa, kaybeden `is_active == false`
-            // gorur ve PASIF-JETON yoluna gider. Orada alarm (spam gerekcesiyle) hala
-            // `kapatilan > 0` kosuluna baglidir ve o an supurulecek aktif oturum YOKTUR
-            // -> alarm YAZILMAZ. F1'in kosulsuz alarmi YALNIZ CAS dalini kapsiyor.
+            // GF-3/K10 O PENCEREYI KAPATTI: CAS + denetim + yeni oturum INSERT'i artik TEK
+            // transaction. Kaybedenin CAS'i kazananin satir kilidinde bekler ve kilit ancak
+            // COMMIT ile birakilir - o an INSERT de kalicidir. Yani "CAS commit oldu ama INSERT
+            // olmadi" ARA DURUMU ARTIK GOZLENEMEZ; kaybeden HER ZAMAN CAS dalina duser ve
+            // orada alarm KOSULSUZDUR (F1).
             //
-            // Bu yuzden bu pin YALNIZCA deterministik olan kanali tutar: TEK basari.
-            // Alarm kanali, ayni davranisi DETERMINISTIK olarak uretebilen ayri bir pine
-            // tasindi -> K4B_SIRALI_YENIDEN_KULLANIM_ALARM_YAZAR (asagida).
-            // BILINEN (muhurde): es zamanli yarista hem aile iptali hem ALARM tek turda
-            // garanti degildir; ikinci denemede yakalanir. KALICI COZUM GF-3: rotasyon
-            // TEK DB transaction'i (CAS + INSERT birlikte commit).
+            // BU PIN ARTIK DUZELTMENIN KENDISINI OLCUYOR: assertler kirmizi verirse
+            // transaction sinirinin delindigi anlamina gelir.
+            await using var son = NewContext();
+
+            // (1) ALARM - kosulsuz dal artik her zaman kosuyor.
+            (await son.Set<Divisima.Entity.Entities.SecurityEvent>().AsNoTracking()
+                .CountAsync(e => e.customer_id == musteri.CustomerId && e.event_type == "RefreshTokenReuse"))
+                .Should().BeGreaterThan(0,
+                    "es zamanli yarista da yeniden kullanim sinyali YAZILMALI - K10 oncesi bu "
+                    + "kanal yuk altinda ayrisiyordu");
+
+            // (2) AILE IPTALI - kaybeden, kazananin YENI oturumunu MUTLAKA gorur.
+            // K10 oncesi bu assert "gecikmeli aile iptali" yuzunden guvenilmezdi (BILINEN #5).
+            (await son.Set<UserSession>().AsNoTracking()
+                .CountAsync(s => s.customer_id == musteri.CustomerId && s.is_active))
+                .Should().Be(0,
+                    "yeniden kullanim sinyalinde zincirin TUMU iptal edilmeli - kazananin yeni "
+                    + "oturumu DAHIL; transaction o satiri gorunur kilar");
         }
 
         // ══ GF-1b / F1 - ALARM KANALININ DETERMINISTIK PINI ═══════════════════════════════
