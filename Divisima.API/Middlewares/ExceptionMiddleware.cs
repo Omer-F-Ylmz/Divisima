@@ -38,12 +38,31 @@ namespace Divisima.API.Middlewares
                 //   korpus : `grep -h '^   at ' Divisima.API/logs/*.log | sort -u`  -> 113 satir
                 //   olcut  : ayni karakter sinifi kurali (uzunluk>=16 + rakam + kucuk harf)
                 //            113 satirin parcalarina awk ile uygulandi
-                //   sonuc  : maskeye takilan BENZERSIZ parca **5**, besi de derleyici uretimi
-                //            ad (`c__DisplayClass28_0`, `2.GetListNoTrackingAsync` gibi)
-                // Yani teshis degeri korunuyor. NOT: korpus depoda DEGIL (log dosyalari
-                // `.gitignore:22` ile disarida), bu yuzden sayi bagimsiz olarak ancak ayni
-                // ifadeyle YENIDEN URETILEREK dogrulanabilir - kural-uyum denetcisi bunu
-                // "OLCEMEDIM" olarak isaretledi ve ifade bu yuzden buraya yazildi.
+                //   sonuc  : maskeye takilan BENZERSIZ parca **5**
+                //
+                // ── DUZELTME (rapor denetcisi, CURUYEN IDDIA) ──────────────────────────────
+                // ILK YAZIMDA BURAYA "besi de DERLEYICI URETIMI ad" YAZILMISTI ve BU YANLISTI;
+                // ustelik yorumun KENDI ORNEGI (`2.GetListNoTrackingAsync`) iddiayi
+                // curutuyordu. Bes parcanin TAM LISTESI ve gercek dagilimi:
+                //     c__DisplayClass28_0                    <- derleyici uretimi (1)
+                //     1.AsyncEnumerator.MoveNextAsync        <- GERCEK metot adi
+                //     1.AsyncEnumerator.InitializeReaderAsync <- GERCEK metot adi
+                //     2.GetListNoTrackingAsync               <- GERCEK metot adi
+                //     2.GetListIgnoringFiltersAsync          <- GERCEK metot adi
+                // Yani 5'in **1'i** derleyici uretimi, DORDU gercek ad. Mekanizma: generic
+                // arite (`Base`2.Metot`) ters tirnaktan bolununce parca RAKAMLA basliyor ve
+                // maskenin aradigi "rakam + kucuk harf" olcutunu SAGLIYOR.
+                //
+                // OLCULEN ZARAR (SUPHELI olarak raporlandi): `GetListNoTrackingAsync` ve
+                // `GetListIgnoringFiltersAsync` AYNI `2.GetLis…` dizesine iniyor - CLAUDE.md
+                // bolum 5'in en cok atif alan tuzaginin (TRACKED okuma) iki cerceve*si log'da
+                // AYIRT EDILEMEZ hale geliyor. Takas yine de yapildi: istisna METINLERINDEKI
+                // PII sizintisi (KVKK) dort cerceve adindan agir basiyor. Yeni bir sezgisel
+                // EKLENMEDI - bu depoda aceleyle acilan ozel durumlar "ayni kuralin ikinci
+                // kopyasi" ailesini uretti; karar merkezindir.
+                //
+                // NOT: korpus depoda DEGIL (log dosyalari `.gitignore:22` ile disarida), bu
+                // yuzden sayi ancak ayni ifadeyle YENIDEN URETILEREK dogrulanabilir.
                 // RFC 7807 GOVDESI DEGISMEZ: yanit `HandleExceptionAsync`te uretiliyor, dokunulmadi.
                 _logger.LogError("Beklenmeyen hata: {Path} | {Hata}", context.Request.Path,
                     Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(ex.ToString()));

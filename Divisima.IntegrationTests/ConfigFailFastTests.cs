@@ -145,15 +145,27 @@ namespace Divisima.IntegrationTests
             hata!.ToString().Should().Contain(anahtar);
         }
 
-        [Fact]
-        public void Uretimde_DEPOYA_ISLENMIS_PUBLIC_JWT_DEGERI_ile_UYGULAMA_ACILMAZ()
+        [Theory]
+        // ── MK-6 BOSLUGU KAPATILDI (rapor denetcisi) ──────────────────────────────────────
+        // ILK YAZIMDA bu pin YALNIZ `docker-compose.yml`i okuyordu. Denetci MUT-9'u IKIYE
+        // BOLDU: birinci ozet (`c54dab…`) bozulunca TAM 1 kirmizi, IKINCI ozet (`d9ec1bed…`)
+        // bozulunca **695 testte 0 kirmizi** - yani deny-list'in yarisi PINSIZDI.
+        // Artik her iki kaynak da okunuyor; `ci.yml` ile `security.yml` AYNI degeri tasidigi
+        // icin ikisi de ayni (ikinci) ozete duser - o yuzden UC girdi, IKI ozet.
+        [InlineData("docker-compose.yml")]
+        [InlineData(".github/workflows/ci.yml")]
+        [InlineData(".github/workflows/security.yml")]
+        public void Uretimde_DEPOYA_ISLENMIS_PUBLIC_JWT_DEGERI_ile_UYGULAMA_ACILMAZ(string goreliYol)
         {
-            // DEGER KAYNAGA YAZILMAZ - `docker-compose.yml`den OKUNUR. Bu ayni zamanda
-            // DENY-LIST'IN GUNCELLIGINI de pinler: o dosyadaki deger degisip Program.cs'teki
-            // SHA-256 ozeti guncellenmezse bu pin KIRILIR ve karar bilincli verilmek zorunda kalir.
-            var satir = File.ReadAllLines(Path.Combine(KokDizin.Value, "docker-compose.yml"))
+            // DEGER KAYNAGA YAZILMAZ - dosyadan OKUNUR. Bu ayni zamanda DENY-LIST'IN
+            // GUNCELLIGINI de pinler: o dosyalardaki deger degisip Program.cs'teki SHA-256
+            // ozetleri guncellenmezse pin KIRILIR ve karar bilincli verilmek zorunda kalir.
+            var tam = Path.Combine(KokDizin.Value, goreliYol.Replace('/', Path.DirectorySeparatorChar));
+            File.Exists(tam).Should().BeTrue($"kaynak dosya bulunmali: {goreliYol}");
+
+            var satir = File.ReadAllLines(tam)
                 .FirstOrDefault(s => s.Contains("TokenOptions__SecurityKey", StringComparison.Ordinal));
-            satir.Should().NotBeNull("docker-compose.yml'de TokenOptions__SecurityKey satiri bulunmali");
+            satir.Should().NotBeNull($"{goreliYol} icinde TokenOptions__SecurityKey satiri bulunmali");
 
             var deger = satir!.Substring(satir.IndexOf(':') + 1).Trim().Trim('"');
             deger.Should().NotBeNullOrWhiteSpace("vakum kirici: deger gercekten okunmus olmali");

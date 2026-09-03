@@ -392,8 +392,16 @@ namespace Divisima.Bussiness.Concrete
         //      400 verirdi. Iki taraf da `KanonikKod`dan gecirilir; o metot null ve "" icin
         //      AYNI degeri ("") dondurdugu icin NULL ≡ "" normalizasyonu DOGAL olarak saglanir
         //      (kupon vermeyen istemci "" gonderir - CLAUDE.md bolum 5'te kayitli baglama tuzagi).
-        //  (2) IPTAL KALEMLERI DISLANIR: kismi iptal gormus bir siparisin kalem kumesi artik
-        //      gelen sepetle eslesmezdi ve mesru replay 400 alirdi.
+        //  (2) IPTAL KALEMLERI DISLANIR (merkez karari D7).
+        //      ── DUZELTME (rapor denetcisi, CELISKI) ───────────────────────────────────────
+        //      ILK YAZIMDA BURAYA "aksi halde mesru replay 400 alirdi" YAZILMISTI ve BU TERSI
+        //      SOYLUYORDU. Mantik izi: siparisin kalemleri ne SIPARIS EDILDIGINI kaydeder;
+        //      sonradan gelen KISMI IPTAL o kaydi degistirmez. Dislama, kalem kumesini
+        //      KUCULTUR - yani kismi iptalden SONRA gelen ve ORIJINAL sepeti tasiyan bir
+        //      replay ESLESMEZ ve 400 alir. Yani dislama olcutu SIKILASTIRIR, gevsetmez.
+        //      Pratik etkisi ihmal edilebilir (replay saniyeler icinde gelir, arada iptal
+        //      olmasi beklenmez) ama YON YANLIS ANLATILMISTI. Davranis DEGISTIRILMEDI -
+        //      merkez karari boyle; semantik itiraz raporda ve pinde kayitli.
         //
         // ESLESMEZSE 400 - SIZINTISIZ: mevcut `OrderPlaceFailed` mesaji AYNEN kullanilir,
         // yani ne siparisin VARLIGI ne `order_number` sizar (GUVENLIK-2/#1 karariyla tutarli).

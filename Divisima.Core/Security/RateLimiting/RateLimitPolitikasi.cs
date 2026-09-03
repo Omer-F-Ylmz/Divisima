@@ -93,7 +93,12 @@ namespace Divisima.Core.Security.RateLimiting
         // ══ GF-1b / K9 (GF1-B12) - BU YORUMUN SAYISI BAYATLAMISTI ═════════════════════════
         // Yukarida "6 dosya 9 yer" yaziyordu. BUGUNKU DEGER, URETEN IFADESIYLE:
         //   git grep -c "^[[:space:]]*\[EnableRateLimiting(" <ref> -- 'Divisima.API/*'
-        //   -> 9 yer / 7 dosya   (NEG kontrol: ayni ifade "ZZZEnableRateLimiting" ile 0)
+        //   -> GF-1b gunu: 9 yer / 7 dosya   (NEG kontrol: "ZZZEnableRateLimiting" -> 0)
+        //   -> **GF-3 SONRASI: 14 yer / 11 dosya** (K9 bes "hassas" oznitelik ekledi:
+        //      Coupon 1 · GiftCard 2 · Search 1 · ProductReview 1). NEG kontrol yine 0.
+        //      Bu blok "yoruma SAYI yazilacaksa URETEN IFADESIYLE yazilir" dersini anlatiyor
+        //      ve K9 onu BAYATLATMISTI - rapor denetcisi yakaladi, ders kendi uzerinde
+        //      ucuncu kez uygulandi.
         //
         // AYNI IFADEYLE OLCULEN TARIHSEL ZINCIR (tahmin degil):
         //   d434906^ : 10 yer / 6 dosya

@@ -128,6 +128,17 @@ namespace Divisima.Bussiness.Outbox
             // GF-3/K2: ONCEDEN hem `ex` NESNESI hem ham `ex.Message` yaziliyordu. Ayni metin
             // `DashboardManager:241`'de ZATEN maskeden geciyordu - yani depo ayni degeri bir
             // yerde maskeleyip bir yerde HAM yaziyordu (ASIMETRI, GF-3 on olcum A).
+            //
+            // ── SINIR - DURUST KAYIT (L3 denetcisi / ITIRAZ-1) ─────────────────────────────
+            // BU SATIRIN DUZELTILMESI ASIMETRIYI KAPATMADI, **YER DEGISTIRDI**. Ayni metodun
+            // ASAGISINDA (`KaliciHataNotuYazAsync` icinde, iki yerde) ham `ex.Message`
+            // `order_status_history.note` alanina yaziliyor ve o not
+            // `GET /api/order/timeline/{orderId}` ile **MUSTERIYE** donuyor - yani LOG'dan
+            // DAHA GENIS bir sink acik kaldi. Ustelik K2'nin kendi gerekcesi ("mail gonderim
+            // istisnalari ALICI ADRESINI tasir") tam da orada gecerlidir ve "admin bildirimi"
+            // dalinda tasinan adres MUSTERININ DEGIL ADMINDIR.
+            // O satirlara BU DALGADA DOKUNULMADI: musteriye GORUNEN metni kirpmak bir urun
+            // karari ve K2'nin kapsami LOG sink'iydi. SUPHELI olarak raporlandi.
             // Istisna NESNESI de gecilmiyor: Serilog'un {Exception} alani ex.ToString()'i HAM
             // yazar ve mail gonderim istisnalari ALICI ADRESINI tasir. Yigin izi kaybolmuyor,
             // maskeden gecirilip metne konuyor (olculdu: 113 gercek yigin satirinda maskelenen
