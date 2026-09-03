@@ -345,7 +345,6 @@ namespace Divisima.IntegrationTests
             if (Skipped()) return;
 
             var utcOnce = DateTime.UtcNow;
-            var yerelOnce = DateTime.Now;
             var (login, customerId) = await GirisYapAsync(_factory!);
             login.StatusCode.Should().Be(HttpStatusCode.OK);
 
@@ -369,7 +368,15 @@ namespace Divisima.IntegrationTests
                 .OrderByDescending(s => s.id).FirstAsync();
 
             var cerezOmru = cerezBitis - utcOnce;
-            var oturumOmru = oturum.expires_at - yerelOnce;
+            // ══ GF-3 / K11 - PININ EKSENI DUZELTILDI (iddia AYNEN korundu) ═════════════════
+            // K11 oncesi `expires_at` YEREL eksende yaziliyordu, bu yuzden oturum omru YEREL
+            // tabandan olculuyordu (`yerelOnce`) - cerez ise UTC. Iki farkli taban KULLANMAK
+            // o gun DOGRUYDU cunku iki deger farkli eksenlerdeydi.
+            // K11 `expires_at`i UTC'ye tasidi; taban da UTC olmak zorunda. Pin bunu KENDILIGINDEN
+            // yakaladi (fark 2.9997 saat = tam UTC+03:00 kaymasi) - yani assert calisiyor.
+            // KORUNAN IDDIA DEGISMEDI: "cerez ve oturum AYNI ANDA biter, ikisi tek sabitten
+            // (OturumOmru.RefreshGun) turer".
+            var oturumOmru = oturum.expires_at - utcOnce;
 
             // 1) IKISI AYNI: fark bir saatten kucuk olmali (ayni sabitten turuyorlar).
             Math.Abs((cerezOmru - oturumOmru).TotalHours).Should().BeLessThan(1,

@@ -22,7 +22,19 @@ namespace Divisima.Core.Security.JWT
         // Açıklayıcı yorum: Kullanıcı için imzalı JWT üret (Customer tipi claim'leriyle)
         public AccessToken CreateToken(IUser user, DateTime? authTime = null)
         {
-            var expiration = DateTime.Now.AddMinutes(_tokenOptions.AccessTokenExpiration);
+            // ══ GF-3 / K11 - JWT ZAMAN EKSENI UTC ══════════════════════════════════════════
+            // `exp` ve `nbf` JWT'de SANIYE cinsinden UTC epoch olarak tasinir; kutuphane
+            // `DateTime`i ONCE UTC'ye cevirir. Yani teldeki deger BUGUN DE dogruydu -
+            // degisen sey KAYNAK Kind'i.
+            //
+            // BILINCLI KABUL (merkez karari, DUR-6): `AccessToken.Expiration` bu degerden
+            // turer ve `CustomerLoginResponseDto.expiration` olarak YANIT GOVDESINE cikar.
+            // Ozel bir `DateTimeConverter` olmadigi icin System.Text.Json `Kind`e gore yazar:
+            // eskiden "...+03:00", artik "...Z". Yani LOGIN YANIT GOVDESI DEGISTI.
+            // Olculdu: frontend bu alani TUKETMIYOR (0 gecis) ve hicbir pin OLCMUYORDU (0).
+            // `SellerLoginResponseDto` de ayni helper'dan beslendigi icin DOLAYLI etkilenir -
+            // Seller KODUNA dokunulmadi, yalnizca degerin BICIMI degisti (muhurde ayri satir).
+            var expiration = DateTime.UtcNow.AddMinutes(_tokenOptions.AccessTokenExpiration);
             var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_tokenOptions.SecurityKey));
             var signingCredentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256Signature);
 
@@ -66,7 +78,7 @@ namespace Divisima.Core.Security.JWT
                 issuer: _tokenOptions.Issuer,
                 audience: _tokenOptions.Audience,
                 expires: expiration,
-                notBefore: DateTime.Now,
+                notBefore: DateTime.UtcNow,   // GF-3/K11 - expiration ile AYNI eksende
                 claims: claims,
                 signingCredentials: signingCredentials);
 

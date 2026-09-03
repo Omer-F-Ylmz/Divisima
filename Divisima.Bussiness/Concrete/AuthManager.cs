@@ -499,9 +499,21 @@ namespace Divisima.Bussiness.Concrete
                 // GF-1b / K3: DB'de OZET durur, istemciye DUZ jeton doner (asagida).
                 // DB okuma yetkisi ya da bir yedek dosyasi artik CANLI oturum jetonu VERMEZ.
                 refresh_token = JetonOzeti.Hesapla(refreshToken),
-                expires_at = DateTime.Now.AddDays(RefreshTokenDays),
+                // ══ GF-3 / K11 - OTURUM ZAMAN EKSENI UTC ═══════════════════════════════════
+                // DAR KAPSAM (merkez karari): yalniz `expires_at` · `created_at` · JWT
+                // `exp`/`nbf`. Ayni dosyadaki `lockout_end`, `password_reset_expiry` ve
+                // `two_factor_code_expiry` YEREL kalir ve BILINEN olarak kaydedilir - gerekce:
+                // her biri KENDI okuyucusuyla CIFT halinde tasinmak zorunda ve `lockout_end`in
+                // UCUNCU okuyucusu `SellerAuthManager` DOKUNULMAZ listesinde. Kismi bir gecis
+                // kilidi ANINDA gecersiz kilardi (kaba kuvvet korumasi sessizce kapanirdi).
+                //
+                // MEVCUT SATIRLAR: bu degisiklikten ONCE yazilmis `expires_at` degerleri YEREL
+                // eksende duruyor; UtcNow ile karsilastirilinca tr-TR'de (UTC+3) uc saat DAHA
+                // UZUN yasarlar. Launch oncesi KABUL (merkez karari, D-YAN); geriye donuk
+                // donusum YAPILMADI.
+                expires_at = DateTime.UtcNow.AddDays(RefreshTokenDays),
                 is_active = true,
-                created_at = DateTime.Now,
+                created_at = DateTime.UtcNow,   // GF-3/K11 - expires_at ile AYNI eksende
                 auth_time = authTime,
                 // GF-1b / K6 (GF1-B7): bu iki kolon VARDI ama HICBIR uretim yolu YAZMIYORDU.
                 device = KisaltUserAgent(),
@@ -650,7 +662,10 @@ namespace Divisima.Bussiness.Concrete
             }
 
             // Açıklayıcı yorum: Refresh token süresi dolmuş mu
-            if (session.expires_at < DateTime.Now)
+            // GF-3/K11: YAZAN ve OKUYAN AYNI ANDA tasindi. Biri tasinip oteki birakilsaydi
+            // tr-TR'de (UTC+3) ya oturum ANINDA gecersiz olurdu ya da uc saat fazla yasardi -
+            // kismi gecisin iki yonu de hasar verir.
+            if (session.expires_at < DateTime.UtcNow)
                 return (HttpStatusCode.Unauthorized, new ErrorResult(Messages.RefreshTokenExpired));
 
             var customer = await _customerDal.GetAsync(c => c.id == session.customer_id);

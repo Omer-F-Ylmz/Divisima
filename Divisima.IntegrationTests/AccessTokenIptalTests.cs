@@ -359,6 +359,57 @@ namespace Divisima.IntegrationTests
                     + "oturumu DAHIL; transaction o satiri gorunur kilar");
         }
 
+        // ══ GF-3 / K11 - ZAMAN EKSENI DAVRANIS PINI ═══════════════════════════════════════
+        //
+        // NEDEN `Kind` OLCULUYOR, SAAT FARKI DEGIL: bir "UtcNow ile Now arasinda 3 saat var"
+        // asserti ORTAMA BAGLI olurdu - CI kosucusu UTC'de kosarsa `Now == UtcNow` cikar ve
+        // pin YALANCI YESIL verir (bu risk merkez tarifinde de isaretlendi). `DateTimeKind`
+        // ise saat dilimine DEGIL degerin URETILDIGI KAYNAGA baglidir: `DateTime.Now` -> Local,
+        // `DateTime.UtcNow` -> Utc. Yani bu assert UTC bir makinede de ayirt eder.
+        //
+        // AYRICA BU, DUR-6'nin BILINCLI KABULUNUN PINIDIR: `expiration` yanit govdesine cikar
+        // ve Kind=Utc oldugu icin JSON'da "...Z" olarak serilesir (eskiden "...+03:00").
+        [Fact]
+        public async Task GF3_K11_JETON_SURESI_UTC_EKSENINDE_URETILIR()
+        {
+            if (Skipped()) return;
+            var musteri = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
+
+            var duzJeton = "gf3-k11-" + Guid.NewGuid().ToString("N");
+            await using (var ctx = NewContext())
+            {
+                var oturum = await ctx.Set<UserSession>()
+                    .SingleAsync(s => s.customer_id == musteri.CustomerId && s.is_active);
+                oturum.refresh_token = Divisima.Core.Security.Tokens.JetonOzeti.Hesapla(duzJeton);
+                await ctx.SaveChangesAsync();
+            }
+
+            using var scope = _factory!.Services.CreateScope();
+            var auth = scope.ServiceProvider.GetRequiredService<Divisima.Bussiness.Abstract.IAuthService>();
+            var (durum, sonuc) = await auth.RefreshToken(
+                new Divisima.Entity.Dtos.Auth.RefreshTokenRequestDto { refresh_token = duzJeton });
+
+            durum.Should().Be(HttpStatusCode.OK, "vakum kirici: rotasyon GERCEKTEN calismali");
+            var dto = sonuc.Should()
+                .BeOfType<Divisima.Core.Utilities.Results.SuccessDataResult<
+                    Divisima.Entity.Dtos.Auth.CustomerLoginResponseDto>>()
+                .Subject.Data;
+
+            dto.expiration.Kind.Should().Be(DateTimeKind.Utc,
+                "access token suresi UTC ekseninde uretilmeli - Local olsaydi yanit govdesi "
+                + "kosucunun saat dilimine gore degisirdi");
+
+            // OTURUM SATIRI da ayni eksende yazilmali (yazan ve okuyan CIFT halinde tasindi).
+            await using var son = NewContext();
+            var yeni = await son.Set<UserSession>().AsNoTracking()
+                .Where(s => s.customer_id == musteri.CustomerId && s.is_active)
+                .OrderByDescending(s => s.id).FirstAsync();
+            // `expires_at` UtcNow + 7 gun olmali. Saat dilimi TOLERANSI YOK - Local yazilsaydi
+            // tr-TR'de fark UC SAAT olurdu; 1 saatlik pencere onu ayirt eder.
+            (yeni.expires_at - DateTime.UtcNow).TotalDays.Should().BeInRange(6.9, 7.01,
+                "expires_at UTC ekseninde yazilmali - yerel yazilsaydi fark 3 saat kayardi");
+        }
+
         // ══ GF-1b / F1 - ALARM KANALININ DETERMINISTIK PINI ═══════════════════════════════
         //
         // Yukaridaki es zamanli pin alarmi GUVENILIR olarak olcemiyor (gerekce orada).

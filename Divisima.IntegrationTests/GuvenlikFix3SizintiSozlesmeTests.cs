@@ -410,6 +410,38 @@ namespace Divisima.IntegrationTests
         }
 
         [Fact]
+        public void K11_OTURUM_ve_JETON_ZAMAN_EKSENI_UTC_kapsam_DISI_alanlar_YEREL_KALIR()
+        {
+            // PIN NEDEN ALAN BAZLI, DOSYA GENELI DEGIL (durust kayit): merkez tarifi
+            // "dort dosyada DateTime.Now gecisi 0" diyordu; ayni kararda `lockout_end`
+            // KAPSAM DISI birakildi ve o alan TAM DA bu dosyalarda `DateTime.Now` kullaniyor
+            // (AuthManager 2 · AccountManager 2 · ucuncu okuyucu SellerAuthManager DOKUNULMAZ).
+            // Dosya-geneli bir "0" asserti bu kararla CELISIRDI. Bu yuzden pin, K11'in
+            // GERCEKTEN tasidigi ALANLARI olcer.
+            var auth = KodSatirlari(Oku("Divisima.Bussiness/Concrete/AuthManager.cs"));
+            var jwt = KodSatirlari(Oku("Divisima.Core/Security/JWT/JwtHelper.cs"));
+
+            // POZ - tasinan alanlar UTC.
+            Sayim(auth, "expires_at = DateTime.UtcNow.AddDays(RefreshTokenDays)").Should().Be(1);
+            Sayim(auth, "created_at = DateTime.UtcNow").Should().Be(1);
+            Sayim(auth, "session.expires_at < DateTime.UtcNow").Should().Be(1);
+            Sayim(jwt, "DateTime.UtcNow.AddMinutes(_tokenOptions.AccessTokenExpiration)").Should().Be(1);
+            Sayim(jwt, "notBefore: DateTime.UtcNow").Should().Be(1);
+
+            // NEG - YAZAN/OKUYAN CIFTININ yarim kalmadigi. Kismi gecis iki yonde de hasar
+            // verir: yazan tasinip okuyan kalirsa oturum ANINDA gecersiz, tersi uc saat fazla.
+            Sayim(auth, "expires_at = DateTime.Now").Should().Be(0);
+            Sayim(auth, "session.expires_at < DateTime.Now").Should().Be(0);
+            Sayim(jwt, "DateTime.Now").Should().Be(0, "JwtHelper TAMAMEN UTC eksenine gecti");
+
+            // KAPSAM DISI ALANLAR YERINDE - "hepsini cevirdim" YANLIS uygulamasini kirar.
+            Sayim(auth, "customer.lockout_end.Value > DateTime.Now").Should().Be(1,
+                "lockout_end BILINCLI olarak yerel kaldi - ucuncu okuyucusu DOKUNULMAZ");
+            Sayim(auth, "customer.password_reset_expiry.Value < DateTime.Now").Should().Be(1,
+                "sifre sifirlama ekseni bu dalgada tasinmadi - BILINEN");
+        }
+
+        [Fact]
         public void K2_ADMIN_EPOSTASI_MASKEDEN_GECER()
         {
             var k = KodSatirlari(Oku("Divisima.Bussiness/Seed/AdminSeeder.cs"));
