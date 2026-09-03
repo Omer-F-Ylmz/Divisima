@@ -1123,5 +1123,67 @@ namespace Divisima.IntegrationTests
             return (await ctx.Set<Address>().AsNoTracking()
                 .Where(a => a.customer_id == musteriId).OrderByDescending(a => a.id).FirstAsync()).id;
         }
+
+        // ══ GF-3 / K12 (GF1-B1) - R-3.10: REPLAY OLCUTU SEPETE DE BAKAR ═══════════════════
+        //
+        // OLCULEN ONCE-DURUM: `request_id` replay'inde karsilastirilan TEK sey E-POSTAYDI.
+        // Ayni anahtarla FARKLI bir sepet gonderen istek, ilk siparisin `order_number`ini
+        // 200 + `replayed:true` olarak geri aliyordu - musteri ikinci siparisin verildigini
+        // saniyor, gercekte hicbir sey yazilmiyordu.
+        //
+        // IKI BACAK (merkez karari): (a) AYNI sepet, KUPONSUZ -> 200 (NULL ≡ "" normalizasyonu
+        // calisiyor demektir; naif esitlik burada 400 verirdi ve bu pin KIRMIZI olurdu),
+        // (b) FARKLI sepet -> 400 ve GOVDE SIZINTISIZ.
+        [Fact]
+        public async Task GF3_K12_AYNI_RID_AYNI_SEPET_200_FARKLI_SEPET_400_SIZINTISIZ()
+        {
+            if (Skipped()) return;
+            var (urunId, beden) = await UrunHazirlaAsync();
+            var (urun2, beden2) = await UrunHazirlaAsync();
+
+            var eposta = "gf3k12-" + Guid.NewGuid().ToString("N").Substring(0, 8) + "@example.com";
+            var rid = "gf3-k12-" + Guid.NewGuid().ToString("N");
+
+            object Govde(int pid, string bd, int adet) => new
+            {
+                guest_name = "GF3 K12",
+                guest_email = eposta,
+                guest_phone = "05001112233",
+                city = "Istanbul",
+                district = "Kadikoy",
+                full_address = "K12 pin adresi",
+                coupon_code = "",              // KUPONSUZ - DB'de NULL, istemcide "" (bolum 5 tuzagi)
+                request_id = rid,
+                payment_method = (byte)1,
+                items = new[] { new { product_id = pid, size = bd, quantity = adet } },
+            };
+
+            // ── (1) ILK SIPARIS - vakum kirici: akis GERCEKTEN calismali ──
+            var ilk = await MisafirIstekAsync(Guid.NewGuid().ToString("N"), Govde(urunId, beden, 1));
+            // ILK siparis 201 Created doner; REPLAY 200 OK doner - ayrim BILINCLI ve pinli.
+            ilk.StatusCode.Should().Be(HttpStatusCode.Created, "misafir siparisi olusabilmeli");
+            var ilkGovde = await ilk.Content.ReadAsStringAsync();
+
+            // ── (2) AYNI rid + AYNI sepet + KUPONSUZ -> 200 idempotent ──
+            // Bu bacak NULL ≡ "" normalizasyonunun pinidir: `orders.coupon_code` NULL, gelen "".
+            var ayni = await MisafirIstekAsync(Guid.NewGuid().ToString("N"), Govde(urunId, beden, 1));
+            ayni.StatusCode.Should().Be(HttpStatusCode.OK,
+                "ayni sepetle gelen replay 200 donmeli - kuponsuzda DB NULL / istemci \"\" ayrimi "
+                + "naif karsilastirilsaydi MESRU replay 400 alirdi");
+            (await ayni.Content.ReadAsStringAsync()).Should().Contain("\"replayed\":true");
+
+            // ── (3) AYNI rid + FARKLI sepet -> 400 ──
+            var farkli = await MisafirIstekAsync(Guid.NewGuid().ToString("N"), Govde(urun2, beden2, 3));
+            farkli.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+                "farkli sepet AYNI siparis DEGILDIR - idempotency anahtari govdeye baglanmali");
+
+            // SIZINTI YOK: ne siparis numarasi ne varlik bilgisi.
+            var farkliGovde = await farkli.Content.ReadAsStringAsync();
+            var siparisNo = System.Text.RegularExpressions.Regex.Match(ilkGovde, "\"order_number\":\"([^\"]+)\"");
+            siparisNo.Success.Should().BeTrue("vakum kirici: ilk yanit gercekten bir siparis numarasi tasimali");
+            farkliGovde.Should().NotContain(siparisNo.Groups[1].Value,
+                "400 govdesi baska bir siparisin numarasini SIZDIRMAMALI");
+            farkliGovde.Should().NotContain("order_number");
+        }
     }
 }

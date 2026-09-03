@@ -442,6 +442,36 @@ namespace Divisima.IntegrationTests
         }
 
         [Fact]
+        public void K13_UPDATE_VALIDATORU_VAR_ve_KURALLARI_ADD_ILE_BIREBIR_AYNI()
+        {
+            var add = KodSatirlari(Oku(
+                "Divisima.Bussiness/ValidationRules/ProductAddRequestValidator.cs"));
+            var upd = KodSatirlari(Oku(
+                "Divisima.Bussiness/ValidationRules/ProductUpdateRequestValidator.cs"));
+
+            upd.Should().Contain("AbstractValidator<ProductUpdateRequestDto>",
+                "GF-2a'da olculen bosluk: bu sinif YOKTU ve Update yolu dogrulanmiyordu");
+
+            // AYRISMA KAPISI: hex deseni IKI dosyada da AYNI olmali. Ayrisirlarsa bu depoda
+            // kayitli kusur sinifinin (Add/Update asimetrisi) yeni bir ornegi dogar.
+            const string desen = "Matches(\"^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$\")";
+            Sayim(add, desen).Should().Be(1, "vakum kirici: capa Add tarafinda GERCEKTEN var");
+            Sayim(upd, desen).Should().Be(1, "Update deseni Add ile BIREBIR ayni olmali");
+
+            // Bos deger MESRU kalir - iki tarafta da ayni kosul.
+            Sayim(upd, "When(p => !string.IsNullOrEmpty(p.color_hex))").Should().Be(1);
+
+            // CSV YOLU DA DOGRULUYOR - istemci TEK savunma olmaktan cikti.
+            var pm = KodSatirlari(Oku("Divisima.Bussiness/Concrete/ProductManager.cs"));
+            Sayim(pm, "gecersiz color_hex").Should().Be(1,
+                "CSV satiri gecersiz hex tasiyorsa REDDEDILMELI ve gerekce errors listesine yazilmali");
+            Sayim(pm, "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$").Should().Be(1,
+                "CSV deseni de AYNI olmali");
+            // NEG: ham okuma artik dogrulanmadan varliga yazilmiyor.
+            Sayim(pm, "color_hex = cols[6].Trim()").Should().Be(0);
+        }
+
+        [Fact]
         public void K2_ADMIN_EPOSTASI_MASKEDEN_GECER()
         {
             var k = KodSatirlari(Oku("Divisima.Bussiness/Seed/AdminSeeder.cs"));

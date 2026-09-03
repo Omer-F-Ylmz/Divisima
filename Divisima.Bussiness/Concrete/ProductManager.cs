@@ -138,6 +138,22 @@ namespace Divisima.Bussiness.Concrete
                 var size = cols[8].Trim();
                 if (!int.TryParse(cols[9].Trim(), out var qty) || qty < 0) { errors.Add($"Satir {i + 1}: gecersiz stok"); continue; }
 
+                // ══ GF-3 / K13 - RENK KODU CSV YOLUNDA DA DOGRULANIR ══════════════════════
+                // OLCULEN ONCE-DURUM: `color_hex` bu dongude dogrulanMIYORDU ve dogrudan
+                // varliga yaziliyordu; kolon `nvarchar(9)` oldugu icin <= 9 karakterlik HER
+                // dizge DB'ye giriyor, daha uzunu ise dongunun ORTASINDA 500 uretiyordu
+                // (import'ta transaction YOK - KISMI ice aktarim kalirdi).
+                // Desen `ProductAddRequestValidator`den KOPYALANDI (ezberden yazilmadi);
+                // BOS deger MESRU kalir - Add validator'i da `.When(!IsNullOrEmpty)` diyor.
+                // Satir REDDEDILIR ve gerekcesi `errors` listesine yazilir: o liste ZATEN
+                // yanitta donuyor (`Data = { imported, skipped, errors }`), yani YANIT
+                // SOZLESMESI DEGISMEDI ve bu ucun frontend tuketicisi de YOK (olculdu).
+                var colorHex = cols[6].Trim();
+                if (!string.IsNullOrEmpty(colorHex)
+                    && !System.Text.RegularExpressions.Regex.IsMatch(
+                        colorHex, "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"))
+                { errors.Add($"Satir {i + 1}: gecersiz color_hex"); continue; }
+
                 var key = name + "|" + brand;
                 if (!grouped.ContainsKey(key))
                     grouped[key] = (new Product
@@ -148,7 +164,7 @@ namespace Divisima.Bussiness.Concrete
                         price = price,
                         sale_price = salePrice,
                         description = cols[5].Trim(),
-                        color_hex = cols[6].Trim(),
+                        color_hex = colorHex,   // GF-3/K13 - yukarida dogrulandi
                         product_type = productType
                     }, new List<(string, int)>());
                 if (!string.IsNullOrWhiteSpace(size))
