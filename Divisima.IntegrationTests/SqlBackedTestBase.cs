@@ -27,7 +27,7 @@ namespace Divisima.IntegrationTests
                 var baseConn = string.IsNullOrWhiteSpace(ExplicitConn)
                     ? @"Server=(localdb)\MSSQLLocalDB;Trusted_Connection=True;TrustServerCertificate=True;"
                     : ExplicitConn;
-                return new SqlConnectionStringBuilder(baseConn) { InitialCatalog = DatabaseName }.ConnectionString;
+                return new SqlConnectionStringBuilder(baseConn) { InitialCatalog = TestDbAdi.Cozumle(DatabaseName) }.ConnectionString;
             }
         }
 

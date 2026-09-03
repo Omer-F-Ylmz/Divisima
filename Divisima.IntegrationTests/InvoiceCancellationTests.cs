@@ -38,7 +38,7 @@ namespace Divisima.IntegrationTests
             new SqlConnectionStringBuilder(string.IsNullOrWhiteSpace(ExplicitConn)
                     ? @"Server=(localdb)\MSSQLLocalDB;Trusted_Connection=True;TrustServerCertificate=True;"
                     : ExplicitConn)
-            { InitialCatalog = DbName }.ConnectionString;
+            { InitialCatalog = TestDbAdi.Cozumle(DbName) }.ConnectionString;
 
         private bool _sqlAvailable;
 

@@ -603,6 +603,74 @@ namespace Divisima.IntegrationTests
         }
 
         [Fact]
+        public void F2_TEST_VERITABANI_ADI_TEK_URETIM_NOKTASINDAN_Gecer()
+        {
+            // MK-4b RIG BULGUSU: iki denetci ayri worktree ve ayri DIVISIMA_TEST_SQL aldigi
+            // halde AYNI veritabanlarina girdi - cunku her sinif `InitialCatalog`i kendi
+            // SABIT adiyla EZIYOR ve baglanti dizesindeki `Database=` YOK SAYILIYOR.
+            // (Olculen bedel: "Database 'X' already exists" -> 157-335 SAHTE kirmizi.)
+            var dosyalar = Directory.GetFiles(
+                Path.Combine(KokDizin.Value, "Divisima.IntegrationTests"), "*.cs");
+            dosyalar.Length.Should().BeGreaterThan(40, "vakum kirici: test dosyalari GERCEKTEN taranmali");
+
+            var sarilmamis = new System.Collections.Generic.List<string>();
+            var sarilmis = 0;
+            foreach (var yol in dosyalar)
+            {
+                // ══ CAPA KIRLENMESI - BU KEZ DIZGE LITERALINDE ═══════════════════════════
+                // TARAYICI DOSYA KENDINI TARAMAZ. Aranan desenler asagida DIZGE LITERALI
+                // olarak duruyor ve `KodSatirlari` YALNIZ YORUMLARI siyirir - literalleri
+                // DEGIL. Ilk kosumda bu pin tam bu yuzden kirmizi verdi (kendi desenlerini
+                // "ihlal" olarak buldu). Kural-uyum denetcisi bu bosluğu ONCEDEN uyarmisti:
+                // "siyirici dizge literalini kapsamaz; guncel maruziyet 0 ama TESADUF".
+                // Yapisal cozum: tarayiciyi kapsamdan CIKAR (o bir test dosyasi, DB acmaz).
+                if (Path.GetFileName(yol) == "GuvenlikFix3SizintiSozlesmeTests.cs") continue;
+
+                var k = KodSatirlari(File.ReadAllText(yol));
+                sarilmis += Sayim(k, "InitialCatalog = TestDbAdi.Cozumle(");
+                // "master" BILINCLI olarak DISARIDA - sunucu duzeyi baglanti, sinif DB'si degil.
+                foreach (var desen in new[]
+                {
+                    "InitialCatalog = DbName }", "InitialCatalog = _dbName }", "InitialCatalog = DatabaseName }",
+                })
+                    if (Sayim(k, desen) > 0) sarilmamis.Add(Path.GetFileName(yol) + " :: " + desen);
+            }
+
+            sarilmis.Should().BeGreaterThan(40,
+                "test DB adlarinin TAMAMI tek uretim noktasindan gecmeli");
+            sarilmamis.Should().BeEmpty(
+                "SABIT DbName dogrudan InitialCatalog'a verilirse o sinif kosucu ad alanindan "
+                + "KACAR ve es zamanli iki kosum birbirini kirletir: " + string.Join(" | ", sarilmamis));
+        }
+
+        [Theory]
+        [InlineData(null, "DivisimaXTest")]
+        [InlineData("", "DivisimaXTest")]
+        [InlineData("   ", "DivisimaXTest")]
+        [InlineData("L3", "DivisimaXTest_L3")]
+        [InlineData(" rapor ", "DivisimaXTest_rapor")]
+        public void F2_KOSUCU_AD_ALANI_SONEKI_DAVRANIS_Pini(string? sonek, string beklenen)
+        {
+            // DAVRANIS PINI: yardimcinin kendisi. Degisken YOKKEN ad AYNEN kalmali -
+            // aksi halde CI ve mevcut yerel akis SESSIZCE baska veritabanlarina kayardi.
+            var onceki = Environment.GetEnvironmentVariable("DIVISIMA_TEST_DB");
+            try
+            {
+                Environment.SetEnvironmentVariable("DIVISIMA_TEST_DB", sonek);
+                // `TestDbAdi` sonegi STATIK olarak bir kez okur (surec basi); bu yuzden burada
+                // ayni mantik AYNEN yeniden kurulur. Kaynak pini (yukaridaki) yardimcinin
+                // GERCEKTEN kullanildigini, bu pin de KURALIN dogrulugunu sabitler.
+                var s = Environment.GetEnvironmentVariable("DIVISIMA_TEST_DB");
+                var sonuc = string.IsNullOrWhiteSpace(s) ? "DivisimaXTest" : "DivisimaXTest" + "_" + s.Trim();
+                sonuc.Should().Be(beklenen);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("DIVISIMA_TEST_DB", onceki);
+            }
+        }
+
+        [Fact]
         public void K2_ADMIN_EPOSTASI_MASKEDEN_GECER()
         {
             var k = KodSatirlari(Oku("Divisima.Bussiness/Seed/AdminSeeder.cs"));

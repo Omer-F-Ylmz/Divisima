@@ -50,7 +50,7 @@ namespace Divisima.IntegrationTests
             : ExplicitConn;
 
         private string ConnStr =>
-            new SqlConnectionStringBuilder(BaseConn) { InitialCatalog = _dbName }.ConnectionString;
+            new SqlConnectionStringBuilder(BaseConn) { InitialCatalog = TestDbAdi.Cozumle(_dbName) }.ConnectionString;
 
         private static string MasterConn =>
             new SqlConnectionStringBuilder(BaseConn) { InitialCatalog = "master" }.ConnectionString;
