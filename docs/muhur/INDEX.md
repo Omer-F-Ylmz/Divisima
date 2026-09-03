@@ -60,7 +60,14 @@ onlari bayatlatmaz. Okuma usulu: CLAUDE.md B0 · MK-11 (b).
 
 | 46 | `46-guvenlik-fix-2a.md` | # 46 · GUVENLIK-FIX-2a (GF-2a) MUHRU — ISTEMCI KACIS (3 Eylul 2026) | — | 17305 | yeni usul |
 
-Toplam arsiv: 48 dosya · 835.205 B (OLCULDU: `ls -1 *.md | grep -v INDEX.md | xargs wc -c`).
+| 47 | `47-guvenlik-fix-3.md` | # 47 · GUVENLIK-FIX-3 (GF-3) MUHRU — SIZINTI / YAPILANDIRMA / LIMIT / KALINTI (3 Eylul 2026) | — | 18375 | yeni usul |
+
+**AD CAKISMASI UYARISI:** bu dosya **GF-3 (Eylul 2026)** dalgasinindir. Depoda ayrica
+**GUVENLIK-FIX-3 (Agustos 2026)** vardir ve onun pinleri `GuvenlikFix3SozlesmeTests.cs`
+dosyasindadir (dagitim yuzeyi: nginx/CSP/clickjacking). Eylul dalgasinin pin dosyasi
+`GuvenlikFix3SizintiSozlesmeTests.cs`. Iki dalga KARISTIRILMAMALIDIR.
+
+Toplam arsiv: 49 dosya · 853.580 B (OLCULDU: `ls -1 *.md | grep -v INDEX.md | xargs wc -c`).
 Bayt denklemi (TARIHSEL, d8f12dd zemini — GUNCELLENMEZ):
 747.240 = 44.393 (C1 sonrasi CLAUDE.md) + 702.847.
 NOT (AV-1'de olculdu): onceki "42 dosya · 702.847 B" satiri BAYATTI — `41-arsiv-1.md`

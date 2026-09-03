@@ -264,6 +264,11 @@ bicim (tablo/kalin/baglanti) kopyada bos dusuyor.
 
 ---
 
+**AD HARITASI (47·GUVENLIK-FIX-3):** `GF-3` = **GUVENLIK-FIX-3, Eylul 2026** (sizinti /
+yapilandirma / limit / kalinti). Zemindeki `GuvenlikFix3SozlesmeTests.cs` ise **Agustos 2026**
+dalgasinin DAGITIM YUZEYI pinleridir (nginx/CSP/clickjacking); Eylul dalgasinin pin dosyasi
+`GuvenlikFix3SizintiSozlesmeTests.cs` adiyla ayrilmistir.
+
 ## B2 SDP v1.3 → skill `sdp` (.claude/skills/sdp/SKILL.md)
 Her dalga/denetim tarifi "SDP ve SUREC skill'lerini yukle" satiriyla baslar; yuklenmeden olcum yapilmaz (MK-12).
 **1.12 GUVENLIK modulu (SDP v1.3): tam metin `42·GUVENLIK-AV-1 · SDP 1.12` — guvenlik
@@ -397,6 +402,10 @@ RAPORLA degil. Gerekce OLCULDU: L3 denetcisi ilk raporunu verdikten SONRA da cal
 worktree sokulunce dizini altindan kayboldu. Sonuc etkilenmedi (olcumler sokumden onceydi)
 ama servis edilen dosyalarin md5 kimligi IKINCI kez dogrulanamadi. "Rapor verdi" ile
 "BITTI" AYNI SEY DEGILDIR.
+
+**EK (47·GUVENLIK-FIX-3):** denetci test DB'si `DIVISIMA_TEST_DB` ile ayrilir; worktree'ye
+`appsettings.Development.json` ana agactan kopyalanir (gitignore'lu); her denetcinin
+scratchpad alt dizini ayri.
 
 
 ## MK-5
@@ -800,6 +809,22 @@ ham yanit dokumlerinin DISKE yazilmasi kapsanmadi -> dokuz dosyada ciplak canli 
 Ajanin KENDI kapanis iddiasi "jetonlar ilk 8 karaktere kirpildi" diyordu ve **CURUK** cikti
 — turun TEK curuyen kalemi bir bulgu degil, bir KAPANIS IDDIASIYDI.
 
+## Uc ders — GUVENLIK-FIX-3 (47·GUVENLIK-FIX-3 · CC HATALARI)
+
+**Tek kanalli on olcum bulgusu = SUPHE, tarife KALEM OLMAZ.** Gerekce OLCULDU: K14
+("UseSerilogRequestLogging sorgu dizesini yaziyor") tek kanalli bir ajan cikarimiydi ve
+ajan "CALISTIRILMADI, L3 dogrulamali" diye ISARETLEMISTI; uyari tasinmadan tarife girdi ve
+uc kanal onu curuttu (paket varsayilani `false` · korpus 0/7855 · `token=` 0). Hata MERKEZIN.
+
+**Yeni test/pin dosyasi yazilmadan ONCE yol YOKLUGU olculur; `git status`ta `A` yerine `M` =
+DUR isareti.** Gerekce OLCULDU: `GuvenlikFix3SozlesmeTests.cs` ZATEN VARDI (Agustos dalgasi,
+alti pin) ve uzerine yazildi; kayip yalniz `M` isaretinin sorgulanmasiyla fark edildi.
+
+**MK-6 mutasyon dongusu `git status --porcelain` BOS DEGILSE CALISMAZ.** Gerekce OLCULDU:
+geri alma `git checkout --` ile yapiliyordu ve K5/K6/K7 henuz commit'lenmemisti - dongu
+URETIM KODUNU SILDI. Onceki kalemler tam da bu yuzden commit'lenmisti; onkosul kendi
+kurucusu tarafindan ihlal edildi.
+
 ## Iki ders — GUVENLIK-FIX-2a (46·GUVENLIK-FIX-2a · HATA KAYDI)
 
 **AV-1 sink sayimi ESLESME BICIMI kusuru tasiyordu: atama isareti SATIR SONUNDA biten 14
@@ -857,6 +882,13 @@ COLLATE Latin1_General_BIN2` 0). Olcumler tarayicida SENTETIK girdilerle yapildi
 YAZILMADI. MAX'lar BIREBIR: musteri **169** · urun **955** · siparis **286** ·
 `user_sessions` **342** · Pending(status=0, id<=210) **35/3837**.
 Suit tabani `46·GUVENLIK-FIX-2a` kapanisinda **Sql 378/378 · tam 651/654** (+10 pin).
+**GF-3 HICBIR KURGU KAYDI URETMEDI** (olculdu: `email LIKE 'gf3%'` -> 0; olcumler ayri test
+veritabanlarinda ve ikinci API surecinde SENTETIK girdilerle yapildi). MAX'lar BIREBIR:
+musteri **169** · urun **955** · siparis **286** · adres **119** · fatura **119** ·
+`user_sessions` **342** · Pending(status=0, id<=210) **35/3837**.
+Suit tabani `47·GUVENLIK-FIX-3` kapanisinda **Sql 382/382 · tam 710/713** (+59 pin;
+uc kirmizi = bilinen Docker uclusu). Ureten ifade: `dotnet test ... --filter "Category=Sql"`
+ve filtresiz.
 
 **TEK YAZMA - URETIM YOLUNDAN:** K2 kanitini almak icin musteri 102'nin
 (`mfix1.once@example.com`, MANTIK-FIX-1 kurgusu) sifresi **uretim yolundan** sifirlandi:
@@ -945,6 +977,14 @@ yalniz somut gerekceyle bakilir.
 - `46·GUVENLIK-FIX-2a·K8` **Service worker IKI KOVA**: kabuk (`divisima-shell-*`) ve API (`divisima-api-*`). `/api/` **NETWORK-ONLY** - Cache Storage API sunucunun `no-store` basligini UYGULAMAZ, yani onbellekleme kimlikli yaniti diske dusururdu. Cikista YALNIZ api kovasi silinir; offline acilis SURER.
 - `46·GUVENLIK-FIX-2a·K10` **Refresh sekmeler arasi TEK**: `navigator.locks` ile origin genelinde kilit; desteklenmeyen tarayicida ornek-ici single-flight'a duser (FAIL-SAFE). Gerekce: iki sekme ayni refresh jetonunu sunarsa GF-1b/K4 yeniden-kullanim sinyali TUM oturumlari iptal eder.
 - `46·GUVENLIK-FIX-2a·K9` **Google Fonts'a SRI EKLENMEZ (KABUL EDILMIS RISK)**: `css2` yaniti User-Agent'a gore DEGISIR, sabit hash YOKTUR - eklemek SITEYI KIRAR. `font-src` allowlist'i GF-2b'nin isidir.
+- `47·GUVENLIK-FIX-3·K1` **Maskede IKINCI DAL - e-posta**: `@` jeton karakter kumesine alindi (onceden ayracti, adres iki KISA parcaya bolunup 16 esiginin ALTINDA kaliyor ve HIC maskelenmiyordu); cikti `ilk 2 + "***@" + alan`, alan adi TESHIS icin GORUNUR. **ETIKET AYRIMI e-posta dalina UYGULANIR, jeton dalina UYGULANMAZ** - orada `=` base64 DOLGUSUDUR ve son `=`den bolmek `abcd==` gibi bir jetonu TUMDEN sizdirirdi.
+- `47·GUVENLIK-FIX-3·K5` **Yer-tutucu kapisi TEK dongude YEDI hassas anahtara** (jwtKey'e ozel kontrol KALDIRILDI, ikinci kopya acilmadi) + **bilinen-public deger SHA-256 deny-list'i** (degerler kaynaga GIRMEZ, iki ozet). Kapi **Production'a KOSULLU** - kosulsuz olsaydi CI'in iki job'i acilista kirilirdi. Yedinci giris `Encryption:Key` CHANGE_ME DEGIL BOS DIZEDIR (ust-kume).
+- `47·GUVENLIK-FIX-3·K6` **HSTS TEK KAYNAK: nginx**. `app.UseHsts()` KALDIRILDI; uc kaynak vardi ve `api.divisima.com`da IKI farkli STS basligi cikiyordu (RFC 6797 "ilk baslik islenir" -> nginx'in daha SIKI politikasi kaybolabilirdi). Kaldirmak korumayi DUSURMEZ (Dockerfile duz HTTP, compose Development, checklist "yalniz nginx disari bakar").
+- `47·GUVENLIK-FIX-3·K9` **"hassas" kovasi 20/dk, IP basina** (kupon dogrulama · gift-card sorgu/bozdurma · arama · yorum yazma). **YERLESIK ve DAGITIK taraf BIRLIKTE acilir** - yalniz biri acilirsa `KovaSec` kovayi tanimaz, yedege duser ve etkin limit global 100/dk olur; govde de BOS duser. Kupon yanit metni MFIX-B/K2 ile DOKUNULMAZ oldugu icin enumerasyon kanali YALNIZ limitle kapanir.
+- `47·GUVENLIK-FIX-3·K10` **Rotasyon TEK DB transaction** (CAS + denetim + yeni oturum INSERT) ve **logout ayni CAS yardimcisinda**. Kaybedenin CAS'i kazananin satir kilidinde bekler; kilit ancak COMMIT ile birakilir, o an INSERT de kalicidir -> aile iptali ve alarm **DETERMINISTIK** (GF-1b BILINEN #5 kapandi). Logout'ta check-then-act + tam-varlik yazma KALDIRILDI.
+- `47·GUVENLIK-FIX-3·K11` **Zaman ekseni UTC - DAR kapsam**: `user_sessions.expires_at` · `created_at` · JWT `exp`/`nbf`; **yazan ve okuyan CIFTLER BIRLIKTE** tasinir (kismi gecis iki yonde de hasar verir). **`lockout_end` KAPSAM DISI ve YEREL kalir** (uc okuyucu, ucuncusu `SellerAuthManager` ve DOKUNULMAZ); `password_reset_expiry` ve `two_factor_code_expiry` de yerel. BILINCLI KABUL: login yaniti `expiration` artik `Z` bicimli.
+- `47·GUVENLIK-FIX-3·K12` **Replay olcutu = e-posta + sepet kalemleri (iptal kalemleri DISLANIR) + KANONIK kupon**, `NULL == ""` normalizasyonu `KanonikKod`un dogal davranisindan turer. Eslesmezse **400 sizintisiz** (varlik da `order_number` da sizmaz). Migration GEREKMEDI.
+- `47·GUVENLIK-FIX-3·F1` **Musteriye donen `order_status_history.note` SABIT METINDIR**: ham `ex.Message` YAZILMAZ (timeline ucu o notu musteriye donuyor ve mail istisnalari ALICI ADRESINI tasir; "admin bildirimi" dalinda o adres ADMINDIR). Teknik ayrinti YALNIZ maskeli log'da; "KRITIK:" oneki korunur.
 
 ## Acik SUPHELI (00b-supheli.md)
 
@@ -996,14 +1036,12 @@ BILINEN/KABUL EDILMIS RISK: C-3 (00a:101) · D-9 · E-1b · Webhook:AllowedIps b
 BASKA KUYRUGA: A-2 -> VITRIN-KALAN 8 · F-3 -> IMPORT-FIX
 ```
 
-1. **GF-3 SIZINTI/YAPILANDIRMA/LIMIT** + GF-1b devri (3 kalem): **rotasyon TEK DB
-   transaction'i** (CAS + INSERT; aile iptalini deterministiklestirir) · **zaman kaynagi
-   TEK ve UTC** (`expires_at` yerel / cerez UTC ayrimi) · **GF1-B1 govde ozeti**
-   + GF-2a devri: **`ProductUpdateRequestValidator` YOK ve CSV yolu `color_hex`i
-   DOGRULAMIYOR** (istemci TEK savunma) · **GF-2a GOZ TURU sonucu bu muhre**   <- SIRADA
+1. ~~GF-3 SIZINTI/YAPILANDIRMA/LIMIT~~ **KAPANDI `33cac2e`** (muhur 47)
 2. GF-2b CSP + GF-2a devri: **`embedCheckoutForm` `s.text` yeniden calistirici**
    (D-9 KABUL EDILMIS RISK satiri "eval esdegeri dahil" diye genisler) · **`font-src`
-   allowlist'i** (Google Fonts'a SRI eklenemedigi icin)
+   allowlist'i** (Google Fonts'a SRI eklenemedigi icin) · **GF-3 devri: "400/409'da rid
+   yenile"** (`api-bridge.js:2352` rid'i YALNIZ basarida yeniliyor -> K12'nin 400'u musteriyi
+   CIKISSIZ DONGUYE sokabilir)   <- SIRADA
 3. GF-4 TEDARIK ZINCIRI
 6. GUVENLIK-AV-2 (dar olcum, ultracode YOK): at-rest sifreleme · 2FA/TOTP ·
    TOCTOU/ExecuteUpdateAsync · A09 · olay isleyicileri · 13 anilmayan controller
@@ -1034,7 +1072,30 @@ K1..K10 (K7 GF-2a'ya devir, K8 dusuruldu) + MK-4b denetim duzeltmeleri + DUR coz
 
 **GUVENLIK-FIX-2a KAPANDI `1dd985b`** (zemin 2a74cbd · muhur `docs/muhur/46-guvenlik-fix-2a.md`) —
 8 kok / 26 kalem; uc denetci, bes bulgu (biri uretim kodunda CURUYEN IDDIA, biri MK-6 boslugu).
-**GOZ TURU BEKLIYOR (6 kalem) - sonuc GF-3 muhrune.**
+**GOZ TURU BEKLIYOR - sonuc kendi muhrune.**
+
+**GUVENLIK-FIX-3 KAPANDI `33cac2e`** (zemin cea48d6 · muhur `docs/muhur/47-guvenlik-fix-3.md`) —
+K1..K13'ten ONBIRI uygulandi; **K3 · K8 · K14 DUSTU** (ucunun de premisi olculerek BOS cikti).
+Sekiz DUR, uc denetci, F1 (DUR-8 + S1/S2/S4) + F2 (test DB ad alani).
+Taban: `Category=Sql` 378 -> **382** · tam suit 654 -> **713** (+59 pin) · uc ardisik kosum BIREBIR.
+**KURGU: hicbir kayit uretilmedi** (MAX'lar acilistaki degerlerde, `email LIKE 'gf3%'` 0).
+
+### BILINEN — GF-3 (dort)
+1. **`lockout_end` YEREL saat ekseninde**, uc okuyucu TUTARLI; UTC'ye gecis Seller acilinca
+   TEK DALGADA yapilir (kismi gecis iki yonde de hasar verir).
+2. **Kismi iptal sonrasi replay 400 alir**: K12'nin iptal-kalemi dislamasi olcutu
+   SIKILASTIRIR (merkez olcutu). Pratikte replay saniyeler icinde gelir, arada iptal beklenmez.
+3. **Logout bayat cerezle 200 doner ama hicbir oturum kapatmaz** (GF-1b D-1 semantigi);
+   K10 yalniz YARIS PENCERESINI kapatti, semantik DEGISMEDI.
+4. **`expiration` alani artik `Z` bicimli**: `SellerLoginResponseDto` da ayni helper'dan
+   beslendigi icin DOLAYLI etkilenir - Seller KODUNA dokunulmadi, DEGERIN BICIMI degisti.
+
+### GOZ TURU BEKLIYOR — SEKIZ KALEM
+GF-2a'dan alti (iki sekmede tek refresh · cikis sonrasi onbellek · offline acilis ·
+`data:image/png` gorsel · shade onizlemesi · admin Chart) + GF-3'ten iki:
+**(7) ARAMA UCU ARTIK 100/dk YERINE 20/dk** - goz1 sozlesmesi KIRILMADI
+(`RateLimit:HassasPermitLimit` yapilandirilabilir) ama tur oncesi bilinmezse "sebepsiz 429"
+gorunur · **(8) K13'un UCTAN UCA kaniti** (gecersiz hex ile guncelleme -> 400; CSV satir reddi).
 
 ### BILINEN — GF-2a (uc)
 1. **Google Fonts SRI YASAK**: `css2` yaniti UA'ya gore degisir, sabit hash yok; eklemek
@@ -1093,6 +1154,10 @@ kaynak: 40·MANTIK-FIX-4_MUHRU · VITRIN-KALAN (bayt-ayni KOPYA)
    duz metin basiliyor; 14 input'ta placeholder BOZUK. [MANTIK]/[UX], XSS DEGIL.
    Ureten ifade: `grep -c 'placeholder=ceviri(' frontend/api-bridge.js` -> 14.
    kaynak `46·GUVENLIK-FIX-2a · SUPHE-6`
+10. Anonim katalog yanitinda **`Pragma: no-cache` + `Cache-Control: private, max-age=60`
+    CELISKISI** suruyor. GF-3/K7 yalniz KIMLIK yarisini duzeltti (kimlikli uc artik
+    `no-store` aliyor); anonim yolda iki baslik hala birbiriyle celisiyor.
+    kaynak `47·GUVENLIK-FIX-3 · S3`
 ```
 
 ## ERTELENMIS-DEFTER (yeni sinif, ARSIV-1/S5)
