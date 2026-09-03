@@ -407,8 +407,28 @@ namespace Divisima.IntegrationTests
 
                 var notlar = await ctx.Set<OrderStatusHistory>().AsNoTracking()
                     .Where(h => h.order_id == siparisId).Select(h => h.note).ToListAsync();
-                notlar.Should().Contain(n => n != null && n.Contains("KRITIK") && n.Contains("onay e-postası"),
+                // ══ GF-3 / F1 - BILINCLI OLARAK KIRILAN PIN, YERINE DAHA GUCLUSU KONDU ═════
+                //
+                // ESKI ASSERT: `Contains("KRITIK") && Contains("onay e-postası")`.
+                // KORUDUGU DEGER (kendi `because` metninden): "kalici hata SESSIZ kalmamali -
+                // operator siparis zaman cizelgesinde GORMELI". `"onay e-postası"` ise
+                // CIFT-ANLAM KIRICISIYDI: notun HANGI basarisizliga ait oldugunu ayirt ediyordu.
+                //
+                // F1 o ifadeyi BILINCLI olarak kaldirdi: not MUSTERIYE donuyor
+                // (`GET /api/order/timeline/{orderId}`) ve icine ham `ex.Message` konuyordu -
+                // mail istisnalari ALICI ADRESINI tasir. Artik teknik ayrinti YALNIZ maskeli
+                // log'da; musteriye giden metin SABIT.
+                //
+                // YERINE KONAN AYIRT EDICI DAHA GUCLU: substring yerine SABIT METNIN kendisi
+                // aranir (baska bir notun tesadufen eslesmesi imkansiz) VE notun teknik
+                // ayrinti TASIMADIGI da olculur - yani pin hem eski degeri (gorunurluk) hem
+                // F1'in yeni degerini (sizinti yok) korur.
+                notlar.Should().Contain(n => n != null && n.Contains("KRITIK") && n.Contains("işlem ertelendi"),
                     "kalici hata SESSIZ kalmamali - operator siparis zaman cizelgesinde GORMELI");
+                notlar.Should().NotContain(n => n != null && n.Contains("Son hata:"),
+                    "GF-3/F1: teknik ayrinti musteriye donen nota GIRMEMELI - yalniz maskeli log'da");
+                notlar.Should().NotContain(n => n != null && n.Contains("@"),
+                    "GF-3/F1: hicbir e-posta adresi zaman cizelgesine girmemeli (KVKK)");
             }
         }
 
