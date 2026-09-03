@@ -151,7 +151,7 @@ namespace Divisima.Bussiness.Concrete
                 var colorHex = cols[6].Trim();
                 if (!string.IsNullOrEmpty(colorHex)
                     && !System.Text.RegularExpressions.Regex.IsMatch(
-                        colorHex, "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"))
+                        colorHex, @"^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})\z"))   // GF-3/F1 (S4)
                 { errors.Add($"Satir {i + 1}: gecersiz color_hex"); continue; }
 
                 var key = name + "|" + brand;

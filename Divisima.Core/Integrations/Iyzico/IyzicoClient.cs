@@ -139,7 +139,8 @@ namespace Divisima.Core.Integrations.Iyzico
 
             if (result.Status != "success")
             {
-                _logger.LogWarning("Iyzico CF init başarısız: {Error}", result.ErrorMessage);
+                _logger.LogWarning("Iyzico CF init başarısız: {Error}",
+                    Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(result.ErrorMessage));
                 return new IyzicoCheckoutInitResult { Success = false, ErrorMessage = result.ErrorMessage };
             }
 
@@ -263,7 +264,8 @@ namespace Divisima.Core.Integrations.Iyzico
             var result = await Task.Run(() => Refund.Create(request, options));
             if (result.Status != "success")
             {
-                _logger.LogWarning("Iyzico refund başarısız: {Error}", result.ErrorMessage);
+                _logger.LogWarning("Iyzico refund başarısız: {Error}",
+                    Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(result.ErrorMessage));
                 return new IyzicoRefundResult { Success = false, ErrorMessage = result.ErrorMessage };
             }
             return new IyzicoRefundResult { Success = true, RefundId = result.PaymentId };

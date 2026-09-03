@@ -123,6 +123,35 @@ namespace Divisima.Bussiness.Outbox
         // basarisiz" notlariyla AYNI kalip: operator paneldeki siparis zaman cizelgesinde gorur.
         // Not yazmanin kendisi patlarsa log TEK kanal olarak kalir - istisna yukari sizip
         // outbox dongusunu KIRMAZ (diger mesajlar islenmeye devam etmeli).
+        // ══ GF-3 / F1 (DUR-8) - MUSTERIYE GORUNEN NOT SABITTIR ════════════════════════════
+        //
+        // OLCULEN ONCE-DURUM (KIRMIZI-ONCE, L3/ITIRAZ-1): bu notlara ham `ex.Message`
+        // konuyordu ve not `GET /api/order/timeline/{orderId}` ile MUSTERIYE donuyordu.
+        // Sentetik bir SMTP hatasiyla olculdu - timeline yanitinda alici adresi BIREBIR
+        // gorundu: "... Son hata: SMTP 550 alici reddedildi: gf3f1.kurban@example.com".
+        // Mail gonderim istisnalari ALICI ADRESINI tasir ve "admin bildirimi" dalinda o
+        // adres MUSTERININ DEGIL ADMINDIR - yani capraz taraf sizintisi.
+        //
+        // NOT SILINMEDI, METNI SABITLENDI: kalici basarisizlik musteriye GORUNMEYE devam
+        // eder (operator/musteri "bir sey ertelendi" bilgisini kaybetmemeli), yalniz TEKNIK
+        // AYRINTI cikarildi. Ayrinti tek yerde kalir: ayni metodun basindaki MASKELI log.
+        // "admin bildirimi" ibaresi de kaldirildi - musteriye gorunen bir not, isletmenin
+        // ic bildirim zincirinden SOZ ETMEZ (merkez karari: admin dali timeline'a not YAZMAZ;
+        // `OrderPlaced` mesaji iki yarıyı da tasidigi icin bu, ibarenin kaldirilmasiyla
+        // gerceklesir).
+        //
+        // DENEME SAYISI DA CIKARILDI: `retry_count` bir IC ISLETIM ayrintisidir ve musteriye
+        // bir sey anlatmaz; operator ayni bilgiyi log'da ve `outbox_messages` tablosunda
+        // GORUYOR.
+        // "KRITIK:" ONEKI KORUNDU - BILINCLI: `PaymentConfirmedOutboxTests`in mevcut pini
+        // (`BesDenemeSonunda_Failed_ve_ZamanCizelgesinde_KRITIK_Notu_Kalir`) bu isareti
+        // ariyor ve o pinin KORUDUGU SEY "kalici basarisizlik zaman cizelgesinde GORUNUR"dur.
+        // Isareti degistirmek pini kirar ama korudugu degeri KORUMAZ; degisen yalniz SIZAN
+        // kisim olmali (asgari degisiklik).
+        private const string MusteriyeGorunenKriTikNot =
+            "KRITIK: siparişinizle ilgili bazı bildirimler şu an tamamlanamadı; işlem " +
+            "ertelendi ve otomatik olarak yeniden denenecek. Siparişiniz bundan etkilenmez.";
+
         private async Task KaliciHataylaBirakAsync(OutboxMessage msg, Exception ex)
         {
             // GF-3/K2: ONCEDEN hem `ex` NESNESI hem ham `ex.Message` yaziliyordu. Ayni metin
@@ -161,8 +190,7 @@ namespace Divisima.Bussiness.Outbox
                     // Durum olarak Pending kullaniliyor: bu not "Sipariş oluşturuldu" ANINA aittir
                     // (OrderManager'daki o satir da Pending yaziyor), yeni bir gecis DEGILDIR.
                     await _statusHistory.RecordAsync(siparis.order_id, (byte)OrderStatusEnum.Pending,
-                        $"KRITIK: sipariş bildirimleri {msg.retry_count} denemede tamamlanamadı " +
-                        $"(onay e-postası/admin bildirimi). Son hata: {ex.Message}");
+                        MusteriyeGorunenKriTikNot);
                     return;
                 }
 
@@ -170,12 +198,15 @@ namespace Divisima.Bussiness.Outbox
                 var evt = JsonSerializer.Deserialize<Divisima.Bussiness.Events.PaymentConfirmedEvent>(msg.payload);
                 if (evt == null || evt.order_id <= 0) return;
                 await _statusHistory.RecordAsync(evt.order_id, (byte)OrderStatusEnum.Confirmed,
-                    $"KRITIK: ödeme sonrası yan etkiler {msg.retry_count} denemede tamamlanamadı " +
-                    $"(fatura/puan/ödül/kupon sayacı). Son hata: {ex.Message}");
+                    MusteriyeGorunenKriTikNot);
             }
             catch (Exception izEx)
             {
-                _logger.LogError(izEx, "OUTBOX kalici hata notu zaman cizelgesine yazilamadi. id={Id}", msg.id);
+                // GF-3/F1 (S1): K2 kalibi buraya da uygulandi - istisna NESNESI gecilmiyor,
+                // metni maskeden gecirilip yaziliyor. Bu dal `RecordAsync` patladiginda
+                // kosuyor ve o istisna DB/baglanti ayrintisi tasiyabilir.
+                _logger.LogError("OUTBOX kalici hata notu zaman cizelgesine yazilamadi. id={Id} hata={Hata}",
+                    msg.id, Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(izEx.ToString()));
             }
         }
     }

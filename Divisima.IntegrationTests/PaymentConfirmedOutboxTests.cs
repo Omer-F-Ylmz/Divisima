@@ -67,11 +67,16 @@ namespace Divisima.IntegrationTests
             // STATIK BAYRAK TEST SINIRINI ASAR - InitializeAsync'te SIFIRLANIR (S7 tuzagi).
             public static bool EarnPatlasin;
 
+            // GF-3/F1: enjekte edilen istisnanin METNI de ayarlanabilir. Varsayilan DEGISMEDI,
+            // yani mevcut pinler etkilenmez; yalniz DUR-8 pini onu PII tasiyan bir metne ceker.
+            public const string VarsayilanPatlamaMesaji = "TEST: sadakat adimi patladi (enjekte edilmis hata)";
+            public static string PatlamaMesaji = VarsayilanPatlamaMesaji;
+
             public new async Task<(System.Net.HttpStatusCode, Divisima.Core.Utilities.Results.Result)> EarnFromOrder(
                 int customerId, decimal orderTotal, int orderId)
             {
                 if (EarnPatlasin)
-                    throw new InvalidOperationException("TEST: sadakat adimi patladi (enjekte edilmis hata)");
+                    throw new InvalidOperationException(PatlamaMesaji);
                 return await base.EarnFromOrder(customerId, orderTotal, orderId);
             }
         }
@@ -114,6 +119,7 @@ namespace Divisima.IntegrationTests
         public async Task InitializeAsync()
         {
             KontrolluLoyalty.EarnPatlasin = false;   // statik bayrak SIFIRLANIR
+            KontrolluLoyalty.PatlamaMesaji = KontrolluLoyalty.VarsayilanPatlamaMesaji;   // GF-3/F1
             try
             {
                 await using (var pre = NewContext())
@@ -395,6 +401,70 @@ namespace Divisima.IntegrationTests
                 notlar.Should().Contain(n => n != null && n.Contains("KRITIK"),
                     $"kalici basarisizlik zaman cizelgesinde GORUNMELI. Notlar: {string.Join(" | ", notlar)}");
             }
+        }
+
+        // ══ GF-3 / F1 (DUR-8) - TIMELINE NOTU ISTISNA METNI TASIMAZ ════════════════════════
+        //
+        // L3 denetcisi buldu: `OutboxProcessor` kalici hatada ham `ex.Message`i
+        // `order_status_history.note` alanina yaziyordu ve o not `GET /api/order/timeline/
+        // {orderId}` ile **MUSTERIYE** donuyor. K2 ayni dosyanin LOG satirini maskeledi ama
+        // asimetri KAPANMADI, YER DEGISTIRDI - yeni sink LOG'dan GENIS: mail gonderim
+        // istisnalari alici adresini tasir ve "admin bildirimi" dalinda o adres MUSTERININ
+        // DEGIL ADMINDIR.
+        //
+        // OLCUM NOKTASI: `IOrderStatusHistoryService.GetTimeline(orderId, userId)` - uc bunu
+        // AYNEN cagiriyor (`OrderController.cs:88`) ve `note` alani DTO'ya BIREBIR
+        // kopyalaniyor (`OrderStatusHistoryManager.cs:52`). Yani servis donusunu olcmek,
+        // musterinin GORDUGU metni olcmektir; HTTP katmani yalnizca kimlik/sahiplik ekler.
+        //
+        // KIRMIZI-ONCE: bu pin duzeltmeden ONCE kosuldu ve enjekte edilen e-posta yaniti
+        // ICINDE bulundu (kayit muhurde).
+        [Fact]
+        [Trait("Category", "Sql")]
+        public async Task GF3_F1_TIMELINE_NOTU_ISTISNA_METNI_ve_EPOSTA_TASIMAZ()
+        {
+            if (Skipped()) return;
+
+            const string kurbanEposta = "gf3f1.kurban@example.com";
+            const string teknikMetin = "SMTP 550 alici reddedildi";
+
+            var s = await SenaryoKurAsync();
+            await MesajYazAsync(s);
+
+            KontrolluLoyalty.EarnPatlasin = true;
+            KontrolluLoyalty.PatlamaMesaji = $"{teknikMetin}: {kurbanEposta}";
+
+            // Hak tukenene kadar isle (bes deneme) - KRITIK notu ancak o zaman yazilir.
+            for (int i = 0; i < 5; i++) await IsleAsync();
+
+            int musteriId;
+            await using (var ctx = NewContext())
+            {
+                musteriId = (await ctx.Set<Order>().AsNoTracking()
+                    .SingleAsync(o => o.id == s.OrderId)).customer_id;
+            }
+
+            using var scope = _factory!.Services.CreateScope();
+            var servis = scope.ServiceProvider
+                .GetRequiredService<Divisima.Bussiness.Abstract.IOrderStatusHistoryService>();
+            var (durum, sonuc) = await servis.GetTimeline(s.OrderId, musteriId);
+
+            durum.Should().Be(System.Net.HttpStatusCode.OK, "vakum kirici: timeline GERCEKTEN okunmali");
+
+            // `sonuc` STATIK tipi `Result`; duz `Serialize(sonuc)` yalnizca Success/Message
+            // yazar ve `Data` DUSER - o zaman NEG assertler "hicbir sey yok" diye bedavaya
+            // gecerdi. CALISMA ZAMANI tipiyle serilestirilir (bu tuzak ilk kosumda yakalandi).
+            var govde = System.Text.Json.JsonSerializer.Serialize(sonuc, sonuc.GetType());
+
+            // POZITIF OLAY KOSULU: kalici hata notu GERCEKTEN yazilmis olmali - aksi halde
+            // asagidaki NEG assertler "hicbir sey yok" diye bedavaya gecerdi.
+            govde.Should().Contain("KRITIK", "kalici basarisizlik musteriye GORUNMELI - not silinmedi, METNI sabitlendi");
+
+            // ASIL IDDIA - PII ve teknik metin SIZMAMALI.
+            govde.Should().NotContain(kurbanEposta, "istisna metnindeki e-posta musteriye DONMEMELI (KVKK)");
+            govde.Should().NotContain("@example.com", "hicbir e-posta adresi timeline'a girmemeli");
+            govde.Should().NotContain(teknikMetin, "saglayici hata metni musteriye DONMEMELI");
+            govde.Should().NotContain("admin", "musteriye gorunen not admin bildiriminden SOZ ETMEMELI");
         }
     }
 }

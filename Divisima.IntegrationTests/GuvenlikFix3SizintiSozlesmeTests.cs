@@ -504,7 +504,8 @@ namespace Divisima.IntegrationTests
 
             // AYRISMA KAPISI: hex deseni IKI dosyada da AYNI olmali. Ayrisirlarsa bu depoda
             // kayitli kusur sinifinin (Add/Update asimetrisi) yeni bir ornegi dogar.
-            const string desen = "Matches(\"^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$\")";
+            // GF-3/F1 (S4): ankraj `$` -> `\z` (verbatim dize, bu yuzden `@"` oneki).
+            const string desen = "Matches(@\"^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})\\z\")";
             Sayim(add, desen).Should().Be(1, "vakum kirici: capa Add tarafinda GERCEKTEN var");
             Sayim(upd, desen).Should().Be(1, "Update deseni Add ile BIREBIR ayni olmali");
 
@@ -515,10 +516,90 @@ namespace Divisima.IntegrationTests
             var pm = KodSatirlari(Oku("Divisima.Bussiness/Concrete/ProductManager.cs"));
             Sayim(pm, "gecersiz color_hex").Should().Be(1,
                 "CSV satiri gecersiz hex tasiyorsa REDDEDILMELI ve gerekce errors listesine yazilmali");
-            Sayim(pm, "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$").Should().Be(1,
-                "CSV deseni de AYNI olmali");
+            Sayim(pm, "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})\\z").Should().Be(1,
+                "CSV deseni de AYNI olmali - ankraj dahil");
+            // NEG - ESKI ANKRAJ HICBIR YERDE KALMAMALI (uc dosyada birden degistirildi).
+            foreach (var yol in new[]
+            {
+                "Divisima.Bussiness/ValidationRules/ProductAddRequestValidator.cs",
+                "Divisima.Bussiness/ValidationRules/ProductUpdateRequestValidator.cs",
+                "Divisima.Bussiness/Concrete/ProductManager.cs",
+            })
+                Sayim(KodSatirlari(Oku(yol)), "[0-9a-fA-F]{8})$").Should().Be(0,
+                    $"{yol}: `$` ankraji sondaki '\\n'i kabul eder - `\\z` olmali");
             // NEG: ham okuma artik dogrulanmadan varliga yazilmiyor.
             Sayim(pm, "color_hex = cols[6].Trim()").Should().Be(0);
+        }
+
+        [Theory]
+        // ══ GF-3 / F1 (S4) - ANKRAJ DAVRANIS PINI ═════════════════════════════════════════
+        // `$` .NET'te dizgenin SONUNDAKI TEK `\n`i KABUL EDER; `\z` ETMEZ. Bu pin
+        // VALIDATOR'IN KENDISINI kosturur - kaynak metni saymaz.
+        [InlineData("#112233", true)]
+        [InlineData("#11223344", true)]
+        [InlineData("", true)]                 // bos MESRU (.When(!IsNullOrEmpty))
+        [InlineData("#112233\n", false)]       // ESKI ANKRAJIN KACIRDIGI VAKA
+        [InlineData("#11223344\n", false)]
+        [InlineData("#1122", false)]
+        [InlineData("zzz", false)]
+        public void F1_S4_RENK_ANKRAJI_SONDAKI_SATIR_SONUNU_REDDEDER(string renk, bool gecerliBeklenir)
+        {
+            var add = new Divisima.Bussiness.ValidationRules.FluentValidation.ProductAddRequestValidator();
+            var upd = new Divisima.Bussiness.ValidationRules.FluentValidation.ProductUpdateRequestValidator();
+
+            var addSonuc = add.Validate(new Divisima.Entity.Dtos.Product.ProductAddRequestDto
+            {
+                name = "F1 pin",
+                brand = "F1",
+                category_id = 1,
+                price = 10m,
+                color_hex = renk,
+            });
+            var updSonuc = upd.Validate(new Divisima.Entity.Dtos.Product.ProductUpdateRequestDto
+            {
+                id = 1,
+                name = "F1 pin",
+                brand = "F1",
+                category_id = 1,
+                price = 10m,
+                color_hex = renk,
+            });
+
+            static bool RenkGecerli(FluentValidation.Results.ValidationResult r) =>
+                !r.Errors.Any(e => e.PropertyName == "color_hex");
+
+            // IKI VALIDATOR AYNI CEVABI VERMELI - ayrisma bu depoda kayitli bir kusur sinifi.
+            RenkGecerli(addSonuc).Should().Be(gecerliBeklenir, $"Add: '{renk.Replace("\n", "\\n")}'");
+            RenkGecerli(updSonuc).Should().Be(gecerliBeklenir, $"Update: '{renk.Replace("\n", "\\n")}'");
+        }
+
+        [Fact]
+        public void F1_S2_IYZICO_HATA_METNI_MASKEDEN_GECER()
+        {
+            var k = KodSatirlari(Oku("Divisima.Core/Integrations/Iyzico/IyzicoClient.cs"));
+
+            // KAYNAK-SOZLESME PINI - DURUST BEYAN: L3 denetcisi bu iki satiri OLCEMEDI
+            // (mock modda kostu, gercek SDK dali hic calismadi). Davranis kaniti bu dalgada
+            // ALINMADI; saglayici hata metinleri isyeri/oturum referansi tasiyabilir.
+            Sayim(k, "Maskele(result.ErrorMessage)").Should().Be(2,
+                "CF init ve refund - iki LogWarning da maskeden gecmeli");
+            Sayim(k, "{Error}\", result.ErrorMessage)").Should().Be(0, "ham arguman KALMAMALI");
+        }
+
+        [Fact]
+        public void F1_DUR8_TIMELINE_NOTU_SABIT_METIN_ISTISNA_TASIMAZ()
+        {
+            var k = KodSatirlari(Oku("Divisima.Bussiness/Outbox/OutboxProcessor.cs"));
+
+            // POZ: iki dal da SABIT metni kullaniyor.
+            Sayim(k, "MusteriyeGorunenKriTikNot").Should().Be(3, "tanim + iki cagri yeri");
+            // NEG: musteriye gorunen notta istisna metni, deneme sayisi ya da "admin" YOK.
+            Sayim(k, "Son hata: {ex.Message}").Should().Be(0);
+            Sayim(k, "admin bildirimi").Should().Be(0,
+                "musteriye gorunen not ic bildirim zincirinden SOZ ETMEMELI");
+            // NEG (S1): istisna NESNESI hicbir LogError'a gecilmiyor.
+            Sayim(k, "LogError(izEx,").Should().Be(0);
+            Sayim(k, "Maskele(izEx.ToString())").Should().Be(1);
         }
 
         [Fact]
