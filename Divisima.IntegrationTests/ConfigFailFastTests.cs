@@ -28,17 +28,29 @@ namespace Divisima.IntegrationTests
         private sealed class ProdFactory : WebApplicationFactory<Program>
         {
             private readonly string? _callbackUrl;
-            public ProdFactory(string? callbackUrl) { _callbackUrl = callbackUrl; }
+            // GF-3/K5: tek bir hassas anahtari BILINCLI olarak bozmak icin. null = bozma yok.
+            private readonly (string Anahtar, string Deger)? _ezme;
+
+            public ProdFactory(string? callbackUrl, (string, string)? ezme = null)
+            {
+                _callbackUrl = callbackUrl;
+                _ezme = ezme;
+            }
 
             protected override void ConfigureWebHost(IWebHostBuilder builder)
             {
                 TestHostConfig.Apply(builder);
                 builder.UseEnvironment("Production");
+                // GF-3/K5: placeholder taramasi artik alti hassas anahtari daha kapsiyor;
+                // asgari uretim ayarlari TEK KAYNAKTAN geliyor (ikinci kopya acilmadi).
+                TestHostConfig.UretimAsgariAyarlari(builder);
                 builder.UseSetting("MailSettings:Host", "smtp.test.local");
                 builder.UseSetting("Encryption:Key", Convert.ToBase64String(new byte[32]));
                 builder.UseSetting("TokenOptions:SecurityKey",
                     "divisima-uretim-ortami-pini-icin-uretilmis-uzun-imzalama-anahtari-0123456789");
                 if (_callbackUrl != null) builder.UseSetting("Iyzico:CallbackUrl", _callbackUrl);
+                // Ezme EN SON uygulanir ki yukaridaki gecerli degerleri BOZABILSIN.
+                if (_ezme != null) builder.UseSetting(_ezme.Value.Anahtar, _ezme.Value.Deger);
 
                 builder.ConfigureServices(services =>
                 {
@@ -98,5 +110,72 @@ namespace Divisima.IntegrationTests
             AcilisHatasi("https://api.divisima.test/api/payment/callback")
                 .Should().BeNull("gecerli yapilandirmayla uretim host'u sorunsuz acilmali");
         }
+
+        // ══ GF-3 / K5 (AV-1: E-5 + E-1a) - DAVRANIS PINLERI ════════════════════════════════
+        private const string GecerliCallback = "https://api.divisima.test/api/payment/callback";
+
+        private static Exception? AcilisHatasi(string anahtar, string deger)
+        {
+            try
+            {
+                using var f = new ProdFactory(GecerliCallback, (anahtar, deger));
+                _ = f.Services;
+                return null;
+            }
+            catch (Exception ex) { return ex; }
+        }
+
+        [Theory]
+        // OLCULEN ONCEKI HAL: yer-tutucu listesi YALNIZ TokenOptions:SecurityKey'e uygulaniyordu.
+        // `appsettings.json`daki ALTI CHANGE_ME degerinden BESI kapiyi GECIYORDU. Asagidaki
+        // anahtarlarin HEPSI o alti degerin anahtarlarindan (grep ile olculdu, tahmin degil).
+        [InlineData("ConnectionStrings:DivisimaDb", "Server=CHANGE_ME;Database=DivisimaDb;Trusted_Connection=True;")]
+        [InlineData("MailSettings:Password", "CHANGE_ME")]
+        [InlineData("Iyzico:ApiKey", "CHANGE_ME")]
+        [InlineData("Iyzico:SecretKey", "CHANGE_ME")]
+        [InlineData("Captcha:SecretKey", "CHANGE_ME")]
+        [InlineData("TokenOptions:SecurityKey", "CHANGE_IN_PRODUCTION_uzun_bir_deger_0123456789012345")]
+        public void Uretimde_HERHANGI_BIR_HASSAS_ANAHTAR_YER_TUTUCU_ISE_UYGULAMA_ACILMAZ(
+            string anahtar, string yerTutucuDeger)
+        {
+            var hata = AcilisHatasi(anahtar, yerTutucuDeger);
+
+            hata.Should().NotBeNull($"'{anahtar}' yer tutucu degerle uretime cikamaz");
+            // CIFT-ANLAM KIRICI: acilis BASKA bir sebepten degil, TAM BU anahtardan durmali.
+            hata!.ToString().Should().Contain(anahtar);
+        }
+
+        [Fact]
+        public void Uretimde_DEPOYA_ISLENMIS_PUBLIC_JWT_DEGERI_ile_UYGULAMA_ACILMAZ()
+        {
+            // DEGER KAYNAGA YAZILMAZ - `docker-compose.yml`den OKUNUR. Bu ayni zamanda
+            // DENY-LIST'IN GUNCELLIGINI de pinler: o dosyadaki deger degisip Program.cs'teki
+            // SHA-256 ozeti guncellenmezse bu pin KIRILIR ve karar bilincli verilmek zorunda kalir.
+            var satir = File.ReadAllLines(Path.Combine(KokDizin.Value, "docker-compose.yml"))
+                .FirstOrDefault(s => s.Contains("TokenOptions__SecurityKey", StringComparison.Ordinal));
+            satir.Should().NotBeNull("docker-compose.yml'de TokenOptions__SecurityKey satiri bulunmali");
+
+            var deger = satir!.Substring(satir.IndexOf(':') + 1).Trim().Trim('"');
+            deger.Should().NotBeNullOrWhiteSpace("vakum kirici: deger gercekten okunmus olmali");
+
+            var hata = AcilisHatasi("TokenOptions:SecurityKey", deger);
+
+            hata.Should().NotBeNull(
+                "depoya islenmis - yani fiilen PUBLIC - bir imzalama anahtari uretimde kullanilamaz");
+            hata!.ToString().Should().Contain("TokenOptions:SecurityKey");
+            // Yer-tutucu dalindan DEGIL, deny-list dalindan durmali (iki dal ayrisiyor).
+            hata.ToString().Should().Contain("public");
+        }
+
+        private static readonly Lazy<string> KokDizin = new(() =>
+        {
+            var d = new DirectoryInfo(AppContext.BaseDirectory);
+            while (d != null && !File.Exists(Path.Combine(d.FullName, "docker-compose.yml")))
+                d = d.Parent;
+            if (d == null)
+                throw new InvalidOperationException(
+                    "Depo koku bulunamadi: docker-compose.yml iceren ust dizin yok. Sessiz skip YOK.");
+            return d.FullName;
+        });
     }
 }

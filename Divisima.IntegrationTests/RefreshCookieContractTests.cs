@@ -62,6 +62,9 @@ namespace Divisima.IntegrationTests
                 if (_environment != null)
                 {
                     builder.UseEnvironment(_environment);
+                    // GF-3/K5: placeholder taramasi genisledi; asgari uretim ayarlari TEK
+                    // KAYNAKTAN (bkz. TestHostConfig.UretimAsgariAyarlari).
+                    TestHostConfig.UretimAsgariAyarlari(builder);
                     // Uretim ortaminda Program.cs FAIL-FAST blogu kritik ayarlari zorunlu kilar.
                     // Testin amaci o blogu olcmek DEGIL, cookie'nin Secure bayragini olcmek;
                     // bu yuzden gecerli degerler VERILIR (host acilabilsin).

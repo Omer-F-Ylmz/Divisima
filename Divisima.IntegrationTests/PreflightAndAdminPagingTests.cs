@@ -286,5 +286,36 @@ namespace Divisima.IntegrationTests
                 }
             }
         }
+
+        // ══ GF-3 / K7 (AV-1: E-6) - DAVRANIS PINI ══════════════════════════════════════════
+        //
+        // BU SINIFA EKLENDI, YENI SQL SINIFI ACILMADI (10d794d dersi: kendi veritabanini kuran
+        // her yeni sinif `model` kilidinde bir katilimci daha olur). Burasi zaten admin
+        // istemcisi uretiyor ve TAM bu ucu cagiriyor - K7'nin hedefi `/api/product/getlist`.
+        //
+        // OLCULEN ONCEKI HAL: `ETagMiddleware` onek listesinde `/api/product` var ve kimlikli
+        // ucu AYIRT ETMIYORDU; middleware `SecurityHeadersMiddleware`den DIS halkada oldugu
+        // icin onun `no-store` basligini `private, max-age=60` ile EZIYORDU. Yani ADMIN URUN
+        // LISTESI paylasilan bir ara onbellege ya da diske dusebilirdi.
+        //
+        // CIFT ANLAM KIRICI: yalnizca "ETag yok" demek yetmez - ETag hic uretilmemis de
+        // olabilirdi. Bu yuzden `Cache-Control`un GERCEKTEN `no-store` oldugu da olculuyor.
+        [Fact]
+        public async Task GF3_K7_ADMIN_URUN_LISTESI_ONBELLEKLENMEZ_ETag_YOK_ve_no_store_KALIR()
+        {
+            var (client, _) = await AdminIstemciAsync(3);
+
+            var yanit = await client.GetAsync("/api/product/getlist");
+
+            yanit.StatusCode.Should().Be(HttpStatusCode.OK, "admin listesi acilabilmeli - vakum kirici");
+            yanit.Headers.ETag.Should().BeNull(
+                "kimlikli uc ETag ALMAMALI: 304 pazarligi yaniti paylasilan bir onbellege tasiyabilir");
+
+            var cacheControl = yanit.Headers.CacheControl?.ToString() ?? "";
+            cacheControl.Should().Contain("no-store",
+                "SecurityHeaders'in no-store'u ETag dali tarafindan EZILMEMELI");
+            cacheControl.Should().NotContain("max-age=60",
+                "ETag dalinin gevsetmesi bu uca ULASMAMALI");
+        }
     }
 }

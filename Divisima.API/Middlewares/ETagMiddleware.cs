@@ -52,9 +52,11 @@ namespace Divisima.API.Middlewares
                 await _next(context);
 
                 // Açıklayıcı yorum: Yalnız 200 + dolu gövde + zaten ETag yoksa
+                // GF-3/K7: ... VE UC KIMLIKSIZ ISE (bkz. KimlikliYanit).
                 if (context.Response.StatusCode == StatusCodes.Status200OK
                     && buffer.Length > 0
-                    && !context.Response.Headers.ContainsKey("ETag"))
+                    && !context.Response.Headers.ContainsKey("ETag")
+                    && !KimlikliYanit(context))
                 {
                     var hash = SHA256.HashData(buffer.GetBuffer().AsSpan(0, (int)buffer.Length));
                     var etag = "\"" + Convert.ToHexString(hash) + "\"";
@@ -84,6 +86,38 @@ namespace Divisima.API.Middlewares
                 if (buffer.Length > 0) { buffer.Position = 0; await buffer.CopyToAsync(originalBody); }
                 throw;
             }
+        }
+
+        // ══ GF-3 / K7 (AV-1: E-6) - KIMLIKLI YANIT ONBELLEKLENMEZ ══════════════════════════
+        //
+        // OLCULEN KUSUR: onek listesi (`/api/product|category|collection`) kimlikli ve
+        // kimliksiz ucu AYIRT ETMIYORDU. Bu middleware `SecurityHeadersMiddleware`den ONCE
+        // kayitlidir, yani DIS halkadir ve yanit yolunda SONRA calisir: onun `no-store`
+        // basligini `private, max-age=60` ile EZIYORDU (`Pragma: no-cache` yerinde kalip
+        // CELISKILI bir baslik cifti uretiyordu). Kapsamdaki SEKIZ GET'ten BIRI admin-only:
+        // `GET /api/Product/getlist` (`ProductController.cs:109-110`) - yani admin urun
+        // listesi paylasilan bir ara onbellege/proxy'ye ya da diske dusebilirdi.
+        //
+        // ONEK LISTESI SILINEREK COZULEMEZ - iki pin onu kilitliyor: `Faz0SozlesmeTests`
+        // (>=2 onek bulunmali) ve `StorefrontCatalogContractTests` (`/api/product` ETag
+        // TASIMALI). Cozum kapsam daraltma degil, KIMLIK AYRIMI.
+        //
+        // IKI OLCUT, ikisi de gerekli:
+        //  (1) UC KIMLIK ISTIYOR MU: `MapControllers().RequireAuthorization()` (GF-1/K5)
+        //      yuzunden `[AllowAnonymous]` TASIMAYAN her controller ucu kimlik ister.
+        //      Metadata `_next`ten SONRA okunur - rota o ana kadar cozulmus olur.
+        //  (2) ISTEK KIMLIKLI GELDI MI: `[AllowAnonymous]` bir uc, jeton varsa kisiye ozel
+        //      icerik donebilir (ornegin fiyatlandirma). Bu dal onu da kapsar.
+        // Ikisinden BIRI dogruysa ETag da `max-age` de YAZILMAZ; `SecurityHeaders`in
+        // `no-store` basligi OLDUGU GIBI KALIR.
+        private static bool KimlikliYanit(HttpContext context)
+        {
+            if (context.User?.Identity?.IsAuthenticated == true) return true;
+
+            var endpoint = context.GetEndpoint();
+            if (endpoint == null) return false;   // rota cozulmediyse zaten govde de yok
+
+            return endpoint.Metadata.GetMetadata<Microsoft.AspNetCore.Authorization.IAllowAnonymous>() == null;
         }
 
         private static bool IsCacheablePath(PathString path)

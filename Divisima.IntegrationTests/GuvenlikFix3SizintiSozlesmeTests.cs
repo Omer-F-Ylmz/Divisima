@@ -258,6 +258,74 @@ namespace Divisima.IntegrationTests
         }
 
         [Fact]
+        public void K5_YER_TUTUCU_TARAMASI_TEK_DONGUDE_TUM_HASSAS_ANAHTARLARA_Uygulanir()
+        {
+            var k = KodSatirlari(Oku("Divisima.API/Program.cs"));
+
+            // POZ: liste var ve ALTI CHANGE_ME anahtarinin hepsini + jwtKey'i kapsiyor (7).
+            foreach (var anahtar in new[]
+            {
+                "\"ConnectionStrings:DivisimaDb\"", "\"TokenOptions:SecurityKey\"", "\"Encryption:Key\"",
+                "\"MailSettings:Password\"", "\"Iyzico:ApiKey\"", "\"Iyzico:SecretKey\"", "\"Captcha:SecretKey\"",
+            })
+                Sayim(k, "            " + anahtar + ",").Should().Be(1,
+                    $"{anahtar} hassas anahtar listesinde TAM 1 kez bulunmali");
+
+            // NEG - IKINCI KOPYA ACILMADI: jwtKey'e OZEL yer-tutucu kontrolu KALDIRILDI.
+            // Bu depoda "ayni kuralin ikinci kopyasi" ailesinin bedeli YEDI KEZ odendi.
+            Sayim(k, "placeholders.Any(p => (jwtKey").Should().Be(0,
+                "jwtKey'e ozel kontrol kaldirilmis olmali - kural TEK dongude");
+
+            // POZ: deny-list IKI ozet tasiyor (ci.yml ve security.yml AYNI degeri kullaniyor).
+            var ozetler = System.Text.RegularExpressions.Regex.Matches(k, "\"[0-9a-f]{64}\"").Count;
+            ozetler.Should().Be(2, "bilinen-public ozet sayisi olculdu: docker-compose + (ci == security)");
+            // NEG - DEGER KAYNAGA GIRMEZ: ozetlerin uretildigi ham degerler kaynakta OLMAMALI.
+            k.Should().NotContain("TokenOptions__SecurityKey",
+                "compose/workflow anahtar ADI bile kaynaga tasinmamali - yalniz ozet durur");
+        }
+
+        [Fact]
+        public void K6_HSTS_TEK_KAYNAK_NGINX_UYGULAMA_TARAFI_KALDIRILDI()
+        {
+            // KAYNAK-SOZLESME PINI (durust kayit): HSTS'in tel uzerinde ne yaptigini olcmek
+            // nginx'i ayaga kaldirmayi gerektirir; bu makinede ne nginx ne docker var (ayni
+            // sinir GuvenlikFix3SozlesmeTests'te de kayitli). Davranis kaniti muhurdeki
+            // sunucu olcumune birakildi.
+            var program = KodSatirlari(Oku("Divisima.API/Program.cs"));
+            Sayim(program, "UseHsts()").Should().Be(0,
+                "HSTS uygulama tarafindan KALDIRILDI - iki kaynak ayni basligi basiyordu");
+
+            // POZ - koruma KAYBOLMADI: nginx tarafi hala basiyor. Vakum kirici: dosya gercekten
+            // nginx yapilandirmasi olmali.
+            var nginx = Oku("ops/infra/nginx.conf");
+            nginx.Should().Contain("proxy_pass", "vakum kirici - dosya gercek bir nginx conf olmali");
+            nginx.Should().MatchRegex(@"add_header\s+Strict-Transport-Security",
+                "api blogunun HSTS'i nginx'te KALMALI - tek kaynak orasi");
+            Oku("ops/infra/divisima-security-headers.conf").Should()
+                .MatchRegex(@"add_header\s+Strict-Transport-Security",
+                    "storefront HSTS'i de nginx tarafinda kalmali");
+        }
+
+        [Fact]
+        public void K7_ETAG_KIMLIKLI_YANITTA_YAZILMAZ_ONEK_LISTESI_KORUNDU()
+        {
+            var k = KodSatirlari(Oku("Divisima.API/Middlewares/ETagMiddleware.cs"));
+
+            // POZ: kosula kimlik ayrimi EKLENDI.
+            Sayim(k, "&& !KimlikliYanit(context)").Should().Be(1);
+            Sayim(k, "IAllowAnonymous>() == null").Should().Be(1,
+                "uc-bazli olcut: [AllowAnonymous] tasimayan controller ucu kimlik ister");
+            Sayim(k, "context.User?.Identity?.IsAuthenticated == true").Should().Be(1,
+                "istek-bazli olcut: anonim bir uc jetonla cagrilirsa da onbelleklenmemeli");
+
+            // NEG - KAPSAM DARALTILARAK COZULMEDI: onek listesi AYNEN duruyor. Iki mevcut pin
+            // (Faz0SozlesmeTests >= 2 onek · StorefrontCatalogContractTests /api/product ETag)
+            // onu zaten kilitliyor; bu assert cozumun YERINI sabitler.
+            Sayim(k, "\"/api/product\", \"/api/category\", \"/api/collection\"").Should().Be(1,
+                "cozum kapsam daraltma DEGIL kimlik ayrimi olmali");
+        }
+
+        [Fact]
         public void K2_ADMIN_EPOSTASI_MASKEDEN_GECER()
         {
             var k = KodSatirlari(Oku("Divisima.Bussiness/Seed/AdminSeeder.cs"));

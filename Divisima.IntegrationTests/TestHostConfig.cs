@@ -73,5 +73,32 @@ namespace Divisima.IntegrationTests
             // testin olctugu seyi kaldirmaz - yalnizca YARISI kaldirir.
             builder.UseSetting("BackgroundJobs:Enabled", "false");
         }
+
+        // ══ GF-3 / K5 - URETIM BACAGINI ACABILECEK ASGARI YAPILANDIRMA ═════════════════════
+        //
+        // NEDEN AYRI METOT: `Production` ortamini ayaga kaldiran IKI fikstur var
+        // (`ConfigFailFastTests.ProdFactory` ve `RefreshCookieContractTests`) ve ikisi de ayni
+        // asgari ayar kumesini tasiyor. K5 o kumeyi BUYUTTU (placeholder taramasi artik alti
+        // hassas anahtari daha kapsiyor); listeyi iki dosyaya KOPYALAMAK "ayni kuralin ikinci
+        // kopyasi" ailesinin yeni bir vakasi olurdu. Tek kaynak burasi.
+        //
+        // DEGERLER KURGUDUR ve YER TUTUCU DEGILDIR - kapinin reddettigi dizgelerin
+        // ("CHANGE_ME", "TODO", "your-", "placeholder", "xxxxx", "CHANGE_IN_PRODUCTION")
+        // hicbirini icermezler. Sir DEGILLER: hicbiri gercek bir saglayiciya karsi gecerli
+        // degil; amaclari yalnizca host'un ACILMASI.
+        //
+        // NOT: `Encryption:Key` ve `TokenOptions:SecurityKey` cagiran fiksturlerde ZATEN
+        // veriliyor ve orada KALIYOR - o iki deger testin KENDI konusuna (32 bayt / uzunluk)
+        // dokunuyor, buraya tasinsa testin ne olctugu okunmaz hale gelirdi.
+        public static void UretimAsgariAyarlari(IWebHostBuilder builder)
+        {
+            // appsettings.json'daki "Server=CHANGE_ME;..." K5'ten SONRA kapiya TAKILIR.
+            builder.UseSetting("ConnectionStrings:DivisimaDb",
+                "Server=localhost;Database=DivisimaUretimBacagiPin;Trusted_Connection=True;TrustServerCertificate=True;");
+            builder.UseSetting("MailSettings:Password", "kurgu-smtp-parolasi-0123456789");
+            builder.UseSetting("Iyzico:ApiKey", "kurgu-iyzico-api-anahtari-0123456789");
+            builder.UseSetting("Iyzico:SecretKey", "kurgu-iyzico-gizli-anahtari-0123456789");
+            builder.UseSetting("Captcha:SecretKey", "kurgu-captcha-gizli-anahtari-0123456789");
+        }
     }
 }

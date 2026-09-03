@@ -82,8 +82,69 @@ var builder = WebApplication.CreateBuilder(args);
         // reddettigini DOGRULUYORDU ama C# listesinde YOKTU - simulasyon, kodda olmayan bir kurali
         // test ediyordu (sahte guvence). Simulasyonu zayiflatmak yerine kod guclendirildi.
         var placeholders = new[] { "CHANGE_ME", "CHANGE_IN_PRODUCTION", "placeholder", "your-", "xxxxx", "TODO" };
-        if (placeholders.Any(p => (jwtKey ?? "").Contains(p, StringComparison.OrdinalIgnoreCase)))
-            throw new InvalidOperationException("FATAL: Config - TokenOptions:SecurityKey placeholder değeri içeriyor (prod'da gerçek secret gerekli).");
+
+        // ══ GF-3 / K5 (AV-1: E-5 + E-1a) ═══════════════════════════════════════════════════
+        //
+        // ONCEKI HAL OLCULDU: yukaridaki yer-tutucu listesi YALNIZ `jwtKey`e uygulaniyordu.
+        // `appsettings.json`daki ALTI "CHANGE_ME" degerinden yalnizca BIRI (SecurityKey)
+        // kapiya takiliyordu; `ConnectionStrings:DivisimaDb` icin olcut sadece "bos mu" idi ve
+        // `Server=CHANGE_ME;...` KAPIYI GECIYORDU; `MailSettings:Password`, `Iyzico:ApiKey`,
+        // `Iyzico:SecretKey` ve `Captcha:SecretKey` degerlerine ise HIC bakilmiyordu.
+        //
+        // KURALIN IKINCI KOPYASI ACILMADI: jwtKey'e OZEL kontrol KALDIRILDI ve ayni liste TEK
+        // dongude tum hassas anahtarlara uygulaniyor. (Bu depoda "ayni kuralin ikinci kopyasi"
+        // ailesinin bedeli YEDI KEZ odendi - yeni bir kopya acmak duzeltmenin kendisini
+        // gelecekteki bir kusura cevirirdi.)
+        //
+        // ANAHTAR LISTESI NEDEN EXPLICIT: tum yapilandirmayi gezmek (`cfg.AsEnumerable()`)
+        // MAKINENIN ORTAM DEGISKENLERINI de kapsardi - bir dosya yolundaki "TODO" ya da
+        // "xxxxx" acilisi engelleyebilirdi. Liste, `appsettings.json`daki alti CHANGE_ME
+        // degerinin ANAHTARLARINDAN grep ile OLCULEREK kuruldu, tahminle degil.
+        var hassasAnahtarlar = new[]
+        {
+            "ConnectionStrings:DivisimaDb",
+            "TokenOptions:SecurityKey",
+            "Encryption:Key",
+            "MailSettings:Password",
+            "Iyzico:ApiKey",
+            "Iyzico:SecretKey",
+            "Captcha:SecretKey",
+        };
+
+        // BILINEN-PUBLIC DEGER DENY-LIST'I (E-1a): `docker-compose.yml` ve iki workflow
+        // dosyasi, JWT imzalama anahtari olarak DEPOYA ISLENMIS - yani FIILEN PUBLIC -
+        // degerler tasiyor. Ucu de yer-tutucu listesine TAKILMIYOR ve uzunluk kapisini
+        // (>= 32 bayt) GECIYOR; yani bugun bir dagitim yanlislikla o degerle uretime cikabilir
+        // ve HICBIR UYARI olmazdi. DEGERLER KAYNAGA GIRMEZ - yalnizca SHA-256 ozetleri durur
+        // (CLAUDE.md bolum 1: kanit degeri tam degeri gerektirmez). ci.yml ve security.yml
+        // AYNI degeri kullaniyor, bu yuzden iki ozet var, uc degil (olculdu).
+        var bilinenPublicOzetler = new[]
+        {
+            "c54dab91d4df75121c324b3f5baf57398639fbd1d8b455b93b4aca9ff762683d", // docker-compose.yml
+            "d9ec1bed104de7c06ebe0b4925e06f3414d10955943d04c3fa8db64c6d1cecf6", // ci.yml + security.yml
+        };
+
+        foreach (var anahtar in hassasAnahtarlar)
+        {
+            var deger = cfg[anahtar];
+            // BOS deger burada kusur SAYILMAZ - "eksik ayar" AYRI kapilarin isi (yukarida
+            // ConnectionStrings/SecurityKey, asagida Encryption/MailSettings/Iyzico zorunlu
+            // kilinmis durumda). Buradaki soru: deger VAR ama YER TUTUCU/PUBLIC MU.
+            if (string.IsNullOrEmpty(deger)) continue;
+
+            var vurulan = placeholders.FirstOrDefault(p => deger.Contains(p, StringComparison.OrdinalIgnoreCase));
+            if (vurulan != null)
+                throw new InvalidOperationException(
+                    $"FATAL: Config - '{anahtar}' placeholder değeri içeriyor ('{vurulan}'); prod'da gerçek secret gerekli.");
+
+            // Ozet KIMLIK dizgesidir - kulturlu casing YASAK (CLAUDE.md 6c): ToLowerInvariant
+            // ve Ordinal karsilastirma.
+            var ozet = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(deger))).ToLowerInvariant();
+            if (bilinenPublicOzetler.Contains(ozet, StringComparer.Ordinal))
+                throw new InvalidOperationException(
+                    $"FATAL: Config - '{anahtar}' DEPOYA İŞLENMİŞ (fiilen public) bir değer taşıyor; prod'da kullanılamaz.");
+        }
 
         // Açıklayıcı yorum: ALAN ŞİFRELEME ANAHTARI - prod'da ZORUNLU.
         // AesEncryptionProvider anahtar boşsa SESSİZCE sabit bir metinden (SHA256("DIVISIMA_DEV_
@@ -560,14 +621,25 @@ app.UseResponseCompression();
 // Açıklayıcı yorum: D2 - Katalog GET yanıtlarına ETag/304 (istemci önbellek)
 app.UseMiddleware<Divisima.API.Middlewares.ETagMiddleware>();
 
+// ══ GF-3 / K6 (AV-1: E-4) - HSTS TEK KAYNAK: NGINX ═════════════════════════════════════
+//
+// ONCEKI HAL OLCULDU: HSTS UC AYRI KAYNAKTAN basiliyordu -
+//   (1) burada `app.UseHsts()` (ASP.NET varsayilani: 30 gun, includeSubDomains/preload YOK -
+//       `AddHsts` cagrisi depoda 0 eslesme, yani varsayilan aynen gecerli)
+//   (2) `ops/infra/nginx.conf` api blogu
+//   (3) `ops/infra/divisima-security-headers.conf` (storefront, uc include)
+// `api.divisima.com`da nginx `add_header` upstream basligini SILMEDIGI icin yanit IKI FARKLI
+// `Strict-Transport-Security` basligi tasiyordu; RFC 6797 "ilk baslik islenir" der, yani
+// nginx'in `includeSubDomains; preload` iceren daha SIKI politikasi FIILEN KAYBOLABILIRDI.
+//
+// UYGULAMA TARAFI KALDIRILDI, NGINX SATIRI SOZLESME OLDU. Kaldirmak korumayi DUSURMEZ -
+// olculdu: Dockerfile duz HTTP dinliyor, docker-compose Development'ta kosuyor ve
+// `ops/deployment-checklist.md:205` "yalniz nginx disari bakar" diyor; yani uygulamanin
+// kendi HSTS'i disari HIC ULASMIYORDU. Pin: burada `UseHsts` 0 gecis · nginx tarafinda 1.
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
-}
-else
-{
-    app.UseHsts();   // B10: HSTS
 }
 
 app.UseMiddleware<SecurityHeadersMiddleware>();
