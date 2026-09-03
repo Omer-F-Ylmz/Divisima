@@ -442,6 +442,30 @@ namespace Divisima.IntegrationTests
         }
 
         [Fact]
+        public void K12_REPLAY_OLCUTU_KUPON_KANONIK_ve_IPTAL_KALEMLERI_DISLANMIS()
+        {
+            var k = KodSatirlari(Oku("Divisima.Bussiness/Concrete/GuestCheckoutManager.cs"));
+
+            // KUPON: iki taraf da kanonik. NULL == "" normalizasyonu KanonikKod'un null/bos
+            // icin AYNI degeri dondurmesinden turer - ayri bir dal ACILMADI.
+            Sayim(k, "KimlikDizgesi.KanonikKod(kayitliKupon)").Should().Be(1);
+            Sayim(k, "KimlikDizgesi.KanonikKod(dto.coupon_code)").Should().Be(1);
+
+            // IPTAL KALEMLERI DISLANIR (merkez karari D7).
+            // BU ASSERT BIR MK-6 BOSLUGUNU KAPATIYOR: MUT-17'de (`!i.is_cancelled` kaldirildi)
+            // TUM davranis pinleri YESIL kaldi - kurgu siparisin iptal kalemi olmadigi icin
+            // fark GOZLENEMIYORDU. Kaynak asserti olmadan bu karar PINSIZ kalirdi.
+            // (Semantik itiraz raporda: dislama, kismi iptalden SONRA gelen MESRU bir replay'i
+            //  400'e dusurur - karar merkezindir, davranis DEGISTIRILMEDI.)
+            Sayim(k, "i.order_id == siparisId && !i.is_cancelled").Should().Be(1);
+
+            // BEDEN bir KIMLIK dizgesidir - kulturlu casing YASAK (CLAUDE.md 6c).
+            Sayim(k, ".ToUpperInvariant()").Should().BeGreaterThan(0);
+            Sayim(k, "OrderBy(s => s, StringComparer.Ordinal)").Should().Be(1,
+                "coklu kume karsilastirmasi sira BAGIMSIZ olmali");
+        }
+
+        [Fact]
         public void K13_UPDATE_VALIDATORU_VAR_ve_KURALLARI_ADD_ILE_BIREBIR_AYNI()
         {
             var add = KodSatirlari(Oku(
