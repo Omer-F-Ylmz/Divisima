@@ -95,10 +95,22 @@ namespace Divisima.IntegrationTests
             // appsettings.json'daki "Server=CHANGE_ME;..." K5'ten SONRA kapiya TAKILIR.
             builder.UseSetting("ConnectionStrings:DivisimaDb",
                 "Server=localhost;Database=DivisimaUretimBacagiPin;Trusted_Connection=True;TrustServerCertificate=True;");
-            builder.UseSetting("MailSettings:Password", "kurgu-smtp-parolasi-0123456789");
-            builder.UseSetting("Iyzico:ApiKey", "kurgu-iyzico-api-anahtari-0123456789");
-            builder.UseSetting("Iyzico:SecretKey", "kurgu-iyzico-gizli-anahtari-0123456789");
-            builder.UseSetting("Captcha:SecretKey", "kurgu-captcha-gizli-anahtari-0123456789");
+            // ══ DEGERLER BILINCLI OLARAK KISA ve DUSUK ENTROPILI ══════════════════════════
+            // ILK YAZIMDA "kurgu-smtp-parolasi-0123456789" gibi degerler kullanildi ve
+            // `secret-scan` job'i KIRILDI. Sebep OLCULDU: bu dizgelerin Shannon entropisi
+            // 4.35-4.42 (gitleaks `generic-api-key` esigi 3.5) ve degerler dogrudan
+            // "Password"/"ApiKey"/"SecretKey" anahtar adlarinin YANINDA duruyor - kuralin
+            // ders kitabi vakasi.
+            // COZUM ENTROPI KUMARI DEGIL YAPISAL: `generic-api-key` kurali en az 10 karakterlik
+            // bir deger arar; "kurgu" BES karakterdir ve kural ONU ESLEYEMEZ. Ayrica entropi
+            // 1.922 - esigin cok altinda. (Depo kalibi: `AccessTokenIptalTests`teki "Bbbbbb22"
+            // ayni gerekceyle secilmisti, entropi 1.299.)
+            // Kapi bu degerleri KABUL EDER: yer-tutucu listesindeki hicbir dizgeyi icermiyorlar
+            // ve deny-list ozetleriyle eslesmiyorlar - tek istedigi bu.
+            builder.UseSetting("MailSettings:Password", "kurgu");
+            builder.UseSetting("Iyzico:ApiKey", "kurgu");
+            builder.UseSetting("Iyzico:SecretKey", "kurgu");
+            builder.UseSetting("Captcha:SecretKey", "kurgu");
         }
     }
 }
