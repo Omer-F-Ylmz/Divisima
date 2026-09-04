@@ -63,6 +63,15 @@ namespace Divisima.IntegrationTests
             throw new InvalidOperationException($"'{fonksiyonAdi}' govdesinin kapanisi bulunamadi.");
         }
 
+        // ══ GF-2b / K5 - PANEL KAYNAGI ARTIK IKI DOSYA ═════════════════════════════════
+        // Panelin JS'i `admin.html`in satir ici <script> blogundaydi; GF-2b/K5 onu
+        // `frontend/admin.js`e tasidi ve admin CSP'sinden `script-src 'unsafe-inline'`
+        // KALDIRILDI. Bu pinlerin OLCTUGU SEY DEGISMEDI - yalnizca kaynagin yeri degisti.
+        // Panel BUTUN olarak okunur; html ONCE gelir ki `IndexOf` ile sira olcen pinler
+        // (purify'in api-client'tan once yuklenmesi) bozulmasin.
+        private static string PanelKaynagi() =>
+            Oku("frontend/admin.html") + "\n" + Oku("frontend/admin.js");
+
         private static int Sayim(string metin, string parca) =>
             metin.Split(parca).Length - 1;
 
@@ -311,7 +320,7 @@ namespace Divisima.IntegrationTests
         [Fact]
         public void GF2A_K7_ADMIN_ALANLARI_KACISLI_ve_INLINE_JS_KALKTI()
         {
-            var admin = Oku("frontend/admin.html");
+            var admin = PanelKaynagi();
 
             admin.Should().Contain("${esc(p.product_name)}", "urun adi kacisli olmali");
             Sayim(admin, "${p.product_name}").Should().Be(0, "ham urun adi GERI GELMEMELI");
@@ -339,7 +348,7 @@ namespace Divisima.IntegrationTests
         [Fact]
         public void GF2A_K1_ADMIN_PURIFY_VENDORDAN_ve_SARMALAYICI_FAIL_CLOSED()
         {
-            var admin = Oku("frontend/admin.html");
+            var admin = PanelKaynagi();
 
             admin.Should().Contain("/vendor/purify.min.js",
                 "purify YEREL vendor'dan yuklenmeli - CDN'e YENI bagimlilik ACILMAZ");

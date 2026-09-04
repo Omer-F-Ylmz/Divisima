@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-hashes' blob: https://sandbox-static.iyzipay.com https://static.iyzipay.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://sandbox-static.iyzipay.com https://static.iyzipay.com; font-src 'self' https://fonts.gstatic.com data: https://sandbox-static.iyzipay.com https://static.iyzipay.com https://cdn.iyzipay.com; img-src 'self' data: blob: http://localhost:5000 https://api.divisima.com https://sandbox-static.iyzipay.com https://static.iyzipay.com https://cdn.iyzipay.com; connect-src 'self' http://localhost:5000 https://api.divisima.com https://sandbox-api.iyzipay.com https://api.iyzipay.com https://sandbox-static.iyzipay.com https://static.iyzipay.com https://sandbox-merchantgw.iyzipay.com https://merchantgw.iyzipay.com https://sandbox-consumerapigw.iyzipay.com https://consumerapigw.iyzipay.com; manifest-src 'self' blob:; worker-src 'self' blob:; base-uri 'self'; form-action 'self' http://localhost:5000 https://api.divisima.com https://sandbox-api.iyzipay.com https://api.iyzipay.com" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' blob: https://sandbox-static.iyzipay.com https://static.iyzipay.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://sandbox-static.iyzipay.com https://static.iyzipay.com; font-src 'self' https://fonts.gstatic.com data: https://sandbox-static.iyzipay.com https://static.iyzipay.com https://cdn.iyzipay.com; img-src 'self' data: blob: http://localhost:5000 https://api.divisima.com https://sandbox-static.iyzipay.com https://static.iyzipay.com https://cdn.iyzipay.com; connect-src 'self' http://localhost:5000 https://api.divisima.com https://sandbox-api.iyzipay.com https://api.iyzipay.com https://sandbox-static.iyzipay.com https://static.iyzipay.com https://sandbox-merchantgw.iyzipay.com https://merchantgw.iyzipay.com https://sandbox-consumerapigw.iyzipay.com https://consumerapigw.iyzipay.com; manifest-src 'self' blob:; worker-src 'self' blob:; base-uri 'self'; form-action 'self' http://localhost:5000 https://api.divisima.com https://sandbox-api.iyzipay.com https://api.iyzipay.com" />
 <!-- ══ API ORIGIN - TEK KAYNAK (DALGA-4-FIX-2 / M1) ═══════════════════════════════════
      Storefront'un API tabani BURADAN turer. Yukaridaki CSP meta'sinin UC direktifi
      (img-src, connect-src, form-action) AYNI origin'i tasimak ZORUNDADIR; dagitimda
@@ -60,10 +60,13 @@
      sayfayi cizmiyordu (olculdu: 661 ms). URL'deki display=swap yalniz FOIT'i cozer, CSS'in
      KENDISININ bloklamasini DEGIL.
      DESEN: media="print" ile getir (bloklamaz), yuklenince media'yi "all" yap. <noscript>
-     yedegi JS kapaliyken eski davranisi korur. CSP UYUMLU: sayfanin script-src'sinde
-     'unsafe-inline' + 'unsafe-hashes' var, satir ici onload calisir (olculdu).
-     preconnect satirlari YERINDE KALDI - bagalanti kurulumu yine erken basliyor. -->
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" media="print" onload="this.media='all';this.onload=null">
+     yedegi JS kapaliyken eski davranisi korur.
+     GF-2b/K5 GUNCELLEMESI: medyayi acan is ARTIK SATIR ICI `onload` DEGIL. O oznitelik
+     CSP'de `'unsafe-hashes'` gerektiriyordu ve bu dalgada o kaynak KALDIRILDI; link
+     yalnizca `data-font-gecikmeli` isaretini tasiyor, dinleyici govdedeki betikte
+     (bkz. `imgFill` oncesi blok) ve `sheet` dolu ise medya HEMEN aciliyor.
+     preconnect satirlari YERINDE KALDI - baglanti kurulumu yine erken basliyor. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" media="print" data-font-gecikmeli>
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap"></noscript>
 <style>*{-webkit-tap-highlight-color:transparent!important}html{-webkit-tap-highlight-color:transparent}a,button,.btn,.pill,.card,.chip,.mnav-item,.iconbtn,.lang-opt,.swatch,[role="button"],[onclick]{-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
 a,button,input,select,textarea,label,summary,[role="button"],[onclick],.btn,.pill,.card,.mnav-item,.chip,.qty-btn,.swatch,.thumb{touch-action:manipulation}
@@ -1694,9 +1697,35 @@ var _COLORMIX_RE=/^color-mix\(in srgb,\s*#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-f
 function guvenliRenk(col){col=(col==null?'':String(col)).trim();if(_HEX_RE.test(col)||_COLORMIX_RE.test(col))return col;return '#d9cfc2';}
 function ph(col,brand,cls){return '<div class="ph '+(cls||'')+'" style="--col:'+guvenliRenk(col)+'">'+hanger()+(brand?'<span class="ph-brand">'+esc(brand)+'</span>':'')+'</div>';}
 function esc(s){return (s||'').toString().replace(/[&<>"']/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];});}
-function imgFill(src,alt,contain){return '<img src="'+src+'" alt="'+esc(alt)+'" loading="lazy" decoding="async" class="lz" onload="this.classList.add(\'lzok\')" onerror="this.classList.add(\'imgerr\')" style="width:100%;height:100%;object-fit:'+(contain?'contain':'cover')+';'+(contain?'background:var(--surface-2);padding:7%;':'')+'">';}
+// ══ GF-2b / K5 - SATIR ICI OLAY OZNITELIGI YOK: YAKALAMA FAZINDA DELEGASYON ═══════
+// `onload`/`onerror` oznitelikleri CSP'de `'unsafe-hashes'` gerektiriyordu; ikisi de
+// kaldirildi ve dinleme TEK NOKTAYA tasindi.
+// KRITIK AYRINTI: `load` ve `error` olaylari KABARMAZ. Kabarma fazinda dinleyen bir
+// kanca HICBIR SEY duymazdi - bu yuzden ucuncu arguman `true` (yakalama fazi).
+// Dinleyici bir kez baglanir ve SONRADAN uretilen tum <img>'leri de kapsar; vitrin
+// gorselleri `imgFill`/`media` ile calisma aninda uretildigi icin kapsam tamdir.
+// KACAN OLAYIN ETKISI OLCULDU: `.lz` yalnizca bir iskelet parlamasi gosteriyor
+// (`.lz.lzok` onu durduruyor), yani kacan bir olay gorseli GIZLEMEZ - en fazla
+// arkada parlama surer. Islevsel gerileme riski YOK.
+document.addEventListener('load',function(e){
+  var t=e.target; if(!t||t.tagName!=='IMG')return;
+  if(t.classList.contains('lz'))t.classList.add('lzok');
+  if(t.classList.contains('rimg-front')){var r=t.closest('.rimg');if(r)r.classList.add('loaded');}
+},true);
+document.addEventListener('error',function(e){
+  var t=e.target;
+  if(t&&t.tagName==='IMG'&&t.classList.contains('lz'))t.classList.add('imgerr');
+},true);
+// GF-2b/K5: yazi tipi stil dosyasi `media="print"` ile geciktiriliyor ve satir ici
+// `onload` ile aciliyordu. Ayni is oznitelik OLMADAN yapilir. `sheet` DOLU ise olay
+// bu betikten ONCE atesledi demektir; o durumda medya HEMEN acilir - yoksa yazi
+// tipleri HIC uygulanmazdi (satir ici surumde bu risk yoktu, burada var ve kapatildi).
+(function(){var l=document.querySelector('link[data-font-gecikmeli]');if(!l)return;
+  function ac(){l.media='all';}
+  if(l.sheet)ac();else l.addEventListener('load',ac,{once:true});})();
+function imgFill(src,alt,contain){return '<img src="'+src+'" alt="'+esc(alt)+'" loading="lazy" decoding="async" class="lz" style="width:100%;height:100%;object-fit:'+(contain?'contain':'cover')+';'+(contain?'background:var(--surface-2);padding:7%;':'')+'">';}
 function galleryOf(p){if(p.imgs&&p.imgs.length)return p.imgs.slice();if(p.img)return [p.img];return [];}
-function media(p,showBrand){var g=galleryOf(p);if(g.length){var alt=esc(nameOf(p)),contain=p.cat==='aksesuar',cls='rimg'+(g.length>1?' has-alt':' single')+(contain?' contain':'');var front='<img class="rimg-img rimg-front" src="'+g[0]+'" alt="'+alt+'" loading="lazy" decoding="async" onload="var r=this.closest(\'.rimg\');if(r)r.classList.add(\'loaded\')">';var back=g.length>1?'<img class="rimg-img rimg-back" src="'+g[1]+'" alt="" aria-hidden="true" loading="lazy" decoding="async">':'';return '<div class="'+cls+'">'+front+back+'</div>';}return ph(p.col,showBrand?p.brand:'','');}
+function media(p,showBrand){var g=galleryOf(p);if(g.length){var alt=esc(nameOf(p)),contain=p.cat==='aksesuar',cls='rimg'+(g.length>1?' has-alt':' single')+(contain?' contain':'');var front='<img class="rimg-img rimg-front" src="'+g[0]+'" alt="'+alt+'" loading="lazy" decoding="async">';var back=g.length>1?'<img class="rimg-img rimg-back" src="'+g[1]+'" alt="" aria-hidden="true" loading="lazy" decoding="async">':'';return '<div class="'+cls+'">'+front+back+'</div>';}return ph(p.col,showBrand?p.brand:'','');}
 function thumb(p){if(p.img)return imgFill(p.img,p.name,p.cat==='aksesuar');return ph(p.col,'','');}
 function pPrice(p){if(!p)return 0;return p.price;}
 function SIZES_FOR(p){if(!p)return [];return (p.sizes&&p.sizes.length)?p.sizes:[36,38,40,42,44];}

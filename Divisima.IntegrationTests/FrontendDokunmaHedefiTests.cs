@@ -109,7 +109,10 @@ namespace Divisima.IntegrationTests
         [Fact]
         public void HICBIR_YENI_EYLEM_HANDLERI_target_id_ILE_KATI_KARSILASTIRMA_YAPMAZ()
         {
-            var dosyalar = new[] { "frontend/index.html", "frontend/api-bridge.js", "frontend/admin.html" };
+            // GF-2b/K5: panelin JS'i `frontend/admin.js`e tasindi. Dosya listeye EKLENDI -
+            // eklenmeseydi bu SINIF DUZEYI tarama panelin TUM kodunu sessizce kapsam
+            // disinda birakirdi (kapsam kaybi, yanlis yesil).
+            var dosyalar = new[] { "frontend/index.html", "frontend/api-bridge.js", "frontend/admin.html", "frontend/admin.js" };
             // MFIX-2: "giftChk" IZINLI LISTEDEN CIKTI - o checkbox MOCK CHECKOUT'un
             // hediye paketi adimindaydi ve MFIX-1 devri kapsaminda SOKULDU. Kural
             // DEGISMEDI (kati e.target.id yalniz change-olayli checkbox'ta guvenli);
@@ -642,8 +645,15 @@ namespace Divisima.IntegrationTests
             // Yardimcilar TANIMLI ve CAGRILMIS olmali (yalniz tanim = olu kod).
             b.Should().Contain("function checkoutIstekIdAl()", "anahtar uretici tanimli olmali");
             b.Should().Contain("function checkoutIstekIdYenile()", "yenileyici tanimli olmali");
-            b.Should().Contain("function checkoutIstekIdSepeteGoreTazele()", "sepet tazeleyici tanimli olmali");
-            Regex.Matches(b, @"checkoutIstekIdSepeteGoreTazele\s*\(\s*\)").Count.Should().BeGreaterThan(1,
+            // ══ GF-2b / K4 - TAZELEYICI YENIDEN ADLANDIRILDI ══════════════════════════
+            // Olcut artik yalniz SEPET degil, CHECKOUT NIYETI: sepet + adres + kupon +
+            // bakiye kullanimi + odeme yontemi (misafir yolunda ayrica e-posta). Sunucu
+            // GF-3/K12 replay olcutu de bu eksende; ad ESKI olcutu anlatiyordu ve YANILTICIYDI.
+            // Bu pinin OLCTUGU SEY DEGISMEDI: tazeleyici TANIMLI ve CAGRILMIS olmali.
+            // Daha SIKI bir karsiligi `GuvenlikFix2bSozlesmeTests.GF2B_K4_NIYET_IMZASI_...`
+            // icinde duruyor - orada cagri sayisi TAM 2 olarak pinli (uye + misafir).
+            b.Should().Contain("function checkoutIstekIdNiyeteGoreTazele()", "niyet tazeleyici tanimli olmali");
+            Regex.Matches(b, @"checkoutIstekIdNiyeteGoreTazele\s*\(\s*\)").Count.Should().BeGreaterThan(1,
                 "tanim + checkout gonderiminde cagri: en az iki gecis");
             Regex.Matches(b, @"checkoutIstekIdYenile\s*\(\s*\)").Count.Should().BeGreaterThan(2,
                 "tanim + sepet degisiminde + BASARILI sipariste: en az uc gecis");

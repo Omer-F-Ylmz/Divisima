@@ -130,7 +130,15 @@ namespace Divisima.IntegrationTests
         [Fact]
         public void ADMIN_PANELI_de_AYNI_TEK_KAYNAK_SOZLESMESINI_Tasir()
         {
-            var admin = Oku("frontend/admin.html");
+            // GF-2b/K5: panelin JS'i `admin.html`in satir ici <script> blogundan
+            // `frontend/admin.js`e tasindi (admin CSP'sinden `script-src 'unsafe-inline'`
+            // kaldirilabilsin diye). Bu pinin OLCTUGU SEY DEGISMEDI: operator override'i
+            // ve sabit yedegin yoklugu artik JS dosyasinda. Panel BUTUN olarak okunur;
+            // html ONCE gelir - meta ve CSP okuyan yardimcilar ilk eslesmeyi bulur.
+            // OLCULDU: `admin.js` icinde "localhost:5000" GECISI 0, yani asagidaki NEG
+            // assert birlestirmeden ETKILENMEZ ve `ops/set-api-origin.sh`in uc dosyalik
+            // kapsami da EKSIK KALMAZ.
+            var admin = Oku("frontend/admin.html") + "\n" + Oku("frontend/admin.js");
             var origin = BeyanEdilenOrigin(admin);
             var csp = CspIcerigi(admin);
 

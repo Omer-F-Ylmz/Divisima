@@ -65,6 +65,20 @@ namespace Divisima.IntegrationTests
             return File.ReadAllText(tam);
         }
 
+        // ══ GF-2b / K5 - PANEL KAYNAGI ARTIK IKI DOSYA ═════════════════════════════════
+        // Panelin JS'i `admin.html` icinde SATIR ICI bir <script> blogundaydi ve bu, admin
+        // CSP'sinde `script-src 'unsafe-inline'`i ZORUNLU kiliyordu. GF-2b/K5'te blok
+        // `frontend/admin.js`e tasindi ve `'unsafe-inline'` KALDIRILDI.
+        //
+        // Bu pinlerin OLCTUGU SEY DEGISMEDI - yalnizca kaynagin yeri degisti. Panel bir
+        // BUTUN olarak okunur; boylece markup pinleri (script sirasi, CSP) ve JS pinleri
+        // (fonksiyon govdeleri, payload anahtarlari) AYNI kapsamda kalir ve tasima
+        // hicbir pinde kapsam KAYBI yaratmaz.
+        // SIRA ONEMLI: html ONCE gelir - `IndexOf` ile sira olcen pinler (purify'in
+        // api-client'tan once yuklenmesi gibi) bozulmasin.
+        private static string PanelKaynagi() =>
+            Oku("frontend/admin.html") + "\n" + Oku("frontend/admin.js");
+
         // Bir JS fonksiyonunun govdesini kaba ama YETERLI bicimde cikarir: adindan baslar,
         // suslu parantezleri sayarak kapanisa kadar gider. Regex ile "govdeyi tahmin etmek"
         // yerine sayma kullaniliyor - ic ice objeler yuzunden regex sessizce yanlis kesebilir.
@@ -124,7 +138,7 @@ namespace Divisima.IntegrationTests
         [Fact]
         public void KuponEklemeGovdesi_DTO_ALANLARIYLA_ORTUSUR_discount_value_ARTIK_YOK()
         {
-            var govde = FonksiyonGovdesi(Oku("frontend/admin.html"), "saveCoupon");
+            var govde = FonksiyonGovdesi(PanelKaynagi(), "saveCoupon");
             var anahtarlar = PayloadAnahtarlari(govde);
 
             // VAKUM KIRICI: taramanin gercekten bir sey bulmus olmasi. Bos bir kume her
@@ -144,7 +158,7 @@ namespace Divisima.IntegrationTests
         [Fact]
         public void KuponListesi_DTO_ALANINI_OKUR_ve_TIPI_METIN_OLARAK_COZER()
         {
-            var kaynak = Oku("frontend/admin.html");
+            var kaynak = PanelKaynagi();
             var govde = FonksiyonGovdesi(kaynak, "renderCoupons");
 
             govde.Should().NotContain("c.discount_value",
@@ -180,7 +194,7 @@ namespace Divisima.IntegrationTests
         [MemberData(nameof(YazmaEkranlari))]
         public void HicbirAdminYazmaEkrani_DTO_DA_OLMAYAN_ALAN_GONDERMEZ(string fonksiyon, Type dtoTipi)
         {
-            var anahtarlar = PayloadAnahtarlari(FonksiyonGovdesi(Oku("frontend/admin.html"), fonksiyon));
+            var anahtarlar = PayloadAnahtarlari(FonksiyonGovdesi(PanelKaynagi(), fonksiyon));
 
             // VAKUM KIRICI: cikarim gercekten calismis olmali.
             anahtarlar.Should().NotBeEmpty($"'{fonksiyon}' govdesinden alan cikarilamadi - tarama VAKUMA dusmus olurdu");
@@ -199,7 +213,7 @@ namespace Divisima.IntegrationTests
         [Fact]
         public void ADMIN_YAZMA_CAGRILARININ_TAMAMI_TARAMA_KAPSAMINDA()
         {
-            var kaynak = Oku("frontend/admin.html");
+            var kaynak = PanelKaynagi();
 
             // Govde GONDEREN cagrilar: api.admin.<x>(payload). Kimlikle cagrilanlar (deleteCoupon(id),
             // changeOrderStatus(id,status), generateInvoice(id)) govde kurmaz - alan adi uyusmazligi
@@ -226,7 +240,7 @@ namespace Divisima.IntegrationTests
         [Fact]
         public void UrunFormu_ZORUNLU_ALANLARI_GONDERIR_color_hex_ve_stocks()
         {
-            var anahtarlar = PayloadAnahtarlari(FonksiyonGovdesi(Oku("frontend/admin.html"), "saveProduct"));
+            var anahtarlar = PayloadAnahtarlari(FonksiyonGovdesi(PanelKaynagi(), "saveProduct"));
 
             anahtarlar.Should().Contain("color_hex", "zorunlu (schema NOT NULL); yokken uc 'The color_hex field is required.' donuyordu");
             anahtarlar.Should().Contain("stocks", "zorunlu; yokken uc 'The stocks field is required.' donuyordu");
@@ -255,7 +269,7 @@ namespace Divisima.IntegrationTests
                 "sayfalama zarfi TEK konvansiyona sahip olmali");
 
             // Panel tarafi: eski PascalCase okumasi geri gelmemeli.
-            var govde = FonksiyonGovdesi(Oku("frontend/admin.html"), "renderOrders");
+            var govde = FonksiyonGovdesi(PanelKaynagi(), "renderOrders");
             govde.Should().Contain("res.items").And.Contain("res.total_count");
             govde.Should().NotContain("res.Items").And.NotContain("res.TotalCount",
                 "olculen kusur buydu: 52 siparis varken ekran 'Siparis yok' gosteriyordu");

@@ -167,7 +167,10 @@ namespace Divisima.IntegrationTests
         [Fact]
         public void KARGO_EKRANI_BEKLEYEN_SIPARIS_LISTESI_Tasir_ve_DURUM_MAKINESIYLE_TUTARLI()
         {
-            var admin = Oku("frontend/admin.html");
+            // GF-2b/K5: panelin JS'i `frontend/admin.js`e tasindi (admin CSP'sinden
+            // `script-src 'unsafe-inline'` kaldirilabilsin diye). Pinin OLCTUGU SEY
+            // DEGISMEDI - kargo ekraninin kodu artik o dosyada.
+            var admin = Oku("frontend/admin.html") + "\n" + Oku("frontend/admin.js");
 
             admin.Should().Contain("kargoBekleyenler", "kargo ekrani artik KOR FORM olmamali");
             admin.Should().Contain("kargoFormunaAl", "listeden forma gecis olmali - operator ID kopyalamamali");

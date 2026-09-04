@@ -420,5 +420,146 @@ namespace Divisima.IntegrationTests
             kod.Should().Contain("const API_CACHE = \"divisima-api-\" + VERSION;",
                 "API kovasi surumden turemeli - GF-2a/K8'in iki kova karari korunuyor");
         }
+
+        // ══ K5-lite - SATIR ICI OLAY OZNITELIGI KALMADI ════════════════════════════════
+        //
+        // Satir ici `onclick`/`oninput`/`onload` oznitelikleri CSP'de `'unsafe-inline'`
+        // (admin) ve `'unsafe-hashes'` (vitrin) kaynaklarini ZORUNLU kiliyordu. Ikisi de
+        // kaldirildi; handler'lar `data-act` ozniteligine ve delege dinleyicilere tasindi.
+        //
+        // ESLESTIRME CAPASI SINANDI (MK-7): `on[a-z]+=` TEK BASINA YANLIS - `content="`
+        // icindeki `ontent=` ve `data-contrast="` icindeki `ontrast=` de eslesiyor
+        // (olculdu: POZ 3/2, NEG 1/0). Bu yuzden capa BOSLUK SINIRI tasir.
+        [Theory]
+        [InlineData("frontend/index.html")]
+        [InlineData("frontend/admin.html")]
+        [InlineData("frontend/admin.js")]
+        [InlineData("frontend/api-bridge.js")]
+        public void GF2B_K5_HICBIR_YUZEYDE_SATIR_ICI_OLAY_OZNITELIGI_YOK(string yol)
+        {
+            var kod = KodSatirlari(Oku(yol));
+            var esler = System.Text.RegularExpressions.Regex
+                .Matches(kod, @"\son[a-z]+\s*=")
+                .Select(m => m.Value.Trim())
+                .ToList();
+
+            esler.Should().BeEmpty(
+                $"{yol}: satir ici olay ozniteligi KALMAMALI - her biri CSP'de " +
+                $"'unsafe-inline'/'unsafe-hashes' gerektirir. Bulunanlar: {string.Join(", ", esler)}");
+        }
+
+        // VAKUM KIRICI - YUKARIDAKI TARAMA GERCEKTEN CALISIYOR MU?
+        // Yukaridaki dort assert "hicbir sey bulunamadi" diyerek yesil kaliyor. Tarama
+        // BOZUK olsaydi (or. regex hicbir seyi eslemeseydi) yine yesil kalirdi. Bu test,
+        // AYNI ifadeyi bilinen-POZITIF bir girdide kosarak taramanin sagligini kanitlar.
+        [Fact]
+        public void GF2B_K5_OLAY_OZNITELIGI_TARAMASI_BILINEN_POZITIFI_YAKALAR()
+        {
+            const string poz = "<button onclick=\"f()\">x</button>\n<img onerror=\"g()\">";
+            const string neg = "<div class=\"normal\" data-contrast=\"high\">y</div>\n"
+                             + "<meta content=\"z\"><span data-on=\"k\">q</span>";
+
+            System.Text.RegularExpressions.Regex.Matches(poz, @"\son[a-z]+\s*=").Count
+                .Should().Be(2, "bilinen-POZITIF girdide IKI olay ozniteligi bulunmali");
+            System.Text.RegularExpressions.Regex.Matches(neg, @"\son[a-z]+\s*=").Count
+                .Should().Be(0, "bilinen-NEGATIF girdide HICBIRI eslesmemeli - " +
+                    "'content=' icindeki 'ontent=' ve 'data-contrast=' icindeki 'ontrast=' " +
+                    "sinir kosulu olmadan YANLIS eslesir (bu turda olculdu)");
+        }
+
+        // ══ K5-lite/b - CSP KAYNAKLARI DARALDI ════════════════════════════════════════
+        [Fact]
+        public void GF2B_K5_ADMIN_CSP_UNSAFE_INLINE_SCRIPT_TASIMAZ()
+        {
+            var meta = CspMetaIcerigi(Oku("frontend/admin.html"));
+            var scriptSrc = Direktif(meta, "script-src");
+
+            scriptSrc.Should().NotContain("'unsafe-inline'",
+                "panelin TUM satir ici script'leri disari alindi - kaynak KALKMALI");
+            // VAKUM KIRICI + CIFT ANLAM: direktif GERCEKTEN okunmus olmali ve panelin
+            // mesru uzak bagimliligi (Chart.js) DURMALI.
+            scriptSrc.Should().Contain("https://cdn.jsdelivr.net",
+                "vakum kirici: script-src okunmus olmali ve Chart.js kaynagi durmali");
+
+            // STIL tarafi BILINCLI olarak dokunulmadi: panelde `style="..."` oznitelikleri
+            // var ve onlar CSS'tir - script yuzeyi degil.
+            Direktif(meta, "style-src").Should().Contain("'unsafe-inline'",
+                "stil tarafi bu dalgada KAPSAM DISI - kaldirilmasi ayri bir istir");
+
+            // OLU DIREKTIF KALKTI: `frame-ancestors` meta CSP'de SPEC GEREGI yok sayilir.
+            // Koruma nginx basligindan geliyor (GuvenlikFix3SozlesmeTests o basligi pinliyor).
+            meta.Should().NotContain("frame-ancestors",
+                "meta'daki frame-ancestors OLU METINDIR - koruma HTTP basligindan gelir");
+        }
+
+        [Fact]
+        public void GF2B_K5_VITRIN_CSP_UNSAFE_HASHES_TASIMAZ_ve_3DS_FORM_ACTION_ILE_YURUR()
+        {
+            var meta = CspMetaIcerigi(Oku("frontend/index.html"));
+
+            Direktif(meta, "script-src").Should().NotContain("'unsafe-hashes'",
+                "satir ici olay oznitelikleri kalktigi icin bu kaynak da KALKMALI");
+
+            // ══ frame-src EKLENMEDI - OLCULEN GEREKCE ═════════════════════════════════
+            // 3DS akisi bir IFRAME degil, ust duzey FORM POST'udur: `docs/muhur/
+            // 01-oturum-devri.md:503` 3DS adimini `form-action` uzerinden kaydediyor ve
+            // AYNI muhurde 3DS uctan uca suruldu (#30 dustu, #31 basarili) - `frame-src`
+            // CSP'de HIC YOKKEN. Yani kanit "yok" degil, OLUMLU yonde: akis frame-src
+            // olmadan calisiyor. Bu pin o mekanizmayi korur.
+            var formAction = Direktif(meta, "form-action");
+            formAction.Should().Contain("iyzipay.com",
+                "3DS adimi form POST ile yurudugu icin saglayici host'u form-action'da olmali");
+            meta.Should().NotContain("frame-src",
+                "3DS iframe DEGIL - kanitsiz bir frame-src eklemek yuzeyi GEREKSIZ genisletir");
+
+            // Merkezin adiyla istedigi iki kaynak (GF-2a data:image karari ile tutarli).
+            Direktif(meta, "font-src").Should().Contain("https://fonts.gstatic.com",
+                "Google Fonts dosyalari font-src'de acik olmali");
+            Direktif(meta, "img-src").Should().Contain("data:",
+                "GF-2a/K3 data:image gorsellerine izin veriyor - CSP onunla tutarli kalmali");
+        }
+
+        // ══ K5-lite/c - DELEGASYON BEYAZ LISTE, `window[...]` DEGIL ════════════════════
+        //
+        // `data-act` degerini dogrudan fonksiyon adina cevirmek (`window[el.dataset.act]()`)
+        // DOM'a oznitelik yazabilen bir saldirgana KEYFI global fonksiyon cagirma yetkisi
+        // verirdi - yani `'unsafe-inline'`i kaldirmakla kazanilan sey geri verilirdi.
+        [Fact]
+        public void GF2B_K5_PANEL_DELEGASYONU_BEYAZ_LISTE_KULLANIR()
+        {
+            var admin = KodSatirlari(Oku("frontend/admin.js"));
+
+            admin.Should().Contain("const PANEL_EYLEM = {",
+                "eylemler BEYAZ LISTE tablosunda olmali");
+            admin.Should().Contain("hasOwnProperty.call(tablo, el.dataset.act)",
+                "arama prototip zincirine DUSMEMELI - 'toString' gibi bir deger eylem sanilmamali");
+            admin.Should().NotContain("window[el.dataset",
+                "eylem adi dogrudan global cozume CEVRILMEMELI - keyfi fonksiyon cagrisi acardi");
+
+            // Uc olay turu de ayri tabloyla baglanmali: tek tablo olsaydi bir `data-act`
+            // yanlis olay turunden de tetiklenebilirdi (input'a tiklamak "Sil" calistirir).
+            foreach (var t in new[] { "\"click\", PANEL_EYLEM", "\"input\", PANEL_GIRDI", "\"change\", PANEL_DEGISIM" })
+                admin.Should().Contain("panelOlayBagla(" + t + ")",
+                    "her olay turu KENDI tablosuyla baglanmali");
+        }
+
+        // CSP meta etiketinin `content` degerini cikarir.
+        private static string CspMetaIcerigi(string html)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(html,
+                "<meta[^>]*http-equiv=\"Content-Security-Policy\"[^>]*content=\"([^\"]*)\"");
+            m.Success.Should().BeTrue("CSP meta etiketi bulunmali");
+            return m.Groups[1].Value;
+        }
+
+        // CSP icinden tek bir direktifin degerini cikarir (adi dahil).
+        private static string Direktif(string csp, string ad)
+        {
+            var parca = csp.Split(';')
+                .Select(p => p.Trim())
+                .FirstOrDefault(p => p.StartsWith(ad + " ", StringComparison.Ordinal) || p == ad);
+            parca.Should().NotBeNull($"CSP'de '{ad}' direktifi bulunmali");
+            return parca!;
+        }
     }
 }
