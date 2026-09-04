@@ -65,9 +65,27 @@ namespace Divisima.Bussiness.Concrete
                 var (_, result) = await _invoiceService.CancelForOrder(orderId);
                 if (result != null && !result.Success)
                 {
-                    _logger.LogError("Fatura iptal edilemedi. orderId={OrderId} mesaj={Mesaj}", orderId, result.Message);
+                    // ══ GF-5 / K5 (SE-3) - MUSTERIYE GIDEN METIN ARTIK SABIT ═══════════════
+                    //
+                    // OLCULEN ONCE-DURUM: `result.Message` DOGRUDAN nota gomuluyordu ve o not
+                    // `order_status_history.note` uzerinden MUSTERIYE GORUNUR. Mesajin kaynagi
+                    // `InvoiceManager` -> e-fatura saglayicisidir; yani saglayicinin ham hata
+                    // metni (ic uc adi, alan adi, kimlik parcasi tasiyabilir) musteri ekranina
+                    // dusebiliyordu.
+                    //
+                    // Bu, `47·GF-3·F1`in ZATEN kapattigi sinifin KACAN IKINCI ORNEGIDIR: orada
+                    // karar "musteriye donen `order_status_history.note` SABIT METIN; ham
+                    // `ex.Message` YAZILMAZ" diye kayda gecmisti. Ayni kural burada uygulaniyor.
+                    //
+                    // TESHIS KAYBOLMUYOR, YER DEGISTIRIYOR: teknik ayrinti LOG'da kaliyor ve
+                    // orada `KanitMaskesi`den geciyor (K5'in ayni dalgadaki kurali). Operasyon
+                    // "hangi siparis" sorusunu `orderId` ile, "neden" sorusunu log ile yanitlar.
+                    // `InvoiceManager` DOKUNULMAZ - degisen yer YALNIZ musteriye acilan uctur.
+                    _logger.LogError("Fatura iptal edilemedi. orderId={OrderId} mesaj={Mesaj}",
+                        orderId, Divisima.Core.Utilities.Text.KanitMaskesi.SatirGuvenli(
+                            Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(result.Message)));
                     await KritikNotDusAsync(orderId,
-                        $"KRİTİK: sipariş iptal edildi fakat FATURASI İPTAL EDİLEMEDİ ({result.Message}) - fatura hâlâ geçerli görünüyor, manuel müdahale gerekli");
+                        "KRİTİK: sipariş iptal edildi fakat FATURASI İPTAL EDİLEMEDİ - fatura hâlâ geçerli görünüyor, manuel müdahale gerekli");
                 }
             }
             catch (Exception ex)

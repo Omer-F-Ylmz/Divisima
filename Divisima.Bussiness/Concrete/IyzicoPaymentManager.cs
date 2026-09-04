@@ -43,6 +43,9 @@ namespace Divisima.Bussiness.Concrete
         private readonly IConfiguration _config;
         // Commit sonrasi yan etkiler artik SESSIZ dusmuyor - patlayan adim adiyla loglanir (S7).
         private readonly ILogger<IyzicoPaymentManager> _logger;
+        // GF-5 / K2: sahiplik ihlali ve webhook imza hatasi IZ birakir. Yalniz YAZAR - hicbir
+        // karar bu servise bagli degildir, donus kodlari ve mesajlar DEGISMEDI.
+        private readonly ISecurityEventService _securityEvents;
 
         public IyzicoPaymentManager(IPaymentDal paymentDal, IOrderDal orderDal,
             IIyzicoClient iyzico, IStockService stockService, ICustomerDal customerDal,
@@ -52,8 +55,10 @@ IOrderStatusHistoryService statusHistory,
 ILoyaltyService loyaltyService,
 IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitOfWork unitOfWork,
             IOrderConfirmationService orderConfirmation, IConfiguration config, ILogger<IyzicoPaymentManager> logger,
-            Divisima.Bussiness.Outbox.IOutboxService outboxService)
+            Divisima.Bussiness.Outbox.IOutboxService outboxService,
+            ISecurityEventService securityEvents)
         {
+            _securityEvents = securityEvents;
             _logger = logger;
             _paymentDal = paymentDal;
             _orderDal = orderDal;
@@ -86,7 +91,12 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
             // sizinti "hangi siparis id'leri gercek + odenmemis" sorusunu ANONIM'e yakin bir
             // maliyetle yanitliyordu. Yanit ustteki "yok" daliyla BIREBIR ayni.
             if (order.customer_id != authenticatedCustomerId)
+            {
+                // GF-5 / K2 (D4): 404 SOZLESMESI DEGISMEDI - yalnizca IZ eklendi. Olay YAZILIR,
+                // sonra AYNI yanit doner; hicbir karar bu cagriya bagli degildir.
+                await _securityEvents.SahiplikIhlaliAsync("order", dto.order_id, authenticatedCustomerId);
                 return (HttpStatusCode.NotFound, new ErrorDataResult<PaymentInitResponseDto>(Messages.OrderNotFound));
+            }
 
             if (order.is_online_payment_done)
                 return (HttpStatusCode.BadRequest, new ErrorDataResult<PaymentInitResponseDto>(Messages.PaymentAlreadyDone));
@@ -232,11 +242,37 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
                     // anahtari acilir ve X-Iyz-Signature V3 bicimiyle dolmaya baslar). Ikinci
                     // durum SESSIZ kalirsa kesinti yine teshis edilemez halde geri gelir -
                     // bu yuzden ADIYLA loglanir.
+                    // ══ GF-5 / K5 (SC-7 = SE-2) - JETON ARTIK MASKELI ═════════════════════════
+                    //
+                    // OLCULEN ONCE-DURUM: `dto.token` HAM basiliyordu. CLAUDE.md'nin
+                    // "MASKELEME URETIM NOKTASINDA YAPILIR" kurali TAM OLARAK bunu yasakliyor
+                    // ve ayni jeton `IyzicoClient.cs:203,206`da ZATEN maskeleniyordu - yani
+                    // kural biliniyordu, bu dosyada uygulanmiyordu (GF-5 on olcumunde IKI ajan
+                    // bagimsiz buldu). Sprint 8'de bir Iyzico odeme jetonunun depoya girmesi
+                    // `secret-scan` job'ini KIRMISTI; bu satir ayni sinifin canli kalan orneginidir.
+                    //
+                    // TESHIS DEGERI KORUNUR: `KanitMaskesi` ilk 8 karakteri BIRAKIR, dolayisiyla
+                    // deger hala `payments.token` ile eslestirilebilir - yukaridaki "saglayicinin
+                    // imza BICIMI degismis olabilir" teshisi icin gereken sey budur.
                     _logger.LogWarning(
                         "ODEME IMZA DOGRULANAMADI. imzaZorunlu={Zorunlu} imzaGeldiMi={Geldi} token={Token}. " +
                         "Imza GELDIGI halde tutmuyorsa saglayicinin imza BICIMI degismis olabilir - " +
                         "Sprint 8 madde 9 notuna bak.",
-                        imzaZorunlu, !string.IsNullOrWhiteSpace(dto.signature), dto.token);
+                        imzaZorunlu, !string.IsNullOrWhiteSpace(dto.signature),
+                        Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(dto.token));
+
+                    // ══ GF-5 / K2 - BOZUK IMZA ARTIK GUVENLIK OLAYI YAZIYOR ═══════════════════
+                    //
+                    // AV-2 / S-C matrisinde "webhook imza hatasi" TAM BOSLUKTU: log'a dusuyordu
+                    // ama `security_events`e HICBIR SEY yazilmiyordu, yani SIEM tarafinda
+                    // gorunmuyordu. DAVRANIS DEGISMEDI - 400 ve mesaj AYNEN duruyor (merkez
+                    // karari D1: K7'nin kod yarisi DUSTU, imza VARSA ve bozuksa 400 STATUKO).
+                    //
+                    // `customer_id` NULL: bu uc ANONIM (saglayici cagiriyor) ve odeme satiri
+                    // HENUZ okunmadi (`:258`). `detail` kullanici girdisi TASIMAZ - yalniz iki
+                    // BOOL; jeton buraya KONMAZ (KVKK + log forging + sir hijyeni).
+                    await _securityEvents.LogAsync("PaymentSignatureInvalid", "Warning", null, null, null,
+                        $"imzaZorunlu={imzaZorunlu} imzaGeldi={!string.IsNullOrWhiteSpace(dto.signature)}");
                     return (HttpStatusCode.BadRequest, new ErrorResult(Messages.PaymentSignatureInvalid));
                 }
             }

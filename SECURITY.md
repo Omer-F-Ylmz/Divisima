@@ -9,14 +9,14 @@ Bu belge tehdit modelini, uygulanan tüm güvenlik katmanlarını ve operasyonel
 ## 1. Kimlik Doğrulama & Oturum
 | Katman | Uygulama |
 |--------|----------|
-| Şifre saklama | HMAC-SHA512 hash + benzersiz salt (düz şifre asla saklanmaz) |
+| Şifre saklama | PBKDF2-SHA512 (100k iterasyon, 69 baytlık v2 zarfı, benzersiz salt) — `HashingHelper`. Eski v1 (HMAC-SHA512) kayıtlar doğru şifreyle girişte sessizce v2'ye taşınır; migration yoktur. Düz şifre asla saklanmaz. |
 | Şifre politikası | Min 8 karakter, büyük/küçük harf + rakam (FluentValidation) |
 | JWT | Kısa ömürlü access token + jti (token id) |
 | Token iptali | `ITokenBlacklist` (Redis-uyumlu) + `TokenBlacklistMiddleware` — logout/şifre değişiminde token anında geçersiz |
 | Refresh token | httpOnly + Secure + SameSite=Strict cookie (JS erişemez → XSS'te çalınamaz), rotation |
 | Hesap kilitleme | 5 başarısız denemede 15 dk kilit (brute-force) |
 | Şifre sıfırlama | Tek kullanımlık token (30 dk), enumeration-safe, sıfırlamada tüm oturum iptali |
-| 2FA/MFA | RFC 6238 TOTP (Google Authenticator uyumlu, ±1 pencere, `ITwoFactorService`) |
+| 2FA/MFA | E-POSTA OTP: 6 hane, SHA-256 hash'li saklanır, 5 dk, tek kullanımlık, sabit-zamanlı karşılaştırma (`AuthManager.cs:349-364`, `:373-400`). `TotpService` (RFC 6238) sınıf olarak vardır ve DI'ya kayıtlıdır (`Program.cs:294`) ama üretim akışında hiç çağrılmaz (ölçüldü: tüketici 0) — Google Authenticator akışı bugün YOKTUR. |
 | Bot koruması | `ICaptchaValidator` (Cloudflare Turnstile) — register/forgot/riskli login |
 
 ## 2. Yetkilendirme (IDOR)
@@ -27,7 +27,7 @@ Bu belge tehdit modelini, uygulanan tüm güvenlik katmanlarını ve operasyonel
 ## 3. Ödeme Güvenliği (en kritik)
 | Vektör | Koruma |
 |--------|--------|
-| Sahte callback | HMAC-SHA256 imza doğrulama (timing-safe) |
+| Sahte callback | Otorite **sunucu-sunucu retrieve**; imza (HMAC-SHA256, timing-safe) GELİRSE doğrulanır ve tutmazsa 400 döner + güvenlik olayı yazılır. Sağlayıcı bugün imza GÖNDERMİYOR (ölçüldü 22 Ağu 2026: gövdede `signature` yok, `X-Iyz-Signature` başlığı VAR ama BOŞ) — imza tek başına kapı DEĞİLDİR. Kapıyı kuran zincir: yalnız-Pending + token 30 dk (tarayıcı yolu) + tutar + para birimi + fraud. Gerekçe: `PaymentNotificationChannelEnum.cs`. |
 | Callback güveni | Sonuç **sunucu-sunucu** Iyzico'dan token ile çekilir, callback gövdesine güvenilmez |
 | Tutar manipülasyonu | Ödenen tutar == sipariş tutarı kontrolü |
 | Para birimi | Sipariş = ödeme para birimi kontrolü |
@@ -36,7 +36,7 @@ Bu belge tehdit modelini, uygulanan tüm güvenlik katmanlarını ve operasyonel
 | PCI-DSS | Kart bilgisi sunucuya HİÇ gelmez (Iyzico Checkout Form iframe) |
 | IDOR | Kullanıcı yalnızca kendi siparişini öder (JWT) |
 | Sipariş durumu | Sadece Pending + ödenmemiş + tutar>0 siparişe ödeme |
-| Replay | Idempotency + token 30 dk zaman aşımı |
+| Replay | Idempotency (yalnız Pending işlenir) + token 30 dk zaman aşımı. 30 dk sınırı **ProviderWebhook kanalında BİLİNÇLİ OLARAK UYGULANMAZ** (`IyzicoPaymentManager.cs:199`, `:270`); gerekçe `PaymentNotificationChannelEnum.cs:38-46` — gecikmiş ama gerçek bir bildirim, parası alınmış ödemeyi "Failed" diye defterliyordu (sipariş #33). |
 | Race condition | Distributed lock (`IDistributedLock` — Redis RedLock) + kilit sonrası double-check |
 | Yedek teyit | Webhook (bant-dışı, idempotent) |
 
@@ -48,19 +48,19 @@ Bu belge tehdit modelini, uygulanan tüm güvenlik katmanlarını ve operasyonel
 
 ## 5. Veri Koruma
 - **Field-level encryption:** `IEncryptionProvider` (AES-256-GCM — gizlilik + bütünlük). 2FA secret DB'de şifreli.
-- **Hassas veri maskeleme:** `SensitiveDataMask` — kart benzeri sayılar + token'lar loglanmadan maskelenir.
+- **Hassas veri maskeleme:** `Divisima.Core.Utilities.Text.KanitMaskesi` — ham gövdeyi/jetonu çıktıya veya loga koyan her yer buradan geçer. Ayrıca GF-5/K6 ile **global bir nokta** açıldı: Serilog'un iki sink'i de `MaskeliFormatter` (`ITextFormatter`) üzerinden yazar, çünkü sızan satırları uygulama kodu değil EF Core / SQL Server üretiyordu (ölçüldü: maskeli ve maskesiz satırın md5'i aynıydı). Çerçeve metinleri için ölçüt `LogMetniMaskesi`dedir (SQL "Truncated value" + EF parametre dökümü); `KanitMaskesi`nin kendi ölçütü GENİŞLETİLMEDİ. `SensitiveDataMask` sınıfı depoda durur ama **çağıranı yoktur (0) — ölü koddur**.
 - **Response sızıntısı:** password_hash/salt asla DTO'da değil (ayrı response DTO'ları).
 - **Secrets:** `ISecretProvider` (config/env → Azure Key Vault/AWS Secrets Manager iskeleti). Kod dokunulmadan kasaya geçiş.
 
 ## 6. Altyapı & DoS
-- **Rate limiting:** Global 100/dk + auth 5/dk + payment 10/dk (IP başına, endpoint-bazlı).
+- **Rate limiting:** Global 100/dk + auth 10/dk + payment 10/dk + **hassas 20/dk** (IP başına, endpoint-bazlı) — tek kaynak `RateLimitPolitikasi.Olustur` (`RateLimitPolitikasi.cs:70-79`), `RateLimit:*PermitLimit` ile ezilebilir. Redis yolundaki eski auth 5/dk **BİLİNÇLİ OLARAK TERK EDİLDİ** (`RateLimitPolitikasi.cs:62-64`). 429 reddi artık güvenlik olayı yazar (60 sn örneklemeyle, kova+IP başına).
 - **Request limiti:** Kestrel body 1 MB + header 32 KB (dev payload DoS).
-- **Transport:** HTTPS redirect + HSTS (production) + güvenli cookie.
+- **Transport:** HTTPS redirect (`app.UseHttpsRedirection()`) + güvenli cookie. **HSTS uygulama katmanında DEĞİL, TEK KAYNAK nginx'tedir** (`ops/infra/nginx.conf:26`); `app.UseHsts()` GF-3/K6 ile kaldırıldı çünkü iki farklı STS başlığı üretiliyordu (ölçüldü: depoda `app.UseHsts()` 0 geçiş).
 - **Güvenlik başlıkları:** X-Frame-Options (clickjacking), X-Content-Type-Options (MIME), CSP, Referrer-Policy, Permissions-Policy, Server gizleme.
 
 ## 7. İzleme & Müdahale
-- **Güvenlik olay logu:** `SecurityEvent` (başarısız login, kilitlenme, ödeme reddi, fraud, IDOR) — ayrı akış + structured log (Serilog → SIEM).
-- **Anormallik/alerting:** Critical olaylarda admin'e anlık bildirim (SignalR/mail).
+- **Güvenlik olay logu:** `SecurityEvent` — bugün üretilen tipler: `LoginFailed` (kayıtlı **ve** kayıtsız e-posta; ikisi `customer_id`nin dolu/null olmasıyla ayrılır), `AccountLocked`, `ChangePasswordFailed`, `AccountDeleted`, `TwoFactorChallenge`, `TwoFactorFailed`, `RefreshTokenReuse`, `ResetPassword`, `Logout`, `IdorAttempt` (sahiplik ihlali — **kapsam Order + Payment**, kalan yedi manager BİLİNEN), `RateLimitExceeded`, `PaymentSignatureInvalid`. `ip_address` ve `user_agent` GF-5/K1 ile `SecurityEventManager` içinde doldurulur (önceden 7 çağrının 7'sinde de null geçiliyordu). Akış Serilog Console + File sink'lerine gider — **SIEM bağlı DEĞİLDİR** (`ops/serilog-siem.md`).
+- **Anormallik/alerting:** `severity == "Critical"` olaylarda `NotifyAdminsAsync` çağrılır (`SecurityEventManager.cs:39-40`) ve SignalR `"admins"` grubuna yayın yapılır. **BUGÜN BU GRUP BOŞTUR**: `NotificationHub.JoinAdminGroup()` çağıranı yoktur (ölçüldü: istemci tarafında SignalR 0 geçiş) — hiçbir alarm bir insana ULAŞMAZ. Mail dalı YOKTUR. Okuyucu launch sonrasıdır.
 - **Correlation id:** Her istek izlenebilir; audit log (kim neyi ne zaman değiştirdi).
 - **Health checks:** /health (DB) + OpenTelemetry (tracing/metrics).
 
@@ -99,14 +99,14 @@ TokenBlacklist → Authorization → Controllers
 - **dependabot.yml:** haftalık otomatik bağımlılık güncelleme, güvenlik güncellemeleri öncelikli.
 
 ## 10. Altyapı (`ops/`)
-- **nginx.conf:** TLS 1.2/1.3, HSTS preload, OCSP stapling, rate/connection limit, güvenlik başlıkları, Hangfire iç-ağ kısıtı.
-- **waf-rules.md:** Cloudflare/AWS WAF/ModSecurity (OWASP CRS), DDoS, bot koruması, rate limiting.
-- **least-privilege.sql:** DB kullanıcısı yalnız CRUD (DDL/DROP/xp_cmdshell yok).
-- **encrypted-backup.sql:** TDE (AES-256 at-rest) + şifreli yedek.
-- **rotate-secrets.sh:** JWT + encryption key rotasyonu (Key Vault, 90 günlük).
-- **serilog-siem.md:** güvenlik olayları → Elasticsearch/Seq + alerting kuralları.
+- **infra/nginx.conf:** TLS 1.2/1.3, HSTS preload, OCSP stapling, rate/connection limit, güvenlik başlıkları, Hangfire iç-ağ kısıtı.
+- **infra/waf-rules.md:** Cloudflare/AWS WAF/ModSecurity (OWASP CRS), DDoS, bot koruması, rate limiting.
+- **db/least-privilege.sql:** DB kullanıcısı yalnız CRUD (DDL/DROP/xp_cmdshell yok).
+- **db/encrypted-backup.sql:** TDE (AES-256 at-rest) + şifreli yedek.
+- **rotate-secrets.sh:** JWT signing key rotasyonu (Key Vault, 90 günlük). **Encryption key rotasyonu DESTEKLENMİYOR (SA-2):** `AesEncryptionProvider` tek anahtarlıdır (`keyId`/versiyonlama 0 geçiş) ve `Decrypt` çözemediği değeri OLDUĞU GİBİ döndürür (`AesEncryptionProvider.cs:53-57`) — anahtar değişirse eski şifreli alan düz metin sanılıp yeniden şifrelenir (çift şifreleme, sessiz veri kaybı). Script'in kendi uyarısında geçen re-encryption job'ı YOKTUR (`ops/rotate-secrets.sh:21-23`). Bugün `Encryption:Key` yalnız `customers.two_factor_secret` alanına uygulanır.
+- **serilog-siem.md:** SIEM entegrasyonu için **TARİF** belgesi — bugün bağlı DEĞİL (aktif sink'ler yalnız Console + File, `Program.cs`; Elasticsearch/Seq paket referansı 0). SIEM launch sonrası.
 - **deployment-checklist.md:** production öncesi feature flag + secret + yetki kontrol listesi.
-- **Dockerfile:** non-root kullanıcı, minimal image, secret gömülmez, healthcheck.
+- **Dockerfile (depo kökü, `ops/` altında DEĞİL):** non-root kullanıcı, minimal image, secret gömülmez, healthcheck.
 
 ## 11. Kabul Edilen Riskler
 

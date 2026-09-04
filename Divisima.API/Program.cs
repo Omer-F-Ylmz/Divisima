@@ -212,11 +212,21 @@ var builder = WebApplication.CreateBuilder(args);
 //   - gunluk dosya + 100 MB'da PARCALA (rollOnFileSizeLimit) -> yazma ASLA sessizce durmaz
 //   - 30 gun saklama -> DataRetentionJob'un outbox penceresiyle ayni buyukluk
 //   - shared: false (varsayilan) korunur - tek surec yaziyor
+// ══ GF-5 / K6 - HER IKI SINK DE MASKELI FORMATTER'DAN GECER ═══════════════════════════════
+// Gerekce ve olculen kanit `Divisima.API.Logging.MaskeliFormatter`in basinda. Ozet: sizan
+// satirlari UYGULAMA KODU yazmiyor (EF Core'un kendi logger'i ve SQL Server'in 2628 hata
+// metni), dolayisiyla cagri-yeri maskesi YAPISAL OLARAK yetmiyordu.
+// C4 SAKLAMA PARAMETRELERI KAYBOLMADI: `File`in ITextFormatter alan asiri yuklemesi
+// rollingInterval + rollOnFileSizeLimit + fileSizeLimitBytes + retainedFileCountLimit'in
+// HEPSINI tasiyor; asagidaki dort deger K6 oncesiyle BIREBIR ayni.
 builder.Host.UseSerilog((ctx, cfg) => cfg
     .ReadFrom.Configuration(ctx.Configuration)
     .Enrich.FromLogContext()
-    .WriteTo.Console()
-    .WriteTo.File("logs/divisima-.log",
+    .WriteTo.Console(new Divisima.API.Logging.MaskeliFormatter(
+        Divisima.API.Logging.MaskeliFormatter.KonsolSablonu))
+    .WriteTo.File(
+        new Divisima.API.Logging.MaskeliFormatter(Divisima.API.Logging.MaskeliFormatter.DosyaSablonu),
+        "logs/divisima-.log",
         rollingInterval: RollingInterval.Day,
         rollOnFileSizeLimit: true,
         fileSizeLimitBytes: 100L * 1024 * 1024,

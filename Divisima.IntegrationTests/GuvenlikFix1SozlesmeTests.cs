@@ -139,11 +139,33 @@ namespace Divisima.IntegrationTests
             i.Should().BeGreaterThanOrEqualTo(0, $"{yol}: sahiplik yuklemi kaynakta bulunmali - "
                 + "bulunamiyorsa yuklem YENIDEN YAZILMIS demektir ve bu pin ARTIK OLCMUYOR");
 
-            // Yuklemden hemen SONRAKI donus ifadesi. 200 karakter, tek `return` satirini
-            // rahatca kapsar ama bir sonraki dala TASMAZ.
-            var pencere = metin.Substring(i, Math.Min(200, metin.Length - i));
-            pencere.Should().Contain("HttpStatusCode.NotFound",
-                $"{yol}: sahiplik ihlali 404 donmeli (SecureControllerBase'teki tek sozlesme)");
+            // ══ GF-5 / K2 - OLCUM BICIMI DEGISTI, IDDIA AYNI (BOZDUKLARIM kaydi) ══════════
+            //
+            // ESKI HALI: yuklemden sonraki 200 KARAKTERLIK pencerede `HttpStatusCode.NotFound`
+            // arardi. K2 bu dallara sahiplik olayi yazimi (+ gerekce yorumu) ekleyince `return`
+            // satiri 200 karakterin DISINA tasti ve pin KIRILDI - yani pencere, "hemen sonraki
+            // donus" fikrinin KIRILGAN bir vekiliydi.
+            //
+            // YENI OLCUM iddiayi DARALTARAK korur: yuklemden sonraki ILK `return` bulunur ve
+            // O DONUSUN 404 oldugu dogrulanir. Bu, "dalin arasina baska is girerse pin kirilir"
+            // kirilganligini kaldirir ama "bu dal 404 doner" sozlesmesini AYNEN pinler -
+            // hatta daha SIKI olur: pencere bir sonraki dalin donusune tasarak yalanci yesil
+            // veremez.
+            //
+            // YORUM SATIRLARI AYIKLANIR: aksi halde bir aciklama icinde gecen "return" kelimesi
+            // olcumu kaydirabilirdi (bu depoda capa/eslesme-bicimi kusurlari BES KEZ olculdu).
+            var kalanSatirlar = metin.Substring(i).Split('\n')
+                .Where(s => !s.TrimStart().StartsWith("//", StringComparison.Ordinal));
+            var kalan = string.Join("\n", kalanSatirlar);
+
+            var r = kalan.IndexOf("return", StringComparison.Ordinal);
+            r.Should().BeGreaterThanOrEqualTo(0,
+                $"{yol}: sahiplik yukleminden sonra bir donus ifadesi bulunmali");
+
+            var donus = kalan.Substring(r, Math.Min(160, kalan.Length - r));
+            donus.Should().Contain("HttpStatusCode.NotFound",
+                $"{yol}: sahiplik ihlalindeki ILK donus 404 olmali (SecureControllerBase'teki "
+                + "tek sozlesme) - baska bir durum kodu donuyorsa varlik SIZAR");
 
             // ALAN BAZLI: dosyada 403 KALMAMALI - "404 eklendi ama 403 da duruyor" hali
             // yukaridaki pencere assert'inden KACARDI.

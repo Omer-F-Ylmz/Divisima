@@ -430,8 +430,13 @@ namespace Divisima.IntegrationTests
             // SEBEP OLCULDU: `WebApplicationFactory` test sunucusunda `RemoteIpAddress`
             // uretilmez (Program.cs'te KAYITLI ortam gercegi) - deger her zaman null gelir,
             // dolayisiyla ayirt edici bir assert bu rig ile KURULAMIYOR.
-            // Kolon siniri (64) yine de korunuyor: kirpma `IstemciIp()` icinde, kaynak
-            // duzeyinde. Uctan uca kanit, IP tasiyan bir rig gerektirir -> GF-2a/GF-3 adayi.
+            // Kolon siniri yine de korunuyor: kirpma kaynak duzeyinde. GF-5/K1 ILE DEGISTI -
+            // sinir artik 64 DEGIL 60 ve kirpma `IstemciIp()`in ICINDE degil, devrettigi
+            // `Divisima.Core.Utilities.Http.IstemciBilgisi`de. Gerekce: ayni deger artik
+            // `security_events.ip_address` kolonuna da yaziliyor ve O KOLON 60 KARAKTER;
+            // 64'te birakmak iz yazarken insert-time 500 uretirdi. Gercek adres KIRPILMAZ
+            // (en uzun IPv6 metni 45 karakter).
+            // Uctan uca kanit, IP tasiyan bir rig gerektirir -> GF-2a/GF-3 adayi.
         }
     }
 }

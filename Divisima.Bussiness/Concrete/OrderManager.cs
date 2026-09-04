@@ -71,6 +71,9 @@ namespace Divisima.Bussiness.Concrete
 
         private const decimal ShippingCost = 49.9m;
 
+        // GF-5 / K2 (D4): sahiplik ihlali izi. Kapsam gerekcesi ISecurityEventService'te.
+        private readonly ISecurityEventService _securityEvents;
+
         public OrderManager(
             IOrderDal orderDal, IOrderItemDal orderItemDal,
             IOrderSnapshotDal orderSnapshotDal, IOrderSnapshotItemDal orderSnapshotItemDal,
@@ -83,8 +86,12 @@ namespace Divisima.Bussiness.Concrete
             IPaymentDal paymentDal, IIyzicoClient iyzico, IRefundService refundService, ILoyaltyService loyaltyService,
             IDistributedLock distributedLock,
             IOrderConfirmationService orderConfirmation,
-            Divisima.Bussiness.Outbox.IOutboxService outboxService)
+            Divisima.Bussiness.Outbox.IOutboxService outboxService,
+            // GF-5 / K2 (D4): sahiplik ihlali IZ birakir. Yalniz YAZAR - 404 sozlesmesi,
+            // mesajlar ve donus kodlari DEGISMEDI.
+            ISecurityEventService securityEvents)
         {
+            _securityEvents = securityEvents;
             _outboxService = outboxService;
             _creditTxDal = creditTxDal;
             _addressDal = addressDal;
@@ -149,7 +156,17 @@ namespace Divisima.Bussiness.Concrete
                 // oldugunu ima ediyordu. Mesaj DEGISMEDI - zaten varlik sizdirmiyor.
                 var addr = await _addressDal.GetAsync(a => a.id == dto.address_id.Value);
                 if (addr == null || addr.customer_id != dto.customer_id)
+                {
+                    // GF-5 / K2 (D4): IZ - 404 sozlesmesi ve mesaj DEGISMEDI.
+                    // OLAY YALNIZ SAHIPLIK IHLALINDE YAZILIR, "adres YOK" dalinda DEGIL:
+                    // ikisi ayni yaniti doner (bilincli, varlik sizdirmamak icin) ama ayni sey
+                    // DEGILDIR - var olmayan bir id'yi yoklamak yazim hatasi olabilir, BASKASININ
+                    // adresini yoklamak olamaz. Olayi ikisine birden yazmak, SIEM tarafinda
+                    // gurultuyu sinyalden ayirt edilemez kilardi.
+                    if (addr != null)
+                        await _securityEvents.SahiplikIhlaliAsync("address", dto.address_id.Value, dto.customer_id);
                     return (HttpStatusCode.NotFound, new ErrorResult(Messages.OrderInvalidAddress));
+                }
             }
 
             // Açıklayıcı yorum: 2) Tüm kalemler için ürün + stok kontrolü (overselling engeli)

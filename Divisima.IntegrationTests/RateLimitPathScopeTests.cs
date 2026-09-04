@@ -1,5 +1,7 @@
 using Divisima.API.Middlewares;
+using Divisima.Bussiness.Abstract;
 using Divisima.Core.Security.RateLimiting;
+using Divisima.Core.Utilities.Caching;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
@@ -38,6 +40,47 @@ namespace Divisima.IntegrationTests
             }
         }
 
+        // ══ GF-5 / K2 (D6) - 429 RED DALI ARTIK OLAY YAZIYOR: YAKALAYICILAR ════════════════
+        //
+        // Middleware imzasi `InvokeAsync(HttpContext, ISecurityEventService, ICacheService)`
+        // oldu (METOT enjeksiyonu - captive dependency'den kacinmak icin; gerekce
+        // middleware'in kendisinde). Bu sinif middleware'i DOGRUDAN kosturdugu icin iki
+        // yakalayici eklendi; boylece 429 izi DIS BAGIMLILIK OLMADAN pinlenebiliyor.
+        private sealed class YakalayanOlay : ISecurityEventService
+        {
+            public List<(string tip, string siddet, int? musteri, string? ip, string? detay)> Kayitlar { get; } = new();
+
+            public Task LogAsync(string eventType, string severity, int? customerId, string? ip, string? userAgent, string? detail)
+            {
+                Kayitlar.Add((eventType, severity, customerId, ip, detail));
+                return Task.CompletedTask;
+            }
+
+            public Task SahiplikIhlaliAsync(string kaynak, int kaynakId, int? istekSahibi) =>
+                LogAsync("IdorAttempt", "Warning", istekSahibi, null, null, $"{kaynak}:{kaynakId}");
+        }
+
+        // Gercek `MemoryCacheService`in set-if-not-exists semantigini TASIYAN en kucuk sahte:
+        // ayni anahtar ikinci kez true DONMEZ. Ornekleme pini bunun uzerine kuruluyor.
+        private sealed class SayanCache : ICacheService
+        {
+            private readonly HashSet<string> _eklenen = new();
+            public List<string> TryAddCagrilari { get; } = new();
+
+            public Task<bool> TryAddAsync(string key, TimeSpan ttl)
+            {
+                TryAddCagrilari.Add(key);
+                return Task.FromResult(_eklenen.Add(key));
+            }
+
+            public Task<T> GetOrSetAsync<T>(string key, Func<Task<T>> factory, TimeSpan? ttl = null) => factory();
+            public Task<bool> ExistsAsync(string key) => Task.FromResult(_eklenen.Contains(key));
+            public Task SetAsync<T>(string key, T value, TimeSpan ttl) => Task.CompletedTask;
+            public Task<T?> GetAsync<T>(string key) => Task.FromResult(default(T));
+            public void Remove(string key) { }
+            public void RemoveByPrefix(string prefix) { }
+        }
+
         private static readonly RateLimitPolitikasi VarsayilanPolitika = new(authLimiti: 10, odemeLimiti: 10, genelLimit: 100);
 
         private static async Task<(string kapsam, int limit)> KapsamOlcAsync(string yol, RateLimitPolitikasi? politika = null)
@@ -48,7 +91,7 @@ namespace Divisima.IntegrationTests
             ctx.Request.Path = yol;
             ctx.Response.Body = new MemoryStream();
 
-            await mw.InvokeAsync(ctx);
+            await mw.InvokeAsync(ctx, new YakalayanOlay(), new SayanCache());
 
             var anahtar = limiter.SonAnahtar ?? "";
             var kapsam = anahtar.Contains(':') ? anahtar.Substring(0, anahtar.IndexOf(':')) : anahtar;
@@ -118,6 +161,100 @@ namespace Divisima.IntegrationTests
             bos.AuthLimiti.Should().Be(10, "varsayilan YERLESIK yolun degeridir (5 DEGIL)");
             bos.OdemeLimiti.Should().Be(10);
             bos.GenelLimit.Should().Be(100);
+        }
+
+        // ══ GF-5 / K2 (D6) - 429 RED DALININ IZI ═══════════════════════════════════════════
+        // Her zaman REDDEDEN limiter: red dali ancak boyle kosturulabilir.
+        private sealed class ReddedenLimiter : IDistributedRateLimiter
+        {
+            public Task<RateLimitResult> CheckAsync(string key, int limit, int windowSeconds) =>
+                Task.FromResult(new RateLimitResult { Allowed = false, Remaining = 0, RetryAfterSeconds = 60 });
+        }
+
+        private static async Task<(YakalayanOlay olay, SayanCache cache)> RedOlcAsync(
+            string yol, int kacKez = 1, string ip = "203.0.113.7")
+        {
+            var olay = new YakalayanOlay();
+            var cache = new SayanCache();
+            var mw = new RedisRateLimitMiddleware(_ => Task.CompletedTask, new ReddedenLimiter(), VarsayilanPolitika);
+
+            for (var i = 0; i < kacKez; i++)
+            {
+                var ctx = new DefaultHttpContext();
+                ctx.Request.Path = yol;
+                ctx.Response.Body = new MemoryStream();
+                ctx.Connection.RemoteIpAddress = System.Net.IPAddress.Parse(ip);
+                await mw.InvokeAsync(ctx, olay, cache);
+                ctx.Response.StatusCode.Should().Be(429, "bu yardimci YALNIZ red dalini olcer");
+            }
+            return (olay, cache);
+        }
+
+        [Fact]
+        public async Task RateLimit_429_GUVENLIK_OLAYI_YAZAR_ip_kova_ve_yol_ile()
+        {
+            var (olay, _) = await RedOlcAsync("/api/auth/login");
+
+            // POZITIF OLAY KOSULU (vakum yasagi): satir GERCEKTEN olusmali.
+            olay.Kayitlar.Should().HaveCount(1, "red dali TAM BOSLUKTU - AV-2 / S-C matrisi");
+
+            var k = olay.Kayitlar[0];
+            k.tip.Should().Be("RateLimitExceeded");
+            k.siddet.Should().Be("Warning", "ON KOSUL kimliksiz-uzak ama tetik ADMIN degil - Critical DEGIL");
+            // ALAN BAZLI (MK-6 dersi): "null degil" YETMEZ, GONDERILEN deger yazilmali.
+            k.ip.Should().Be("203.0.113.7", "429 olayinin ATIF ekseni IP'dir");
+            k.detay.Should().Contain("kova=auth", "hangi kovanin yandigi olaydan okunabilmeli");
+            k.detay.Should().Contain("/api/auth/login");
+            // ATIF SINIRI - BILINCLI VE PINLI: middleware UseAuthentication'DAN ONCE kosar,
+            // dolayisiyla musteri kimligi ELDE DEGILDIR. Bu assert o KABUL EDILMIS SINIRI
+            // pinler; bir gun middleware asagi tasinirsa BU PIN KIRILIR ve karar yeniden
+            // gorusulur (sessizce degismesin diye).
+            k.musteri.Should().BeNull("429 aninda HttpContext.User HENUZ BOS - atif yarisi acik");
+        }
+
+        [Fact]
+        public async Task RateLimit_429_ORNEKLEME_ayni_ip_ve_kova_icin_TEK_satir_yazar()
+        {
+            var (olay, cache) = await RedOlcAsync("/api/auth/login", kacKez: 5);
+
+            // AYIRT EDICI: bes RED kosuldu (yukaridaki yardimci her turda 429 dogruluyor)
+            // ama defterde TEK satir olmali - aksi halde 429 seli, tam da DB'nin zorlandigi
+            // anda yazma yuku uretirdi.
+            cache.TryAddCagrilari.Should().HaveCount(5, "ornekleme kapisi HER redde YOKLANIR");
+            olay.Kayitlar.Should().HaveCount(1, "60 sn penceresinde ayni (kova, IP) icin TEK satir");
+            cache.TryAddCagrilari[0].Should().Be("sec-olay:429:auth:203.0.113.7",
+                "ornekleme anahtari KOVA ve IP ile daralir - global tek anahtar DEGIL");
+        }
+
+        [Fact]
+        public async Task RateLimit_429_ORNEKLEME_FARKLI_ip_AYRI_satir_yazar()
+        {
+            // VAKUM KIRICI: yukaridaki pin "hep tek satir yazar" ile de yesil kalirdi.
+            // Ornekleme anahtari IP tasidigi icin BASKA bir IP AYRI satir uretmeli.
+            var (olay1, _) = await RedOlcAsync("/api/auth/login", ip: "203.0.113.7");
+            var (olay2, _) = await RedOlcAsync("/api/auth/login", ip: "198.51.100.4");
+
+            olay1.Kayitlar.Should().HaveCount(1);
+            olay2.Kayitlar.Should().HaveCount(1);
+            olay1.Kayitlar[0].ip.Should().NotBe(olay2.Kayitlar[0].ip);
+        }
+
+        [Fact]
+        public async Task RateLimit_429_YOL_LOG_SATIRI_BOLEMEZ_CRLF_ayiklanir()
+        {
+            // `Request.Path.Value` COZULMUS yoldur: URL'deki %0D%0A GERCEK CRLF olarak iner.
+            // `detail` Serilog sablonuna giriyor ve Serilog kontrol karakteri AYIKLAMAZ
+            // (GF-3/A-3) - maskesiz birakilirsa saldirgan SAHTE bir "SECURITY ..." satiri
+            // uydurabilirdi.
+            var (olay, _) = await RedOlcAsync("/api/auth/login\r\nSECURITY sahte satir");
+
+            olay.Kayitlar.Should().HaveCount(1);
+            var detay = olay.Kayitlar[0].detay ?? "";
+            detay.Should().NotContain("\r", "CR defterdeki satiri bolerdi");
+            detay.Should().NotContain("\n", "LF defterdeki satiri bolerdi");
+            // POZITIF: icerik KAYBOLMADI, yalnizca kontrol karakteri katlandi - teshis degeri korunur.
+            detay.Should().Contain("SECURITY sahte satir",
+                "ayiklama metni SILMEZ; yalnizca satir bolmeyi engeller");
         }
     }
 }

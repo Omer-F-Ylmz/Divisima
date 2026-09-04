@@ -24,9 +24,17 @@
     <!-- GF-4/K7 - NuGet denetimi GECISLI paketleri de kapsar. Varsayilan "direct" YALNIZ
          dogrudan basvurulari tarar; oysa bu cozumdeki acik paketlerin cogu GECISLIDIR
          (olculdu: SSH.NET, System.Net.Http, System.Text.RegularExpressions dogrudan
-         basvurulmuyor). Deger ACIKCA yaziliyor cunku varsayilan SDK surumune baglidir ve
-         yerel (SDK 9) ile CI (SDK 8) arasinda sessizce ayrisabilir - olculdu, bugun ikisi
-         de "direct".
+         basvurulmuyor). Deger ACIKCA yaziliyor cunku varsayilan TFM SURUMUNE baglidir:
+         SDK 9'un NuGet.targets:76-79 kosulu "TargetFrameworkVersion >= 10.0 ise all, aksi
+         halde direct" der (OLCULDU, kaynak SDK dosyasindan okundu). TFM net8.0 oldugu
+         surece varsayilan "direct"tir.
+         GF-5 DUZELTMESI (GF-4'un 7. CC hatasi): onceki metin "varsayilan SDK SURUMUNE
+         baglidir ... olculdu, bugun ikisi de direct" diyordu. Ikisi de yanlisti. (a) Kosul
+         SDK surumune degil TFM surumune bakiyor. (b) CI (SDK 8) tarafi BU MAKINEDE
+         OLCULEMEZ: kurulu tek SDK 9.0.305 ("dotnet" SDK listesi ile olculdu) ve global.json
+         YOK; o taraf
+         icin "direct" bir CIKARIMDIR, olcum degil. Sonuc yine "direct" cikar (TFM net8.0
+         sabit) ama GEREKCE ve KANIT TURU duzeltildi.
          UYARI SEVIYESI, HATA DEGIL: depoda -warnaserror / TreatWarningsAsErrors YOK
          (olculdu), dolayisiyla NU1901-NU1904 build'i KIRMAZ. Kapi gorevini security.yml'
          daki dependency-scan (advisory-id allowlist'li) gormeye devam eder; burasi

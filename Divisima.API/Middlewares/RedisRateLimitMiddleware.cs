@@ -1,4 +1,6 @@
+using Divisima.Bussiness.Abstract;
 using Divisima.Core.Security.RateLimiting;
+using Divisima.Core.Utilities.Caching;
 
 namespace Divisima.API.Middlewares
 {
@@ -25,7 +27,15 @@ namespace Divisima.API.Middlewares
             _politika = politika;
         }
 
-        public async Task InvokeAsync(HttpContext context)
+        // ══ GF-5 / K2 (D6) - 429 ARTIK GUVENLIK OLAYI YAZIYOR ══════════════════════════════
+        //
+        // SERVISLER METOT ENJEKSIYONUYLA ALINIR, CTOR'DAN DEGIL - CAPTIVE DEPENDENCY:
+        // middleware TEK ORNEKTIR (pipeline'da bir kez kurulur), `ISecurityEventService` ise
+        // SCOPED (`AutofacBusinessModule.cs:196` InstancePerLifetimeScope). Ctor'a almak scoped
+        // servisi - ve onun `DbContext`ini - TUM UYGULAMA OMRUNE hapsederdi. Depodaki dogru
+        // kalip ZATEN var ve aynen izleniyor: `IdempotencyMiddleware.cs:45`
+        // (`InvokeAsync(HttpContext, ICacheService)`) ve `TokenBlacklistMiddleware.cs:28`.
+        public async Task InvokeAsync(HttpContext context, ISecurityEventService securityEvents, ICacheService cache)
         {
             // ══ KALITE SUPURMESI B3 - URL YOLU KIMLIK DIZGESIDIR, KULTURSUZ ESLESIR ═════════
             // ONCEKI HALI: `Path.Value?.ToLower()` + kultur duyarli `Contains`.
@@ -63,6 +73,45 @@ namespace Divisima.API.Middlewares
 
             if (!result.Allowed)
             {
+                // ══ GF-5 / K2 (D6) - RED DALININ IZI ═══════════════════════════════════════
+                //
+                // ORNEKLEME ZORUNLU: bu dal bir SEL anidir - saniyede yuzlerce kez kosabilir ve
+                // her red icin satir yazmak, tam da DB'nin zorlandigi anda yazma yuku EKLERDI
+                // (ustelik `DataRetentionJob.cs:33` non-Critical satirlari BIR YIL tutuyor).
+                // `TryAddAsync` ATOMIK set-if-not-exists'tir (Redis SETNX / in-memory lock):
+                // ayni (kova + IP) icin 60 saniyede YALNIZ ILK cagri true doner. Check-then-act
+                // yarisi YOK - bu yuzden `ExistsAsync` + `Set` ikilisi KULLANILMADI.
+                //
+                // `customer_id` NULL - KABUL EDILMIS SINIR (merkez karari D6): bu middleware
+                // `app.UseAuthentication()`DAN ONCE kosuyor (`Program.cs` :687 vs :690), yani
+                // `context.User` HENUZ BOS. A09'un "ATIF" yarisi bu satirda KAPANMIYOR ve bu
+                // bilincli bir kayittir; kapanan yari "GORUNURLUK"tur. Middleware'i
+                // UseAuthentication SONRASINA almak rate limit'i kimlik dogrulamanin ARDINA
+                // koyardi - yani kaba kuvvet savunmasi, korumak istedigi isin PESINE duserdi.
+                //
+                // OLAY YAZIMI ISTEGI DUSURMEZ: `ExceptionMiddleware` (`Program.cs:665`) bu
+                // middleware'den ONCE kayitli, dolayisiyla buradan cikan bir istisna 429'u
+                // 500'e cevirirdi. Yazma bu yuzden kendi try/catch'inde - iz KAYBOLABILIR ama
+                // musterinin gordugu yanit ASLA degismez.
+                try
+                {
+                    if (await cache.TryAddAsync($"sec-olay:429:{scope}:{ip}", TimeSpan.FromSeconds(60)))
+                        // `path` KULLANICI KONTROLLUDUR ve `SatirGuvenli`den GECIRILIR:
+                        // `Request.Path.Value` COZULMUS yoldur, yani URL'deki `%0D%0A`
+                        // GERCEK CRLF olarak buraya iner. `detail` alani
+                        // `SecurityEventManager.cs`teki Serilog sablonuna giriyor ve Serilog
+                        // kontrol karakterlerini AYIKLAMAZ (GF-3/A-3 kaydi) - yani maskesiz
+                        // birakmak saldirgana LOG SATIRI BOLDURURDU (sahte "SECURITY ..."
+                        // satiri uydurmak dahil). `scope` ve `limit` uretim tarafindan
+                        // belirlenir, kullanici giremez.
+                        await securityEvents.LogAsync("RateLimitExceeded", "Warning", null, ip, null,
+                            $"kova={scope} limit={limit} yol={Divisima.Core.Utilities.Text.KanitMaskesi.SatirGuvenli(path)}");
+                }
+                catch
+                {
+                    // Bilincli yutma: iz yazimi yanit sozlesmesini BOZAMAZ.
+                }
+
                 context.Response.StatusCode = 429;
                 context.Response.Headers["Retry-After"] = result.RetryAfterSeconds.ToString();
                 await context.Response.WriteAsJsonAsync(new { success = false, message = "Çok fazla istek. Lütfen biraz sonra tekrar deneyin." });

@@ -2168,29 +2168,69 @@ namespace Divisima.IntegrationTests
         // KACISSIZ: regex referans degeri pinde LITERAL yazilmaz (`\s` ve parantez bu
         // depoda yazim zincirinde IKI KEZ kayboldu) - dosyalardan cikarilan degerler
         // BIRBIRLERIYLE karsilastirilir, vakum kiricilar ayri tutulur.
+        //
+        // ══ GF-5 / K4 - PIN BILINCLI OLARAK DEGISTIRILDI (BOZDUKLARIM kaydi) ══════════════
+        //
+        // ESKI IDDIA: "telefon regex'i DORT validator'da LITERAL yazili ve dordu BIREBIR ayni".
+        // K4 uc kopyayi `GirdiSinirlari.TelefonDeseni` sabitine bagladi, dolayisiyla artik
+        // yalnizca `SellerRegisterRequestValidator` LITERAL tasiyor (Seller DOKUNULMAZ - bu
+        // dalganin "Seller* enjeksiyon noktalarina 0 SATIR" siniri). Eski pin, `.Matches(@"`
+        // bicimini saydigi icin K4 sonrasi 1 site bulup `BeGreaterThan(3)`te KIRILDI - yani
+        // pin GERCEKTEN olcuyordu (bedava dogru degildi).
+        //
+        // KORUNAN SEY AYNI, OLCUM BICIMI DEGISTI: "ayni girdiyi bir uctan kabul edip
+        // digerinden reddeden sessiz tutarsizlik OLUSAMAZ". Yeni pin her telefon kuralini
+        // iki bicimde de kabul eder ve HEPSININ AYNI DEGERE cozundugunu dogrular:
+        //   (a) `GirdiSinirlari.TelefonDeseni` REFERANSI  -> deger sabitten okunur
+        //   (b) `@"..."` LITERALI                          -> deger satirdan okunur
+        // Boylece besinci bir kopya (hangi bicimde olursa olsun) YINE yakalanir ve Seller'in
+        // literali sabitten AYRISIRSA pin KIRMIZI verir.
+        //
+        // NOT (on olcum duzeltmesi): GF-5 kapsam elestirmeni "bu kopyalari koruyan HICBIR
+        // TARAMA PINI YOK" demisti - OLCUM bunu YALANLADI: pin VARDI ve K4'te kirildi.
         [Fact]
-        public void KAYNAK_SOZLESMESI_TelefonKurali_DORT_VALIDATORDE_AYNI()
+        public void KAYNAK_SOZLESMESI_TelefonKurali_TUM_VALIDATORLERDE_AYNI_DEGERE_COZUNUR()
         {
             var dizin = Path.Combine(KokDizin.Value, "Divisima.Bussiness", "ValidationRules");
             Directory.Exists(dizin).Should().BeTrue("validator dizini bulunmali: " + dizin);
 
-            var bulgu = new List<(string dosya, string regex)>();
+            // Sabitin GERCEK degeri kaynaktan okunur - pine LITERAL yazilmaz (kacis-kaybi).
+            var sabitYol = Path.Combine(KokDizin.Value, "Divisima.Core", "Utilities", "Validation",
+                "GirdiSinirlari.cs");
+            File.Exists(sabitYol).Should().BeTrue("ortak sabit dosyasi bulunmali: " + sabitYol);
+            var sabitSatir = File.ReadAllLines(sabitYol)
+                .FirstOrDefault(s => s.Contains("TelefonDeseni", StringComparison.Ordinal)
+                                     && s.Contains("@\"", StringComparison.Ordinal));
+            sabitSatir.Should().NotBeNull("TelefonDeseni sabiti kaynakta bulunmali");
+            var sb = sabitSatir!.IndexOf("@\"", StringComparison.Ordinal) + 2;
+            var ss = sabitSatir.IndexOf('"', sb);
+            var sabitDeger = sabitSatir.Substring(sb, ss - sb);
+
+            var bulgu = new List<(string dosya, string deger, string bicim)>();
             foreach (var yol in Directory.GetFiles(dizin, "*.cs"))
             {
                 var satirlar = File.ReadAllLines(yol);
                 for (var i = 0; i < satirlar.Length; i++)
                 {
-                    var j = satirlar[i].IndexOf(".Matches(@", StringComparison.Ordinal);
+                    var j = satirlar[i].IndexOf(".Matches(", StringComparison.Ordinal);
                     if (j < 0) continue;
                     // Telefon kurali mi: bu satirda ya da onceki iki satirda `phone` gecmeli.
                     var pencere = string.Join("\n", satirlar.Skip(Math.Max(0, i - 2)).Take(3));
                     if (pencere.IndexOf("phone", StringComparison.Ordinal) < 0) continue;
 
+                    if (satirlar[i].Contains("GirdiSinirlari.TelefonDeseni", StringComparison.Ordinal))
+                    {
+                        // (a) REFERANS bicimi: deger TANIM GEREGI sabitin degeridir.
+                        bulgu.Add((Path.GetFileName(yol), sabitDeger, "referans"));
+                        continue;
+                    }
+
                     var bas = satirlar[i].IndexOf('"', j);
+                    if (bas < 0) continue;
                     var son = satirlar[i].IndexOf('"', bas + 1);
-                    bas.Should().BeGreaterThan(-1, "regex acilis tirnagi bulunmali: " + yol);
                     son.Should().BeGreaterThan(bas, "regex kapanis tirnagi bulunmali: " + yol);
-                    bulgu.Add((Path.GetFileName(yol), satirlar[i].Substring(bas + 1, son - bas - 1)));
+                    // (b) LITERAL bicimi.
+                    bulgu.Add((Path.GetFileName(yol), satirlar[i].Substring(bas + 1, son - bas - 1), "literal"));
                 }
             }
 
@@ -2199,22 +2239,27 @@ namespace Divisima.IntegrationTests
                 "telefon kurali en az DORT validator'da bulunmali - tarama bos donerse "
                 + "esitlik iddiasi BEDAVA dogru olurdu");
 
-            // VAKUM KIRICI 2: cikarilan deger gercekten bir telefon karakter sinifi olmali.
-            // (Referans metin LITERAL yazilmaz - yalniz ayirt edici iki parca aranir.)
-            foreach (var (dosya, rx) in bulgu)
+            // VAKUM KIRICI 2: IKI BICIM DE GERCEKTEN VAR OLMALI. Bu, "hepsi referans oldu"
+            // ya da "hicbiri sabite baglanmadi" durumlarinin ikisini de yakalar - yani pin
+            // K4'un yaptigi seyi (uc referans + Seller literali) OLCER, varsaymaz.
+            bulgu.Select(x => x.bicim).Distinct().Should().HaveCount(2,
+                "K4 sonrasi hem SABITE REFERANS veren hem LITERAL tasiyan site bulunmali "
+                + "(Seller DOKUNULMAZ oldugu icin literalini korur)");
+
+            // VAKUM KIRICI 3: cikarilan deger gercekten bir telefon karakter sinifi olmali.
+            foreach (var (dosya, deger, _) in bulgu)
             {
-                rx.Should().NotBeNullOrWhiteSpace("regex bos okunmus olamaz: " + dosya);
-                rx.Should().Contain("0-9", "telefon kurali rakam sinifi tasimali: " + dosya);
-                rx.Should().Contain("{7,20}", "telefon kurali uzunluk niceleyicisi tasimali: " + dosya);
+                deger.Should().NotBeNullOrWhiteSpace("regex bos okunmus olamaz: " + dosya);
+                deger.Should().Contain("0-9", "telefon kurali rakam sinifi tasimali: " + dosya);
+                deger.Should().Contain("{7,20}", "telefon kurali uzunluk niceleyicisi tasimali: " + dosya);
             }
 
-            // ASIL IDDIA: dort kopya BIREBIR ayni olmali. Ihlalci dosya ADIYLA raporlanir.
-            var ilk = bulgu[0];
-            var ayrisan = bulgu.Where(x => !string.Equals(x.regex, ilk.regex, StringComparison.Ordinal))
-                               .Select(x => x.dosya).ToList();
+            // ASIL IDDIA: TUM siteler AYNI DEGERE cozunmeli. Ihlalci dosya ADIYLA raporlanir.
+            var ayrisan = bulgu.Where(x => !string.Equals(x.deger, sabitDeger, StringComparison.Ordinal))
+                               .Select(x => x.dosya + " (" + x.bicim + ")").ToList();
             ayrisan.Should().BeEmpty(
-                "telefon kuralinin TUM kopyalari BIREBIR ayni olmali (referans: " + ilk.dosya
-                + "). Ayrisan bir kopya, ayni girdiyi bir uctan kabul edip digerinden "
+                "telefon kuralinin TUM siteleri ortak sabitle AYNI degere cozunmeli. "
+                + "Ayrisan bir kopya, ayni girdiyi bir uctan kabul edip digerinden "
                 + "reddeden SESSIZ bir tutarsizlik uretir.");
         }
     }

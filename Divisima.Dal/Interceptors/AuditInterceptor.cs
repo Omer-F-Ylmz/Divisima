@@ -32,10 +32,48 @@ namespace Divisima.DataAccess.Interceptors
     // anahtari), `Added`in bos `changes`i ve NULL `user_id`'ler BU COMMIT'TE DEGISMEDI.
     // Olculdu ki bu, F3'u BLOKE ETMIYOR: `changes` DOLU olan 397 satirin 397'si de `Modified`
     // ve entity_id'leri POZITIF; `Added` satirlarinin 1226/1226'si NULL `changes` tasiyor.
+    // ═══ GF-5 / K3 - `Added` SATIRLARININ entity_id'si ARTIK GERCEK ANAHTAR ════════════════
+    //
+    // OLCULEN ONCE-DURUM (AV-2 / SC-5, GF-5 on olcumunde uc kanalda dogrulandi):
+    // `Added` denetim satirlarinin entity_id'si EF'in GECICI anahtarini tasiyordu - hepsi
+    // NEGATIF. Ureten ifade (LITERAL DEGIL - sayi her kosumda buyur, MK-3):
+    //     SELECT COUNT(*) FROM audit_logs WHERE action='Added' AND TRY_CAST(entity_id AS int) < 0;
+    // Bu ifade olcum aninda 2984 dondu (toplam 4295 satirin %69,5'i) ve 2984/2984 negatifti.
+    // ONCEKI kayitlarda gecen "2970" BAYATTIR - sayi bir LITERAL olarak degil, YALNIZ ureten
+    // ifadesiyle anilir.
+    //
+    // DEGER SADECE BAGLANAMAZ DEGIL, MASIF CAKISIYOR: 2984 satir yalnizca 78 farkli degeri
+    // paylasiyor (bant `int.MinValue+1001..+1078`); en sik deger 755 satirda ve 34 FARKLI
+    // tabloda geciyor. Yani `(table_name, entity_id)` cifti bile TEKIL DEGIL - "hangi kayda
+    // ait" sorusu YAPISAL OLARAK yanitlanamiyordu.
+    //
+    // NEDEN POST-SAVE, NEDEN "HIC YAZMA, SONRA YAZ" DEGIL: denetim satirlari is satiriyla
+    // AYNI SaveChanges icinde ekleniyor (`:73-75`) - bu, "is kaydedildi ama izi yok" durumunu
+    // YAPISAL OLARAK imkansiz kilan bir garantidir. Satirlari SavedChanges'e ertelemek o
+    // garantiyi FEDA ederdi (ikinci yazma duserse denetim satiri HIC OLMAZDI). Bu yuzden
+    // satir AYNI transaction'da yazilir, entity_id ise anahtar GERCEKLESTIKTEN sonra
+    // duzeltilir. Kismi basarisizlikta satir BUGUNKU haliyle (gecici id ile) kalir - yani
+    // en kotu durum GERILEME DEGIL, mevcut durumla AYNIDIR.
+    //
+    // KAPSAM SINIRI (durust kayit): `changes` alani `Added` icin HALA NULL kaliyor
+    // (`SerializeChanges` :90). Bilincli: doldurmak, KVKK redaksiyon sorgusunun
+    // (`AccountManager.cs:398-399`, `changes != null` filtreli) kapsamini bir anda
+    // buyuturdu ve entity_id ile BIRLIKTE ele alinmasi gereken ayri bir karardir.
     public class AuditInterceptor : SaveChangesInterceptor
     {
         private readonly IHttpContextAccessor _httpContextAccessor;
         private static readonly HashSet<string> _ignored = new() { nameof(AuditLog), nameof(OutboxMessage) };
+
+        // GF-5 / K3: anahtari GECICI olan girdilerle onlarin denetim satirlarinin eslesmesi.
+        // Interceptor SCOPED kayitlidir (`Program.cs:234`), yani bu liste ISTEK BASINADIR -
+        // statik olsaydi istekler arasi sizardi.
+        private readonly List<(EntityEntry Girdi, AuditLog Satir)> _geciciAnahtarlilar = new();
+
+        // Ikinci `SaveChangesAsync` bu interceptor'i YENIDEN tetikler. Dongu zaten SONLANIR
+        // (AuditLog `_ignored` icinde, dolayisiyla ikinci turda uretilecek satir YOKTUR) ama
+        // bayrak niyeti ACIK yazar ve bekleyen listenin ikinci turda yeniden islenmesini
+        // KESIN olarak engeller.
+        private bool _duzeltmeKosuyor;
 
         public AuditInterceptor(IHttpContextAccessor httpContextAccessor)
         {
@@ -59,7 +97,7 @@ namespace Divisima.DataAccess.Interceptors
                 if (_ignored.Contains(typeName)) continue;
                 if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted)) continue;
 
-                audits.Add(new AuditLog
+                var satir = new AuditLog
                 {
                     table_name = typeName,
                     entity_id = TryGetId(entry),
@@ -67,7 +105,16 @@ namespace Divisima.DataAccess.Interceptors
                     changes = SerializeChanges(entry),
                     user_id = userId,
                     created_at = DateTime.Now
-                });
+                };
+                audits.Add(satir);
+
+                // GF-5 / K3: anahtar SU AN gecici mi? Karar BURADA verilmelidir - `SaveChanges`
+                // sonrasinda `IsTemporary` FALSE'a doner ve "bu deger uydurma miydi" sorusu
+                // ARTIK SORULAMAZ. Kosul `action == "Added"` DEGIL, `IsTemporary`: olcut
+                // DAVRANISIN KENDISI olsun istendi - veritabani tarafinda uretilmeyen bir
+                // anahtarla eklenen satir (ornegin id'si elle verilmis) BOSUNA guncellenmesin.
+                if (GeciciAnahtarliMi(entry))
+                    _geciciAnahtarlilar.Add((entry, satir));
             }
 
             // Açıklayıcı yorum: Audit kayıtlarını aynı SaveChanges içinde ekle (tek transaction)
@@ -75,6 +122,63 @@ namespace Divisima.DataAccess.Interceptors
                 context.Set<AuditLog>().AddRange(audits);
 
             return await base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+
+        // ═══ GF-5 / K3 - ANAHTAR GERCEKLESTIKTEN SONRA entity_id DUZELTILIR ════════════════
+        //
+        // `SavedChangesAsync` EF'in `AcceptAllChanges` adimindan SONRA atesler; bu noktada
+        // veritabaninin urettigi anahtar girdiye ISLENMIS durumdadir, yani `TryGetId` artik
+        // GERCEK degeri doner.
+        //
+        // TRANSACTION DAVRANISI (durust kayit): cagiran bir transaction ACMISSA (UnitOfWork
+        // yollari) bu ikinci yazma AYNI transaction'a katilir ve atomiktir. Transaction YOKSA
+        // (ornegin `Register` akisindaki duz `AddAsync` cagrilari) ilk `SaveChanges` kendi
+        // ortuk transaction'ini COMMIT ETMISTIR ve bu yazma AYRI bir transaction olur.
+        // O durumda ikinci yazma duserse denetim satiri gecici id ile KALIR - bugunku
+        // davranisin AYNISI, yani gerileme yok.
+        public override async ValueTask<int> SavedChangesAsync(
+            SaveChangesCompletedEventData eventData, int result, CancellationToken cancellationToken = default)
+        {
+            if (_duzeltmeKosuyor || _geciciAnahtarlilar.Count == 0 || eventData.Context == null)
+                return await base.SavedChangesAsync(eventData, result, cancellationToken);
+
+            _duzeltmeKosuyor = true;
+            try
+            {
+                foreach (var (girdi, satir) in _geciciAnahtarlilar)
+                    satir.entity_id = TryGetId(girdi);
+                _geciciAnahtarlilar.Clear();
+
+                // Denetim satirlari ZATEN izleniyor (ayni context'e eklendiler), dolayisiyla
+                // bu cagri onlar icin UPDATE uretir. Yuk: `Added` tasiyan her birim icin
+                // +1 gidis-donus (olculdu: register +4, login +1).
+                await eventData.Context.SaveChangesAsync(cancellationToken);
+            }
+            finally
+            {
+                _duzeltmeKosuyor = false;
+            }
+
+            return await base.SavedChangesAsync(eventData, result, cancellationToken);
+        }
+
+        // GF-5 / K3: yazma DUSERSE bekleyen liste TEMIZLENIR. Aksi halde ayni scope'ta yapilan
+        // BIR SONRAKI `SaveChanges`, artik gecerli olmayan girdileri isleyip yanlis satirlari
+        // guncellemeye calisirdi (misafir telafi yolu tam da boyle bir "duser, sonra yine yazar"
+        // akisidir).
+        public override Task SaveChangesFailedAsync(
+            DbContextErrorEventData eventData, CancellationToken cancellationToken = default)
+        {
+            _geciciAnahtarlilar.Clear();
+            return base.SaveChangesFailedAsync(eventData, cancellationToken);
+        }
+
+        // GF-5 / K3: `PropertyEntry.IsTemporary` EF Core 8.0.30'da MEVCUTTUR (yuklu derlemede
+        // olculdu) - paket yukseltmesi GEREKMEDI.
+        private static bool GeciciAnahtarliMi(EntityEntry entry)
+        {
+            var key = entry.Properties.FirstOrDefault(p => p.Metadata.IsPrimaryKey());
+            return key is { IsTemporary: true };
         }
 
         private static string TryGetId(EntityEntry entry)

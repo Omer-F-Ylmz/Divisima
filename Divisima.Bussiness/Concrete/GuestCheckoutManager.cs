@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
 using Divisima.Bussiness.Abstract;
+using Divisima.Core.DataAccess;
 using Divisima.Core.Security.Hashing;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Enums;
@@ -37,6 +38,10 @@ namespace Divisima.Bussiness.Concrete
         // ReplayGuardiAsync'in basinda). Yalniz OKUMA - sema degismedi, migration YOK.
         private readonly IOrderItemDal _orderItemDal;
         private readonly IConfiguration _configuration;
+        // GF-5 / K4: telafi silmesinin IKI adimini tek transaction'a almak icin.
+        // BURADA BASKA HICBIR YERDE KULLANILMAZ - PlaceOrder kendi transaction'ini
+        // yonetmeye devam eder (sinif basindaki "nested transaction yok" notu KORUNDU).
+        private readonly IUnitOfWork _unitOfWork;
 
         public const string EsikAnahtari = "GuestCheckout:MaxOpenOrdersPerMailbox";
         public const int VarsayilanEsik = 3;
@@ -55,7 +60,8 @@ namespace Divisima.Bussiness.Concrete
         public GuestCheckoutManager(ICustomerDal customerDal, IAddressDal addressDal, IOrderService orderService,
             IAuthService authService, ILogger<GuestCheckoutManager> logger, IOrderDal orderDal,
             IOrderItemDal orderItemDal,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            IUnitOfWork unitOfWork)
         {
             _orderItemDal = orderItemDal;
             _customerDal = customerDal;
@@ -65,6 +71,7 @@ namespace Divisima.Bussiness.Concrete
             _logger = logger;
             _orderDal = orderDal;
             _configuration = configuration;
+            _unitOfWork = unitOfWork;
         }
 
         public async Task<(HttpStatusCode, Result)> PlaceGuestOrder(GuestCheckoutDto dto)
@@ -310,9 +317,12 @@ namespace Divisima.Bussiness.Concrete
             // 409 dali ve kupon dogrulama noktalari DEGISTIRILMEDI.
             //
             // ── BILINCLI SINIRLAR (rapora ve muhre girer) ──────────────────────────────
-            //  1. TELAFI ATOMIK DEGIL. Telafi adimi kendisi duserse satir KALIR; o durumda
-            //     musteriye PlaceOrder'in hatasi doner (telafi hatasi DEGIL) ve olay ADIYLA
-            //     loglanir. Kalici kapanis GUVENLIK-AV-1 girdisidir.
+            //  1. TELAFI ARTIK ATOMIK - GF-5 / K4 ILE KAPANDI. Iki silme tek transaction'da
+            //     kosuyor (`MisafirKayitlariniTelafiSilAsync`, gerekce orada); "adres gitti,
+            //     musteri kaldi" kismi durumu ARTIK OLUSAMAZ. DEGISMEYEN sozlesme: telafinin
+            //     KENDISI duserse (transaction tumden geri alinir, IKI satir da KALIR)
+            //     musteriye yine PlaceOrder'in hatasi doner - telafi hatasi DEGIL - ve olay
+            //     ADIYLA loglanir. Yani basarisizlik hala mumkun, ama artik BOLUNMUS DEGIL.
             //  2. ISTISNA YOLU KAPSAM DISI. Merkez tarifi "donus-degerli hata dahil, throw
             //     beklenmez" diyor; PlaceOrder ISTISNA firlatirsa telafi KOSMAZ ve davranis
             //     K4 ONCESIYLE AYNI kalir (regresyon degil, kapatilmamis yol).
@@ -500,8 +510,39 @@ namespace Divisima.Bussiness.Concrete
                 //
                 // "ID'LER ELDE" KURALI KORUNDU (K4'un siniri): yuklem `id` uzerinden - e-posta
                 // ile ARAMA YAPILMIYOR. FK sirasi da AYNEN korundu: ONCE adres, SONRA musteri.
-                await _addressDal.DeleteWhereAsync(a => a.id == address.id);
-                await _customerDal.DeleteWhereAsync(c => c.id == guest.id);
+                //
+                // ══ GF-5 / K4 - TELAFI ARTIK ATOMIK (BILINCLI SINIR 1 KAPANDI) ═════════════
+                //
+                // ESKI HAL: iki `DeleteWhereAsync` ARDISIK ve SARMALAYICISIZ kosuyordu. Her
+                // biri kendi `ExecuteDeleteAsync`ini (yani kendi ortuk transaction'ini) acar;
+                // ILKI GECIP IKINCISI DUSERSE adres silinmis ama MUSTERI KALMIS olur - yani
+                // telafinin kendisi KISMI DURUM uretir. Uretim kodu bu kalemi ADIYLA deftere
+                // havale ediyordu (asagidaki "BILINCLI SINIRLAR 1", :313).
+                //
+                // NEDEN BURADA ACILABILIYOR (olculdu, sinifin basindaki "nested transaction
+                // yok" notuyla CELISMIYOR): bu metoda YALNIZ `PlaceOrder` DONDUKTEN SONRA
+                // giriliyor. Basarisiz dalda `UnitOfWork.RollbackAsync` transaction'i dispose
+                // edip alani null'lamis olur; basarili-ama-replay dalinda da PlaceOrder kendi
+                // transaction'ini KAPATMIS olur. Yani bu noktada ORTAMDA ACIK TRANSACTION
+                // YOKTUR (yukaridaki :498-499 notunun olctugu gercek) ve `ExecuteInTransactionAsync`
+                // IC ICE bir transaction ACMAZ - kendi `tx`ini acar, isini yapar, kapatir.
+                //
+                // `ExecuteInTransactionAsync` SECILDI, elle Begin/Commit DEGIL: IUnitOfWork'un
+                // kendi yorumu (IUnitOfWork.cs:10-12) "yeni transaction'lar bunu kullanmali"
+                // diyor - execution strategy tum begin->is->commit'i tek retriable birim yapar.
+                // Emsal AccountManager.cs:239-263'te (KVKK silme) ZATEN uretimde kosuyor.
+                //
+                // SARMALAMA CATCH'IN **ICINDE**: disarida sarmak davranisi BOZARDI -
+                // `ExecuteInTransactionAsync` istisnayi RETHROW eder (UnitOfWork.cs:64) ve
+                // telafi hatasi cagirana kadar cikip musteriye 500 dondururdu. Oysa sozlesme
+                // (asagidaki catch + :313-315) telafi hatasinin MUSTERIYE YANSIMAMASINI,
+                // PlaceOrder'in kendi hatasinin donmesini soyluyor. Bu sozlesme DEGISMEDI.
+                await _unitOfWork.ExecuteInTransactionAsync(async () =>
+                {
+                    await _addressDal.DeleteWhereAsync(a => a.id == address.id);
+                    await _customerDal.DeleteWhereAsync(c => c.id == guest.id);
+                    return true;
+                });
             }
             catch (Exception ex)
             {

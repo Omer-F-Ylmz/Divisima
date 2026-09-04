@@ -1,3 +1,4 @@
+using Divisima.Core.Utilities.Validation;
 using Divisima.Entity.Dtos.Order;
 using FluentValidation;
 
@@ -9,6 +10,23 @@ namespace Divisima.Bussiness.ValidationRules.FluentValidation
         public OrderCreateRequestValidator()
         {
             RuleFor(o => o.customer_id).GreaterThan(0).WithMessage("Geçerli müşteri gerekli.");
+
+            // ══ GF-5 / K4 (D2) - request_id TASIYICI KAPISI ═══════════════════════════════
+            //
+            // `orders.request_id` NVARCHAR(80) ve bu alani YAZAN IKI YOL VAR: misafir
+            // (GuestCheckoutDto) ve UYE (burasi). Kapiyi yalniz misafire koymak, ayni
+            // kolonun ayni 500'unu uye yolunda ACIK BIRAKIRDI - SD-7'nin ta kendisi.
+            // Kural ve sabitler misafir yoluyla AYNI (GirdiSinirlari); mesajlar da ayni.
+            //
+            // GUID SARTI YOK - gerekce GirdiSinirlari.RequestIdDeseni'nin basinda: dolu 122
+            // degerin 54'u GUID DEGIL ve o bicim CANLI; ayrica frontend'in `crypto.randomUUID`
+            // yedegi "co-<zaman>-<8kar>" uretiyor, o dal PINLI ve frontend DOKUNULMAZ.
+            RuleFor(o => o.request_id)
+                .MaximumLength(GirdiSinirlari.RequestIdEnUzun)
+                    .WithMessage($"İstek kimliği en fazla {GirdiSinirlari.RequestIdEnUzun} karakter olabilir.")
+                .Matches(GirdiSinirlari.RequestIdDeseni)
+                    .WithMessage("İstek kimliği yalnızca harf, rakam, nokta, alt tire ve tire içerebilir.")
+                .When(o => !string.IsNullOrWhiteSpace(o.request_id));
 
             // ══ GUVENLIK-FIX (G9) - NEGATIF MAGAZA KREDISI GIRISTE REDDEDILIR ═════════════
             // OLCULEN ONCE-DURUM: `use_store_credit = -1000` -> HTTP 201 (siparis OLUSTU).

@@ -1,3 +1,5 @@
+using Divisima.Core.Utilities.Sanitization;
+using Divisima.Core.Utilities.Validation;
 using Divisima.Entity.Dtos.Guest;
 using FluentValidation;
 
@@ -17,6 +19,24 @@ namespace Divisima.Bussiness.ValidationRules.FluentValidation
     // GuestCheckoutManager'in KENDI bolgesinde ZATEN var (:68 :70 :72 :79) ve buraya
     // KOPYALANMAZ - bu depoda "ayni kuralin ikinci kopyasi" sinifinin bedeli YEDI KEZ
     // odendi. Burada YALNIZCA bugun HICBIR YERDE dogrulanmayan alanlar var.
+    //
+    // ══ GF-5 / K4 - YUKARIDAKI KAPSAM CUMLESI DARALTILDI (bilincli, merkez karari) ══════
+    // "guest_name ... buraya KOPYALANMAZ" satiri VARLIK kurallari icindi ve DOGRUYDU:
+    // NotEmpty hala YALNIZ manager'da (GuestCheckoutManager.cs:74). Ama guest_name'in
+    // UZUNLUGU o gun HICBIR YERDE dogrulanmiyordu ve AV-2 bunu LAUNCH BLOKER olarak olctu
+    // (SD-7 `[VERI-BOZAN]`): 151 karakterlik ad -> EF insert-time 500, musteri satiri ZATEN
+    // yazilmis -> YETIM MUSTERI (canli: id 179) + o e-postanin KALICI 409'u. Yani burasi
+    // "bugun HICBIR YERDE dogrulanmayan alanlar" tanimina TAM OLARAK giriyor - kural
+    // kopyalanmadi, EKSIK OLAN kural eklendi. Ikinci kopya SAYACI ARTMADI.
+    //
+    // UZUNLUK SANITIZE SONRASI OLCULUR (merkez karari, GF-5 / D3): DB'ye giden deger
+    // `InputSanitizer.Sanitize(dto.guest_name.Trim())` sonucudur (GuestCheckoutManager.cs:195
+    // ve :243), ham girdi DEGIL. OLCULEN YON - KAYDA GECER: `Sanitize` HTML-ENCODE ETMEZ
+    // (o ayri bir metottur, `HtmlEncode`, ve bu yolda CAGRILMIYOR); govdesi bes adet
+    // `Replace(..., "")` + `Trim()`, yani `Sanitize(x).Length <= x.Length` HER ZAMAN.
+    // Dolayisiyla ham uzerinden olcmek TASMA URETMEZDI - yalnizca sigacak bir degeri
+    // gereksiz yere reddederdi. Sanitize sonrasi olcmek DOGRU degeri sinar; bu bir
+    // 500 savunmasi degil, DOGRULUK duzeltmesidir.
     //
     // KURALLAR UYE YOLUYLA BIREBIR AYNI (AddressRequestValidator): yeni politika ICAT
     // EDILMEDI. Mesajlar da ayni - iki yol musteriye AYNI dili konusur.
@@ -39,12 +59,33 @@ namespace Divisima.Bussiness.ValidationRules.FluentValidation
     {
         public GuestCheckoutValidator()
         {
+            // GF-5 / K4 (SD-7): guest_name UZUNLUGU. NotEmpty BURAYA EKLENMEDI - o kural
+            // manager'da (GuestCheckoutManager.cs:74) ve oradaki mesaj musteriye donuyor;
+            // ikinci kopya acilmaz. Bos/whitespace burada GECER, manager reddeder.
+            // Olcum SANITIZE SONRASI: DB'ye giden deger budur (gerekce sinif yorumunda).
+            RuleFor(x => x.guest_name)
+                .Must(ad => string.IsNullOrWhiteSpace(ad)
+                            || InputSanitizer.Sanitize(ad.Trim()).Length <= GirdiSinirlari.MusteriAdi)
+                .WithMessage($"Ad soyad en fazla {GirdiSinirlari.MusteriAdi} karakter olabilir.");
+
             RuleFor(x => x.guest_phone).NotEmpty().WithMessage("Telefon boş olamaz.")
-                .Matches(@"^[0-9+\s()-]{7,20}$").WithMessage("Geçerli bir telefon girin.");
-            RuleFor(x => x.city).NotEmpty().WithMessage("Şehir boş olamaz.").MaximumLength(50);
-            RuleFor(x => x.district).NotEmpty().WithMessage("İlçe boş olamaz.").MaximumLength(50);
-            RuleFor(x => x.full_address).NotEmpty().WithMessage("Açık adres boş olamaz.").MaximumLength(500);
-            RuleFor(x => x.zip_code).MaximumLength(10).When(x => x.zip_code != null);
+                .Matches(GirdiSinirlari.TelefonDeseni).WithMessage("Geçerli bir telefon girin.");
+            RuleFor(x => x.city).NotEmpty().WithMessage("Şehir boş olamaz.").MaximumLength(GirdiSinirlari.Sehir);
+            RuleFor(x => x.district).NotEmpty().WithMessage("İlçe boş olamaz.").MaximumLength(GirdiSinirlari.Ilce);
+            RuleFor(x => x.full_address).NotEmpty().WithMessage("Açık adres boş olamaz.").MaximumLength(GirdiSinirlari.AcikAdres);
+            RuleFor(x => x.zip_code).MaximumLength(GirdiSinirlari.PostaKodu).When(x => x.zip_code != null);
+
+            // GF-5 / K4 (D2): request_id TASIYICI kapisi - BICIM kapisi DEGIL.
+            // `orders.request_id` NVARCHAR(80); 81 karakter guest_name ile AYNI ailenin
+            // insert-time 500'unu uretir. GUID SARTI YOK - gerekce GirdiSinirlari'nda
+            // (olculdu: dolu 122 degerin 54'u GUID degil ve o bicim CANLI; ayrica
+            // frontend'in yedek dali "co-..." uretiyor ve o dal PINLI + DOKUNULMAZ).
+            RuleFor(x => x.request_id)
+                .MaximumLength(GirdiSinirlari.RequestIdEnUzun)
+                    .WithMessage($"İstek kimliği en fazla {GirdiSinirlari.RequestIdEnUzun} karakter olabilir.")
+                .Matches(GirdiSinirlari.RequestIdDeseni)
+                    .WithMessage("İstek kimliği yalnızca harf, rakam, nokta, alt tire ve tire içerebilir.")
+                .When(x => !string.IsNullOrWhiteSpace(x.request_id));
         }
     }
 }

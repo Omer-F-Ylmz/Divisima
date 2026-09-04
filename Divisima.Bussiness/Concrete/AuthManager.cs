@@ -7,6 +7,7 @@ using Divisima.Core.Security.Tokens;
 using Divisima.Core.Utilities.Caching;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Enums;
+using Divisima.Core.Utilities.Http;
 using Divisima.Core.Utilities.Mail;
 using Divisima.Core.Utilities.Results;
 using Divisima.Core.Utilities.Sanitization;
@@ -261,6 +262,23 @@ namespace Divisima.Bussiness.Concrete
                 // böylece "var/yok" yanıt süresi farkından e-posta enumerasyonu yapılamaz.
                 HashingHelper.CreatePasswordHash("dummy_timing_equalizer", out var dh, out var ds);
                 HashingHelper.VerifyPasswordHash(dto.password ?? "x", dh, ds);
+                // ══ GF-5 / K2 - KAYITSIZ E-POSTA ILE GIRIS DENEMESI ARTIK IZ BIRAKIYOR ══════
+                //
+                // OLCULEN ONCE-DURUM (AV-2 / S-C): bu dal HICBIR SEY yazmiyordu; matriste
+                // "login basarisiz (KAYITSIZ)" TAM BOSLUKTU. Yani bir saldirgan binlerce
+                // e-postayi deneyip gecebiliyor, geriye TEK SATIR iz kalmiyordu.
+                //
+                // `customer_id` NULL, `detail` SABIT METIN - E-POSTA YAZILMIYOR (bilincli):
+                // (a) KVKK - `security_events` bugun kimlik tasimiyor, yeni bir veri sinifi
+                //     ACILMAZ; (b) LOG FORGING - `detail` `SecurityEventManager.cs`teki Serilog
+                //     sablonuna giriyor ve Serilog CRLF AYIKLAMAZ (GF-3/A-3); kullanici
+                //     kontrollu bir deger buraya konursa saldirgan log satiri BOLEBILIR.
+                //     Ayirt edicilik KAYBOLMUYOR: "LoginFailed + customer_id NULL" kombinasyonu
+                //     kayitsiz denemeyi, "customer_id DOLU" ise gercek hesaba yanlis sifreyi
+                //     gosterir. IP/user-agent K1 ile ZATEN doluyor - alarm kurali icin yeten
+                //     eksen budur ("ayni IP'den 10 basarisiz login").
+                await _securityEvents.LogAsync("LoginFailed", "Warning", null, null, null,
+                    "Kayıtlı olmayan e-posta ile giriş denemesi");
                 return (HttpStatusCode.Unauthorized, new ErrorResult(Messages.LoginFailed));
             }
 
@@ -310,8 +328,25 @@ namespace Divisima.Bussiness.Concrete
             {
                 if (kilitli)
                 {
-                    // Hesap ZATEN kilitli: sayac artmaz, olay yazilmaz, kilit uzamaz.
+                    // Hesap ZATEN kilitli: sayac artmaz, kilit uzamaz.
                     // Yanit KAYITSIZ adresin yanitiyla BIREBIR ayni - oracle kapali.
+                    //
+                    // ══ GF-5 / K2 - "OLAY YAZILMAZ" KAYDI DEGISTI, GEREKCESI KORUNDU ═══════
+                    //
+                    // Bu satirda eskiden "olay yazilmaz" yaziyordu ve GEREKCESI su cumleydi:
+                    // yanit kayitsiz adresin yanitiyla BIREBIR ayni kalsin. K2 kayitsiz dala
+                    // (`:259-266`) bir olay yazmasi eklediginde o gerekce TERSINE DONDU:
+                    // kayitsiz dal bir DB INSERT yaparken bu dal yapmasaydi, KILITLI hesap
+                    // OLCULEBILIR SEKILDE DAHA HIZLI yanit verir ve saldirgan "bu e-posta VAR
+                    // ve kilitli" bilgisini SURE FARKINDAN cikarabilirdi - yani tam da
+                    // kapatilmis olan oracle YENIDEN ACILIRDI.
+                    //
+                    // Yani buraya olay eklemek o karari BOZMAZ, KORUR: iki dal da ayni isi
+                    // yapar. Yan kazanc, kayitli bir bosluktu - kilitli bir hesaba yapilan
+                    // israrli denemeler bugune kadar HICBIR IZ birakmiyordu.
+                    // `customer_id` YAZILIR (hesap bilinmektedir); `detail` sabit metindir.
+                    await _securityEvents.LogAsync("LoginFailed", "Warning", customer.id, null, null,
+                        "Kilitli hesaba giriş denemesi");
                     return (HttpStatusCode.Unauthorized, new ErrorResult(Messages.LoginFailed));
                 }
 
@@ -465,28 +500,33 @@ namespace Divisima.Bussiness.Concrete
         //
         // MASKELEME/SINIR: user-agent DB kolonu 200, IP kolonu 64 karakter. Uzun degerler
         // KIRPILIR - kirpmadan yazmak EF tarafinda insert-time 500 uretirdi (`guest_name`
-        // ailesinin ayni tuzagi). PII notu: ikisi de zaten `security_events` tablosunda
-        // TUTULUYOR; yeni bir veri sinifi ACILMIYOR.
-        private const int CihazEnUzun = 200;
-        private const int IpEnUzun = 64;
+        // ailesinin ayni tuzagi).
+        //
+        // ══ GF-5 / K1 - IKI DUZELTME (biri OLCULEN HATA, biri KIRPMA SINIRI) ══════════════
+        //
+        // (1) BU YORUM YANLISTI - OLCULDU VE DUZELTILDI. Onceki hali "PII notu: ikisi de zaten
+        //     `security_events` tablosunda TUTULUYOR; yeni bir veri sinifi ACILMIYOR" diyordu.
+        //     TUTULMUYORDU: `LogAsync`in ip/userAgent argumanlari YEDI cagri yerinin yedisinde
+        //     de `null` geciliyordu ve canli tabloda 40 satirin 40'inda ikisi de NULL'di
+        //     (AV-2/SC-1 olcumu, GF-5 on olcumunde iki ajan tarafindan bagimsiz dogrulandi).
+        //     Yani cumle bir VARSAYIMI olcum gibi yaziyordu. GF-5/K1 ile iddia ARTIK DOGRU:
+        //     `SecurityEventManager` degerleri kendi icinde dolduruyor. "YORUM != OLCUM"
+        //     dersinin bu depodaki kayitli ornegi budur.
+        //
+        // (2) KIRPMA ARTIK 60, 64 DEGIL. `security_events.ip_address` kolonu 60 KARAKTER
+        //     (sys.columns olcumu), `user_sessions.ip_address` ise 64. Ayni deger artik IKI
+        //     tabloya da gidiyor; tek sinir SECILDI ve KUCUK OLAN alindi (60 <= 60 ve 60 <= 64).
+        //     Bu, user_sessions tarafinda bilincli bir SIKILASTIRMADIR ve gercek bir adresi
+        //     KIRPMAZ: en uzun IPv6 metni 45 karakterdir. Gerekce IstemciBilgisi'nin basinda.
+        //
+        // OKUMA ARTIK BURADA DEGIL - TEK NOKTA `Divisima.Core.Utilities.Http.IstemciBilgisi`.
+        // K1 ucuncu bir okuyucu (`SecurityEventManager`) ekliyordu; ucuncu kopyayi acmak
+        // yerine okuma+kirpma ortak yardimciya tasindi. Asagidaki iki metot KORUNDU (cagri
+        // yerleri ve `IssueSessionAndTokenAsync` govdesi DEGISMESIN diye) ama artik yalnizca
+        // DEVREDIYOR. X-Forwarded-For'un neden okunmadigi da orada yazili.
+        private string? KisaltUserAgent() => IstemciBilgisi.UserAgent(_httpContextAccessor);
 
-        private string? KisaltUserAgent()
-        {
-            var ham = _httpContextAccessor?.HttpContext?.Request?.Headers["User-Agent"].ToString();
-            if (string.IsNullOrWhiteSpace(ham)) return null;
-            return ham.Length <= CihazEnUzun ? ham : ham.Substring(0, CihazEnUzun);
-        }
-
-        // X-Forwarded-For BURADA OKUNMAZ: `Program.cs` ForwardedHeaders middleware'i YALNIZ
-        // bilinen proxy'lerden gelen basligi kabul edip `RemoteIpAddress`i ZATEN duzeltiyor
-        // (spoofing engeli orada, tek yerde). Basligi burada ikinci kez okumak o korumayi
-        // ATLAR ve saldirganin yazdigi degeri DB'ye gecirirdi.
-        private string? IstemciIp()
-        {
-            var ham = _httpContextAccessor?.HttpContext?.Connection?.RemoteIpAddress?.ToString();
-            if (string.IsNullOrWhiteSpace(ham)) return null;
-            return ham.Length <= IpEnUzun ? ham : ham.Substring(0, IpEnUzun);
-        }
+        private string? IstemciIp() => IstemciBilgisi.Ip(_httpContextAccessor);
 
         private async Task<CustomerLoginResponseDto> IssueSessionAndTokenAsync(Customer customer,
             DateTime? authTime)
@@ -969,12 +1009,30 @@ namespace Divisima.Bussiness.Concrete
                 // semantik karar merkezin, bu dalgada DAVRANIS DEGISTIRILMEDI.
                 var session = await _userSessionDal.GetByRefreshTokenAnyStateAsync(refreshToken);
                 if (session != null && session.customer_id == customerId)
-                    await _userSessionDal.DeactivateIfActiveAsync(session.id);
+                {
+                    // ══ GF-5 / K2 - CIKIS ARTIK IZ BIRAKIYOR (AV-2 / S-C: TAM BOSLUK) ═══════
+                    //
+                    // OLCULEN ONCE-DURUM: `is_active` 1 -> 0 oluyordu ama defter deltasi 0 idi;
+                    // yani "bu oturum ne zaman, kim tarafindan kapatildi" sorusunun yaniti
+                    // HICBIR YERDE yoktu. Bir saldirgan kurbani cikarabilir ve bu gorunmezdi.
+                    //
+                    // CAS SONUCU DETAY'A YAZILIR: `DeactivateIfActiveAsync` atomik CAS'tir ve
+                    // ETKILENEN SATIR SAYISINI doner. 0 donmesi "oturum ZATEN kapaliydi"
+                    // demektir (bayat cerezle gelen cikis - SUPHELI olarak kayitli davranis).
+                    // Sayiyi yazmak o iki durumu defterde AYIRT EDILEBILIR kilar.
+                    var kapanan = await _userSessionDal.DeactivateIfActiveAsync(session.id);
+                    await _securityEvents.LogAsync("Logout", "Info", customerId, null, null,
+                        $"Tek oturum kapatıldı (etkilenen satır: {kapanan})");
+                }
             }
             else
             {
                 // Tum aktif oturumlari TEK atomik sorgu ile kapat (foreach N+1 yerine - DRY + performans)
-                await _userSessionDal.InvalidateAllForCustomerAsync(customerId);
+                // GF-5 / K2: DONUS DEGERI ARTIK KULLANILIYOR. Onceden atiliyordu (AV-2 on
+                // olcumunde S-A8 olarak isaretlenmisti); ayni cagri `:636`da zaten bir
+                // degiskene aliniyordu, yani tutarsizlikti. Deger cikis olayinin detayina
+                // giriyor - "tum cihazlardan cik" kac oturumu kapatti sorusu artik defterde.
+                var kapatilanOturum = await _userSessionDal.InvalidateAllForCustomerAsync(customerId);
 
                 // ══ GF-1b / K1 - "TUM CIHAZLARDAN CIK" ═══════════════════════════════════
                 //
@@ -987,6 +1045,11 @@ namespace Divisima.Bussiness.Concrete
                 // orada kullanici yalniz O cihazdan cikmak istiyor - statuko (merkez karari).
                 await _tokenRevocation.RevokeAllBeforeNowAsync(
                     (int)UserTypeEnum.Customer, customerId, TimeSpan.FromMinutes(AccessTokenOmruDk));
+
+                // GF-5 / K2: "tum cihazlardan cik" dalinin izi. Esik yaziminin (access iptali)
+                // ARDINDAN yazilir - olay, isin TAMAMLANDIGINI bildirsin diye.
+                await _securityEvents.LogAsync("Logout", "Info", customerId, null, null,
+                    $"Tüm oturumlar kapatıldı (etkilenen satır: {kapatilanOturum})");
             }
             return (HttpStatusCode.OK, new SuccessResult(Messages.LogoutSuccess));
         }
