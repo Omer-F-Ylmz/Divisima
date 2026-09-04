@@ -13,5 +13,13 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <!-- Deterministik build (reproducible) -->
     <Deterministic>true</Deterministic>
+    <!-- GF-4/K4 (Y5) - TEDARIK ZINCIRI: her proje packages.lock.json uretir ve o dosya
+         depoya girer. Boylece cozumlenen GECISLI graf de surum kontrolunde olur; CI
+         restore adimi "locked-mode" bayragiyla grafin degismedigini DOGRULAR (sessiz
+         gecisli surum kaymasi biter). Lock dosyasi degistiginde diff'te GORUNUR.
+         NOT: bu yorumda cift tire KULLANILAMAZ (XML kurali) - bayrak adi bu yuzden
+         duz yazildi; bir kez bozuk XML uretildi ve "dotnet restore" buna ragmen
+         exit 0 verdi, hatayi yalniz "msbuild -getProperty" probu gosterdi. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 </Project>

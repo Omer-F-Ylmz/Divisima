@@ -86,8 +86,11 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Bagimliliklari geri yukle
-        run: dotnet restore Divisima-Backend.sln
+      # GF-4/K4 (Y5): --locked-mode, packages.lock.json ile cozumlenen grafin BIREBIR
+      # ayni oldugunu dogrular. Lock disi bir surum gelirse restore KIRILIR (NU1004),
+      # yani gecisli surum kaymasi artik sessiz olamaz.
+      - name: Bagimliliklari geri yukle (kilitli graf)
+        run: dotnet restore Divisima-Backend.sln --locked-mode
 
       - name: Derle (Release, uyarilar gorunur)
         run: dotnet build Divisima-Backend.sln --configuration Release --no-restore
