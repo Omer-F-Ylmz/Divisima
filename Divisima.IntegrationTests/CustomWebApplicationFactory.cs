@@ -18,9 +18,11 @@ namespace Divisima.IntegrationTests
         // "M:Testcontainers.MsSql.MsSqlBuilder.#ctor(System.String)".
         // GF-4/K5 (Y6): tag + digest pini - gerekce ve dort kopyanin listesi ci.yml'da.
         // Testcontainers 4.14.0'in digest'li referansi DOGRU ayristirdigi CALISTIRILARAK
-        // olculdu (DockerImage: Repository=mssql/server, Tag=2022-latest, Digest=sha256:0730f368...,
+        // olculdu (DockerImage: Repository=mssql/server, Tag=2022-latest, Digest dolu,
         // FullName girdiyle BIREBIR) - yerelde Docker olmadigi icin suit bunu kosamaz.
-        private readonly MsSqlContainer _dbContainer = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest@sha256:0730f3689a6dcc33beaf8f466376ac056d7483a2272dcbd3bcc36d3a6df05437")
+        // K5-DUZELTME: ilk yazilan digest ADRESLENEMEZ bir Schema 1 degeriydi; gerekce
+        // ve dogrulama yontemi ci.yml'daki yorumda.
+        private readonly MsSqlContainer _dbContainer = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest@sha256:ba4c8329f48fb8f02e1416be6a930ebfd71268caee78aa985f3af4315e457c89")
             .WithPassword("Test_Password123!")
             .Build();
 

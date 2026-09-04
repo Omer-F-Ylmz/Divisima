@@ -141,9 +141,13 @@ yakalanamadığı için tek bir istek değil **tüm süreç** ölür (DoS).
    > ```
    > Ölçüm: `_mapper.Map<` toplam 25 geçişin 20'si `*ResponseDto`/`List<*ResponseDto>`
    > hedefler (çıkış yönü, istemci girdisi DEĞİL); ENTITY hedefli olan 5'tir.
-   > **Bu belge daha önce 7 diyordu**: yalnız jenerik biçim sayılmış, Address ve Category'nin
-   > güncelleme yolları atlanmıştı. Sayı `GuvenlikFix4SozlesmeTests` ile pinlidir - eşleme
-   > yüzeyi değişirse test kırmızı verir ve bu paragraf güncellenmeden geçilemez.
+   > **Bu belge daha önce 7 diyordu.** Eski sayım Address, Category ve Collection'ı BİRER,
+   > Coupon ve Product'ı İKİŞER kez sayıyordu (1+1+1+2+2 = 7). Yani biçim körlüğü KISMİYDİ:
+   > jenerik-olmayan güncelleme yollarından ikisi (Coupon, Product) zaten sayılmıştı.
+   > Atlanan **üç** kalem Address, Category ve Collection'ın güncelleme yollarıdır —
+   > `AddressManager.cs:43`, `CategoryManager.cs:48`, `CollectionManager.cs:64`.
+   > Sayı `GuvenlikFix4SozlesmeTests` ile pinlidir - eşleme yüzeyi değişirse test kırmızı
+   > verir ve bu paragraf güncellenmeden geçilemez.
 3. **JSON bağlama derinlik sınırı**: özel `MaxDepth` ayarı yok, yani System.Text.Json
    varsayılanı (64) geçerli. 25.000 seviyelik bir gövde AutoMapper'a ULAŞMADAN,
    deserialization aşamasında reddedilir.

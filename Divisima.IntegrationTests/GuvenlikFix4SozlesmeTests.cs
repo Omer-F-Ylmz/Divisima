@@ -70,8 +70,14 @@ namespace Divisima.IntegrationTests
         // BASKA bir imaji cozer. Dordunun ayni tag+digest'i tasimasi, testin kostugu
         // veritabani ile CI'nin ve yerel gelistirmenin AYNI ikiliyi kullandigini garanti
         // eder. Digest degisecekse DORDU BIRDEN degisir - bu pin onu zorlar.
+        // K5-DUZELTME: bu sabit bir kez YANLIS yazildi. MCR'nin "Docker-Content-Digest"
+        // basligi istenen Accept turune gore DEGISIR; mssql/server'in manifest LISTESI
+        // olmadigi icin liste turleri istendiginde kullanimdan kalkmis Schema 1 bicimine
+        // duser ve ADRESLENEMEZ bir digest dondurur. Pin bunu YAKALAYAMAZ - dort siteye
+        // de ayni gecersiz deger yazilsaydi 12 pin de YESIL kalirdi. Digest'in GERCEKLIGI
+        // yalnizca registry'den O DIGEST ILE geri cekilerek dogrulanir (echo-back esitligi).
         private const string ImajTam =
-            "mcr.microsoft.com/mssql/server:2022-latest@sha256:0730f3689a6dcc33beaf8f466376ac056d7483a2272dcbd3bcc36d3a6df05437";
+            "mcr.microsoft.com/mssql/server:2022-latest@sha256:ba4c8329f48fb8f02e1416be6a930ebfd71268caee78aa985f3af4315e457c89";
 
         private const string ImajDigestsiz = "mcr.microsoft.com/mssql/server:2022-latest";
 

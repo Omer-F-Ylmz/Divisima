@@ -31,7 +31,16 @@ jobs:
         # DORT yerde birebir durur: bu dosya, security.yml, docker-compose.yml ve
         # Divisima.IntegrationTests/CustomWebApplicationFactory.cs. Dordunun esitligi
         # GuvenlikFix4SozlesmeTests ile PINLI - biri kayarsa test KIRMIZI verir.
-        image: mcr.microsoft.com/mssql/server:2022-latest@sha256:0730f3689a6dcc33beaf8f466376ac056d7483a2272dcbd3bcc36d3a6df05437
+        #
+        # DIGEST NASIL ALINIR (bir kez yanlis alindi, K5-DUZELTME): MCR'den
+        # "Docker-Content-Digest" basligini okumak TEK BASINA YETMEZ - deger istenen
+        # Accept basligina gore DEGISIR. mssql/server'in manifest LISTESI YOKTUR; yalniz
+        # liste turleri istenirse MCR kullanimdan kalkmis Schema 1 bicimine duser
+        # (manifest.v1+prettyjws) ve ONUN digest'ini dondurur. O digest ADRESLENEMEZ
+        # (uydurma bir digest gibi 404 verir) ve pull EDILEMEZ.
+        # KURAL: alinan digest, O DIGEST ILE geri cekilerek dogrulanir; echo-back esit
+        # degilse deger GECERSIZDIR.
+        image: mcr.microsoft.com/mssql/server:2022-latest@sha256:ba4c8329f48fb8f02e1416be6a930ebfd71268caee78aa985f3af4315e457c89
         env:
           ACCEPT_EULA: "Y"
           # NOT: gercek bir sir DEGIL. Yalniz bu is icin ayaga kalkan, is bitince yok olan, sadece
