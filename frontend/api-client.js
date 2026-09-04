@@ -37,6 +37,29 @@
         localStorage.removeItem("divisima_refresh_token");
       } catch (_) {}
 
+      // ══ GF-2b / K1 - DIGER SEKMENIN BELLEK JETONUNU TAZELE ══════════════════════════
+      // `setAccessToken` bellegi ve depoyu BIRLIKTE yaziyor - ama yalnizca YAZAN sekmede.
+      // `storage` olayi tanim geregi DIGER sekmelerde atesler; boylece bir sekme jetonu
+      // yenileyince otekinin BELLEK kopyasi da tazelenir ve bayat jetonla gereksiz bir
+      // 401 HIC DOGMAZ. Kilit icindeki kiyas (bkz. `_tryRefresh`) ikinci savunma hattidir.
+      //
+      // KAPSAM BILINCLI OLARAK DAR: yalniz bu anahtar dinlenir ve yalniz BELLEK esitlenir.
+      // `setAccessToken` CAGRILMAZ - o cagri cikis kancasini (SW api kovasi temizligi)
+      // her sekmede yeniden atesler ve "ayni kuralin ikinci kopyasi" ailesine girerdi.
+      //
+      // BILINEN DAVRANIS DEGISIKLIGI: panel ve vitrin AYNI origin ve AYNI anahtari
+      // paylasir (admin.html:120 · index.html:3453). Panelde cikis yapilinca vitrin
+      // sekmesinin bellek jetonu da null'a duser. Sunucuda o jeton ZATEN iptal oldugu
+      // icin bu DURUST bir esitlemedir: onceki hal jetonu ilk 401'e kadar tasiyordu.
+      try {
+        if (typeof window !== "undefined" && window.addEventListener) {
+          window.addEventListener("storage", (e) => {
+            if (!e || e.key !== "divisima_access_token") return;
+            this._accessToken = e.newValue;
+          });
+        }
+      } catch (_) {}
+
       // Alt modüller
       this.auth = this._buildAuth();
       this.products = this._buildProducts();
@@ -253,15 +276,24 @@
     async _tryRefresh() {
       if (this._refreshing) return this._refreshing;
       if (typeof navigator !== "undefined" && navigator.locks && navigator.locks.request) {
-        // ONCE oku, SONRA kilidi iste: karsilastirma degeri kilidi BEKLEMEYE BASLAMADAN
-        // ONCEKI durumu temsil etmeli.
-        const oncekiToken = this._okuAccessToken();
         this._refreshing = navigator.locks
           .request("divisima-refresh", async () => {
-            // Kilidi BEKLERKEN baska bir sekme yenilemis olabilir. O durumda jeton
-            // depoda DEGISMIS olur; yeniden ag cagrisi YAPMADAN onu al.
+            // ══ GF-2b / K1 - KIYAS TABANI *BELLEK* JETONUDUR (olculdu, duzeltildi) ═════
+            // ONCEKI HAL: kilit ONCESI depodan okunan bir deger ile kilit ICINDE depodan
+            // okunan deger karsilastiriliyordu - yani STORAGE <-> STORAGE. Oysa 401'i
+            // DOGURAN jeton, `_request`in Authorization basligina koydugu BELLEK
+            // jetonudur (`this._accessToken`).
+            //
+            // OLCULEN KIRIK: iki sekme eszamanli 401 alir. B tazeler ve depoyu yazar.
+            // A kilide girer; depoyu kilit ONCESI de SONRASI da AYNI (taze) degerde
+            // gorur, "degismemis" sonucuna varir ve IKINCI bir ag refresh'i atar.
+            // Beklenen TAM 1, gerceklesen 2 (goz turu olcumu).
+            //
+            // DOGRU OLCUT: depodaki deger, BENIM 401 yiyen jetonumdan FARKLI mi?
+            // Kilidi BEKLERKEN baska bir sekme yenilediyse fark olusur ve ag cagrisi
+            // YAPILMADAN taze jeton devralinir.
             const taze = this._okuAccessToken();
-            if (taze && taze !== oncekiToken) { this.setAccessToken(taze); return true; }
+            if (taze && taze !== this._accessToken) { this.setAccessToken(taze); return true; }
             return this._refreshAgCagrisi();
           })
           // ══ GF-2a DENETIM / S1 - BU `catch` BIR REGRESYONU KAPATIR ══════════════════
