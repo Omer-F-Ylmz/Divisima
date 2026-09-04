@@ -42,7 +42,22 @@ namespace Divisima.IntegrationTests
         // kuruyor, yani ayni ada baglanan dort Init/Dispose birbirinin veritabanini
         // dusuruyordu ("Cannot open database ... login failed" ve "Database already exists"
         // birebir goruldu). Guid ekiyle catisma YAPISAL olarak imkansiz.
-        private readonly string _dbName = "DivisimaSemaPin_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        private readonly string _dbHamAd = "DivisimaSemaPin_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+
+        // ══ GF-2b / F1 - KOSUCU AD ALANI UC KULLANIMIN UCUNE DE UYGULANIR ═══════════════
+        //
+        // OLCULEN KIRIK: ad alani YALNIZ baglanma noktasina (`InitialCatalog`) uygulanmisti;
+        // veritabani HAM adla YARATILIYOR ve HAM adla DUSURULUYORDU. `DIVISIMA_TEST_DB` set
+        // edildiginde - ki MK-4b'nin denetci izolasyonu BUNU ZORUNLU KILAR - sinif "A"yi
+        // yaratip "A_sonek"e baglanmaya calisiyor ve dort test
+        // "Cannot open database ... login failed" ile duser (assert DEGIL, SQL login hatasi).
+        // GF-3/F2'nin kosucu ad alani bu dosyada YARIM UYGULANMISTI; kusur zeminde de vardi
+        // ve MK-4b'yi uygulayan HER denetci onunla karsilasiyordu.
+        //
+        // COZUM YAPISAL, DISIPLINE BAGLI DEGIL: cozulmus ad TEK BIR yerden turer ve ham ad
+        // BASKA HICBIR YERDE kullanilmaz. Yeni bir kullanim yeri eklendiginde cozulmus adi
+        // almak zorunda kalir, dolayisiyla ayni asimetri YENIDEN DOGAMAZ.
+        private string _dbName => TestDbAdi.Cozumle(_dbHamAd);
         private static readonly string? ExplicitConn = Environment.GetEnvironmentVariable("DIVISIMA_TEST_SQL");
 
         private static string BaseConn => string.IsNullOrWhiteSpace(ExplicitConn)
@@ -50,7 +65,7 @@ namespace Divisima.IntegrationTests
             : ExplicitConn;
 
         private string ConnStr =>
-            new SqlConnectionStringBuilder(BaseConn) { InitialCatalog = TestDbAdi.Cozumle(_dbName) }.ConnectionString;
+            new SqlConnectionStringBuilder(BaseConn) { InitialCatalog = _dbName }.ConnectionString;
 
         private static string MasterConn =>
             new SqlConnectionStringBuilder(BaseConn) { InitialCatalog = "master" }.ConnectionString;

@@ -616,6 +616,40 @@ namespace Divisima.IntegrationTests
                 "tabloda uretilmeyen eylem kalmamali - bayat girdi sonraki okuyucuyu yanıltir");
         }
 
+        // ══ F1 - SEMA PIN SINIFI HAM DB ADINI KULLANMAZ ═══════════════════════════════
+        //
+        // OLCULEN KIRIK (L3 ve kural-uyum denetcileri BAGIMSIZ buldu): kosucu ad alani
+        // YALNIZ baglanma noktasina uygulanmisti; veritabani HAM adla yaratilip HAM adla
+        // dusuruluyordu. `DIVISIMA_TEST_DB` set edildiginde - ki MK-4b'nin denetci
+        // izolasyonu BUNU ZORUNLU KILAR - sinif "A"yi yaratip "A_sonek"e baglanmaya
+        // calisiyor ve dort test SQL login hatasiyla duser. Kusur ZEMINDE de vardi
+        // (GF-3/F2'nin ad alani bu dosyada YARIM uygulanmisti) ve MK-4b'yi uygulayan HER
+        // denetci onunla karsilasiyordu - yani MK-4b tabani fiilen OLCULEMIYORDU.
+        [Fact]
+        public void GF2B_F1_SEMA_PIN_SINIFI_HAM_DB_ADINI_KULLANMAZ()
+        {
+            var kaynak = KodSatirlari(Oku("Divisima.IntegrationTests/SemaTekKaynakTests.cs"));
+
+            // ASIL AYIRT EDICI: ham ad YALNIZ iki yerde gecebilir - uretildigi satir ve
+            // cozuldugu satir. Ucuncu bir gecis, bir kullanim yerinin ad alanini ATLADIGI
+            // anlamina gelir ve tam da onarilan kusurdur.
+            Sayim(kaynak, "_dbHamAd").Should().Be(2,
+                "ham veritabani adi YALNIZ uretildigi ve cozuldugu yerde gecmeli - " +
+                "ucuncu bir gecis ad alanini atlayan bir kullanim yeridir");
+            kaynak.Should().Contain("TestDbAdi.Cozumle(_dbHamAd)",
+                "cozum TEK NOKTADAN gecmeli");
+
+            // ══ UC KULLANIM YERI ALAN BAZLI PINLENIR ══════════════════════════════════
+            // Sayim yerine SITE BAZLI assert: "kac gecis" bedava dogru olabilir, "hangi
+            // cagri hangi adi aliyor" olamaz (MK-6 dersi).
+            kaynak.Should().Contain("InitialCatalog = _dbName",
+                "BAGLANMA cozulmus adi kullanmali");
+            kaynak.Should().Contain("CollationIleOlusturAsync(MasterConn, _dbName,",
+                "YARATMA cozulmus adi kullanmali - onceki hal burada ham adi kullaniyordu");
+            kaynak.Should().Contain("DROP DATABASE [{_dbName}]",
+                "DUSURME cozulmus adi kullanmali - onceki hal burada da ham adi kullaniyordu");
+        }
+
         // CSP meta etiketinin `content` degerini cikarir.
         private static string CspMetaIcerigi(string html)
         {
