@@ -809,6 +809,19 @@ ham yanit dokumlerinin DISKE yazilmasi kapsanmadi -> dokuz dosyada ciplak canli 
 Ajanin KENDI kapanis iddiasi "jetonlar ilk 8 karaktere kirpildi" diyordu ve **CURUK** cikti
 — turun TEK curuyen kalemi bir bulgu degil, bir KAPANIS IDDIASIYDI.
 
+## Iki ders — GUVENLIK-FIX-2b (48·GUVENLIK-FIX-2b · CC HATALARI)
+
+**Assert KUSUR SINIFINI pinler, ESKI LITERAL BICIMINI degil (5. vaka).** Gerekce OLCULDU:
+`Contain("res.status === 429")` bir `4290` mutasyonuyla BEDAVA saglandi (ust-dizge), ve
+ankrajsiz `MatchRegex(...400...404...422...)` kosula `|| kod === 429` EKLENINCE kirilmadi -
+yani `[PARA]` kusurunun TAM KENDISI pinden geciyordu. Capa `\b` sinir kosulu alir; kapali
+liste SAYIYLA pinlenir (`Sayim(govde,"kod ===") == 3`).
+
+**Harness fetch katmani SW kaydini engeller; service worker kabulu GERCEK CHROME ister.**
+Gerekce OLCULDU: var olmayan bir yol da gercek dosya da BIREBIR ayni "unknown error"
+veriyor - SW makinesi calissaydi var olmayan yol MIME hatasi verirdi. Bu ortamda alinan
+"SW kaydi dusuyor" gozlemi URUN KUSURU SAYILMAZ.
+
 ## Uc ders — GUVENLIK-FIX-3 (47·GUVENLIK-FIX-3 · CC HATALARI)
 
 **Tek kanalli on olcum bulgusu = SUPHE, tarife KALEM OLMAZ.** Gerekce OLCULDU: K14
@@ -889,6 +902,19 @@ musteri **169** · urun **955** · siparis **286** · adres **119** · fatura **
 Suit tabani `47·GUVENLIK-FIX-3` kapanisinda **Sql 382/382 · tam 710/713** (+59 pin;
 uc kirmizi = bilinen Docker uclusu). Ureten ifade: `dotnet test ... --filter "Category=Sql"`
 ve filtresiz.
+**GF-2b HICBIR KURGU KAYDI URETMEDI** (olculdu: `email LIKE 'gf2b%'` -> 0; olcumler ayri
+test veritabanlarinda ve tarayicida SENTETIK girdilerle yapildi, panel giris denemesi VAR
+OLMAYAN bir adresle kosuldu). MAX'lar goz turu kapanisiyla BIREBIR: musteri **171** ·
+urun **955** · siparis **286** · adres **119** · fatura **119** · `user_sessions` **356** ·
+Pending(status=0, id<=210) **35/3837**.
+Suit tabani `48·GUVENLIK-FIX-2b` kapanisinda **Sql 382/382 · tam 730/733** (+20 pin;
+uc kirmizi = bilinen Docker uclusu). Ureten ifade:
+`dotnet test Divisima-Backend.sln -c Release --filter "Category=Sql"` ve filtresiz.
+**GF-3 TABANI AD ALANI KAPALIYKEN ALINMIS (kayit):** `SemaTekKaynakTests` kosucu ad alanini
+yalniz baglanma noktasina uyguluyordu; yaratma ve dusurme HAM adi kullaniyordu. Bu yuzden
+`DIVISIMA_TEST_DB` SET edildiginde - ki MK-4b bunu ZORUNLU kilar - dort test SQL login
+hatasiyla dusuyordu ve MK-4b tabani fiilen OLCULEMIYORDU. GF-2b/F1 ile yapisal olarak
+kapatildi; **733/730 tabani ilk kez env SET edilmis turda da dogrulandi.**
 
 **TEK YAZMA - URETIM YOLUNDAN:** K2 kanitini almak icin musteri 102'nin
 (`mfix1.once@example.com`, MANTIK-FIX-1 kurgusu) sifresi **uretim yolundan** sifirlandi:
@@ -985,6 +1011,11 @@ yalniz somut gerekceyle bakilir.
 - `47·GUVENLIK-FIX-3·K11` **Zaman ekseni UTC - DAR kapsam**: `user_sessions.expires_at` · `created_at` · JWT `exp`/`nbf`; **yazan ve okuyan CIFTLER BIRLIKTE** tasinir (kismi gecis iki yonde de hasar verir). **`lockout_end` KAPSAM DISI ve YEREL kalir** (uc okuyucu, ucuncusu `SellerAuthManager` ve DOKUNULMAZ); `password_reset_expiry` ve `two_factor_code_expiry` de yerel. BILINCLI KABUL: login yaniti `expiration` artik `Z` bicimli.
 - `47·GUVENLIK-FIX-3·K12` **Replay olcutu = e-posta + sepet kalemleri (iptal kalemleri DISLANIR) + KANONIK kupon**, `NULL == ""` normalizasyonu `KanonikKod`un dogal davranisindan turer. Eslesmezse **400 sizintisiz** (varlik da `order_number` da sizmaz). Migration GEREKMEDI.
 - `47·GUVENLIK-FIX-3·F1` **Musteriye donen `order_status_history.note` SABIT METINDIR**: ham `ex.Message` YAZILMAZ (timeline ucu o notu musteriye donuyor ve mail istisnalari ALICI ADRESINI tasir; "admin bildirimi" dalinda o adres ADMINDIR). Teknik ayrinti YALNIZ maskeli log'da; "KRITIK:" oneki korunur.
+- `48·GUVENLIK-FIX-2b·K1` **Refresh kilidindeki kiyas tabani BELLEK jetonudur** (`taze !== this._accessToken`), storage DEGIL: 401'i doguran jeton `_request`in Authorization basligina koydugudur. Kilit yolunda depo TEK KEZ okunur. Ikinci savunma `storage` olayi dinleyicisi - YALNIZ bellegi esitler, `setAccessToken` CAGIRMAZ (o, GF-2a/K8 cikis kancasini her sekmede yeniden ateslerdi). Panel ve vitrin ayni anahtari paylastigi icin panelde cikis vitrinin bellek jetonunu da dusurur - DURUST esitleme, BILINEN.
+- `48·GUVENLIK-FIX-2b·K3` **429 AYRI HATA SINIFI** (`DivisimaRateLimitError`), `status`/`data` KORUNUR. Arama 429'u ONBELLEGE YAZMAZ (yazsa limit gectikten SONRA da bos sonuc donerdi). **Kupon YALNIZ 400/404/422'de kalkar** - 429 "gecersiz" DEGIL "simdi olmaz"tir ve GF-3/K9 kupon dogrulamayi 20/dk kovasina koydugu icin siradan gezinmede tetiklenebilir. `[PARA]`
+- `48·GUVENLIK-FIX-2b·K4` **rid YALNIZ 409'da yenilenir**; 400/5xx/ag hatasinda KORUNUR - `ReplayGuardiAsync`in 400'u yalnizca o rid ile siparis ZATEN VARKEN doner, yenilemek guard'i bosa dusurup IKINCI SIPARIS acardi `[VERI-BOZAN]`. **`sepetImzasi` GENISLETILMEZ** (uc tuketicisinin olcutu "sepet icerigi"); niyet imzasi AYRI ve sepet imzasini ICERIR: adres + kanonik kupon + bakiye + odeme yontemi (+ misafir e-postasi). Misafir yolu da niyete gore tazeler.
+- `48·GUVENLIK-FIX-2b·K2` **SW kaydi TEK NOKTADA** (`pwa-register.js` -> `/service-worker.js`); `index.html`in var olmayan `sw.js` kaydi olu koddu ve KALKTI. SW govdesi degistiginde VERSION bumplanir ve **`KAPAT` bayragi** (varsayilan false) install/activate/fetch UCUNDE DE okunur - kurulu bir SW tarayicida KALIR, depoyu geri almak tek basina yetmez.
+- `48·GUVENLIK-FIX-2b·K5` **admin CSP'de `script-src 'unsafe-inline'` YOK** (panel JS'i `admin.js`e tasindi, 35 handler `data-act` + delege dinleyici, eylem tablosu BEYAZ LISTE - `window[dataset.act]` YASAK). Vitrinde `'unsafe-hashes'` KALKTI; **vitrin `'unsafe-inline'` KABUL EDILMIS RISK, SURELI** - gerekce `embedCheckoutForm`un Iyzico CF satir ici script'i, kalici cozum launch sonrasi iframe izolasyonu. `frame-src` **SUPHELI**: vitrin meta'sinda hic yokken 3DS uctan uca surulmus ama `SecurityHeadersMiddleware:29` `frame-src https://*.iyzipay.com` tasiyor - EKLENMEDI, gercek sandbox odemesiyle kapanacak.
 
 ## Acik SUPHELI (00b-supheli.md)
 
@@ -1037,12 +1068,12 @@ BASKA KUYRUGA: A-2 -> VITRIN-KALAN 8 · F-3 -> IMPORT-FIX
 ```
 
 1. ~~GF-3 SIZINTI/YAPILANDIRMA/LIMIT~~ **KAPANDI `33cac2e`** (muhur 47)
-2. GF-2b CSP + GF-2a devri: **`embedCheckoutForm` `s.text` yeniden calistirici**
-   (D-9 KABUL EDILMIS RISK satiri "eval esdegeri dahil" diye genisler) · **`font-src`
-   allowlist'i** (Google Fonts'a SRI eklenemedigi icin) · **GF-3 devri: "400/409'da rid
-   yenile"** (`api-bridge.js:2352` rid'i YALNIZ basarida yeniliyor -> K12'nin 400'u musteriyi
-   CIKISSIZ DONGUYE sokabilir)   <- SIRADA
-3. GF-4 TEDARIK ZINCIRI
+2. ~~GF-2b FAZ 1~~ **KAPANDI `0fd3e62`** (muhur 48). **D-7 durumu: KISMEN** - admin TAM
+   (satir ici script/handler 0, `'unsafe-inline'` kalkti), vitrin `'unsafe-inline'` KABUL
+   EDILMIS RISK olarak DURUYOR. **CSP FAZ B YAPILMADI** -> ERTELENMIS-DEFTER.
+   GF-3 devrinin "400/409'da rid yenile" kalemi **OLCULEREK DEGISTI**: 400'de yenilemek
+   cift siparis kapisiydi, karar **yalniz 409** (bkz. `48·GUVENLIK-FIX-2b·K4`).
+3. GF-4 TEDARIK ZINCIRI   <- SIRADA
 6. GUVENLIK-AV-2 (dar olcum, ultracode YOK): at-rest sifreleme · 2FA/TOTP ·
    TOCTOU/ExecuteUpdateAsync · A09 · olay isleyicileri · 13 anilmayan controller
    (Comparison/Collection ham entity suphesi)
@@ -1089,6 +1120,23 @@ Taban: `Category=Sql` 378 -> **382** · tam suit 654 -> **713** (+59 pin) · uc 
    K10 yalniz YARIS PENCERESINI kapatti, semantik DEGISMEDI.
 4. **`expiration` alani artik `Z` bicimli**: `SellerLoginResponseDto` da ayni helper'dan
    beslendigi icin DOLAYLI etkilenir - Seller KODUNA dokunulmadi, DEGERIN BICIMI degisti.
+
+**GUVENLIK-FIX-2b FAZ 1 KAPANDI `0fd3e62`** (zemin a031685 · muhur `docs/muhur/48-guvenlik-fix-2b.md`) —
+K1..K5-lite; dort DUR (K4 cift siparis `[VERI-BOZAN]` · K6 nginx pini · K2 kapsam · goz1 altinci
+arguman), uc denetci, F1 (SemaTekKaynak ad alani, test-only) + F1 eki (GF-3 pini genisletildi).
+Taban: `Category=Sql` **382/382** · tam suit 713 -> **733** (+20 pin) · uc ardisik kosum BIREBIR,
+**biri `DIVISIMA_TEST_DB` SET edilmis ortamda** (MK-4b tabaninin ilk gercek olcumu).
+**KURGU: hicbir kayit uretilmedi.** IKI IDDIA CURUDU ve duzeltildi (SW "hic kosmadi" · AR sozluk).
+**CSP FAZ B YAPILMADI.**
+
+### GOZ TURU BEKLIYOR — GF-2b'den IKI KALEM
+**(1) K2 GERCEK CHROME (2 dk, uc satir):** `navigator.serviceWorker.getRegistrations()`
+uzunlugu · `caches.keys()` ciktisi · ucak modunda sayfa aciliyor mu. Gerekce: harness SW
+kaydini FETCH KATMANINDA engelliyor (var olmayan yol da gercek dosya da BIREBIR ayni
+"unknown error" veriyor) - bu ortamda alinan gozlem urun kusuru sayilamaz.
+**(2) `frame-src` SUPHELISI:** gercek sandbox odemesi. Kanit celiskili - vitrin meta'sinda
+hic yokken 3DS uctan uca surulmus, ama `SecurityHeadersMiddleware:29` `frame-src
+https://*.iyzipay.com` tasiyor.
 
 ### GOZ TURU BEKLIYOR — SEKIZ KALEM
 GF-2a'dan alti (iki sekmede tek refresh · cikis sonrasi onbellek · offline acilis ·
@@ -1173,6 +1221,12 @@ Acilmaz; yalniz HAM kalem basliklari + 00a atfi. Tam metin arsivde.
 - `00a:166` **YENI KALEM (Dalga 4 / M10-M11 eki - kullanici karari): CIKISLI KULLANICIYA DOGRUDAN
 - `00a:192` **YENI KALEM (GUVENLIK DALGASI 2 / B5 eki - kullanici karari): `failed-jobs` PII RISKI
 - `00a:200` **YENI KALEM (GUVENLIK DALGASI 2 yan gozlemi - DOKUNULMADI): `frontend/pwa/` DIZINI OLU.**
+- `48·GUVENLIK-FIX-2b` **YENI KALEM (kullanici karari): CHECKOUT FORMU IZOLE IFRAME'E
+  (`srcdoc` + kendi CSP'si) -> VITRIN `script-src` STRICT.** Bugun vitrin CSP'sinde
+  `'unsafe-inline'` KABUL EDILMIS RISK olarak duruyor; tek gerekce `embedCheckoutForm`un
+  saglayici satir ici script'ini calistirmasi. Odeme formu kendi CSP'li iframe'ine alinirsa
+  vitrin `'unsafe-inline'`siz kalabilir. **Tasarim launch SONRASI.** (CSP FAZ B bu kalemin
+  ustune kurulur; GF-2b'de YAPILMADI.)
 
 ## GUVENLIK-AV-1 kapsam girdileri
 
