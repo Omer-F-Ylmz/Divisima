@@ -20,6 +20,33 @@
 (function (global) {
   "use strict";
 
+  // ══ GF-2b / K3 - 429 AYRI HATA SINIFI ═══════════════════════════════════════════════
+  //
+  // NEDEN AYRI SINIF: 429 "istek YANLIS" demek DEGIL, "SIMDI olmaz" demektir. Cagiranlar
+  // bugun tum 4xx'i tek kovaya koyup KALICI bir olumsuz sonuca ceviriyordu:
+  //   - arama: 429 yiyen sorgu BOS SONUC olarak onbellege yaziliyor, kullaniciya
+  //     "Sonuc bulunamadi" gosteriliyordu (goz turunda olculdu);
+  //   - kupon: 429 "sunucu gecersiz dedi" sayilip GECERLI kupon sepetten kaldiriliyordu
+  //     - yani limit yiyen musteri indirimini KAYBEDIYORDU. [PARA]
+  // Ayrim TIP duzeyine tasiniyor ki cagiran "gecersiz" ile "simdi olmaz"i karistirmasin.
+  //
+  // GERIYE UYUMLU: `status` ve `data` alanlari KORUNDU - `e.status` okuyan mevcut cagri
+  // yerleri degismeden calisir. Sinif onlarin YERINE degil, USTUNE gelir.
+  class DivisimaRateLimitError extends Error {
+    constructor(message, data, retryAfter) {
+      super(message);
+      this.name = "DivisimaRateLimitError";
+      this.status = 429;
+      this.data = data;
+      // Saniye cinsinden, YOKSA null.
+      // DURUST SINIR: `Retry-After` CORS'ta safelist DISINDADIR. Vitrin ayri origin'den
+      // (5173 -> 5000) konustugu icin sunucu `Access-Control-Expose-Headers` ile acikca
+      // acmadikca burasi null doner. Uretimde nginx ikisini de ayni origin'den servis
+      // ettiginde deger GELIR. Cagiran bu yuzden null'a DAYANIKLI olmak zorundadir.
+      this.retryAfter = retryAfter;
+    }
+  }
+
   class DivisimaAPI {
     constructor(baseUrl) {
       // Açıklama: Sondaki / temizlenir
@@ -236,6 +263,16 @@
       if (!res.ok) {
         // Açıklama: Backend Result deseni {success, message} döner; hatayı fırlat
         const message = (data && data.message) ? data.message : ("İstek başarısız (" + res.status + ")");
+        // GF-2b/K3: 429 AYRI SINIF - "gecersiz" degil "simdi olmaz".
+        if (res.status === 429) {
+          let saniye = null;
+          try {
+            const ham = res.headers && res.headers.get ? res.headers.get("Retry-After") : null;
+            const n = parseInt(ham, 10);
+            if (isFinite(n) && n >= 0) saniye = n;
+          } catch (_) {}
+          throw new DivisimaRateLimitError(message, data, saniye);
+        }
         const err = new Error(message);
         err.status = res.status;
         err.data = data;
@@ -720,5 +757,8 @@
   }
 
   global.DivisimaAPI = DivisimaAPI;
+  // GF-2b/K3: cagiranin `instanceof` ile ayirt edebilmesi icin sinif da disari verilir.
+  // `e.status === 429` kontrolu de gecerli kalir - iki yol da desteklenir.
+  global.DivisimaRateLimitError = DivisimaRateLimitError;
   if (typeof module !== "undefined" && module.exports) module.exports = DivisimaAPI;
 })(typeof window !== "undefined" ? window : this);

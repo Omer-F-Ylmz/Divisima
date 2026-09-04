@@ -1114,6 +1114,33 @@
   // renderSearch/searchProducts SENKRON. Bu yüzden: sonuçları önbelleğe çek, sonra
   // renderSearch'i yeniden çalıştır. searchProducts önbelleği okur.
   var searchCache = { q: null, items: [] };
+
+  // ══ GF-2b / K3 - HIZ LIMITI ICIN AYRI DONUS DEGERI ═══════════════════════════════
+  // Bos dizi KULLANILAMAZ: "sonuc yok" ile "simdi olmaz" ayni degere duserse cagiran
+  // ikisini AYIRT EDEMEZ ve kullaniciya yanlis cumleyi kurar. Kimlik karsilastirmasiyla
+  // (===) sinandigi icin degerin icerigi onemli degil, TEKLIGI onemli.
+  var ARAMA_LIMITLI = { limitli: true };
+
+  // GF-2b/K3: hiz limiti ekrani. Yanlis olan sey yalniz metin DEGIL, EKRANIN KENDISIYDI -
+  // "Sonuc bulunamadi" bir OLGU iddiasidir ve 429'da YANLISTIR. Bu yuzden toast'in yani
+  // sira sonuc alani da degistirilir.
+  // `innerHTML` KULLANILMAZ: metin `textContent` ile yazilir, yani bu yol yeni bir
+  // enjeksiyon yuzeyi ACMAZ (GF-2a sink disiplini).
+  function aramaLimitEkrani() {
+    var mesaj = ceviri("h_rate_limit",
+      "Bu istek şu anda işleme alınamıyor. Lütfen biraz sonra tekrar dene.");
+    notify(mesaj, "err");
+    try {
+      var el = document.getElementById("searchResults");
+      if (!el) return;
+      el.textContent = "";
+      var kutu = document.createElement("div");
+      kutu.className = "search-empty";
+      kutu.textContent = mesaj;
+      el.appendChild(kutu);
+    } catch (e) {}
+  }
+
   async function fetchSearch(q) {
     try {
       var res = await api.search.products(q, { page: 1, size: 24 });
@@ -1125,6 +1152,16 @@
       searchCache = { q: q, items: items };
       return items;
     } catch (e) {
+      // ══ GF-2b / K3 - 429 ONBELLEGE YAZILMAZ ══════════════════════════════════════
+      // ONCEKI HAL: HER hata `searchCache = { q: q, items: [] }` ile BASARILI-AMA-BOS
+      // sonuc olarak onbellege yaziliyordu ve `e.status` HIC okunmuyordu. Sonuc:
+      // `searchProducts` ayni sorgu icin onbellekten BOS doner - limit GECTIKTEN SONRA
+      // bile. Yani gecici bir kesinti KALICI bir yanlis cevaba donusuyordu.
+      // Onbellege yazmamak, sonraki cizimin sunucuya YENIDEN sormasini saglar.
+      if (e && e.status === 429) {
+        console.warn("Divisima: arama hız limitine takıldı", e && e.message);
+        return ARAMA_LIMITLI;
+      }
       console.warn("Divisima: arama başarısız", e);
       searchCache = { q: q, items: [] };
       return [];
@@ -1142,10 +1179,14 @@
         var n = (q || "").trim();
         if (!n || searchCache.q === n) return orig.call(window, q);
         orig.call(window, q);                       // ara durum (boş sonuç ekranı)
-        fetchSearch(n).then(function () {
+        fetchSearch(n).then(function (sonuc) {
           // Kullanıcı yazmaya devam ettiyse eski sorgunun sonucunu ÇİZME
           var cur = document.getElementById("searchInput");
-          if (!cur || (cur.value || "").trim() === n) orig.call(window, q);
+          if (cur && (cur.value || "").trim() !== n) return;
+          // GF-2b/K3: limit yendiyse `orig` CAGRILMAZ - o, bos onbellegi okuyup
+          // "Sonuc bulunamadi" yazardi ve YANLIS bir olgu iddia ederdi.
+          if (sonuc === ARAMA_LIMITLI) { aramaLimitEkrani(); return; }
+          orig.call(window, q);
         });
       };
     }
@@ -2581,8 +2622,23 @@
         return { ulasildi: true, gecerli: !!d, veri: d };
       } catch (e) {
         var kod = Number(e && e.status) || 0;
-        // 4xx = sunucu KARAR VERDI (gecersiz). Digerleri (0/5xx) = ULASILAMADI.
-        if (kod >= 400 && kod < 500) return { ulasildi: true, gecerli: false, veri: null };
+        // ══ GF-2b / K3 - "GECERSIZ" DAR TANIMLI, GERISI "ULASILAMADI" ════════════════
+        // ONCEKI HAL: TUM 4xx "sunucu karar verdi, kupon gecersiz" sayiliyordu. 429 da
+        // bu kovaya dusuyor ve cagiran `kuponuTazele` GECERLI kuponu sepetten
+        // KALDIRIYORDU - yani hiz limitine takilan musteri indirimini KAYBEDIYORDU.
+        // GF-3/K9 arama ve kupon dogrulamayi AYNI 20/dk kovasina koydugu icin bu yol
+        // artik siradan bir gezinmede de tetiklenebiliyor. [PARA]
+        //
+        // 429 "gecersiz" DEGIL, "SIMDI olmaz"tir. `ulasildi:false` donunce cagiran
+        // hicbir sey yapmaz, imzayi sifirlar ve bir sonraki cizimde YENIDEN dener -
+        // kupon SEPETTE KALIR.
+        //
+        // Kaldirma yetkisi yalnizca sunucunun KESIN olumsuz kararlarina birakildi:
+        //   400 gecersiz istek · 404 kupon yok · 422 kural saglanmadi
+        // 401/403/409 ve 5xx de kaldirma sebebi DEGILDIR - hicbiri kuponun GECERSIZ
+        // oldugunu soylemez, yalnizca "bu istek boyle sonuclandi" der.
+        if (kod === 400 || kod === 404 || kod === 422)
+          return { ulasildi: true, gecerli: false, veri: null };
         return { ulasildi: false, gecerli: null, veri: null };
       }
     };

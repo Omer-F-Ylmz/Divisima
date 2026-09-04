@@ -165,5 +165,114 @@ namespace Divisima.IntegrationTests
             dinleyici.Should().Contain("divisima_access_token",
                 "dinleyici yalniz access token anahtarina tepki vermeli");
         }
+
+        // ══ K3 - 429 AYRI HATA SINIFI ══════════════════════════════════════════════════
+        //
+        // 429 "istek YANLIS" demek degil, "SIMDI olmaz" demektir. Istemci bu ayrimi
+        // yapmadigi icin gecici bir limit KALICI olumsuz sonuca donusuyordu.
+        [Fact]
+        public void GF2B_K3_HIZ_LIMITI_AYRI_HATA_SINIFI_ve_STATUS_GERIYE_UYUMLU()
+        {
+            var kaynak = Oku("frontend/api-client.js");
+
+            kaynak.Should().Contain("class DivisimaRateLimitError extends Error",
+                "429 icin AYRI hata sinifi bulunmali - cagiran ayrimi tip duzeyinde yapabilmeli");
+
+            var parse = MetotGovdesi(kaynak, "async _parse(res)");
+            parse.Should().Contain("res.status === 429",
+                "yanit ayristirmasi 429'u AYRI dala almali");
+            parse.Should().Contain("throw new DivisimaRateLimitError(",
+                "429 yolunda genel Error DEGIL, hiz limiti sinifi firlatilmali");
+
+            // ══ GERIYE UYUMLULUK - CIFT ANLAM KIRICI ═══════════════════════════════════
+            // Yeni sinif mevcut `e.status` okuyucularinin YERINE degil USTUNE gelir.
+            // `status` dusseydi kupon ve arama dallari 429'u 0 (=ulasilamadi) sanardi -
+            // tesadufen dogru sonuc, ama YANLIS SEBEPLE; sonraki bir degisiklikte kirilirdi.
+            kaynak.Should().Contain("this.status = 429;",
+                "sinif `status` alanini KORUMALI - mevcut e.status okuyuculari kirilmamali");
+            kaynak.Should().Contain("global.DivisimaRateLimitError = DivisimaRateLimitError;",
+                "sinif disari verilmeli ki cagiran `instanceof` ile de ayirt edebilsin");
+        }
+
+        // ══ K3/b - ARAMADA 429 ONBELLEGE YAZILMAZ ══════════════════════════════════════
+        //
+        // OLCULEN KIRIK (goz turu): arama ucu 429 aldi, ekranda "Sonuc bulunamadi" yazdi.
+        // Sebep: catch HER hatayi `{ q, items: [] }` ile BASARILI-AMA-BOS sonuc olarak
+        // onbellege yaziyordu ve `e.status` HIC okunmuyordu. Onbellek yazildigi icin limit
+        // GECTIKTEN SONRA bile ayni sorgu bos sonuc gosteriyordu.
+        [Fact]
+        public void GF2B_K3_ARAMADA_429_ONBELLEGE_YAZILMAZ()
+        {
+            var govde = KodSatirlari(MetotGovdesi(Oku("frontend/api-bridge.js"),
+                "async function fetchSearch(q)"));
+
+            var limitDali = govde.IndexOf("e.status === 429", StringComparison.Ordinal);
+            limitDali.Should().BeGreaterThan(-1, "catch 429'u AYRI dalda tanimali");
+
+            // VAKUM KIRICI: genel hata dali HALA onbellege yaziyor olmali. Bu satir
+            // kaybolsaydi asagidaki sira karsilastirmasi anlamsizlasirdi.
+            var bosYazma = govde.IndexOf("searchCache = { q: q, items: [] }", StringComparison.Ordinal);
+            bosYazma.Should().BeGreaterThan(-1,
+                "vakum kirici: genel hata dali onbellege yazmaya devam etmeli");
+
+            // ══ SIRA ONEMLI - ASIL AYIRT EDICI ════════════════════════════════════════
+            // 429 kontrolu bos onbellek yaziminden SONRA gelseydi yazma ZATEN olmus olurdu
+            // ve dal hicbir sey kurtarmazdi.
+            limitDali.Should().BeLessThan(bosYazma,
+                "429 kontrolu BOS ONBELLEK YAZIMINDAN ONCE gelmeli");
+
+            govde.Should().Contain("return ARAMA_LIMITLI;",
+                "limit dali, bos sonuctan AYIRT EDILEBILIR bir deger dondurmeli");
+            Sayim(govde, "searchCache = { q: q, items: [] }").Should().Be(1,
+                "onbellege bos sonuc YALNIZ genel hata dalinda yazilmali - ikinci yazma " +
+                "limit dalinin da onbellegi kirlettigini gosterir");
+        }
+
+        // ══ K3/c - LIMIT EKRANI "SONUC BULUNAMADI" DEMEZ ve YENI SINK ACMAZ ════════════
+        [Fact]
+        public void GF2B_K3_LIMIT_EKRANI_AYRI_CIZILIR_ve_TEXTCONTENT_KULLANIR()
+        {
+            var kaynak = Oku("frontend/api-bridge.js");
+
+            kaynak.Should().Contain("if (sonuc === ARAMA_LIMITLI) { aramaLimitEkrani(); return; }",
+                "limit yendiginde ozgun cizim CAGRILMAMALI - o, bos onbellegi okuyup " +
+                "'Sonuc bulunamadi' yazar ve YANLIS bir olgu iddia eder");
+
+            var ekran = MetotGovdesi(kaynak, "function aramaLimitEkrani()");
+            ekran.Should().Contain("ceviri(\"h_rate_limit\"",
+                "metin MEVCUT sozluk anahtarindan gelmeli - yeni anahtar EKLENMEDI");
+
+            // GF-2a SINK DISIPLINI: bu yol yeni bir enjeksiyon yuzeyi ACMAMALI.
+            Sayim(KodSatirlari(ekran), "innerHTML").Should().Be(0,
+                "limit ekrani metni textContent ile yazmali - innerHTML yeni sink acar");
+        }
+
+        // ══ K3/d - KUPON: 429 "GECERSIZ" SAYILMAZ [PARA] ═══════════════════════════════
+        //
+        // OLCULEN KIRIK: `kod >= 400 && kod < 500` dali TUM 4xx'i "sunucu karar verdi,
+        // kupon gecersiz" sayiyordu. 429 da bu kovaya dusuyor ve cagiran `kuponuTazele`
+        // GECERLI kuponu sepetten KALDIRIYORDU - hiz limitine takilan musteri indirimini
+        // KAYBEDIYORDU. GF-3/K9 arama ile kupon dogrulamayi AYNI 20/dk kovasina koydugu
+        // icin bu yol siradan bir gezinmede de tetiklenebiliyor.
+        [Fact]
+        public void GF2B_K3_KUPON_429DA_SEPETTE_KALIR()
+        {
+            var govde = KodSatirlari(MetotGovdesi(Oku("frontend/api-bridge.js"),
+                "window.divisimaKuponDurumu = async function"));
+
+            govde.Should().Contain("kod === 400 || kod === 404 || kod === 422",
+                "kupon KALDIRMA yetkisi yalnizca sunucunun KESIN olumsuz kararlarinda olmali");
+
+            // ══ ASIL AYIRT EDICI - GENIS KOVA GERI GELMEMELI ══════════════════════════
+            // Bu NEG assert yorumsuz kaynak uzerinde kosar (capa kirlenmesi yapisal cozumu).
+            govde.Should().NotContain("kod < 500",
+                "genis 4xx kovasi kaldirma yetkisini 429'a da verirdi - GECERLI kupon " +
+                "hiz limiti yuzunden sepetten duserdi [PARA]");
+
+            // VAKUM KIRICI: "ulasilamadi" dali gercekten var olmali; yoksa yukaridaki iki
+            // assert govde bosalmis halde de yesil kalabilirdi.
+            govde.Should().Contain("ulasildi: false",
+                "vakum kirici: 429 ve digerleri icin ULASILAMADI dali bulunmali");
+        }
     }
 }
