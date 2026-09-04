@@ -3,7 +3,7 @@
 # digest olmadan ayni Dockerfile zaman icinde BASKA bir taban imaji cozer (reproducible
 # build ve tedarik zinciri butunlugu icin). Dependabot "docker" ekosistemi bu dosyayi
 # izliyor (.github/dependabot.yml), yani digest yamalari PR olarak gelir.
-FROM mcr.microsoft.com/dotnet/sdk:8.0@sha256:bb32ba3ba3ea36e38572d9d8db76fa15f7cbf722f3f886e06bca6d528bd4fba8 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:e1ffd2a92ae84c1291bc1b6887501f8af98e6331e7af6d4c8d37168c5e87a64c AS build
 WORKDIR /src
 COPY ["Divisima-Backend.sln", "./"]
 COPY ["Divisima.Core/Divisima.Core.csproj", "Divisima.Core/"]
@@ -16,7 +16,7 @@ COPY . .
 RUN dotnet publish "Divisima.API/Divisima.API.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
 # Açıklayıcı yorum: Runtime - küçük image, non-root kullanıcı (ele geçirilse bile sınırlı yetki)
-FROM mcr.microsoft.com/dotnet/aspnet:8.0@sha256:787c228ea85457bec43c8b084e6ac360b26ea43b5c2fcbe861f721f2e8670dd3 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:a4556ed033fa96f984bb7a8d348851cb2d36b1281dd2420070045f664fbb5f94 AS final
 WORKDIR /app
 # Açıklayıcı yorum: HEALTHCHECK curl kullanıyor - aspnet imajında curl YOK, kur (root iken, minimal + cache temizle)
 RUN apt-get update \
