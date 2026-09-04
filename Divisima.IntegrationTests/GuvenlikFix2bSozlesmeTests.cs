@@ -345,5 +345,80 @@ namespace Divisima.IntegrationTests
             Sayim(KodSatirlari(kaynak), "checkoutIstekIdNiyeteGoreTazele();").Should().Be(2,
                 "uye ve misafir gonderimlerinin IKISI de rid'i niyete gore tazelemeli");
         }
+
+        // ══ K2 - SERVICE WORKER KAYDI TEK NOKTADA ══════════════════════════════════════
+        //
+        // OLCULDU: `index.html` var olmayan bir 'sw.js'i kaydediyordu. `frontend/sw.js`
+        // HICBIR commit'te YOK (ilk commit df91863'ten beri olu kod); statik sunucu SPA
+        // fallback'i `text/html` dondurdugu icin Chrome kaydi REDDEDIYOR ve
+        // `.catch(function(){})` hatayi yutuyordu. Dogru kayit `pwa-register.js`teydi -
+        // yani iki kayit vardi, biri hep dusuyordu.
+        [Fact]
+        public void GF2B_K2_SW_KAYDI_TEK_NOKTADA_ve_DOGRU_YOLDA()
+        {
+            var index = KodSatirlari(Oku("frontend/index.html"));
+            Sayim(index, "serviceWorker.register").Should().Be(0,
+                "index.html ARTIK service worker kaydetmemeli - kayit tek noktada, " +
+                "pwa-register.js icinde");
+            Sayim(index, "'sw.js'").Should().Be(0,
+                "var olmayan 'sw.js' yolu kaynakta KALMAMALI");
+
+            var pwa = KodSatirlari(Oku("frontend/pwa-register.js"));
+            Sayim(pwa, "serviceWorker.register").Should().Be(1,
+                "kayit TEK olmali - ikinci kopya yeniden dogar ve biri hep duser");
+            pwa.Should().Contain("register(\"/service-worker.js\")",
+                "kayit GERCEKTEN var olan dosyayi, KOK YOLLA gostermeli");
+
+            // VAKUM KIRICI: pinlenen dosya gercekten servis edilen SW olmali.
+            Oku("frontend/service-worker.js").Should().NotBeNullOrWhiteSpace(
+                "vakum kirici: kaydedilen dosya depoda bulunmali");
+        }
+
+        // ══ K2/b - GERI DONUS KAPISI (KILL SWITCH) ═════════════════════════════════════
+        //
+        // SW bu dalgaya kadar URETIMDE HIC KOSMADI; K2 ile ilk kez gercek kullanicilarda
+        // calisacak ve GF-2a/K8'in kararlari da ilk kez uretimde surulecek. Onbellekli
+        // bir SW yanlis davranirsa kullanicinin tarayicisinda KALIR ve yeni dagitim ona
+        // ULASAMAYABILIR - depoyu geri almak TEK BASINA yetmez. Bu yuzden dagitimla
+        // calisan bir geri donus kapisi ZORUNLU.
+        [Fact]
+        public void GF2B_K2_KILL_SWITCH_VARSAYILAN_KAPALI_ve_UC_OLAYDA_DA_OKUNUR()
+        {
+            var sw = Oku("frontend/service-worker.js");
+            var kod = KodSatirlari(sw);
+
+            kod.Should().Contain("const KAPAT = false;",
+                "geri donus bayragi bulunmali ve VARSAYILAN olarak KAPALI olmali - " +
+                "yanlislikla true kalirsa SW hicbir kullanicida calismaz");
+
+            // ══ UC OLAY DA AYNI KARARI GORMELI ════════════════════════════════════════
+            // Biri atlanirsa YARIM DURUM olusur: orn. `fetch` bayragi gormezse, kendini
+            // silmis bir SW hala istekleri yakalamaya devam eder.
+            foreach (var olay in new[] { "install", "activate", "fetch" })
+            {
+                var govde = MetotGovdesi(kod, "addEventListener(\"" + olay + "\"");
+                govde.Should().Contain("KAPAT",
+                    $"'{olay}' olayi geri donus bayragini OKUMALI - okumayan olay yarim " +
+                    "durum uretir");
+            }
+
+            // Kapali dalda GERCEKTEN geri donus yapilmali (vakum kirici + cift anlam).
+            var activate = MetotGovdesi(kod, "addEventListener(\"activate\"");
+            activate.Should().Contain("self.registration.unregister()",
+                "kapali dal SW kaydini SILMELI - yalniz onbellek bosaltmak yetmez");
+            activate.Should().Contain("keys.map((k) => caches.delete(k))",
+                "kapali dal TUM kovalari suzgecsiz bosaltmali - amac geri donus, koruma degil");
+
+            // ══ SURUM BUMPI - K2 BIR KEZLIK KANITI ════════════════════════════════════
+            // SW govdesi bu dalgada DEGISTI; CACHE adlari VERSION'dan turedigi icin surum
+            // bumplanmazsa `activate` eski kovalari silmez ve degisiklik kullaniciya gec
+            // ulasir. Onceki dalganin degeri adiyla anilir ki bump ATLANAMASIN.
+            kod.Should().NotContain("VERSION = \"2026-09-03-gf2a\"",
+                "SW govdesi degistiginde VERSION da bumplanmali - GF-2a degeri kalmamali");
+            kod.Should().Contain("const CACHE = \"divisima-shell-\" + VERSION;",
+                "kabuk kovasi surumden turemeli");
+            kod.Should().Contain("const API_CACHE = \"divisima-api-\" + VERSION;",
+                "API kovasi surumden turemeli - GF-2a/K8'in iki kova karari korunuyor");
+        }
     }
 }

@@ -37,7 +37,26 @@
 // Bu depoda derleme adımı yok (statik dosyalar olduğu gibi sunuluyor), bu yüzden sürüm elle
 // bumplanan bir sabit. Dağıtım otomasyonu geldiğinde buraya commit SHA'sı yazılmalı; bump
 // unutulursa (a) ayağı devre dışı kalır ama (b) ayağı sayesinde düzeltmeler yine ulaşır.
-const VERSION = "2026-09-03-gf2a";
+const VERSION = "2026-09-04-gf2b";
+
+// ══ GF-2b / K2 - GERI DONUS KAPISI (KILL SWITCH) ══════════════════════════════════════
+//
+// NEDEN BU DALGADA GEREKTI: service worker URETIMDE BUGUNE KADAR HIC KOSMADI.
+// `index.html` var olmayan bir 'sw.js'i kaydetmeye calisiyordu (dosya HICBIR commit'te
+// yok, ilk commit'ten beri olu kod) ve kayit sessizce dusuyordu. K2 kaydi tek dogru
+// noktaya indirdi - yani SW ILK KEZ gercek kullanicilarda calisacak, ve onunla birlikte
+// GF-2a/K8'in kararlari (iki kova, /api network-only, cikista API kovasi temizligi) de
+// ilk kez uretimde surulecek.
+//
+// RISK: onbellekli bir SW yanlis davranirsa kullanicinin tarayicisinda KALIR ve yeni
+// dagitim ona ULASAMAYABILIR. Bu yuzden dagitimla geri alinabilen bir kapi gerekir -
+// depoyu geri almak TEK BASINA yetmez, cunku kurulu SW zaten kullanicidadir.
+//
+// KULLANIMI: bu bayrak `true` yapilip dosya dagitilir. Kurulan her SW kendini SILER ve
+// TUM kovalari bosaltir; sayfa bir sonraki yuklemede tamamen SW'siz calisir.
+// TEPE DUZEYDE okunmasi BILINCLI: `install`, `activate` ve `fetch` AYNI karari gorur,
+// yani yarim durum (kabugu silmis ama istekleri hala yakalayan SW) olusamaz.
+const KAPAT = false;
 // ══ GF-2a / K8 (D-6) - IKI KOVA ═══════════════════════════════════════════════════════
 //
 // OLCULEN ONCE-DURUM: TEK kova vardi ve `/api/` yanitlari UYGULAMA KABUGUYLA AYNI kutuya
@@ -57,12 +76,29 @@ const SHELL = ["/", "/index.html", "/manifest.json", "/api-client.js", "/api-bri
 
 // Kurulum: kabuğu önbelleğe al, sıraya girmeden hemen devral
 self.addEventListener("install", (e) => {
+  // GF-2b/K2: kapali moddayken kabuk ONBELLEGE ALINMAZ - dogrudan devral ve `activate`te
+  // kendini sil. Kurulum sirasinda `addAll` yapilsaydi silinecek seyi once yazmis olurduk.
+  if (KAPAT) { e.waitUntil(self.skipWaiting()); return; }
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });
 
 // Aktivasyon: BU sürüm dışındaki TÜM önbellekleri sil, açık sekmeleri hemen devral.
 // CACHE adı artık VERSION ile değiştiği için bu satır gerçekten iş yapar.
 self.addEventListener("activate", (e) => {
+  // ══ GF-2b / K2 - KAPALI MOD: KENDINI SIL, TUM KOVALARI BOSALT ═══════════════════════
+  // Suzgec YOK: normal dalda `k !== CACHE && k !== API_CACHE` ile SECEREK siliniyor,
+  // burada AYRIM YAPILMADAN hepsi siliniyor - amac geri donus, koruma degil.
+  // `unregister()` KOVALARDAN SONRA cagrilir: ters sirada olsaydi kayit silindikten
+  // sonra silme sozunun tamamlanacagi GARANTI olmazdi.
+  if (KAPAT) {
+    e.waitUntil(
+      caches.keys()
+        .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+        .then(() => self.registration.unregister())
+        .then(() => self.clients.claim())
+    );
+    return;
+  }
   e.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k !== API_CACHE).map((k) => caches.delete(k))))
@@ -78,6 +114,9 @@ function kodTasiyorMu(request, url) {
 }
 
 self.addEventListener("fetch", (e) => {
+  // GF-2b/K2: kapali moddayken HICBIR istege karisilmaz - `respondWith` cagrilmadigi
+  // icin tarayici istegi dogrudan aga goturur, yani sayfa SW YOKMUS gibi calisir.
+  if (KAPAT) return;
   const url = new URL(e.request.url);
   if (e.request.method !== "GET") return; // yalnız GET önbelleklenir
 

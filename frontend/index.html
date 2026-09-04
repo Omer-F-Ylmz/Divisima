@@ -3286,7 +3286,11 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'&&panel.class
   try{var mb=new Blob([JSON.stringify(manifest)],{type:'application/manifest+json'});var ml=document.createElement('link');ml.rel='manifest';ml.href=URL.createObjectURL(mb);document.head.appendChild(ml);
 try{if(/^https?:/.test(location.protocol)){var _cl=document.createElement('link');_cl.rel='canonical';_cl.href=location.origin+location.pathname;document.head.appendChild(_cl);}}catch(e){}}catch(e){}
   if(iconUrl){try{var ai=document.createElement('link');ai.rel='apple-touch-icon';ai.href=iconUrl;document.head.appendChild(ai);var fv=document.createElement('link');fv.rel='icon';fv.type='image/svg+xml';fv.href=iconUrl;document.head.appendChild(fv);}catch(e){}}
-  if('serviceWorker' in navigator&&location.protocol!=='file:'){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}
+  // GF-2b/K2: BURADAKI service worker kaydi KALDIRILDI. Var olmayan bir 'sw.js'i
+  // kaydediyordu (frontend/sw.js HICBIR commit'te yok - ilk commit df91863'ten beri
+  // olu kod) ve statik sunucu SPA fallback'i text/html dondurdugu icin Chrome kaydi
+  // REDDEDIYORDU; `.catch(function(){})` hatayi yutuyordu. Dogru kayit TEK YERDE:
+  // pwa-register.js:12 -> '/service-worker.js'.
   var dp=null,pill=document.getElementById('pwaPill');
   window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();dp=e;try{if(sessionStorage.getItem('dvs_pwa_off')==='1')return;}catch(_e){}if(pill)setTimeout(function(){pill.classList.add('on');},2600);});
   var ib=document.getElementById('pwaInstall');if(ib)ib.addEventListener('click',function(){if(!dp)return;dp.prompt();dp.userChoice.then(function(){dp=null;if(pill)pill.classList.remove('on');});});
