@@ -143,7 +143,14 @@ jobs:
           fi
           echo "KAPI GEÇTİ - kalan advisory'lerin tamamı açık istisna listesinde."
 
-      - name: Kullanımdan kalkmış paket kontrolü
+      # GF-4/DUR-3: "|| true" BILINCLI OLARAK KALIYOR ve maskeleme YAPMIYOR.
+      # OLCULDU: "dotnet list package --deprecated" bulgu VARKEN de cikis kodu 0 dondurur
+      # (ayni sey --vulnerable icin de gecerli). Yani bu adim "|| true" olmadan da bulgu
+      # yuzunden ASLA kirilmazdi; kaldirmak, olmayan bir kapiyi VAR SANDIRIRDI. "|| true"
+      # burada yalnizca komutun KENDISININ (ag/restore) hatasini yutar ve adimi bilgi
+      # amacli tutar. GERCEK kapi yukaridaki "Açık bağımlılık kapısı" adimidir: o, cikis
+      # koduna degil CIKTI METNINE + advisory-id allowlist'ine bakar ve exit 1 verir.
+      - name: Kullanımdan kalkmış paket kontrolü (BILGI AMACLI - kapi DEGIL)
         run: dotnet list Divisima-Backend.sln package --deprecated 2>&1 | tee deprecated.txt || true
 
       # ══ GF-4/K6 - VENDOR BUTUNLUK KAPISI ══════════════════════════════════════════════
