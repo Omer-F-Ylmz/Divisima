@@ -625,15 +625,33 @@ namespace Divisima.IntegrationTests
                 // "siyirici dizge literalini kapsamaz; guncel maruziyet 0 ama TESADUF".
                 // Yapisal cozum: tarayiciyi kapsamdan CIKAR (o bir test dosyasi, DB acmaz).
                 if (Path.GetFileName(yol) == "GuvenlikFix3SizintiSozlesmeTests.cs") continue;
+                // GF-2b/F1: ayni gerekce ikinci bir dosya icin de gecerli oldu. O dosya bu
+                // taramanin desenlerini DIZGE LITERALI olarak tasiyor (F1'i pinliyor) ve
+                // hicbir veritabani ACMIYOR - kapsamda kalsaydi kendi desenlerini "ihlal"
+                // sayardi. Disarida birakmak YAPISAL cozum, tesadufe birakilmis degil.
+                if (Path.GetFileName(yol) == "GuvenlikFix2bSozlesmeTests.cs") continue;
 
                 var k = KodSatirlari(File.ReadAllText(yol));
                 sarilmis += Sayim(k, "InitialCatalog = TestDbAdi.Cozumle(");
+
+                // ══ GF-2b / F1 - COZUM ALAN TANIMINA DA CIKABILIR ════════════════════════
+                // ILK YAZIM sarmalamanin YALNIZ `InitialCatalog` satirinda olabilecegini
+                // varsayiyordu. F1'de olculdu ki bu VARSAYIM DAR: `SemaTekKaynakTests`
+                // veritabanini YARATIYOR ve DUSURUYOR da, ve o iki yer sarmalanmamisti -
+                // yani "InitialCatalog sarili" olmak TEK BASINA yetmiyordu (dort test
+                // DIVISIMA_TEST_DB set edilince SQL login hatasiyla dusuyordu).
+                // Cozum adin TANIMINA tasinirsa UC kullanim yerini birden kapsar; bu
+                // KACIS DEGIL, DAHA GUCLU bir sarmalamadir. Tarama artik onu da taniyor.
+                var adTanimdaSarilmis = Sayim(k, "=> TestDbAdi.Cozumle(") > 0;
+                if (adTanimdaSarilmis) sarilmis++;
+
                 // "master" BILINCLI olarak DISARIDA - sunucu duzeyi baglanti, sinif DB'si degil.
                 foreach (var desen in new[]
                 {
                     "InitialCatalog = DbName }", "InitialCatalog = _dbName }", "InitialCatalog = DatabaseName }",
                 })
-                    if (Sayim(k, desen) > 0) sarilmamis.Add(Path.GetFileName(yol) + " :: " + desen);
+                    if (!adTanimdaSarilmis && Sayim(k, desen) > 0)
+                        sarilmamis.Add(Path.GetFileName(yol) + " :: " + desen);
             }
 
             sarilmis.Should().BeGreaterThan(40,
