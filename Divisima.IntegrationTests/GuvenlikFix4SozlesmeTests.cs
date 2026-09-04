@@ -177,5 +177,79 @@ namespace Divisima.IntegrationTests
                 Govde(wf).Should().Contain("dotnet restore Divisima-Backend.sln --locked-mode",
                     $"{wf} restore adimi kilitli grafi dogrulamali");
         }
+
+        [Fact]
+        public void K7_NuGet_Denetimi_GECISLI_PAKETLERI_DE_KAPSIYOR()
+        {
+            // Varsayilan "direct" YALNIZ dogrudan basvurulari tarar. Deger ACIKCA
+            // yazilmalidir: varsayilan SDK surumune baglidir ve yerel (SDK 9) ile CI
+            // (SDK 8) arasinda sessizce ayrisabilir.
+            Govde("Directory.Build.props")
+                .Should().Contain("<NuGetAuditMode>all</NuGetAuditMode>",
+                    "NuGet denetimi gecisli paketleri de kapsamali");
+        }
+
+        // ── Y8: SECURITY.md'DEKI ESLEME SAYISI KAYNAKTAN OLCULUR ──────────────────────
+        //
+        // SECURITY.md'nin AutoMapper kabul-edilen-risk gerekcesi "istemci girdisinden
+        // entity'ye esleme yalniz N noktada" diyor. Bu sayi belgeye ELLE yazildigi surece
+        // BAYATLAR - nitekim bayatlamisti (belge 7 diyordu, gercek 10; Address ve
+        // Category'nin GUNCELLEME yollari sayilmamisti).
+        //
+        // ESLESME BICIMI KUSURU (CLAUDE.md B6 / A grubu): esleme IKI BICIMDE yaziliyor -
+        // jenerik `Map<Entity>(dto)` (ekleme) ve jenerik OLMAYAN `Map(dto, entity)`
+        // (guncelleme). Tek capa kullanan her sayim guncelleme yollarini KACIRIR; belgedeki
+        // 7 tam olarak boyle olusmustu. Pin BU YUZDEN iki bicimi de sayar.
+        private const int EslemeNoktasiSayisi = 10;
+
+        private static string[] BussinessKaynaklari()
+            => Directory.GetFiles(Path.Combine(KokDizin.Value, "Divisima.Bussiness"), "*.cs",
+                                  SearchOption.AllDirectories);
+
+        [Fact]
+        public void Y8_Istemci_Girdisinden_Entitye_ESLEME_NOKTASI_SAYISI_KAYNAKTAN()
+        {
+            var ekleme = 0;
+            var guncelleme = 0;
+
+            foreach (var dosya in BussinessKaynaklari())
+            {
+                // Yorumlar SOYULUR: `.Map(dto, product)` dizgesi bir validator'in YORUM
+                // satirinda da geciyor; sayilsaydi sonuc 11 cikardi.
+                var govde = YorumsuzSatir(File.ReadAllText(dosya), "//");
+
+                // Jenerik bicim: hedef tipi Dto/Response OLMAYANLAR entity hedeflidir.
+                // (Olculdu: 25 gecisin 20'si *ResponseDto / List<*ResponseDto> - cikis yonu.)
+                ekleme += Regex.Matches(govde, @"_mapper\.Map<([^>]+)>")
+                    .Cast<Match>()
+                    .Count(m => !m.Groups[1].Value.Contains("Dto", StringComparison.Ordinal)
+                             && !m.Groups[1].Value.StartsWith("List<", StringComparison.Ordinal));
+
+                // Jenerik OLMAYAN bicim: var olan entity'nin USTUNE yazan guncelleme yolu.
+                guncelleme += Regex.Matches(govde, @"_mapper\.Map\([^<]").Count;
+            }
+
+            (ekleme + guncelleme).Should().Be(EslemeNoktasiSayisi,
+                "esleme yuzeyi degistiyse SECURITY.md'deki kabul-edilen-risk gerekcesi de " +
+                "guncellenmelidir (bolum 11, AutoMapper CVE-2026-32933)");
+
+            // Belgedeki sayi ile kaynaktaki sayi AYNI olmali.
+            Oku("SECURITY.md").Should().Contain($"yalnız {EslemeNoktasiSayisi} noktada",
+                "SECURITY.md'deki sayi kaynaktan olculen sayiyla AYNI olmali");
+        }
+
+        [Fact]
+        public void Y8_ProjectTo_KULLANILMIYOR_iddiasi_HALA_DOGRU()
+        {
+            // SECURITY.md'nin ILK kaniti bu; ProjectTo eklenirse maruziyet analizi
+            // COKER (IQueryable uzerinde derin graf kurulabilir).
+            var projeler = new[] { "Divisima.Bussiness", "Divisima.Dal", "Divisima.API" };
+            var toplam = projeler
+                .SelectMany(p => Directory.GetFiles(Path.Combine(KokDizin.Value, p), "*.cs",
+                                                    SearchOption.AllDirectories))
+                .Sum(f => Sayim(YorumsuzSatir(File.ReadAllText(f), "//"), "ProjectTo"));
+
+            toplam.Should().Be(0, "SECURITY.md 'ProjectTo kullanilmiyor - sifir eslesme' diyor");
+        }
     }
 }

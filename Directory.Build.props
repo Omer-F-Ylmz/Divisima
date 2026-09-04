@@ -21,5 +21,16 @@
          duz yazildi; bir kez bozuk XML uretildi ve "dotnet restore" buna ragmen
          exit 0 verdi, hatayi yalniz "msbuild -getProperty" probu gosterdi. -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- GF-4/K7 - NuGet denetimi GECISLI paketleri de kapsar. Varsayilan "direct" YALNIZ
+         dogrudan basvurulari tarar; oysa bu cozumdeki acik paketlerin cogu GECISLIDIR
+         (olculdu: SSH.NET, System.Net.Http, System.Text.RegularExpressions dogrudan
+         basvurulmuyor). Deger ACIKCA yaziliyor cunku varsayilan SDK surumune baglidir ve
+         yerel (SDK 9) ile CI (SDK 8) arasinda sessizce ayrisabilir - olculdu, bugun ikisi
+         de "direct".
+         UYARI SEVIYESI, HATA DEGIL: depoda -warnaserror / TreatWarningsAsErrors YOK
+         (olculdu), dolayisiyla NU1901-NU1904 build'i KIRMAZ. Kapi gorevini security.yml'
+         daki dependency-scan (advisory-id allowlist'li) gormeye devam eder; burasi
+         GORUNURLUK saglar. -->
+    <NuGetAuditMode>all</NuGetAuditMode>
   </PropertyGroup>
 </Project>

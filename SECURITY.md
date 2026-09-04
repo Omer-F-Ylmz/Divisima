@@ -122,11 +122,28 @@ yakalanamadığı için tek bir istek değil **tüm süreç** ölür (DoS).
 
 **Neden maruz DEĞİLİZ (kanıtlar):**
 1. **`ProjectTo` kullanılmıyor** — tüm çözümde sıfır eşleşme.
-2. **İstemci girdisinden entity'ye eşleme yalnız 7 noktada** (Address, Category, Collection,
-   Coupon ×2, Product ×2) ve bu isteklerin DTO'ları **düz**: en derini
+2. **İstemci girdisinden entity'ye eşleme yalnız 10 noktada** — Address ×2, Category ×2,
+   Collection ×2, Coupon ×2, Product ×2 (her biri için bir ekleme + bir güncelleme yolu)
+   ve bu isteklerin DTO'ları **düz**: en derini
    `ProductAddRequestDto.stocks : List<ProductStockDto>`, `ProductStockDto` ise yalnız
    `string` + `int` içerir. İstemci girdisinden ulaşılabilen azami graf derinliği **2**.
    Hiçbir istek DTO'sunda kendine referans veya döngü yok - tip grafiği sonlu ve döngüsüz.
+
+   > **Üreten ifade (bu sayı ezberden yazılmaz).** Eşleme İKİ AYRI BİÇİMDE yazılıyor ve
+   > tek bir çapa ikisini birden yakalamaz:
+   > ```
+   > # ekleme yolları  - jenerik biçim, hedefi ENTITY olanlar (5)
+   > grep -rnE '_mapper\.Map<(Address|Category|Collection|Coupon|Product)>' --include=*.cs Divisima.Bussiness
+   > # güncelleme yolları - jenerik OLMAYAN biçim (5; 6. eşleşme bir YORUM satırıdır)
+   > grep -rnE '_mapper\.Map\([^<]' --include=*.cs Divisima.Bussiness
+   > # negatif kontrol
+   > grep -rc 'ProjectTo' --include=*.cs Divisima.Bussiness Divisima.Dal Divisima.API   # -> 0
+   > ```
+   > Ölçüm: `_mapper.Map<` toplam 25 geçişin 20'si `*ResponseDto`/`List<*ResponseDto>`
+   > hedefler (çıkış yönü, istemci girdisi DEĞİL); ENTITY hedefli olan 5'tir.
+   > **Bu belge daha önce 7 diyordu**: yalnız jenerik biçim sayılmış, Address ve Category'nin
+   > güncelleme yolları atlanmıştı. Sayı `GuvenlikFix4SozlesmeTests` ile pinlidir - eşleme
+   > yüzeyi değişirse test kırmızı verir ve bu paragraf güncellenmeden geçilemez.
 3. **JSON bağlama derinlik sınırı**: özel `MaxDepth` ayarı yok, yani System.Text.Json
    varsayılanı (64) geçerli. 25.000 seviyelik bir gövde AutoMapper'a ULAŞMADAN,
    deserialization aşamasında reddedilir.
