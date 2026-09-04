@@ -271,8 +271,24 @@ namespace Divisima.IntegrationTests
             govde.Should().MatchRegex(@"kod === 400\b \|\| kod === 404\b \|\| kod === 422\b",
                 "kupon KALDIRMA yetkisi yalnizca sunucunun KESIN olumsuz kararlarinda olmali");
 
-            // ══ ASIL AYIRT EDICI - GENIS KOVA GERI GELMEMELI ══════════════════════════
-            // Bu NEG assert yorumsuz kaynak uzerinde kosar (capa kirlenmesi yapisal cozumu).
+            // ══ ASIL AYIRT EDICI - LISTE KAPALI OLMALI (L3 DENETCISI BULDU) ═══════════
+            // ILK YAZIM YETMIYORDU: yukaridaki `MatchRegex` ANKRAJSIZ, yani kosula
+            // `|| kod === 429` EKLENDIGINDE mutasyonlu ifadenin ONEKI hala esliyor ve pin
+            // YESIL kaliyordu. Asagidaki NEG assert de yalniz ESKI bicimi (`kod < 500`)
+            // yasakliyordu - acik bir `|| kod === 429` ETRAFINDAN DOLASIYORDU.
+            // Yani pin "uc kod VAR" diyordu, "DORDUNCU YOK" DEMIYORDU. Bu, CLAUDE.md B6'daki
+            // "assert ESKI LITERAL BICIMI ariyor, KUSUR SINIFINI degil" ailesinin 5. vakasi.
+            //
+            // KAPATMA: kod sayisi PINLENIYOR. Dorduncu bir kod eklenirse sayim 4 olur ve pin
+            // BICIMDEN BAGIMSIZ olarak kirilir.
+            Sayim(govde, "kod ===").Should().Be(3,
+                "kaldirma listesi KAPALI olmali - dorduncu bir durum kodu eklenirse " +
+                "(orn. 429) GECERLI kupon yeniden sepetten duserdi [PARA]");
+            govde.Should().NotContain("429",
+                "429 bu fonksiyonun KOD dalinda HIC gecmemeli - gectigi an bir karar " +
+                "dalina baglanmis demektir");
+
+            // Eski genis kova da ayrica yasak (iki bicim de kapali).
             govde.Should().NotContain("kod < 500",
                 "genis 4xx kovasi kaldirma yetkisini 429'a da verirdi - GECERLI kupon " +
                 "hiz limiti yuzunden sepetten duserdi [PARA]");
