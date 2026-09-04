@@ -229,14 +229,34 @@ namespace Divisima.IntegrationTests
         [Fact]
         public async Task RateLimit_429_ORNEKLEME_FARKLI_ip_AYRI_satir_yazar()
         {
-            // VAKUM KIRICI: yukaridaki pin "hep tek satir yazar" ile de yesil kalirdi.
-            // Ornekleme anahtari IP tasidigi icin BASKA bir IP AYRI satir uretmeli.
-            var (olay1, _) = await RedOlcAsync("/api/auth/login", ip: "203.0.113.7");
-            var (olay2, _) = await RedOlcAsync("/api/auth/login", ip: "198.51.100.4");
+            // VAKUM KIRICI: bir onceki pin "hep tek satir yazar" mutasyonuyla da yesil kalirdi.
+            // Ornekleme anahtari IP TASIDIGI icin baska bir IP AYRI satir uretmeli.
+            //
+            // KRITIK: cache ve olay defteri IKI IP ARASINDA PAYLASILIR. Ayri ayri kurulsalardi
+            // ("her cagri kendi cache'ini alsin") bu pin anahtarin IP tasiyip tasimadigini
+            // OLCMEZDI - iki ayri cache'te her anahtar zaten ilk kez eklenir ve pin, IP'yi
+            // anahtardan CIKARAN bir mutasyonda bile YESIL kalirdi. Ilk yazimda tam bu kusur
+            // vardi ve MK-6 mutasyon turu oncesi yakalandi (kayit).
+            var olay = new YakalayanOlay();
+            var cache = new SayanCache();
+            var mw = new RedisRateLimitMiddleware(_ => Task.CompletedTask, new ReddedenLimiter(), VarsayilanPolitika);
 
-            olay1.Kayitlar.Should().HaveCount(1);
-            olay2.Kayitlar.Should().HaveCount(1);
-            olay1.Kayitlar[0].ip.Should().NotBe(olay2.Kayitlar[0].ip);
+            foreach (var ip in new[] { "203.0.113.7", "198.51.100.4" })
+            {
+                var ctx = new DefaultHttpContext();
+                ctx.Request.Path = "/api/auth/login";
+                ctx.Response.Body = new MemoryStream();
+                ctx.Connection.RemoteIpAddress = System.Net.IPAddress.Parse(ip);
+                await mw.InvokeAsync(ctx, olay, cache);
+                ctx.Response.StatusCode.Should().Be(429);
+            }
+
+            olay.Kayitlar.Should().HaveCount(2,
+                "AYNI cache uzerinde iki FARKLI IP iki AYRI satir yazmali - anahtar IP tasimazsa "
+                + "ikincisi ornekleme kapisina takilir ve bu assert TEK satir gorur");
+            olay.Kayitlar.Select(k => k.ip).Distinct().Should().HaveCount(2);
+            cache.TryAddCagrilari.Distinct().Should().HaveCount(2,
+                "ornekleme anahtarlari da AYRISMALI");
         }
 
         [Fact]
