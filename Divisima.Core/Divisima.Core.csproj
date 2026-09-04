@@ -23,6 +23,15 @@
     <PackageReference Include="StackExchange.Redis" Version="2.7.33" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="7.7.3" />
     <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="7.7.3" />
+    <!-- GF-4/K2: asagidaki uc satir SURUM PINIDIR, kullanim degil (bu depoda OpenIdConnect
+         ve MSAL tipleri dogrudan kullanilmaz). Core kok dugum oldugu icin pin alti projenin
+         tamamina uygulanir. Protocols* JwtBearer 8.0.0'dan 7.0.3, SqlClient'tan 6.35.0
+         cozumleniyordu (ikisi de kullanim disi; 7.0.3/OpenIdConnect ayrica CriticalBugs);
+         IdentityModel ailesiyle 7.7.3'te hizalandi. MSAL 4.67.2 (Azure.Identity) ve 4.76.0
+         (SqlClient zinciri, CriticalBugs) tek surumde birlestirildi. -->
+    <PackageReference Include="Microsoft.IdentityModel.Protocols" Version="7.7.3" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="7.7.3" />
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.77.1" />
   </ItemGroup>
 </Project>
 
