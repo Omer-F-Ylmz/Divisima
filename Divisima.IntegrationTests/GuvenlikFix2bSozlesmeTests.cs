@@ -179,7 +179,12 @@ namespace Divisima.IntegrationTests
                 "429 icin AYRI hata sinifi bulunmali - cagiran ayrimi tip duzeyinde yapabilmeli");
 
             var parse = MetotGovdesi(kaynak, "async _parse(res)");
-            parse.Should().Contain("res.status === 429",
+            // ══ SAYISAL CAPA SINIR KOSULU TASIR - MK-6 BULDU ══════════════════════════
+            // ILK YAZIM `Contain("res.status === 429")` idi ve BEDAVA DOGRUYDU: mutasyon
+            // `429` -> `4290` yapildiginda dizge HALA ICERILIYOR ("4290" ustunde "429"
+            // var) ve pin YESIL kaliyordu. Kod ise artik HICBIR 429'u yakalamiyordu.
+            // `\b` rakam sinirinda kirilir; ayni tuzak tum sayisal capalarda kapatildi.
+            parse.Should().MatchRegex(@"res\.status\s*===\s*429\b",
                 "yanit ayristirmasi 429'u AYRI dala almali");
             parse.Should().Contain("throw new DivisimaRateLimitError(",
                 "429 yolunda genel Error DEGIL, hiz limiti sinifi firlatilmali");
@@ -206,8 +211,11 @@ namespace Divisima.IntegrationTests
             var govde = KodSatirlari(MetotGovdesi(Oku("frontend/api-bridge.js"),
                 "async function fetchSearch(q)"));
 
-            var limitDali = govde.IndexOf("e.status === 429", StringComparison.Ordinal);
-            limitDali.Should().BeGreaterThan(-1, "catch 429'u AYRI dalda tanimali");
+            // Sayisal capa sinir kosulu tasir (MK-6: "429" bir "4290" mutasyonuyla
+            // BEDAVA saglanir - bu tuzak bu turda birebir yasandi).
+            var limitEs = System.Text.RegularExpressions.Regex.Match(govde, @"e\.status\s*===\s*429\b");
+            limitEs.Success.Should().BeTrue("catch 429'u AYRI dalda tanimali");
+            var limitDali = limitEs.Index;
 
             // VAKUM KIRICI: genel hata dali HALA onbellege yaziyor olmali. Bu satir
             // kaybolsaydi asagidaki sira karsilastirmasi anlamsizlasirdi.
@@ -260,7 +268,7 @@ namespace Divisima.IntegrationTests
             var govde = KodSatirlari(MetotGovdesi(Oku("frontend/api-bridge.js"),
                 "window.divisimaKuponDurumu = async function"));
 
-            govde.Should().Contain("kod === 400 || kod === 404 || kod === 422",
+            govde.Should().MatchRegex(@"kod === 400\b \|\| kod === 404\b \|\| kod === 422\b",
                 "kupon KALDIRMA yetkisi yalnizca sunucunun KESIN olumsuz kararlarinda olmali");
 
             // ══ ASIL AYIRT EDICI - GENIS KOVA GERI GELMEMELI ══════════════════════════
@@ -288,7 +296,9 @@ namespace Divisima.IntegrationTests
             var kaynak = Oku("frontend/api-bridge.js");
             var govde = KodSatirlari(MetotGovdesi(kaynak, "function ridHataSonrasiTazele(e)"));
 
-            govde.Should().Contain("=== 409",
+            // Sayisal capa sinir kosulu tasir (MK-6: "409" bir "4090" mutasyonuyla
+            // BEDAVA saglanirdi - ayni tuzak K3'te birebir yasandi).
+            govde.Should().MatchRegex(@"===\s*409\b",
                 "yenileme kosulu TAM 409 olmali");
 
             // ══ ASIL AYIRT EDICI: govdede TEK bir yenileme cagrisi ve TEK bir kosul ═════
