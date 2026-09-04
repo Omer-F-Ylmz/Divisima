@@ -797,7 +797,13 @@ kaynak: ARSIV-1 denetim turu, muhurde 41·ARSIV-1 · CC HATALARI 4
 **E · URETIM DAVRANISI (1 vaka)**
 - `ExecuteUpdateAsync` `AuditInterceptor`i ATLAR; CAS yolunda denetim kaydi ELLE yazilir. -> 45
 
-**F · RIG / OLCUM DUZENEGI (3 vaka)**
+**F · RIG / OLCUM DUZENEGI (6 vaka)**
+- `Directory.Build.props` XML'i BOZUKKEN `dotnet restore` exit 0 verir ve MSB4024 BASMAZ;
+  ozellik projeye ULASTI MI sorusu yalniz `msbuild -getProperty` probuyla yanitlanir. -> 50
+- MCR digest'i Accept turune gore DEGISIR: manifest LISTESI olmayan imajda liste turleri
+  istenirse Schema 1 doner ve o digest CEKILEMEZ; digest her zaman GET ile dogrulanir. -> 50
+- CR dedektoru olarak YALNIZ `tr -cd '\r' | wc -c` calisir; `awk '/\r$/'` ve
+  `grep -c "$(printf '\r')"` bu kabukta 0 doner (`grep -P` de calismaz). -> 50
 - Harness fetch katmani SW kaydini engeller; SW kabulu GERCEK CHROME ister. -> 48
 - Chrome/CDP rig: `--user-data-dir` %LOCALAPPDATA% altinda (temp'te Cache Storage KIRIK);
   offline kaniti SUNUCUYU DURDURARAK alinir - `emulateNetworkConditions` SW'yi KAPSAMAZ. -> 49
@@ -854,6 +860,15 @@ Pending(status=0, id<=210) **35/3837**.
 Suit tabani `48·GUVENLIK-FIX-2b` kapanisinda **Sql 382/382 · tam 730/733** (+20 pin;
 uc kirmizi = bilinen Docker uclusu). Ureten ifade:
 `dotnet test Divisima-Backend.sln -c Release --filter "Category=Sql"` ve filtresiz.
+**GF-4 HICBIR KURGU KAYDI URETMEDI.** MAX'lar GF-2b kapanisiyla BIREBIR (musteri 171 ·
+urun 955 · siparis 286 · adres 119 · fatura 119 · `user_sessions` 356 · Pending 35/3837).
+**CAPA TUZAGI - KAYIT:** onceki muhurlerin `email LIKE 'gfN%' -> 0` kanit bicimi GF-4 icin
+KIRLIDIR - `'gf4%'` bugun **11** satir donduruyor (id 55-65) ve onbiri de **25 Agustos
+2026** tarihli AGUSTOS dalgasinin kurgusudur (collation tuzagi DEGIL; BIN2 ile de 11).
+Durust ureten ifade tarih niteleyicisi ister: `... AND created_at >= CAST(GETDATE() AS date)`
+-> **0**.
+Suit tabani `50·GUVENLIK-FIX-4` kapanisinda **Sql 382/382 · tam 743/746** (+13 pin;
+uc kirmizi = bilinen Docker uclusu, yerelde Docker YOK). Ureten ifade ayni.
 **GF-3 TABANI AD ALANI KAPALIYKEN ALINMIS (kayit):** `SemaTekKaynakTests` kosucu ad alanini
 yalniz baglanma noktasina uyguluyordu; yaratma ve dusurme HAM adi kullaniyordu. Bu yuzden
 `DIVISIMA_TEST_DB` SET edildiginde - ki MK-4b bunu ZORUNLU kilar - dort test SQL login
@@ -961,6 +976,10 @@ yalniz somut gerekceyle bakilir.
 - `48·GF-2b·K3` 429 AYRI HATA SINIFI; arama onbellege YAZMAZ, kupon YALNIZ 400/404/422'de kalkar. `[PARA]` -> 48
 - `48·GF-2b·K4` rid YALNIZ 409'da yenilenir `[VERI-BOZAN]`; `sepetImzasi` GENISLETILMEZ, niyet imzasi AYRI ve onu ICERIR. -> 48
 - `48·GF-2b·K5` admin CSP `'unsafe-inline'`siz; vitrin `'unsafe-inline'` KABUL EDILMIS RISK; `frame-src` SUPHELI. -> 48
+- `50·GF-4·K1` Tum GitHub action'lari 40-hane COMMIT SHA'sina pinli + surum yorumu; major yukseltme de bu usulle. -> 50
+- `50·GF-4·K4` Paket kaynagi TEK (`NuGet.config` + `<clear />`) · her projede `packages.lock.json` · CI `restore --locked-mode` (CI SDK 8'de YESIL kosuldu). -> 50
+- `50·GF-4·K5` Imaj referansi TEK KAYNAK: dort site ayni tag+digest, pinle zorunlu. Digest **Schema 2 POZ/NEG cozucuyle** alinir (etiketten okunan deger TEK BASINA gecersiz; digest'le geri cekilip echo-back sinanir). -> 50
+- `50·GF-4·K7` AutoMapper 12.0.1 KALIR (lisans degisimi **15.0.0**); `NuGetAuditMode=all` UYARI seviyesi; deprecated adimindaki `\|\| true` BILINCLIDIR (o komut bulguda da exit 0 verir, kaldirmak olmayan bir kapiyi var sandirir). -> 50
 
 ## Acik SUPHELI (00b-supheli.md)
 
@@ -1012,18 +1031,25 @@ BASKA KUYRUGA: A-2 -> VITRIN-KALAN 8 · F-3 -> IMPORT-FIX
 
 **KAPANANLAR** (tam metin muhurde, kesilen satirlar 49'da): ARSIV-1 `c6721b7`/41 ·
 AV-1 `c6721b7`/42 · ARSIV-2 `4c29f32`/43 · GF-1 `189ce81`/44 · GF-1b `00b012f`/45 ·
-GF-2a `1dd985b`/46 · GF-3 `33cac2e`/47 · **GF-2b FAZ 1 `0fd3e62`/48**.
+GF-2a `1dd985b`/46 · GF-3 `33cac2e`/47 · GF-2b FAZ 1 `0fd3e62`/48 ·
+**GF-4 TEDARIK ZINCIRI `4976974`/50** (cift yesil: run 33891017398 · 33891017496).
 **D-7 KISMEN**: admin TAM, vitrin `'unsafe-inline'` KABUL EDILMIS RISK; **CSP FAZ B YOK** -> ERT-DEFTER.
 
-1. GF-4 TEDARIK ZINCIRI   <- SIRADA
-2. GUVENLIK-AV-2 (dar olcum, ultracode YOK): at-rest sifreleme · 2FA/TOTP ·
+1. GUVENLIK-AV-2 (dar olcum, ultracode YOK)   <- SIRADA: at-rest sifreleme · 2FA/TOTP ·
    TOCTOU/ExecuteUpdateAsync · A09 · olay isleyicileri · 13 anilmayan controller
    (Comparison/Collection ham entity suphesi)
-3. VITRIN-KALAN (10 kalem)  4. FIX-1B  5. ADMIN-FIX  6. IMPORT-FIX  7. FIX-1C  8. LOG-FIX  9. FIX-2  10. FIX-3/B13
+2. VITRIN-KALAN (10 kalem)  3. FIX-1B  4. ADMIN-FIX  5. IMPORT-FIX  6. FIX-1C  7. LOG-FIX  8. FIX-2  9. FIX-3/B13
 
 Bes BILINEN kalem (ayni-saniye jeton penceresi · miras oturumda step-up · 342 olu oturum ·
 IP davranis kaniti yok · K4 gecikmeli aile iptali) TAM METINLE `docs/muhur/45-guvenlik-fix-1b.md`
 icinde; kesilen satirlar bayt-aynen `docs/muhur/49-arsiv-3.md`de.
+
+Iki BILINEN kalem (`50·GUVENLIK-FIX-4`):
+- **Yerel SDK 9.0.305 / CI SDK 8.0.x, `global.json` YOK** (DUR-2'de dusuruldu). Ayrisma
+  bugun gozlenmedi - `--locked-mode` CI'da (SDK 8) YESIL kosuldu - ama PINLENMEMISTIR.
+- **Dependabot `docker` ekosistemi yalniz kok `Dockerfile`/`docker-compose.yml`i tarar.**
+  Workflow `services.*.image` ve C# icindeki digest literallerini HICBIR ekosistem
+  tazelemez; o iki deger ELLE guncellenir (bakim notu).
 
 Dort BILINEN kalem (`lockout_end` YEREL · kismi iptal sonrasi replay 400 · logout bayat cerezle
 200 · `expiration` artik `Z` bicimli) TAM METINLE `docs/muhur/47-guvenlik-fix-3.md` icinde;
@@ -1113,6 +1139,10 @@ Acilmaz; yalniz HAM kalem basliklari + 00a atfi. Tam metin arsivde.
   saglayici satir ici script'ini calistirmasi. Odeme formu kendi CSP'li iframe'ine alinirsa
   vitrin `'unsafe-inline'`siz kalabilir. **Tasarim launch SONRASI.** (CSP FAZ B bu kalemin
   ustune kurulur; GF-2b'de YAPILMADI.)
+- `50·GUVENLIK-FIX-4` **YENI KALEM (kullanici karari): TFM `net8.0` -> `net9.0`/`net10.0`.**
+  GF-4'te TFM DOKUNULMAZDI (yukseltme LAUNCH SONRASI). **TETIKLEYICI: .NET 8 EOL,
+  Kasim 2026.** Yukseltme `global.json` yoklugunu (yerel SDK 9 / CI SDK 8 ayrismasi) ve
+  NuGet audit varsayilanini da (`all` dali TFM >= 10.0 sartina bagli) birlikte etkiler.
 
 ## AV-2 GIRDILERI (39·MF-3'ten acik kalanlar)
 
