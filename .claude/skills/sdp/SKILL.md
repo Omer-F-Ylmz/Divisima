@@ -1,9 +1,9 @@
 ---
 name: sdp
-description: Divisima Sahada Doğrulanmış Denetim Protokolü v1.3 — her dalga/denetim tarifi başında yüklenir
+description: Divisima Sahada Doğrulanmış Denetim Protokolü v1.4 — her dalga/denetim tarifi başında yüklenir
 ---
 
-# SDP — SAHADA DOGRULANMIS DENETIM PROTOKOLU v1.3 (KALICI; v1.1 27 Agustos 2026, v1.2 28 Agustos 2026)
+# SDP — SAHADA DOGRULANMIS DENETIM PROTOKOLU v1.4 (KALICI; v1.1 27 Agustos 2026, v1.2 28 Agustos 2026, v1.4 5 Eylul 2026)
 
 **Bu bolum BAGLAYICIDIR: bundan sonraki her CC isi bu protokole uyar.**
 v1.0 MTUR-OLCUM turunda sahada surulda; her v1.1 maddesi O TURDA OLCULEN bir
@@ -295,6 +295,41 @@ Denetci "sunu OLCEMEDIM" dediginde, ana akis o boslugu KAPATMAYA CALISIR ve sonu
 yazar. Kapatamiyorsa bosluk RAPORDA ADIYLA durur. (MANTIK-AV-1 ornegi: denetci ham API
 dokumlerini sir taramasina dahil etmedigini yazdi; ana akis tum scratchpad agacini - 47
 dosya, uzanti farketmeksizin, suzgec sinanmis - tarayip boslugu kapatti.)
+
+### 1.12 GUVENLIK TURU MODULU — TAM METIN ARSIVDE, BURADA v1.4 DELTASI
+
+**TAM METIN:** `42·GUVENLIK-AV-1 · SDP 1.12` (`docs/muhur/42-guvenlik-av-1.md`, bolum 6).
+Guvenlik dalgalarinda ORADAN okunur (MK-11/b somut gerekce). Arsiv BAYT-SABITTIR (MK-11/d);
+asagidaki uc madde arsivi DEGISTIRMEZ, onu **DEGISTIREREK TAMAMLAR** ve celiski halinde
+**BU METIN GECERLIDIR**. Ucu de GUVENLIK-AV-2 turunda OLCULEN bir surtunmeye dayanir.
+
+**1.12.2 EKI (v1.4) — ON KOSUL EKSENININ TANIMI.**
+ON KOSUL, bulguyu **KIM TETIKLEYEBILIR** sorusunu yanitlar; **okuyucu ya da etkilenen taraf
+DEGILDIR.**
+*Gerekce OLCULDU (AV-2):* SIEM/izleme boslugu bulgusu "kimse OKUMUYOR" gerekcesiyle
+`KIMLIKSIZ-UZAK` etiketlendi ve siddeti TAM DA O EKSENDEN sisirilerek YUKSEK'e cikti. Bir
+TESPIT BOSLUGUNUN saldirgan on kosulu YOKTUR; dogru deger `ilgisiz`. Ayni defterde ayni
+eksen IKI FARKLI kurala gore dolduruldu (baska bir bulguda "tetikleyici anonim ama bedeli
+sorusturma odiyor" -> `KIMLIKLI`). Rapor denetcisi siddeti ORTA'ya dusurdu.
+
+**1.12.6-(b) EKI (v1.4) — "DISKE YAZILMAZ" GECICI DOSYAYI DA KAPSAR.**
+Jeton/parola/anahtar bicimli hicbir deger diske yazilmaz; **gecici dosya, "yaz-kullan-sil"
+kalibi ve scratchpad DISINDAKI HICBIR YOL** (ozellikle `%TEMP%` / `/tmp` kokleri) istisna
+DEGILDIR. Kabuk degiskeni yasar; gerekiyorsa cagrilar TEK cagriya toplanir.
+*Gerekce OLCULDU (AV-2):* uc ajan bu siniri kaydirdi - ikisi jetonu yazip SILDI (denetci
+silindigini bagimsiz dogruladi), ucuncusunun yazdigi jeton-bicimli dosya **SILINMEDEN KALDI
+ve SAHIPSIZDI** (alti defterin hicbiri anmiyordu; ancak kural-uyum denetcisi yakaladi).
+Ek olcum: o degerdeki BUYUK HARFLI GUID'i `KanitMaskesi` **zaten maskelemezdi**
+(`char.IsLower` sarti) - yani "maske nasilsa yakalar" varsayimi da YANLIS.
+
+**1.12.10 EKI (v1.4) — KAPSAM MATRISI KUMULATIFTIR.**
+Her AV turu, kapsam matrisini (**uc/controller x TUR**) muhre **KUMULATIF** yazar; sonraki
+AV turu **onceki turun KOR KUMESINDEN baslar**. Kapsamin YER DEGISTIRMESI kapsam
+GENISLEMESI SAYILMAZ.
+*Gerekce OLCULDU (AV-2):* AV-1'in anilmayan 13 controller'i ile AV-2'nin anilmayan 17'sinin
+**KESISIMI 0** cikti - iki kume TAMAMEN AYRIK; 40 controller'in **30'u en az bir turda kor
+kaldi** ve iki turde de kapsanan yalniz 10. Her tur "dar" tarif edildi ama **"NEYE GORE
+dar" YAZILMADIGI** icin derinlesme ve korlesme ayni anda oldu, kimse gormedi.
 
 ## 2. DIVISIMA EKI v1.2 (DEPOYA OZGU)
 

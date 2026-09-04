@@ -601,6 +601,20 @@ SATIRI esliyor; ayni NEG girdide (saf LF) de 2 dondu, yani dedektor BOZUKTU. Ilk
 olcumunde CLAUDE.md "12434 satirin 12434'unde CR" gorundu ve "kabul kriteri CR 0 ile
 CELISIYOR" sanildi; `tr -cd` ile yeniden olculunce CR baytinin 0 oldugu, celiskinin
 OLMADIGI cikti. skill `sdp` · 1.7/1'in bu turdaki kazanci.
+
+**S6 - ALT-DIZGE SAYACI.** Ureten ifade: `grep -oi "<capa>" <dosya> | wc -l`
+
+```
+POZ  /tmp/poz_pii.txt ("PII satiri" + "pii kucuk")  -> 2
+NEG  ayni dosyada "zzzpii"                          -> 0
+POZ  tum-defterler.txt "PII"                        -> 17  (capraz: grep -c -> 17)
+NEG  tum-defterler.txt "zzzssrf"                    -> 0
+```
+
+**EMEKLI:** `grep -oiF` - bu kabukta `-o` + `-i` + `-F` BIRLIKTE HICBIR SEY dondurmuyor;
+ayni POZ girdide **0** doner. 27 ankrajlik bir kor-nokta taramasi bu dedektorle
+"27/27 sifir" verdi ve SSRF disindaki **26 sonuc YANLISTI**. Kapsam elestirmeni "27/27
+sifir makul degil" deyip POZ kontrol kosunca yakalandi (`51·AV-2`).
 ---
 
 # B6 — DERSLER: AILE SAYACLARI · SALINIM · TUZAKLAR · RIG KOR NOKTALARI
@@ -781,7 +795,11 @@ kaynak: ARSIV-1 denetim turu, muhurde 41·ARSIV-1 · CC HATALARI 4
 - Assert KUSUR SINIFINI pinler, ESKI LITERAL BICIMINI degil (5. vaka). -> 48
 - NEG capa dizesi belgeye YAZILMAZ; NEG kontrolu raporda/muhurde anilir. -> 43
 
-**B · TEK KANAL / KAYNAK BUTUNLUGU (3 vaka)**
+**B · TEK KANAL / KAYNAK BUTUNLUGU (4 vaka)**
+- **YORUM != OLCUM - IKI TUR UST USTE.** `AuthManager.cs:468` "ikisi de zaten
+  security_events'te tutuluyor" diyor (olculdu: TUTULMUYOR, ip/ua 0/40) ve
+  `AuditLogController` yorumu "40 controller icinde TEK ornek (olculdu)" diyor
+  (olculdu: `SeoController` ayni kusuru tasiyor ve iddiadan ALTI GUN once oradaydi). -> 51
 - Tek kanalli on olcum bulgusu = SUPHE; tarife KALEM OLMAZ. -> 47
 - BILINEN listesi B8 fragmanlarindan KURULMAZ; 00a/00b tam metni okunur. -> 42
 - RUNTIME SOZLUK = DB METNI; kaynak okuyana "sabit" gorunur, DEGILDIR. -> 46
@@ -797,7 +815,10 @@ kaynak: ARSIV-1 denetim turu, muhurde 41·ARSIV-1 · CC HATALARI 4
 **E · URETIM DAVRANISI (1 vaka)**
 - `ExecuteUpdateAsync` `AuditInterceptor`i ATLAR; CAS yolunda denetim kaydi ELLE yazilir. -> 45
 
-**F · RIG / OLCUM DUZENEGI (6 vaka)**
+**F · RIG / OLCUM DUZENEGI (7 vaka)**
+- **goz1 API'sinin saglik ucu `/health` (200); `/api/health` YOKTUR (404).** Surec adi
+  `Divisima.API` DEGIL **`dotnet`**tir. PowerShell `Invoke-WebRequest` 404'te ISTISNA atar -
+  iki dedektor birden "rig kalkmadi" der, oysa rig KOSUYORDUR. -> 51
 - `Directory.Build.props` XML'i BOZUKKEN `dotnet restore` exit 0 verir ve MSB4024 BASMAZ;
   ozellik projeye ULASTI MI sorusu yalniz `msbuild -getProperty` probuyla yanitlanir. -> 50
 - MCR digest'i Accept turune gore DEGISIR: manifest LISTESI olmayan imajda liste turleri
@@ -869,6 +890,17 @@ Durust ureten ifade tarih niteleyicisi ister: `... AND created_at >= CAST(GETDAT
 -> **0**.
 Suit tabani `50·GUVENLIK-FIX-4` kapanisinda **Sql 382/382 · tam 743/746** (+13 pin;
 uc kirmizi = bilinen Docker uclusu, yerelde Docker YOK). Ureten ifade ayni.
+**AV-2 DORT KURGU KAYDI URETTI (SALT OLCUM turu, hepsi URETIM YOLUNDAN):** musteri
+**172** `av2.sb.1@` · **174** `av2.sf.1@` · **175** `av2.sd.2@` · **177** `av2.sc.1@`.
+URETIM IMZASI: dordunde de `password_hash` **69** / `password_salt` **16** (GF-1/K6 v2
+zarfi). **173 ve 176 SAF IDENTITY BOSLUGUDUR** - bes FK tablosunda (`addresses`, `orders`,
+`consent_records`, `user_sessions`, `carts`) 0 yetim satir.
+**D-YAN:** musteri **175 MISAFIR YOLUNDAN dogdu** (register DEGIL; SD-7'nin 151-karakter
+reprosu), bu yuzden `consent_records` **0** tasiyor ve o e-posta misafir checkout'tan
+KALICI olarak disaniyor. Temizlik karari merkezin.
+MAX'lar kapanista: musteri **177** · urun **955** · siparis **286** · adres **119** ·
+fatura **119** · `user_sessions` **369** · Pending(status=0, id<=210) **35/9/210/3837**
+(uc olcumde de BIREBIR; `orders`'a Pending URETILMEDI).
 **GF-3 TABANI AD ALANI KAPALIYKEN ALINMIS (kayit):** `SemaTekKaynakTests` kosucu ad alanini
 yalniz baglanma noktasina uyguluyordu; yaratma ve dusurme HAM adi kullaniyordu. Bu yuzden
 `DIVISIMA_TEST_DB` SET edildiginde - ki MK-4b bunu ZORUNLU kilar - dort test SQL login
@@ -980,6 +1012,8 @@ yalniz somut gerekceyle bakilir.
 - `50·GF-4·K4` Paket kaynagi TEK (`NuGet.config` + `<clear />`) · her projede `packages.lock.json` · CI `restore --locked-mode` (CI SDK 8'de YESIL kosuldu). -> 50
 - `50·GF-4·K5` Imaj referansi TEK KAYNAK: dort site ayni tag+digest, pinle zorunlu. Digest **Schema 2 POZ/NEG cozucuyle** alinir (etiketten okunan deger TEK BASINA gecersiz; digest'le geri cekilip echo-back sinanir). -> 50
 - `50·GF-4·K7` AutoMapper 12.0.1 KALIR (lisans degisimi **15.0.0**); `NuGetAuditMode=all` UYARI seviyesi; deprecated adimindaki `\|\| true` BILINCLIDIR (o komut bulguda da exit 0 verir, kaldirmak olmayan bir kapiyi var sandirir). -> 50
+- `51·AV-2` **LAUNCH BLOKER OLCUTU:** `KRITIK` **∨** `YUKSEK`+`KIMLIKSIZ-UZAK` **∨** `[PARA]`/`[VERI-BOZAN]`. Digerleri launch SONRASI. Siddet ON KOSULDAN bagimsiz verilemez; `ADMIN` on kosullu kalem KRITIK OLAMAZ. -> 51
+- `51·AV-2` **AV KAPSAMI KUMULATIF MATRISLE OLCULUR; YER DEGISTIRME YASAK.** Her AV turu kapsam matrisini (uc/controller x tur) muhre kumulatif yazar ve sonraki tur onceki turun KOR KUMESINDEN baslar. Gerekce olculdu: AV-1'in kor 13'u ile AV-2'nin kor 17'sinin kesisimi **0**; 40 controller'in **30'u** en az bir turda kor kaldi. -> 51
 
 ## Acik SUPHELI (00b-supheli.md)
 
@@ -1032,17 +1066,51 @@ BASKA KUYRUGA: A-2 -> VITRIN-KALAN 8 · F-3 -> IMPORT-FIX
 **KAPANANLAR** (tam metin muhurde, kesilen satirlar 49'da): ARSIV-1 `c6721b7`/41 ·
 AV-1 `c6721b7`/42 · ARSIV-2 `4c29f32`/43 · GF-1 `189ce81`/44 · GF-1b `00b012f`/45 ·
 GF-2a `1dd985b`/46 · GF-3 `33cac2e`/47 · GF-2b FAZ 1 `0fd3e62`/48 ·
-**GF-4 TEDARIK ZINCIRI `4976974`/50** (cift yesil: run 33891017398 · 33891017496).
+GF-4 TEDARIK ZINCIRI `4976974`/50 (cift yesil: run 33891017398 · 33891017496) ·
+**GUVENLIK-AV-2 (SALT OLCUM) `ce54d0c` zemininde /51**.
+**PROVENANS DUZELTMESI (AV-2'de olculdu):** AV-2'nin kapsami `42·GUVENLIK-AV-1`de
+"at-rest sifreleme · 2FA/TOTP · TOCTOU/ExecuteUpdateAsync · A09 · olay isleyicileri ·
+13 anilmayan controller (Comparison/Collection ham entity suphesi) **· Stock yuzeyi**"
+diye yaziliydi; son parca CLAUDE.md'ye TASINMAMISTI (olculdu: muhur 1, CLAUDE.md 0).
+Etkisi sifirdi (Stock zaten 13'un uyesi) ama tasima kaybi GERCEKTI - **geri konuldu**.
 **D-7 KISMEN**: admin TAM, vitrin `'unsafe-inline'` KABUL EDILMIS RISK; **CSP FAZ B YOK** -> ERT-DEFTER.
 
-1. GUVENLIK-AV-2 (dar olcum, ultracode YOK)   <- SIRADA: at-rest sifreleme · 2FA/TOTP ·
-   TOCTOU/ExecuteUpdateAsync · A09 · olay isleyicileri · 13 anilmayan controller
-   (Comparison/Collection ham entity suphesi)
-2. VITRIN-KALAN (10 kalem)  3. FIX-1B  4. ADMIN-FIX  5. IMPORT-FIX  6. FIX-1C  7. LOG-FIX  8. FIX-2  9. FIX-3/B13
+**KUYRUK (AV-2 sonrasi yeniden dizildi):**
+
+1. **GF-5 (LAUNCH ONCESI, TEK DALGA)** <- SIRADA. Dort kok:
+   **A09 iz/atif** (SC-1 LAUNCH BLOKER · SC-2 ayni kok · SC-4 logout izsiz · SC-10
+   403/404/429 izsiz · SC-13 elle yazim kapsami) · **misafir yolu butunlugu**
+   (SD-7 LAUNCH BLOKER `[VERI-BOZAN]` · SE-4 `request_id` dogrulamasi ·
+   `:503-504` atomiklestirme) · **maske** (SC-7=SE-2 odeme jetonu · SC-6/Y-3 EF ham
+   istisna -> PII · SE-3 e-fatura metni · SC-12 outbox duz jeton) · **imzasiz webhook** (SE-5).
+2. **AV-3 DAR** (salt olcum): `POST api/order/place` · dosya yukleme yuzeyi
+   (`product/import`, `product-image/upload`) · **A06** (tedarik zinciri) ve **A10** (SSRF) ·
+   kor kalan 30 controller'dan `[PARA]`/`[VERI-BOZAN]` tasiyanlar. Kapsam matrisi KUMULATIF
+   (bkz. B8) - AV-3 **AV-2'nin kor kumesinden baslar**.
+3. **LAUNCH GO/NO-GO TURU**.
+4. Launch SONRASI: GF-5d anonim uc sozlesmesi (SD-1/SD-2/SD-4) · SA-1/SA-2 (at-rest
+   kurcalama + anahtar rotasyonu) · SB-1 (2FA dalinda CAS geri alma) · SC-3 SIEM okuyucusu ·
+   VITRIN-KALAN (10 kalem) · FIX-1B · ADMIN-FIX · IMPORT-FIX · FIX-1C · LOG-FIX · FIX-2 ·
+   FIX-3/B13
 
 Bes BILINEN kalem (ayni-saniye jeton penceresi · miras oturumda step-up · 342 olu oturum ·
 IP davranis kaniti yok · K4 gecikmeli aile iptali) TAM METINLE `docs/muhur/45-guvenlik-fix-1b.md`
 icinde; kesilen satirlar bayt-aynen `docs/muhur/49-arsiv-3.md`de.
+
+Iki BILINEN kalem (`51·GUVENLIK-AV-2`):
+- **SignalR "admins" alarmi BOS GRUBA yayin yapiyor.** `SecurityEventManager.cs:39-40` ->
+  `Clients.Group("admins")`; gruba katilim `NotificationHub.JoinAdminGroup()` ile olur ve
+  CAGIRANI YOK (frontend'de `signalr|hubconnection|/hubs` **0** gecis, POZ kontrol backend 9).
+  **Okuyucu LAUNCH SONRASI** - alarm kanalinin kendisi GF-5'te duzelmez.
+- **SC-3 belge ayrismasi GF-5'te DOCS DUZELTMESIYLE kapanir.** `ops/serilog-siem.md`
+  Elasticsearch/Seq + alerting anlatiyor; gercekte sink yalniz Console+File, `Siem:` anahtari
+  0 gecis, belgenin sekiz olay tipinin **BESI kodda YOK**. Kod degil BELGE yanlis;
+  duzeltme GF-5'in docs yarisidir.
+
+**B-27 KAPANDI (AV-2, 4 Eylul 2026)** - `/api/payment/callback` artik `payment` kovasinda
+(`PaymentController.cs:29` sinif duzeyi `[EnableRateLimiting("payment")]`); canli sinir
+kosulu **10 gecer / 11. istek 429**, iki denetci AYRI AYRI olctu. **`00b:247` arsivi
+DEGISMEZ (MK-11/d)** - kayit burada.
 
 Iki BILINEN kalem (`50·GUVENLIK-FIX-4`):
 - **Yerel SDK 9.0.305 / CI SDK 8.0.x, `global.json` YOK** (DUR-2'de dusuruldu). Ayrisma

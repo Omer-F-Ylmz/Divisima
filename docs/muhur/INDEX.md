@@ -64,14 +64,24 @@ onlari bayatlatmaz. Okuma usulu: CLAUDE.md B0 · MK-11 (b).
 | 48 | `48-guvenlik-fix-2b.md` | # 48 · GUVENLIK-FIX-2b (GF-2b) FAZ 1 — ISTEMCI OTURUM · SW · 429 UX · RID · CSP-LITE (4 Eylul 2026) | — | 17082 | yeni usul |
 | 49 | `49-arsiv-3.md` | # 49 · ARSIV-3 — CLAUDE.md KESIMI (FAZ A OLCUMU + FAZ B UYGULAMASI) (4 Eylul 2026) | — | 30219 | yeni usul |
 | 50 | `50-guvenlik-fix-4.md` | # 50 · GUVENLIK-FIX-4 (GF-4) MUHRU — TEDARIK ZINCIRI (4 Eylul 2026) | — | 21430 | yeni usul |
+| 51 | `51-guvenlik-av-2.md` | # 51 · GUVENLIK-AV-2 MUHRU — DAR GUVENLIK OLCUMU (5 Eylul 2026) | — | 27702 | yeni usul |
 
 **AD CAKISMASI UYARISI:** bu dosya **GF-3 (Eylul 2026)** dalgasinindir. Depoda ayrica
 **GUVENLIK-FIX-3 (Agustos 2026)** vardir ve onun pinleri `GuvenlikFix3SozlesmeTests.cs`
 dosyasindadir (dagitim yuzeyi: nginx/CSP/clickjacking). Eylul dalgasinin pin dosyasi
 `GuvenlikFix3SizintiSozlesmeTests.cs`. Iki dalga KARISTIRILMAMALIDIR.
 
-Toplam arsiv: 52 dosya · 922.311 B (OLCULDU: `ls -1 *.md | grep -v INDEX.md | xargs wc -c`;
-50 numarali muhur eklendikten SONRA yeniden olculdu - onceki "51 · 900.881" satiri bayatti).
+**AD CAKISMASI UYARISI (GF-4):** depoda **IKI ayri "GUVENLIK-FIX-4"** vardir.
+`18-guvenlik-fix-4.md` = **Agustos 2026** (Sprint donemi); `00b` #22'yi (Idempotency
+filtresinin anahtari) KAPATAN dalga BUDUR. `50-guvenlik-fix-4.md` = **4 Eylul 2026**
+(TEDARIK ZINCIRI: paket/imaj/CI). `00a`/`00b` icindeki "GUVENLIK-FIX-4" atiflari
+**TARIHINE bakarak** cozulur. Kurgu izi de ayrisir: `email LIKE 'gf4%'` **11** satir
+donduruyor ve onbiri de **25 Agustos 2026** tarihli AGUSTOS dalgasinindir.
+Iki dalga KARISTIRILMAMALIDIR. (AV-2 turunda olculdu -> `51·GUVENLIK-AV-2`.)
+
+Toplam arsiv: 53 dosya · 950.013 B (OLCULDU: `ls -1 *.md | grep -v INDEX.md | xargs wc -c`;
+51 numarali muhur eklendikten SONRA yeniden olculdu. Bu satir ARSIV-1'de bir kez, GF-4'te
+bir kez daha bayatladi - her muhur eklendiginde YENIDEN OLCULUR, artirilmaz).
 Bayt denklemi (TARIHSEL, d8f12dd zemini — GUNCELLENMEZ):
 747.240 = 44.393 (C1 sonrasi CLAUDE.md) + 702.847.
 NOT (AV-1'de olculdu): onceki "42 dosya · 702.847 B" satiri BAYATTI — `41-arsiv-1.md`
