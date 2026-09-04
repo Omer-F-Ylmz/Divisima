@@ -1121,3 +1121,8 @@ Acilmaz; yalniz HAM kalem basliklari + 00a atfi. Tam metin arsivde.
 - **`ExecuteDeleteAsync` <-> transaction ROLLBACK** OLCULMEDI (K2 onu transaction ICINDE cagiriyor).
 - **Hata kodu birlestirme** - TR serbest metin capalarinin kirilganligi (K3 + K3b ayni capa).
 - **Ortak RuleBuilder** - K7 mesaj/NotEmpty ayrismasi (dort validator, regex ayni, metin farkli).
+- **K4 TELAFISININ ATOMIKLESTIRILMESI** - GuestCheckoutManager telafisi IKI AYRI
+  DeleteWhereAsync (adres, sonra musteri, :503-504) ve TRANSACTION YOK; ilki gecip
+  ikincisi duserse KISMI DURUM olusur. Uretim kodu bu kalemi ADIYLA deftere havale
+  ediyor (GuestCheckoutManager.cs:313). BILINCLI SINIRLAR 2-3 (istisna yolunda telafi
+  kosmaz · outbox satiri silinmez) kod :313 yorumunda, defterde ilk kez burada.

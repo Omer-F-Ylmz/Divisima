@@ -15,10 +15,12 @@ eklenen           :  7.301 B   (OLCULDU: git diff)
 21.266 - 7.301 = 13.965 = FARK    (denklem KAPANIR)
 hedefe pay 5 B · butceye pay 16.389 B · CR 0 (saf LF)
 
-AYRAC KAYDI: yedek dosyalarinin ham toplami 21.274 B'dir; aradaki 12 B, blok yedeklerini
-ayirmak icin ELLE eklenen UC adet "---" satiridir (kesilen icerik DEGIL). Ilk yazimda
-"eklenen 7.309" OLCULMUS DEGIL, 21.274-13.965'ten TURETILMISTI - denetci yakaladi,
-her iki rakam da `git diff` ile YENIDEN OLCULDU.
+AYRAC KAYDI: yedek dosyalarinin ham toplami 21.274 B, olculen kesilen 21.266 B; aradaki
+fark **8 B** ve iki bilesenden olusur: **+12 B** blok yedeklerini ayirmak icin ELLE eklenen
+UC adet "---" satiri (kesilen icerik DEGIL) **-4 B** CLAUDE.md'den kesilen ama yedeklere
+alinmayan DORT BOS satir. Icerik kaybi 0, uydurma yedek satiri 0 (`comm` ile olculdu).
+Ilk yazimda "eklenen 7.309" OLCULMUS DEGIL, 21.274-13.965'ten TURETILMISTI; ikinci yazimda
+fark "12 B" denmisti - IKISINI DE denetci yakaladi, her iki rakam `git diff` ile olculdu.
 
 DUZELTME COMMIT'I (bu commit): CLAUDE.md 65.531 -> 64.356 B (hedefe pay 1.180 B).
 Ek kesimler: iki AV-1 blogu (1.341 B, asagida) · "GOZ TURU BEKLIYOR - SEKIZ KALEM" blogu ·
@@ -76,6 +78,18 @@ ELENEN bir yakalamadan (`kesim3-*.txt`) geliyordu; o yakalama sinir hatasiyla ko
 2.220" icinde ZATEN sayiliyordu (~1,3 KB cift sayim). Gercek BILINEN bloklari 882/689/751;
 ureten ifade `wc -c < kes-bilinen-*.txt`. Denetci yakaladi.
 ```
+
+## 5b · MERKEZ HATASI (denetci yakaladi, duzeltildi)
+
+Duzeltme tarifi iki AV-1 blogunun silinmesini "AV-1 kapandi; ... **K4 telafi kapandi 44**"
+gerekcesine dayandirdi. **Olcum bu premisi CURUTTU:** `44·GF-1·K4` **"Sahiplik ihlali 404"**
+hakkindadir - bambaska bir K4; "K4 telafisi" **MANTIK-FIX-3**'un kalemidir (`39·MF-3`, muhur
+39:504) ve muhur 44'te `DeleteWhere` 0 / `transaction` 0 gecer. Kusur BUGUN CANLI:
+`GuestCheckoutManager.cs:503-504` telafiyi IKI AYRI `DeleteWhereAsync` ile, TRANSACTION
+OLMADAN yapiyor; uretim kodu `:313`te kalici kapanisi ADIYLA bu deftere havale ediyor.
+Iki AYRI kusur soz konusu: **DV1** = "telafi ATESLENMIYOR" (kapandi, 44) · bu kalem =
+"telafi ateslendiginde ATOMIK DEGIL". Kesim sonrasi `grep -c 'ATOMIK'` 1 -> 1 -> **0**
+olmustu; denetci yakaladi, **AV-2 GIRDILERI'ne BESINCI satir** eklendi ve kayit geri kondu.
 
 ## 6 · MUKERRER (bulundu ve kesildi)
 
