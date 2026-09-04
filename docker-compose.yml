@@ -2,7 +2,8 @@
 # Yeni gelistirici 5 dakikada calistirir (SQL Server + Redis + API).
 services:
   sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+    # GF-4/K5 (Y6): tag + digest pini - gerekce ve dort kopyanin listesi ci.yml'da.
+    image: mcr.microsoft.com/mssql/server:2022-latest@sha256:0730f3689a6dcc33beaf8f466376ac056d7483a2272dcbd3bcc36d3a6df05437
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: "${DB_PASSWORD:-Your_strong_Pass123}"

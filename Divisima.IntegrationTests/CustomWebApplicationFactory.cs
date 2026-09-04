@@ -16,7 +16,11 @@ namespace Divisima.IntegrationTests
         // kullanim disi kaldi (CS0618) ve imaj artik KURUCUYA verilir; .WithImage(...) cagrisi
         // bu yuzden kalkti. Imza kaynaktan okundu (paketin XML dokumani):
         // "M:Testcontainers.MsSql.MsSqlBuilder.#ctor(System.String)".
-        private readonly MsSqlContainer _dbContainer = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest")
+        // GF-4/K5 (Y6): tag + digest pini - gerekce ve dort kopyanin listesi ci.yml'da.
+        // Testcontainers 4.14.0'in digest'li referansi DOGRU ayristirdigi CALISTIRILARAK
+        // olculdu (DockerImage: Repository=mssql/server, Tag=2022-latest, Digest=sha256:0730f368...,
+        // FullName girdiyle BIREBIR) - yerelde Docker olmadigi icin suit bunu kosamaz.
+        private readonly MsSqlContainer _dbContainer = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest@sha256:0730f3689a6dcc33beaf8f466376ac056d7483a2272dcbd3bcc36d3a6df05437")
             .WithPassword("Test_Password123!")
             .Build();
 
