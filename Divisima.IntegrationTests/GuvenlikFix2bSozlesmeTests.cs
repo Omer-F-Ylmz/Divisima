@@ -274,5 +274,76 @@ namespace Divisima.IntegrationTests
             govde.Should().Contain("ulasildi: false",
                 "vakum kirici: 429 ve digerleri icin ULASILAMADI dali bulunmali");
         }
+
+        // ══ K4 - RID YALNIZ 409'DA YENILENIR [VERI-BOZAN] ══════════════════════════════
+        //
+        // OLCULDU (`GuestCheckoutManager.ReplayGuardiAsync`): guard 400'u YALNIZCA o
+        // request_id ile bir siparis ZATEN VARKEN ve olcut tutmayinca doner. Istemci
+        // 400'de rid'i yenilerse yeni rid icin gecmis kayit BULUNAMAZ, guard bosa duser
+        // ve IKINCI SIPARIS + IKINCI REZERVASYON olusur - GF-3/K12'nin replay kapisi
+        // fiilen devre disi kalir.
+        [Fact]
+        public void GF2B_K4_RID_HATA_SONRASI_YALNIZ_409DA_YENILENIR()
+        {
+            var kaynak = Oku("frontend/api-bridge.js");
+            var govde = KodSatirlari(MetotGovdesi(kaynak, "function ridHataSonrasiTazele(e)"));
+
+            govde.Should().Contain("=== 409",
+                "yenileme kosulu TAM 409 olmali");
+
+            // ══ ASIL AYIRT EDICI: govdede TEK bir yenileme cagrisi ve TEK bir kosul ═════
+            // Ikinci bir dal (orn. 400) eklenirse bu sayimlar buyur ve pin kirilir.
+            Sayim(govde, "checkoutIstekIdYenile()").Should().Be(1,
+                "yenileme TEK dalda olmali - ikinci dal 400'u de kapsayabilir ve " +
+                "replay kapisini bosa dusururdu");
+            Sayim(govde, "===").Should().Be(1,
+                "TEK durum kodu kosulu bulunmali - ikinci kosul 400/5xx'i de kapsar");
+
+            // Iki cagri yeri: uye `submitOrder` catch'i ve misafir catch'i.
+            Sayim(KodSatirlari(kaynak), "ridHataSonrasiTazele(e);").Should().Be(2,
+                "hem uye hem misafir hata dali ayni merkezden gecmeli - ikinci kopya ACILMAZ");
+        }
+
+        // ══ K4/b - NIYET IMZASI GENIS, SEPET IMZASI DAR ════════════════════════════════
+        //
+        // rid "AYNI NIYET" demektir; olcut sepet + adres + kupon + bakiye + odeme
+        // yontemi. Ama `sepetImzasi` GENISLETILEMEZ: uc tuketicisi daha var ve ucunun de
+        // olcutu "SEPET ICERIGI degisti mi"dir (sunucu sepet senkronu, mirror tur imzasi,
+        // kupon yeniden dogrulama). Genisletilseydi yalnizca ADRES SECMEK sunucu
+        // sepetini yazdirir ve kupon dogrulamayi tetiklerdi - GF-3/K9'un 20/dk kovasina,
+        // yani K3'un yeni duzelttigi limitin USTUNE.
+        [Fact]
+        public void GF2B_K4_NIYET_IMZASI_AYRI_ve_SEPET_IMZASI_DAR_KALIR()
+        {
+            var kaynak = Oku("frontend/api-bridge.js");
+
+            var niyet = KodSatirlari(MetotGovdesi(kaynak, "function checkoutNiyetImzasi()"));
+            niyet.Should().Contain("sepetImzasi()",
+                "niyet imzasi sepet imzasini ICERMELI - kopya degil BILESIM");
+            foreach (var alan in new[] { "addrId", "useCredit", "method", "kuponImzaAnahtari" })
+            {
+                niyet.Should().Contain(alan,
+                    $"niyet imzasi '{alan}' degisimini yakalamali - govdeye giren her alan " +
+                    "rid'in tanimladigi NIYETIN parcasidir");
+            }
+            niyet.Should().Contain("mgMail",
+                "misafir e-postasi imzaya girmeli - K12 replay olcutunun BIRINCI bileseni odur; " +
+                "girmezse e-posta degisiminde rid ayni kalir ve musteri 400 dongusunde sikisir");
+
+            // ══ SEPET IMZASI DAR KALMALI - YAN ETKI KAPISI ═════════════════════════════
+            var sepet = KodSatirlari(MetotGovdesi(kaynak, "function sepetImzasi()"));
+            sepet.Should().Contain("i.product_id",
+                "vakum kirici: sepet imzasi hala kalemleri okuyor olmali");
+            foreach (var sizinti in new[] { "addrId", "useCredit", "checkoutState" })
+            {
+                sepet.Should().NotContain(sizinti,
+                    $"sepet imzasi '{sizinti}' TASIMAMALI - uc tuketicisinin olcutu " +
+                    "'SEPET ICERIGI degisti mi'dir; genisleme onlarda yanlis tetikleme uretir");
+            }
+
+            // Iki gonderim yolu da niyete gore tazeler (misafir yolunda EKSIKTI).
+            Sayim(KodSatirlari(kaynak), "checkoutIstekIdNiyeteGoreTazele();").Should().Be(2,
+                "uye ve misafir gonderimlerinin IKISI de rid'i niyete gore tazelemeli");
+        }
     }
 }

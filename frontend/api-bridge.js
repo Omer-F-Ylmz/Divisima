@@ -1815,6 +1815,14 @@
 
     var btn = document.getElementById("mgGonder");
     if (btn) { btn.disabled = true; btn.textContent = ceviri("sending"); }
+    // ══ GF-2b / K4 - MISAFIR YOLU DA NIYETE GORE TAZELENIR ═══════════════════════════
+    // OLCULDU: bu cagri BURADA YOKTU - rid yalnizca uye `submitOrder`da tazeleniyordu.
+    // Oysa GF-3/K12'nin replay kapisi MISAFIR yolundadir. Sonuc: siparis sunucuda
+    // olusup istemci sonucu goremediyse (ag kesintisi), musteri sepetini ya da
+    // e-postasini degistirip yeniden gonderdiginde rid AYNI kalir, guard 400 doner ve
+    // rid 400'de yenilenmedigi icin musteri CIKISSIZ DONGUYE girerdi. Niyet imzasi
+    // e-postayi ve kuponu da tasidigi icin bu dongu kapanir.
+    checkoutIstekIdNiyeteGoreTazele();
     try {
       var r = await api.orders.placeAsGuest({
         guest_name: d.ad, guest_email: d.eposta, guest_phone: d.telefon,
@@ -1853,6 +1861,8 @@
       // BILINMEYEN MESAJDA HAM BASIM STATUKO: uydurma bir notr metin, sunucunun
       // soyledigi somut sebebin YERINE GECMEZ - musteri "neden olmadi" bilgisini
       // kaybetmemeli. Bilinmeyenlerin sayimi rapora yazildi.
+      // GF-2b/K4: rid YALNIZ 409'da yenilenir (o dalda siparis olusmamistir).
+      ridHataSonrasiTazele(e);
       var _ha = hataAnahtari(e);
       er.textContent = _ha ? ceviri(_ha) : (e.message || ceviri("b_siparis_olusturulamadi"));
       if (btn) { btn.disabled = false; btn.textContent = ceviri("mg_submit"); }
@@ -2191,10 +2201,80 @@
       }).sort().join(",");
     } catch (e) { return ""; }
   }
+  // ══ GF-2b / K4 - KUPON KODU IMZA ANAHTARI ════════════════════════════════════════
+  // NULL ile "" AYNI degere duser - sunucu K12 olcutu de bu normalizasyonu yapar.
+  // KIMLIK dizgesi oldugu icin INVARIANT casing kullanilir (CLAUDE.md 6c): kulture
+  // bagli buyultme "i/I" ciftini bozar ve AYNI kupon IKI farkli anahtar uretirdi.
+  //
+  // SUNUCUNUN TAM KANONIK BICIMI (KimlikDizgesi.KanonikKod) BURAYA KOPYALANMAZ.
+  // Istemcinin ihtiyaci sunucunun kanonik degeri DEGIL, KARARLI bir anahtardir -
+  // "ayni kuralin ikinci kopyasi" bu depoda yedi kez bedeli odenmis bir hatadir.
+  function kuponImzaAnahtari(kod) {
+    return String(kod == null ? "" : kod).trim().toUpperCase();
+  }
+
+  // ══ GF-2b / K4 - CHECKOUT NIYET IMZASI ═══════════════════════════════════════════
+  // rid "AYNI NIYET" demektir. Sunucu (GF-3/K12) replay olcutunu e-posta + sepet
+  // kalemleri + kanonik kupon uzerinden kuruyor; istemci imzasi ayni ekseni ve ek
+  // olarak govdeye giren adres / bakiye kullanimi / odeme yontemini de kapsar.
+  //
+  // NEDEN `sepetImzasi` GENISLETILMEDI (olculdu, varsayilmadi): o fonksiyonun UC
+  // tuketicisi daha var ve ucunun de olcutu "SEPET ICERIGI degisti mi"dir -
+  //   :1493 sunucu sepet senkronu        (imza degisince sunucuya YAZAR)
+  //   :1618 mirror tur imzasi
+  //   :2145 kupon yeniden dogrulama      (imza degisince sunucuya SORAR)
+  // Genisletilseydi yalnizca ADRES SECMEK sunucu sepetini yeniden yazdirir ve kupon
+  // dogrulamayi tetiklerdi; GF-3/K9 kupon dogrulamayi 20/dk "hassas" kovasina koydugu
+  // icin bu, K3'un henuz duzelttigi limitin USTUNE binerdi. Niyet imzasi bu yuzden
+  // AYRI ve sepet imzasini ICERIR - kopya degil, BILESIM.
+  function checkoutNiyetImzasi() {
+    var p = [sepetImzasi()];
+    try {
+      var s = checkoutState || {};
+      p.push("a:" + (s.addrId || ""));
+      p.push("b:" + (s.useCredit > 0 ? s.credit : 0));
+      p.push("y:" + (s.method || ""));
+      p.push("k:" + kuponImzaAnahtari(s.coupon && s.coupon.code));
+    } catch (e) {}
+    try {
+      // MISAFIR YOLU `checkoutState` KULLANMAZ: niyeti formdaki e-posta ve cekmecedeki
+      // kupon belirler. E-posta imzaya GIRER cunku K12 olcutunun BIRINCI bileseni odur;
+      // e-posta degisip rid ayni kalirsa sunucu 400 doner ve rid 400'de ARTIK
+      // yenilenmedigi icin musteri CIKISSIZ kalirdi.
+      //
+      // E-POSTAYA CASING UYGULANMAZ (kupondan bilincli AYRISMA): CLAUDE.md 6c geregi
+      // `KanonikKod` e-postaya uygulanmaz. Buyuk/kucuk fark ederse imza degisir ve rid
+      // yenilenir - zarasiz, cunku o rid'e bagli bir siparis HENUZ yoktur.
+      var mg = document.getElementById("mgMail");
+      if (mg) p.push("m:" + String(mg.value || "").trim());
+      p.push("mk:" + kuponImzaAnahtari(misafirKuponKodu()));
+    } catch (e) {}
+    return p.join("#");
+  }
+
   function checkoutIstekIdYenile() { _checkoutIstekId = null; }
-  function checkoutIstekIdSepeteGoreTazele() {
-    var imza = sepetImzasi();
+  function checkoutIstekIdNiyeteGoreTazele() {
+    var imza = checkoutNiyetImzasi();
     if (imza !== _checkoutSepetImzasi) { _checkoutSepetImzasi = imza; checkoutIstekIdYenile(); }
+  }
+
+  // ══ GF-2b / K4 - RID HATA SONRASI YALNIZ 409'DA YENILENIR ════════════════════════
+  //
+  // OLCULDU (kaynaktan, `GuestCheckoutManager.ReplayGuardiAsync`): guard 400'u
+  // YALNIZCA o request_id ile bir siparis ZATEN VARKEN ve olcut tutmayinca doner.
+  // Istemci 400'de rid'i yenilerse yeni rid icin gecmis kayit BULUNAMAZ, guard bosa
+  // duser ve IKINCI SIPARIS + IKINCI REZERVASYON olusur - yani GF-3/K12'nin replay
+  // kapisi fiilen DEVRE DISI kalir. [VERI-BOZAN]
+  //
+  // 409 ("bu e-posta kayitli") farklidir: o dalda siparis OLUSMAMISTIR, dolayisiyla
+  // rid'i yenilemek hicbir kapiyi acmaz.
+  //
+  // 5xx ve AG HATASI da yenilemez: istegin sunucuya ULASIP ULASMADIGI bilinmez; ulasip
+  // siparis olustuysa yeni rid ikinci siparisi acardi. Cikissiz dongu buradan DEGIL,
+  // NIYET IMZASINDAN cozulur - musteri sepetini/adresini/kuponunu degistirdiginde rid
+  // zaten yenilenir ve 400 dogmaz.
+  function ridHataSonrasiTazele(e) {
+    if (e && Number(e.status) === 409) checkoutIstekIdYenile();
   }
   function checkoutIstekIdAl() {
     if (!_checkoutIstekId) {
@@ -2219,7 +2299,9 @@
     var err = document.getElementById("coErr");
     var btn = document.getElementById("coSubmit");
     checkoutHatasiYaz("");
-    checkoutIstekIdSepeteGoreTazele();   // MFIX-1/F-M3f: sepet degistiyse YENI anahtar
+    // MFIX-1/F-M3f: sepet degistiyse YENI anahtar.
+    // GF-2b/K4: olcut artik NIYET - sepet + adres + kupon + bakiye + odeme yontemi.
+    checkoutIstekIdNiyeteGoreTazele();
     var _zatenVarMesaji = "";            // MFIX-1/F-M3f: catch dalinda da gorulsun
     var items = cartItemsPayload();
     if (!items.length) { checkoutHatasiYaz(ceviri("b_sepet_bos_nokta")); return; }
@@ -2302,6 +2384,9 @@
       }
       embedCheckoutForm(pay.checkout_form_content);
     } catch (e) {
+      // GF-2b/K4: rid YALNIZ 409'da yenilenir. 400/5xx/ag hatasinda KORUNUR - aksi halde
+      // GF-3/K12'nin replay kapisi bosa duser ve ikinci siparis olusur. [VERI-BOZAN]
+      ridHataSonrasiTazele(e);
       // GOZ-FIX / F-Ö2: 401 = oturum gercekten bitti (api-client zaten BIR KEZ refresh
       // dener; buraya dusuyorsa o da basarisiz olmustur - olculdu: cart/add 401 ->
       // auth/refresh 401). Teknik mesaj yerine ne yapmasi gerektigi soylenir.
