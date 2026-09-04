@@ -19,6 +19,10 @@ permissions:
 jobs:
   zap-baseline:
     runs-on: ubuntu-latest
+    # GF-4 KAPANIS: CLAUDE.md 7 "her job'da timeout-minutes" sarti bu dosyada EKSIKTI
+    # (zeminde de yoktu; kural-uyum denetcisi isaretledi). ZAP baseline taramasi disa
+    # bagimli bir hedefe kosuyor - asili kalirsa slot 6 saat tutar.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: ZAP Baseline Scan (pasif - güvenli)

@@ -20,7 +20,10 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    # GF-4 KAPANIS (Y6 tamamlama): yardimci imajlar da tag + digest ile pinli.
+    # K5 bunlari kapsam disi birakmis ve BEYAN ETMEMISTI (iki denetci isaretledi).
+    # Digest Docker Hub'dan ADRESLENEBILIRLIK sinamasiyla alindi - bkz. ci.yml'daki not.
+    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     ports:
       # GUVENLIK: yalniz localhost - auth'suz Redis agdaki diger makinelere ACILMASIN (unauth-access engeli).
       - "127.0.0.1:6379:6379"
@@ -81,7 +84,8 @@ services:
   # kadar elle kurulan duzenin ta kendisi, artik `docker compose up` ile geliyor.
   # Uretimde karsiligi ops/infra/nginx.conf'taki divisima.com blogudur.
   frontend:
-    image: nginx:1.27-alpine
+    # GF-4 KAPANIS (Y6 tamamlama): tag + digest pini - gerekce redis servisinde.
+    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
     depends_on:
       - api
     ports:

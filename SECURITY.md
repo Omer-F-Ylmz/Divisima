@@ -166,3 +166,15 @@ uyarısını veriyor). Yani "MIT kalarak yamalı sürüme geçmek" mümkün değ
 
 **Telafi edici kontroller:** `dependency-scan` kapısındaki istisna advisory-id bazlıdır
 (`GHSA-rvv3-g6hj-g44x`) - başka bir zafiyet çıkarsa kapı yine kırar.
+
+### Microsoft.Identity.Client.Extensions.Msal 4.67.2 — kullanım dışı, GEÇİŞLİ
+
+**Kayıt tarihi:** 4 Eylül 2026 · **Durum:** kabul edilen risk (zafiyet değil, `Other` sınıfı
+kullanım dışı kaydı) · **Konum:** GEÇİŞLİ — ölçüldü: `*.csproj` içinde doğrudan başvuru **0**,
+`packages.lock.json` `"type": "Transitive"` (pozitif kontrol: `Microsoft.Identity.Client`
+aynı dosyada `"Direct"`). İşlevi 4.61'den itibaren MSAL'ın kendisine katıldığı için üst
+sürümü yok; yalnız `Azure.Identity` bırakınca düşer. Üst referans olarak **eklenmez** —
+eklemek, çözümlenen sürümü zorlamadan sahte bir "doğrudan bağımlılık" yaratırdı.
+**Yeniden değerlendirme:** `Azure.Identity` bir üst sürüme çıktığında zincir yeniden ölçülür.
+Not: bu kayıt, GF-4'te kapatılan **CriticalBugs 6 → 0** sonucundan ayrıdır — "CriticalBugs
+yok" ile "kullanım dışı paket yok" aynı şey değildir.

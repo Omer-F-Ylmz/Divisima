@@ -117,17 +117,13 @@ namespace Divisima.IntegrationTests
                 $"{yol} icinde digest'siz (yuruyen etiketli) imaj referansi KALMAMALI");
         }
 
-        [Fact]
-        public void Y6_Imaj_Referansi_DORT_SITEDE_DE_BIREBIR_AYNI_DIZGE()
-        {
-            // Theory her siteyi TEK TEK dogrular; bu test dordunun AYNI ANDA ve AYNI
-            // dizgeyle pinli oldugunu tek assert'te gosterir (drift kaniti).
-            var bulunan = ImajSiteleri.Select(y => Sayim(Govde(y), ImajTam)).ToArray();
-
-            bulunan.Should().HaveCount(4, "Y6 dort siteyi kapsar");
-            bulunan.Should().OnlyContain(n => n > 0,
-                "dort sitenin HEPSI ayni tag+digest'i tasimali - biri kayarsa bu pin kirilir");
-        }
+        // KALDIRILDI (GF-4 KAPANIS, L3 denetcisinin ITIRAZI): burada bir
+        // Y6_Imaj_Referansi_DORT_SITEDE_DE_BIREBIR_AYNI_DIZGE Fact'i vardi ve BAGIMSIZ
+        // AYIRT-ETME GUCU 0'di. Olculdu: HaveCount(4) derleme zamani sabit dizi uzerinde
+        // TOTOLOJI; ikinci assert Theory'nin (a) sartinin BIREBIR kopyasi. Mutasyonla
+        // gosterildi - ci.yml'dan digest sokuldugunde Theory ILE BIRLIKTE kirildi, ama
+        // docker-compose.yml'dan sokuldugunde Theory kirilirken bu YESIL KALDI. Yani
+        // "12 pin" sayisi bir tane SISIRILMISTI. Pin sayisi durustlestirildi.
 
         // ── Y6: DOCKERFILE TABAN IMAJLARI DIGEST'E PINLI ──────────────────────────────
         [Theory]
@@ -145,6 +141,31 @@ namespace Divisima.IntegrationTests
 
             Sayim(govde, imaj).Should().Be(Sayim(govde, tam),
                 $"Dockerfile'da {imaj} icin digest'siz FROM satiri KALMAMALI");
+        }
+
+        // ── Y6 (GF-4 KAPANIS): COMPOSE'UN YARDIMCI IMAJLARI DA DIGEST'E PINLI ─────────
+        //
+        // Iki denetci birden isaretledi: K5 "imaj referanslari digest'e pinlendi" derken
+        // docker-compose.yml'in KENDI icindeki iki imaji kapsam disi birakmisti ve bunu
+        // BEYAN ETMEMISTI. Ikisi de commit'in kendi gerekcesindeki "yuruyen etiket"
+        // sinifindan. Digest'ler Docker Hub'dan, mssql vakasindan sonra kurulan
+        // ADRESLENEBILIRLIK sinamasiyla alindi (digest ile geri cekim + echo-back esitligi;
+        // NEG: var olmayan etiket digest DONDURMEZ).
+        [Theory]
+        [InlineData("redis:7-alpine",
+                    "sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf")]
+        [InlineData("nginx:1.27-alpine",
+                    "sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10")]
+        public void Y6_Compose_Yardimci_Imajlari_DIGESTE_PINLI(string imaj, string digest)
+        {
+            var govde = Govde("docker-compose.yml");
+            var tam = imaj + "@" + digest;
+
+            Sayim(govde, tam).Should().BeGreaterThan(0,
+                $"docker-compose.yml'de {imaj} digest ile pinli olmali");
+
+            Sayim(govde, imaj).Should().Be(Sayim(govde, tam),
+                $"docker-compose.yml'de {imaj} icin digest'siz (yuruyen etiketli) satir KALMAMALI");
         }
 
         // ── Y5: PAKET KAYNAGI TEK VE KILITLI GRAF ─────────────────────────────────────
@@ -250,10 +271,22 @@ namespace Divisima.IntegrationTests
             // SECURITY.md'nin ILK kaniti bu; ProjectTo eklenirse maruziyet analizi
             // COKER (IQueryable uzerinde derin graf kurulabilir).
             var projeler = new[] { "Divisima.Bussiness", "Divisima.Dal", "Divisima.API" };
-            var toplam = projeler
+            var dosyalar = projeler
                 .SelectMany(p => Directory.GetFiles(Path.Combine(KokDizin.Value, p), "*.cs",
                                                     SearchOption.AllDirectories))
-                .Sum(f => Sayim(YorumsuzSatir(File.ReadAllText(f), "//"), "ProjectTo"));
+                .ToArray();
+
+            // POZITIF KONTROL (vakum yasagi - CLAUDE.md bolum 6; L3 denetcisinin ITIRAZI).
+            // Bu satir olmadan assert "hicbir sey olmadiginda YESIL": .cs dosyalari baska
+            // bir dizine tasinsa tarama BOS doner ve pin bedava gecerdi. Esik OLCULDU -
+            // uc projede obj/bin HARIC 332, DAHIL 352 dosya (ureten ifade:
+            // find Divisima.Bussiness Divisima.Dal Divisima.API -name '*.cs' | wc -l).
+            // Esik bilerek OLCULENIN ALTINDA: amac olagan dosya ekleme/silmede YANLIS
+            // KIRMIZI uretmek degil, taramanin SIFIRA dusmesini yakalamaktir.
+            dosyalar.Length.Should().BeGreaterThan(300,
+                "tarama gercekten dosya okumali - bos tarama bu pini bedava yesil birakirdi");
+
+            var toplam = dosyalar.Sum(f => Sayim(YorumsuzSatir(File.ReadAllText(f), "//"), "ProjectTo"));
 
             toplam.Should().Be(0, "SECURITY.md 'ProjectTo kullanilmiyor - sifir eslesme' diyor");
         }
