@@ -12,8 +12,11 @@ namespace Divisima.IntegrationTests
     // Böylece testler gerçek EF davranışını (transaction, concurrency, migration) doğrular - mock değil.
     public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyncLifetime
     {
-        private readonly MsSqlContainer _dbContainer = new MsSqlBuilder()
-            .WithImage("mcr.microsoft.com/mssql/server:2022-latest")
+        // GF-4/K3: Testcontainers 3.10.0 -> 4.14.0 ile parametresiz MsSqlBuilder() kurucusu
+        // kullanim disi kaldi (CS0618) ve imaj artik KURUCUYA verilir; .WithImage(...) cagrisi
+        // bu yuzden kalkti. Imza kaynaktan okundu (paketin XML dokumani):
+        // "M:Testcontainers.MsSql.MsSqlBuilder.#ctor(System.String)".
+        private readonly MsSqlContainer _dbContainer = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest")
             .WithPassword("Test_Password123!")
             .Build();
 
