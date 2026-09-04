@@ -543,6 +543,38 @@ namespace Divisima.IntegrationTests
                     "her olay turu KENDI tablosuyla baglanmali");
         }
 
+        // ══ K5-lite/d - URETILEN HER `data-act`IN TABLODA KARSILIGI VAR ═══════════════
+        //
+        // BU REFAKTORUN ASIL RISKI: satir ici `onclick` YANLIS yazilsaydi tarayici konsola
+        // hata basardi; `data-act` yanlis yazilirsa dinleyici onu SESSIZCE yok sayar ve
+        // dugme HICBIR SEY YAPMAZ - kimse fark etmez. Pin iki yonu de kapatir:
+        //   (a) uretilip tabloda OLMAYAN bir eylem  -> OLU DUGME
+        //   (b) tabloda olup HIC uretilmeyen eylem  -> OLU TABLO GIRDISI (bayat kod)
+        [Fact]
+        public void GF2B_K5_URETILEN_data_act_ile_TABLO_BIREBIR_ORTUSUR()
+        {
+            var kaynak = Oku("frontend/admin.js") + "\n" + Oku("frontend/admin.html");
+
+            var uretilen = System.Text.RegularExpressions.Regex
+                .Matches(kaynak, "data-act=\"([a-zA-Z]+)\"")
+                .Select(m => m.Groups[1].Value)
+                .Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
+
+            // Tablo girdileri: `const PANEL_* = {` blogundaki iki bosluk girintili anahtarlar.
+            var tanimli = System.Text.RegularExpressions.Regex
+                .Matches(Oku("frontend/admin.js"), @"(?m)^  ([a-zA-Z]+):")
+                .Select(m => m.Groups[1].Value)
+                .Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
+
+            uretilen.Should().NotBeEmpty("vakum kirici: taranan kaynakta data-act BULUNMALI");
+            tanimli.Should().NotBeEmpty("vakum kirici: eylem tablolari OKUNMUS olmali");
+
+            uretilen.Except(tanimli).Should().BeEmpty(
+                "uretilen her eylemin tabloda karsiligi olmali - yoksa dugme SESSIZCE olu kalir");
+            tanimli.Except(uretilen).Should().BeEmpty(
+                "tabloda uretilmeyen eylem kalmamali - bayat girdi sonraki okuyucuyu yanıltir");
+        }
+
         // CSP meta etiketinin `content` degerini cikarir.
         private static string CspMetaIcerigi(string html)
         {
