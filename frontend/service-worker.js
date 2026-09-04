@@ -41,16 +41,21 @@ const VERSION = "2026-09-04-gf2b";
 
 // ══ GF-2b / K2 - GERI DONUS KAPISI (KILL SWITCH) ══════════════════════════════════════
 //
-// NEDEN BU DALGADA GEREKTI: service worker URETIMDE BUGUNE KADAR HIC KOSMADI.
-// `index.html` var olmayan bir 'sw.js'i kaydetmeye calisiyordu (dosya HICBIR commit'te
-// yok, ilk commit'ten beri olu kod) ve kayit sessizce dusuyordu. K2 kaydi tek dogru
-// noktaya indirdi - yani SW ILK KEZ gercek kullanicilarda calisacak, ve onunla birlikte
-// GF-2a/K8'in kararlari (iki kova, /api network-only, cikista API kovasi temizligi) de
-// ilk kez uretimde surulecek.
+// ── DUZELTILMIS GEREKCE (ILK YAZIM CURUDU - rapor denetcisi olctu) ───────────────────
+// ILK YAZIMDA "service worker URETIMDE BUGUNE KADAR HIC KOSMADI ... ILK KEZ gercek
+// kullanicilarda calisacak" yaziyordu. **YANLIS.** Olculdu: `index.html` ILK COMMIT'ten
+// (df91863) beri `/pwa-register.js`i yukluyor ve o dosya `pwa-register.js:12`de VAR OLAN
+// `/service-worker.js`i kaydediyor; dosya bu dalgada DEGISMEDI. Yani SW gercek tarayicida
+// ZATEN KOSUYORDU ve GF-2a/K8'in kararlari (iki kova, /api network-only, cikis temizligi)
+// da `1dd985b` ile ZATEN yayinda. K2'nin soktugu satir IKINCI ve HER ZAMAN DUSEN bir
+// kayitti (var olmayan 'sw.js'e) - onu silmek hijyendir, SW'nin kosup kosmadigini
+// DEGISTIRMEZ.
 //
-// RISK: onbellekli bir SW yanlis davranirsa kullanicinin tarayicisinda KALIR ve yeni
-// dagitim ona ULASAMAYABILIR. Bu yuzden dagitimla geri alinabilen bir kapi gerekir -
-// depoyu geri almak TEK BASINA yetmez, cunku kurulu SW zaten kullanicidadir.
+// GERCEK GEREKCE: bu dalga SW GOVDESINI degistiriyor ve VERSION'u bumpliyor, yani
+// kullanicilara YENI bir SW surumu kurulacak ve `activate` eski kovalari silecek.
+// Bir service worker kullanicinin tarayicisinda KALIR: hatali bir surum yayinlanirsa
+// yeni dagitim ona ULASAMAYABILIR ve depoyu geri almak TEK BASINA yetmez, cunku kurulu
+// SW zaten kullanicidadir. Dagitim duzeyinde geri alinabilen bir kapi bu yuzden gerekli.
 //
 // KULLANIMI: bu bayrak `true` yapilip dosya dagitilir. Kurulan her SW kendini SILER ve
 // TUM kovalari bosaltir; sayfa bir sonraki yuklemede tamamen SW'siz calisir.

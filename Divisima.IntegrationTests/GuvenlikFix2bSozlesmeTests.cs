@@ -402,11 +402,15 @@ namespace Divisima.IntegrationTests
 
         // ══ K2/b - GERI DONUS KAPISI (KILL SWITCH) ═════════════════════════════════════
         //
-        // SW bu dalgaya kadar URETIMDE HIC KOSMADI; K2 ile ilk kez gercek kullanicilarda
-        // calisacak ve GF-2a/K8'in kararlari da ilk kez uretimde surulecek. Onbellekli
-        // bir SW yanlis davranirsa kullanicinin tarayicisinda KALIR ve yeni dagitim ona
-        // ULASAMAYABILIR - depoyu geri almak TEK BASINA yetmez. Bu yuzden dagitimla
-        // calisan bir geri donus kapisi ZORUNLU.
+        // DUZELTILMIS GEREKCE (ilk yazim CURUDU - rapor denetcisi olctu): "SW bu dalgaya
+        // kadar uretimde HIC KOSMADI" YANLISTI. `index.html` ILK COMMIT'ten beri
+        // `/pwa-register.js`i yukluyor ve o, VAR OLAN `/service-worker.js`i kaydediyor.
+        // K2'nin soktugu satir IKINCI ve her zaman DUSEN bir kayitti.
+        //
+        // Kapinin gercek gerekcesi: bu dalga SW GOVDESINI degistirip VERSION'u bumpliyor,
+        // yani kullanicilara YENI bir surum kurulacak. Service worker kullanicinin
+        // tarayicisinda KALIR; hatali bir surumde yeni dagitim ona ULASAMAYABILIR ve
+        // depoyu geri almak TEK BASINA yetmez. Dagitimla calisan geri donus kapisi ZORUNLU.
         [Fact]
         public void GF2B_K2_KILL_SWITCH_VARSAYILAN_KAPALI_ve_UC_OLAYDA_DA_OKUNUR()
         {
@@ -526,12 +530,23 @@ namespace Divisima.IntegrationTests
             Direktif(meta, "script-src").Should().NotContain("'unsafe-hashes'",
                 "satir ici olay oznitelikleri kalktigi icin bu kaynak da KALKMALI");
 
-            // ══ frame-src EKLENMEDI - OLCULEN GEREKCE ═════════════════════════════════
-            // 3DS akisi bir IFRAME degil, ust duzey FORM POST'udur: `docs/muhur/
-            // 01-oturum-devri.md:503` 3DS adimini `form-action` uzerinden kaydediyor ve
-            // AYNI muhurde 3DS uctan uca suruldu (#30 dustu, #31 basarili) - `frame-src`
-            // CSP'de HIC YOKKEN. Yani kanit "yok" degil, OLUMLU yonde: akis frame-src
-            // olmadan calisiyor. Bu pin o mekanizmayi korur.
+            // ══ frame-src EKLENMEDI - KANIT CELISKILI, KARAR "EKLEME" ═════════════════
+            //
+            // LEHTE (vitrin yuzeyi icin GUCLU): `docs/muhur/01-oturum-devri.md:503` 3DS
+            // adimini `form-action` uzerinden kaydediyor ve AYNI muhurde 3DS UCTAN UCA
+            // suruldu (#30 dustu, #31 basarili) - vitrin CSP'sinde `frame-src` HIC YOKKEN.
+            // Yani bu yuzey frame-src OLMADAN calisti.
+            //
+            // ALEYHTE (rapor denetcisi buldu, ILK YAZIMDA ATLANMISTI): `Divisima.API/
+            // Middlewares/SecurityHeadersMiddleware.cs:29` CSP'sinde
+            // `frame-src https://*.iyzipay.com` VAR ve yorumu "Iyzico iframe'ine izin"
+            // diyor. O baslik API JSON yanitlarina uygulaniyor - bir belge cercevelemedigi
+            // icin orada FIILEN ETKISIZ - ama birinin bu akisi IFRAME sandigini gosterir.
+            // ILK YAZIMDA "kanit OLUMLU yonde" denmisti; DOGRUSU "kanit CELISKILI".
+            //
+            // KARAR (merkez tarifi): kanit kesin degilse EKLENMEZ + SUPHELI olarak kayda
+            // gecer + gercek sandbox odemesiyle goz turunda olculur. Bu pin o karari
+            // korur; celiski cozulunce BILINCLI olarak degistirilmesi gerekir.
             var formAction = Direktif(meta, "form-action");
             formAction.Should().Contain("iyzipay.com",
                 "3DS adimi form POST ile yurudugu icin saglayici host'u form-action'da olmali");
