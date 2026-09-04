@@ -146,6 +146,85 @@ jobs:
       - name: Kullanımdan kalkmış paket kontrolü
         run: dotnet list Divisima-Backend.sln package --deprecated 2>&1 | tee deprecated.txt || true
 
+      # ══ GF-4/K6 - VENDOR BUTUNLUK KAPISI ══════════════════════════════════════════════
+      # frontend/vendor/ altindaki ucuncu taraf dosyalar depoya ELLE kopyalanmistir; NuGet
+      # ya da npm gibi bir cozumleyici onlari DOGRULAMAZ. Yani bugune kadar o dosyalarin
+      # degismedigini kontrol eden HICBIR mekanizma yoktu - bu, dalganin kapattigi tedarik
+      # zinciri bosluklarindan biri (ve frontend/'in CI'ya ILK girisi).
+      #
+      # IKINCI KOPYA YOK: beklenen ozet zaten frontend/vendor/README.txt manifestinde
+      # yaziliydi; kapi onu OKUR, kendi kopyasini tutmaz. Boylece "iki yerde ayni sayi"
+      # sinifindan bir kayma dogmaz.
+      #
+      # CAPA NOTU (olculdu): manifestte "SHA-256" dizgesi IKI kez geciyor - biri yapisal
+      # kayit satiri, digeri GUNCELLEME baslikli DUZ YAZI cumlesi. Gevsek bir grep duz
+      # yaziyi okur; bu yuzden capa "anahtar : DEGER" bicimine ve 64 hane HEX'e baglandi.
+      #
+      # AYIRT-ETME KANITI (yerelde kum havuzunda kosuldu, depoya dokunulmadan):
+      #   degismemis -> 0 · icerik degisti -> 1 · manifestsiz dosya -> 1 · dosya silindi -> 1
+      - name: Vendor butunluk kapisi (frontend/vendor sha256 <-> README manifesti)
+        run: |
+          set -o pipefail
+          MANIFEST="frontend/vendor/README.txt"
+          HATA=0
+          if [ ! -f "$MANIFEST" ]; then
+            echo "::error::Vendor manifesti bulunamadi: $MANIFEST"
+            exit 1
+          fi
+          KAYITLAR=$(awk '
+            /^[[:space:]]*Dosya[[:space:]]*:[[:space:]]*[^[:space:]]+[[:space:]]*$/ {
+              sub(/^[^:]*:[[:space:]]*/, ""); gsub(/[[:space:]]/, ""); cur = $0; next
+            }
+            /^[[:space:]]*SHA-256[[:space:]]*:[[:space:]]*[0-9a-f]{64}[[:space:]]*$/ {
+              sub(/^[^:]*:[[:space:]]*/, ""); gsub(/[[:space:]]/, ""); sha[cur] = $0; next
+            }
+            /^[[:space:]]*Boyut[[:space:]]*:[[:space:]]*[0-9]+[[:space:]]*bayt[[:space:]]*$/ {
+              sub(/^[^:]*:[[:space:]]*/, ""); sub(/bayt.*$/, ""); gsub(/[[:space:]]/, ""); boyut[cur] = $0; next
+            }
+            END { for (d in sha) printf "%s\t%s\t%s\n", d, sha[d], (d in boyut ? boyut[d] : "?") }
+          ' "$MANIFEST")
+          if [ -z "$KAYITLAR" ]; then
+            echo "::error::Manifest AYRISTIRILAMADI - hicbir 'Dosya/SHA-256' kaydi okunamadi."
+            exit 1
+          fi
+          echo "Manifest kayitlari:"
+          echo "$KAYITLAR" | while IFS=$'\t' read -r d s b; do echo "  $d  sha=${s:0:12}...  boyut=$b"; done
+          for f in frontend/vendor/*; do
+            ad=$(basename "$f")
+            [ "$ad" = "README.txt" ] && continue
+            bek_sha=$(echo "$KAYITLAR" | awk -F'\t' -v a="$ad" '$1 == a { print $2 }')
+            bek_boyut=$(echo "$KAYITLAR" | awk -F'\t' -v a="$ad" '$1 == a { print $3 }')
+            if [ -z "$bek_sha" ]; then
+              echo "::error::Vendor dosyasi manifestte KAYITLI DEGIL: $ad (manifeste eklenmeden vendor'a dosya konmaz)"
+              HATA=1
+              continue
+            fi
+            ger_sha=$(sha256sum "$f" | awk '{print $1}')
+            ger_boyut=$(wc -c < "$f" | tr -d ' ')
+            if [ "$ger_sha" != "$bek_sha" ]; then
+              echo "::error::Vendor ozeti UYUSMUYOR: $ad"
+              echo "::error::  beklenen $bek_sha"
+              echo "::error::  gercek   $ger_sha"
+              HATA=1
+            elif [ "$ger_boyut" != "$bek_boyut" ]; then
+              echo "::error::Vendor boyutu UYUSMUYOR: $ad beklenen=$bek_boyut gercek=$ger_boyut"
+              HATA=1
+            else
+              echo "OK  $ad  sha256 ve boyut manifestle BIREBIR ($ger_boyut bayt)"
+            fi
+          done
+          while IFS=$'\t' read -r d s b; do
+            if [ ! -f "frontend/vendor/$d" ]; then
+              echo "::error::Manifestte kayitli ama DOSYASI YOK: $d"
+              HATA=1
+            fi
+          done <<< "$KAYITLAR"
+          if [ "$HATA" -ne 0 ]; then
+            echo "Vendor butunluk kapisi KIRMIZI."
+            exit 1
+          fi
+          echo "Vendor butunluk kapisi YESIL."
+
   # 2) Statik güvenlik analizi (CodeQL - SQL injection, XSS, hardcoded secret vb.)
   codeql:
     runs-on: ubuntu-latest

@@ -30,7 +30,7 @@ jobs:
         # digest olmadan ayni satir zaman icinde BASKA bir imaji cozer. Ayni tag+digest
         # DORT yerde birebir durur: bu dosya, security.yml, docker-compose.yml ve
         # Divisima.IntegrationTests/CustomWebApplicationFactory.cs. Dordunun esitligi
-        # ImajReferansiSozlesmeTests ile PINLI - biri kayarsa test KIRMIZI verir.
+        # GuvenlikFix4SozlesmeTests ile PINLI - biri kayarsa test KIRMIZI verir.
         image: mcr.microsoft.com/mssql/server:2022-latest@sha256:0730f3689a6dcc33beaf8f466376ac056d7483a2272dcbd3bcc36d3a6df05437
         env:
           ACCEPT_EULA: "Y"
