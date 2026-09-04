@@ -8,12 +8,22 @@
 
 ```
 once  (55a79a7)   : 79.496 B   1.253 satir
-sonra (bu commit) : 65.531 B   1.142 satir
+sonra (kesim)     : 65.531 B   1.142 satir
 FARK              : 13.965 B
-kesilen toplam    : 21.274 B   (asagida BAYT-AYNEN)
-eklenen (net)     :  7.309 B   (oz bloklari + aile bloklari + isaretciler + MK-6 kurali)
-21.274 - 7.309 = 13.965 = FARK    (denklem KAPANIR)
+kesilen toplam    : 21.266 B   (OLCULDU: git diff; asagida BAYT-AYNEN)
+eklenen           :  7.301 B   (OLCULDU: git diff)
+21.266 - 7.301 = 13.965 = FARK    (denklem KAPANIR)
 hedefe pay 5 B · butceye pay 16.389 B · CR 0 (saf LF)
+
+AYRAC KAYDI: yedek dosyalarinin ham toplami 21.274 B'dir; aradaki 12 B, blok yedeklerini
+ayirmak icin ELLE eklenen UC adet "---" satiridir (kesilen icerik DEGIL). Ilk yazimda
+"eklenen 7.309" OLCULMUS DEGIL, 21.274-13.965'ten TURETILMISTI - denetci yakaladi,
+her iki rakam da `git diff` ile YENIDEN OLCULDU.
+
+DUZELTME COMMIT'I (bu commit): CLAUDE.md 65.531 -> 64.356 B (hedefe pay 1.180 B).
+Ek kesimler: iki AV-1 blogu (1.341 B, asagida) · "GOZ TURU BEKLIYOR - SEKIZ KALEM" blogu ·
+frame-src paragrafindaki mukerrer K2 cumlesi. Ek eklemeler: AV-2 GIRDILERI (dort satir) ·
+DEVIR durum satiri · K4 ozune `[VERI-BOZAN]` · kuyruk 1'den numaralandirma.
 ```
 
 ## 2 · FAZ A — BOLUM BAYTLARI (once -> sonra)
@@ -21,8 +31,11 @@ hedefe pay 5 B · butceye pay 16.389 B · CR 0 (saf LF)
 ```
 B0 arsiv usulu + B1/B2      2.496 -> 18.976*   B6 dersler          13.712 ->  9.801
 B4 MK-1..MK-10             10.977 -> 11.341    B7 kurgu + D-YAN     5.752 ->  5.752
-B5 suzgec kutuphanesi       3.600 ->  3.600    B8 baglayici+supheli 13.812 ->  7.324
+B5 suzgec kutuphanesi       3.600 ->  3.600    B8 baglayici+supheli 13.812 ->  7.318
                                                B9 kuyruk/kalan     12.662 ->  8.738
+(B8 ilk yazimda 7.324 yazilmisti - olcum SON iki bayt-kirpma duzenlemesinden ONCE
+ alinmisti; denetci yakaladi, yeniden olculdu. Sutun toplami 65.526 + 5 B basliksiz on
+ = 65.531 = dosya.)
 * B0 rakami "once" olcumunde YALNIZ B0 basligini kapsiyordu; "sonra" olcumu B0+B1+B2'yi
   birlikte veriyor (B1/B2 ayri `# B` basligi TASIMIYOR). Bu bir kesim degil, OLCUM SINIRI -
   B1/B2 iceriginde DEGISIKLIK YOK.
@@ -53,9 +66,15 @@ Yedi dalga-bazli ders bolumu = 91 satir / 5.694 B -> **alti aile grubu, 16 ders 
 ## 5 · FAZ A — B9 ALT-BLOK BAYTLARI (kesim ONCESI)
 
 ```
-Kuyruk+kapanis 2.220 | BILINEN GF-1b 1.589 · GF-3 1.305 · GF-2a 752 (toplam 3.646)
+Kuyruk+kapanis 2.220 | BILINEN GF-1b 882 · GF-3 689 · GF-2a 751 (toplam 2.322)
 GOZ TURU BEKLIYOR 590 + 464 | Devir 1.275 | VITRIN-KALAN 1.585
 ERTELENMIS-DEFTER 1.478 | AV-1 girdileri 1.341        B4 (kesim oncesi): 10.977 B
+
+CIFT SAYIM DUZELTMESI: ilk yazimda BILINEN rakamlari 1.589/1.305/752 idi. O uc deger
+ELENEN bir yakalamadan (`kesim3-*.txt`) geliyordu; o yakalama sinir hatasiyla komsu
+"GUVENLIK-FIX-2a/3 KAPANDI" paragraflarini da yutmustu ve ayni paragraflar "Kuyruk+kapanis
+2.220" icinde ZATEN sayiliyordu (~1,3 KB cift sayim). Gercek BILINEN bloklari 882/689/751;
+ureten ifade `wc -c < kes-bilinen-*.txt`. Denetci yakaladi.
 ```
 
 ## 6 · MUKERRER (bulundu ve kesildi)
@@ -343,4 +362,32 @@ basarili sifre sifirlama HICBIR `audit_logs` satiri birakmiyordu (rapor denetcis
 geri alma + md5 dogrulamasi.** Gerekce OLCULDU: `git stash push -- <yol>` untracked
 dosyalari BIRAKIR, geri alma fixli kod uzerinde kostu ve YALANCI "0 kirmizi" verdi.
 
+```
+
+### DUZELTME COMMITI — B9 / GUVENLIK-AV-1 iki blok (23 satir, 1.341 B)
+
+```
+## GUVENLIK-AV-1 kapsam girdileri
+
+- `00a:192` **YENI KALEM (GUVENLIK DALGASI 2 / B5 eki - kullanici karari): `failed-jobs` PII RISKI
+- `40·MANTIK-FIX-4·DV3`      -> GUVENLIK-AV-1 girdisi
+- `40·MANTIK-FIX-4·VITRIN-KALAN` ortak RuleBuilder karari GUVENLIK-AV-1 SONRASINA (K7 mesaj/NotEmpty ayrismasi)
+- `39·MANTIK-FIX-3·FIX-1B DEVRI` F4 erisim jetonu iptali + F8 step-up zinciri
+
+## GUVENLIK-AV-1 girdileri (39·MANTIK-FIX-3, bayt-ayni)
+
+kaynak: 39·MANTIK-FIX-3_MUHRU · GUVENLIK-AV-1 GIRDILERI (bayt-ayni)
+
+### GUVENLIK-AV-1 GIRDILERI
+
+- **Access token iptali** - sifre degisiminden sonra eski access token YASIYOR
+  (`RevokeAsync` uretimde 0 cagri, `user_sessions`ta `jti` kolonu YOK).
+- **Hata kodu birlestirme** - TR serbest metin capalarinin kirilganligi (K3 + K3b ayni capa).
+- **K4 telafisinin ATOMIKLESTIRILMESI** - bugun iki ayri `SaveChanges`; kismi durum mumkun.
+- **`ExecuteDeleteAsync` <-> transaction ROLLBACK olcumu** - K2 `DeleteWhereAsync`i
+  transaction ICINDE cagiriyor; rollback davranisi SINANMADI (denetcinin kor noktasi).
+- **`guest_name` UZUNLUK DOGRULAMASI YOK** - uye yolu `MaximumLength(120)` istiyor, misafir
+  yolunda sinir yok ve `full_name` kolonu 150 karakter; uzun ad EF insert'te 500 uretir.
+  Manager'in KENDI dogrulama bolgesine ait oldugu icin bu dalgada dokunulmadi.
+  **FIX GUVENLIK-FIX ADAYI.**
 ```

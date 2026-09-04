@@ -62,14 +62,14 @@ onlari bayatlatmaz. Okuma usulu: CLAUDE.md B0 · MK-11 (b).
 
 | 47 | `47-guvenlik-fix-3.md` | # 47 · GUVENLIK-FIX-3 (GF-3) MUHRU — SIZINTI / YAPILANDIRMA / LIMIT / KALINTI (3 Eylul 2026) | — | 18375 | yeni usul |
 | 48 | `48-guvenlik-fix-2b.md` | # 48 · GUVENLIK-FIX-2b (GF-2b) FAZ 1 — ISTEMCI OTURUM · SW · 429 UX · RID · CSP-LITE (4 Eylul 2026) | — | 17082 | yeni usul |
-| 49 | `49-arsiv-3.md` | # 49 · ARSIV-3 — CLAUDE.md KESIMI (FAZ A OLCUMU + FAZ B UYGULAMASI) (4 Eylul 2026) | — | 26474 | yeni usul |
+| 49 | `49-arsiv-3.md` | # 49 · ARSIV-3 — CLAUDE.md KESIMI (FAZ A OLCUMU + FAZ B UYGULAMASI) (4 Eylul 2026) | — | 29129 | yeni usul |
 
 **AD CAKISMASI UYARISI:** bu dosya **GF-3 (Eylul 2026)** dalgasinindir. Depoda ayrica
 **GUVENLIK-FIX-3 (Agustos 2026)** vardir ve onun pinleri `GuvenlikFix3SozlesmeTests.cs`
 dosyasindadir (dagitim yuzeyi: nginx/CSP/clickjacking). Eylul dalgasinin pin dosyasi
 `GuvenlikFix3SizintiSozlesmeTests.cs`. Iki dalga KARISTIRILMAMALIDIR.
 
-Toplam arsiv: 51 dosya · 897.136 B (OLCULDU: `ls -1 *.md | grep -v INDEX.md | xargs wc -c`).
+Toplam arsiv: 51 dosya · 899.791 B (OLCULDU: `ls -1 *.md | grep -v INDEX.md | xargs wc -c`).
 Bayt denklemi (TARIHSEL, d8f12dd zemini — GUNCELLENMEZ):
 747.240 = 44.393 (C1 sonrasi CLAUDE.md) + 702.847.
 NOT (AV-1'de olculdu): onceki "42 dosya · 702.847 B" satiri BAYATTI — `41-arsiv-1.md`

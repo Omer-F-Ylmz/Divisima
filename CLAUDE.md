@@ -959,7 +959,7 @@ yalniz somut gerekceyle bakilir.
 - `48·GF-2b·K1` Refresh kilidindeki kiyas tabani BELLEK jetonu; `storage` dinleyicisi YALNIZ bellegi esitler. -> 48
 - `48·GF-2b·K2` SW kaydi TEK NOKTADA (`pwa-register` -> `/service-worker.js`) + `KAPAT` bayragi UC olayda da okunur. -> 48
 - `48·GF-2b·K3` 429 AYRI HATA SINIFI; arama onbellege YAZMAZ, kupon YALNIZ 400/404/422'de kalkar. `[PARA]` -> 48
-- `48·GF-2b·K4` rid YALNIZ 409'da yenilenir; `sepetImzasi` GENISLETILMEZ, niyet imzasi AYRI ve onu ICERIR. -> 48
+- `48·GF-2b·K4` rid YALNIZ 409'da yenilenir `[VERI-BOZAN]`; `sepetImzasi` GENISLETILMEZ, niyet imzasi AYRI ve onu ICERIR. -> 48
 - `48·GF-2b·K5` admin CSP `'unsafe-inline'`siz; vitrin `'unsafe-inline'` KABUL EDILMIS RISK; `frame-src` SUPHELI. -> 48
 
 ## Acik SUPHELI (00b-supheli.md)
@@ -1015,11 +1015,11 @@ AV-1 `c6721b7`/42 · ARSIV-2 `4c29f32`/43 · GF-1 `189ce81`/44 · GF-1b `00b012f
 GF-2a `1dd985b`/46 · GF-3 `33cac2e`/47 · **GF-2b FAZ 1 `0fd3e62`/48**.
 **D-7 KISMEN**: admin TAM, vitrin `'unsafe-inline'` KABUL EDILMIS RISK; **CSP FAZ B YOK** -> ERT-DEFTER.
 
-3. GF-4 TEDARIK ZINCIRI   <- SIRADA
-6. GUVENLIK-AV-2 (dar olcum, ultracode YOK): at-rest sifreleme · 2FA/TOTP ·
+1. GF-4 TEDARIK ZINCIRI   <- SIRADA
+2. GUVENLIK-AV-2 (dar olcum, ultracode YOK): at-rest sifreleme · 2FA/TOTP ·
    TOCTOU/ExecuteUpdateAsync · A09 · olay isleyicileri · 13 anilmayan controller
    (Comparison/Collection ham entity suphesi)
-7. VITRIN-KALAN (8 kalem)  8. FIX-1B  9. ADMIN-FIX  10. IMPORT-FIX  11. FIX-1C  12. LOG-FIX  13. FIX-2  14. FIX-3/B13
+3. VITRIN-KALAN (10 kalem)  4. FIX-1B  5. ADMIN-FIX  6. IMPORT-FIX  7. FIX-1C  8. LOG-FIX  9. FIX-2  10. FIX-3/B13
 
 Bes BILINEN kalem (ayni-saniye jeton penceresi · miras oturumda step-up · 342 olu oturum ·
 IP davranis kaniti yok · K4 gecikmeli aile iptali) TAM METINLE `docs/muhur/45-guvenlik-fix-1b.md`
@@ -1031,21 +1031,18 @@ kesilen satirlar bayt-aynen `docs/muhur/49-arsiv-3.md`de.
 
 **`frame-src` SUPHELISI - GERCEK SANDBOX ODEMESI.** Kanit celiskili: vitrin meta'sinda hic
 yokken 3DS uctan uca surulmus, ama `SecurityHeadersMiddleware:29` `frame-src
-https://*.iyzipay.com` tasiyor. (K2 gercek Chrome kalemi OLCULDU ve KAPANDI - uc kanal
-yesil, kanit `docs/muhur/49-arsiv-3.md`.)
+https://*.iyzipay.com` tasiyor.
 
-### GOZ TURU BEKLIYOR — SEKIZ KALEM
-GF-2a'dan alti (iki sekmede tek refresh · cikis sonrasi onbellek · offline acilis ·
-`data:image/png` gorsel · shade onizlemesi · admin Chart) + GF-3'ten iki:
-**(7) ARAMA UCU ARTIK 100/dk YERINE 20/dk** - goz1 sozlesmesi KIRILMADI
-(`RateLimit:HassasPermitLimit` yapilandirilabilir) ama tur oncesi bilinmezse "sebepsiz 429"
-gorunur · **(8) K13'un UCTAN UCA kaniti** (gecersiz hex ile guncelleme -> 400; CSV satir reddi).
+**GOZ TURU:** 8 kalem olculdu (`48·GF-2b · GOZ TURU`, `49·ARSIV-3 · K2`); acik yalniz
+`frame-src` (gercek sandbox odemesi).
 
 Uc BILINEN kalem (Google Fonts SRI yasak · `admin.html` kendi `imgUrl()` kopyasi · panelde
 `guvenliHTML`/`guvenliYaz` cagirani yok) TAM METINLE `docs/muhur/46-guvenlik-fix-2a.md`
 icinde; kesilen satirlar bayt-aynen `docs/muhur/49-arsiv-3.md`de.
 
 ## Devir ID'leri
+
+**DURUM:** DV1 KAPANDI `44·GF-1` · DV3 KAPANDI `47·GF-3` · DV2 D-YAN · DV4-6 kayit.
 
 kaynak: 40·MANTIK-FIX-4_MUHRU · DEVIR ID'LERI (bayt-ayni KOPYA)
 
@@ -1117,26 +1114,10 @@ Acilmaz; yalniz HAM kalem basliklari + 00a atfi. Tam metin arsivde.
   vitrin `'unsafe-inline'`siz kalabilir. **Tasarim launch SONRASI.** (CSP FAZ B bu kalemin
   ustune kurulur; GF-2b'de YAPILMADI.)
 
-## GUVENLIK-AV-1 kapsam girdileri
+## AV-2 GIRDILERI (39·MF-3'ten acik kalanlar)
 
-- `00a:192` **YENI KALEM (GUVENLIK DALGASI 2 / B5 eki - kullanici karari): `failed-jobs` PII RISKI
-- `40·MANTIK-FIX-4·DV3`      -> GUVENLIK-AV-1 girdisi
-- `40·MANTIK-FIX-4·VITRIN-KALAN` ortak RuleBuilder karari GUVENLIK-AV-1 SONRASINA (K7 mesaj/NotEmpty ayrismasi)
-- `39·MANTIK-FIX-3·FIX-1B DEVRI` F4 erisim jetonu iptali + F8 step-up zinciri
-
-## GUVENLIK-AV-1 girdileri (39·MANTIK-FIX-3, bayt-ayni)
-
-kaynak: 39·MANTIK-FIX-3_MUHRU · GUVENLIK-AV-1 GIRDILERI (bayt-ayni)
-
-### GUVENLIK-AV-1 GIRDILERI
-
-- **Access token iptali** - sifre degisiminden sonra eski access token YASIYOR
-  (`RevokeAsync` uretimde 0 cagri, `user_sessions`ta `jti` kolonu YOK).
+- **`guest_name` UZUNLUK DOGRULAMASI YOK** - misafir yolunda sinir yok, `full_name` kolonu
+  150 karakter; uzun ad EF insert'te 500 uretir. **FIX adayi.**
+- **`ExecuteDeleteAsync` <-> transaction ROLLBACK** OLCULMEDI (K2 onu transaction ICINDE cagiriyor).
 - **Hata kodu birlestirme** - TR serbest metin capalarinin kirilganligi (K3 + K3b ayni capa).
-- **K4 telafisinin ATOMIKLESTIRILMESI** - bugun iki ayri `SaveChanges`; kismi durum mumkun.
-- **`ExecuteDeleteAsync` <-> transaction ROLLBACK olcumu** - K2 `DeleteWhereAsync`i
-  transaction ICINDE cagiriyor; rollback davranisi SINANMADI (denetcinin kor noktasi).
-- **`guest_name` UZUNLUK DOGRULAMASI YOK** - uye yolu `MaximumLength(120)` istiyor, misafir
-  yolunda sinir yok ve `full_name` kolonu 150 karakter; uzun ad EF insert'te 500 uretir.
-  Manager'in KENDI dogrulama bolgesine ait oldugu icin bu dalgada dokunulmadi.
-  **FIX GUVENLIK-FIX ADAYI.**
+- **Ortak RuleBuilder** - K7 mesaj/NotEmpty ayrismasi (dort validator, regex ayni, metin farkli).
