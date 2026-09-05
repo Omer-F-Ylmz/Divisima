@@ -214,9 +214,13 @@ namespace Divisima.IntegrationTests
 
         private async Task<int> SiparisVerAsync(Kurulum k, byte odemeYontemi, int adet = 2)
         {
+            // GF-6 / K2: `address_id` ARTIK ZORUNLU.
+            var adresId = await TestAdresHelper.AdresOlusturAsync(ConnStr, k.MusteriId);
+
             var place = await WithScopeAsync(sp => sp.GetRequiredService<IOrderService>().PlaceOrder(new OrderCreateRequestDto
             {
                 customer_id = k.MusteriId,
+                address_id = adresId,
                 coupon_code = k.KuponKodu,
                 use_store_credit = 0m,
                 payment_method = odemeYontemi,

@@ -463,12 +463,27 @@ namespace Divisima.IntegrationTests
         [Fact]
         public void K12_REPLAY_OLCUTU_KUPON_KANONIK_ve_IPTAL_KALEMLERI_DISLANMIS()
         {
-            var k = KodSatirlari(Oku("Divisima.Bussiness/Concrete/GuestCheckoutManager.cs"));
+            // ══ GF-6 / K1 (D1) - PIN DOSYA DEGISTIRDI, OLCTUGU SEY DEGISMEDI ═══════════════
+            //
+            // Govde `GuestCheckoutManager`dan `SiparisReplayGuardi`ye TASINDI (kopya DEGIL -
+            // tasima) cunku AYNI kural artik UYE yolunda da kosuyor. Pin hedefi guncellendi;
+            // korudugu uc karar (kupon KANONIK · iptal kalemleri DISLANIR · sepet anahtari
+            // sira BAGIMSIZ ve ORDINAL) BIREBIR AYNI. KAZANC: pin artik TEK dosyada iki yolu
+            // birden koruyor - eskiden uye yolunun karsiligi PINSIZDI cunku KURAL DA YOKTU.
+            var k = KodSatirlari(Oku("Divisima.Bussiness/Concrete/SiparisReplayGuardi.cs"));
+
+            // NEG KONTROL: eski dosyada govde KALMADI (yarim tasima "iki kopya" birakirdi -
+            // bu depoda yedi kez bedeli odenmis aile).
+            var eski = KodSatirlari(Oku("Divisima.Bussiness/Concrete/GuestCheckoutManager.cs"));
+            Sayim(eski, "KimlikDizgesi.KanonikKod(kayitliKupon)").Should().Be(0,
+                "tasima TAM olmali - misafir sinifinda IKINCI kopya KALMAMALI");
 
             // KUPON: iki taraf da kanonik. NULL == "" normalizasyonu KanonikKod'un null/bos
             // icin AYNI degeri dondurmesinden turer - ayri bir dal ACILMADI.
             Sayim(k, "KimlikDizgesi.KanonikKod(kayitliKupon)").Should().Be(1);
-            Sayim(k, "KimlikDizgesi.KanonikKod(dto.coupon_code)").Should().Be(1);
+            // Cagiran artik `dto`yu DEGIL kupon kodunu GECIRIYOR (iki farkli DTO tipi ayni
+            // servisi kullaniyor); karsilastirmanin KANONIK olmasi sarti DEGISMEDI.
+            Sayim(k, "KimlikDizgesi.KanonikKod(kuponKodu)").Should().Be(1);
 
             // IPTAL KALEMLERI DISLANIR (merkez karari D7).
             // BU ASSERT BIR MK-6 BOSLUGUNU KAPATIYOR: MUT-17'de (`!i.is_cancelled` kaldirildi)

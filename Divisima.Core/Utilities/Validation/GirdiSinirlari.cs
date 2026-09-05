@@ -84,5 +84,55 @@ namespace Divisima.Core.Utilities.Validation
         // tirnak ve kontrol karakteri GECMEZ - bunlar log satirini bolebilen ya da baska bir
         // ayristiriciyi yanitabilecek karakterlerdir.
         public const string RequestIdDeseni = @"^[A-Za-z0-9._-]+$";
+
+        // ══ ODEME YONTEMI KUMESI (GF-6 / K3 · D4) ══════════════════════════════════════════
+        //
+        // OLCULEN ONCE-DURUM (AV-3 / T1-B3): `OrderCreateRequestDto.payment_method` bir `byte`
+        // ve HICBIR dogrulamasi YOKTU. `OrderManager.PlaceOrder` yalniz IKI degeri ADIYLA
+        // taniyor (`== 1` COD · `== 2` havale); TANIMSIZ her deger (3, 7, 99, 255) sessizce
+        // "else" dalina, yani ONLINE odemeye dusuyordu. Musteri "kapida odeme" sanip online
+        // dala giren bir siparis uretebiliyordu - misafir yolunda AYNI aile GF-1 oncesi
+        // kapatilmisti (`GuestOnlyCashOnDelivery`: sessizce COD'a DUSURME YOK).
+        //
+        // NEDEN BURADA, NEDEN YENI ENUM DEGIL: bu dalganin kapsami `GirdiSinirlari`yi girdi
+        // sinirlarinin TEK KAYNAGI olarak aniyor; yeni bir enum dosyasi acmak kapsam disi bir
+        // yuzey olurdu. Degerler URETIMDEN TURETILDI, uydurulmadi - `OrderManager`in kendi
+        // dallari (`isCod`/`isBankTransfer`) ve `Order.payment_type` yorumu okundu.
+        public const byte OdemeOnline = 0;
+        public const byte OdemeKapida = 1;   // COD
+        public const byte OdemeHavale = 2;   // Havale/EFT - Pending kalir, admin manuel onaylar
+
+        public static readonly byte[] GecerliOdemeYontemleri = { OdemeOnline, OdemeKapida, OdemeHavale };
+
+        // ══ CSV ICE-AKTARIM SINIRLARI (GF-6 / K7 · D7) ═════════════════════════════════════
+        //
+        // OLCULEN ONCE-DURUM (AV-3 / T2-1, T2-2, T2-6 · ayrica F-3 IMPORT-FIX kaydi):
+        //   (a) SATIR SINIRI YOKTU - tum dosya bellege okunuyor, satir basina EN AZ bir
+        //       `GetAsync` sorgusu kosuyor; 1 MB'lik bir CSV on binlerce gidis-donus demek.
+        //   (b) DOSYA TURU SORULMUYORDU - `IFormFile` ne olursa olsun metin gibi okunuyordu.
+        //   (c) FORMUL ENJEKSIYONU: `=`, `+`, `-`, `@` ile baslayan hucre, urun adi olarak
+        //       kaydedilip admin panelinden Excel'e disari aktarildiginda FORMUL olarak
+        //       calisir (CSV injection / DDE). Kaynak dosyada da hedef dosyada da metindir -
+        //       tehlike ELEKTRONIK TABLONUN yorumlamasindadir, bu yuzden GIRISTE reddedilir.
+        //
+        // SATIR SINIRI 5000 - URETIMDEN TURETILDI, UYDURULMADI: bugunku katalog `955` urun
+        // (kurgu MAX kaydi) ve bir urun birden cok BEDEN satiri tasir; 5000 satir, mevcut
+        // katalogun tamamini tek dosyada yeniden yuklemeye YETER ve hala tavan olur.
+        public const int CsvSatirEnCok = 5000;
+
+        // 5 MB - ust sinir DOSYA duzeyinde de bagimsiz olarak konur: satir sayimi ancak dosya
+        // BELLEGE OKUNDUKTAN sonra yapilabilir, yani satir siniri tek basina bellek tuketimini
+        // sinirlamaz. Iki kapi FARKLI seyi korur ve ikisi de gereklidir.
+        public const long CsvDosyaEnBuyukBayt = 5L * 1024L * 1024L;
+
+        // `products.name` kolonu 200, `products.brand` 120 (DivisimaDbContext'ten OKUNDU,
+        // varlik sinifindan DEGIL). `ProductAddRequestValidator` ayni degerleri kullaniyor;
+        // CSV yolu ise HICBIR uzunluk sormuyordu - 201 karakterlik bir ad dongunun ORTASINDA
+        // insert-time 500 uretirdi (SD-7 ailesi).
+        public const int UrunAdi = 200;
+        public const int UrunMarkasi = 120;
+
+        // Elektronik tablonun formul baslangici sayacagi karakterler.
+        public static readonly char[] FormulBaslangiclari = { '=', '+', '-', '@' };
     }
 }

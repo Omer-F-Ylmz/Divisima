@@ -7,6 +7,7 @@ using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Pricing;
 using Divisima.Core.Utilities.Results;
 using Divisima.Core.Utilities.Stock;
+using Divisima.Core.Utilities.Validation;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Product;
 using Divisima.Entity.Entities;
@@ -44,10 +45,17 @@ namespace Divisima.Bussiness.Concrete
         // DALGA C / C6: beden-stok upsert dongusunu ATOMIK yapmak icin.
         private readonly Divisima.Core.DataAccess.IUnitOfWork _unitOfWork;
 
+        // GF-6 / K7 (D7 · T2-5): reddedilen ice-aktarim satirlari icin TEK OZET olayi.
+        // Satir BASINA olay YAZILMAZ - 5000 satirlik bozuk bir dosya, denetim tablosunu
+        // doldurup gercek sinyali gomerdi (GF-5'te 429 ornekleme icin verilen ayni karar).
+        private readonly ISecurityEventService _securityEvents;
+
         public ProductManager(IProductDal productDal, IProductStockDal productStockDal, IProductReviewDal productReviewDal, IMapper mapper,
             IPriceDropService priceDropService, ICacheService cache, ICategoryDal categoryDal,
-            Divisima.Core.DataAccess.IUnitOfWork unitOfWork)
+            Divisima.Core.DataAccess.IUnitOfWork unitOfWork,
+            ISecurityEventService securityEvents)
         {
+            _securityEvents = securityEvents;
             _categoryDal = categoryDal;
             _productDal = productDal;
             _productStockDal = productStockDal;
@@ -111,6 +119,14 @@ namespace Divisima.Bussiness.Concrete
             if (lines.Length < 2)
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.ImportEmpty));
 
+            // ══ GF-6 / K7 (D7 · T2-1) - SATIR SINIRI ══════════════════════════════════════
+            // Gerekce `GirdiSinirlari.CsvSatirEnCok`un basinda: satir basina EN AZ bir
+            // `GetAsync` kosuyor, yani maliyet satir sayisiyla DOGRUSAL. Kapi, dosya
+            // AYRISTIRILMADAN once konur - reddedilen istek is yapmis olmaz.
+            // Baslik satiri sayilmaz: sinir VERI satiri sayisidir.
+            if (lines.Length - 1 > GirdiSinirlari.CsvSatirEnCok)
+                return (HttpStatusCode.BadRequest, new ErrorResult(Messages.ImportTooManyRows));
+
             var errors = new List<string>();
             var grouped = new Dictionary<string, (Product head, List<(string size, int qty)> stocks)>();
             var ci = CultureInfo.InvariantCulture;
@@ -122,6 +138,26 @@ namespace Divisima.Bussiness.Concrete
                 var name = cols[0].Trim();
                 var brand = cols[1].Trim();
                 if (string.IsNullOrWhiteSpace(name)) { errors.Add($"Satir {i + 1}: ad bos"); continue; }
+
+                // ══ GF-6 / K7 (D7 · T2-6) - FORMUL ENJEKSIYONU ════════════════════════════
+                // Gerekce `GirdiSinirlari.FormulBaslangiclari`nin basinda. Kontrol TUM
+                // hucrelere uygulanir, yalniz ad/markaya degil: disari aktarilan her kolon
+                // ayni riski tasir. Deger TRIM EDILMIS haliyle sorulur - basindaki bosluk
+                // elektronik tabloyu yaniltmaz ama bizi yaniltirdi.
+                var formulHucresi = cols.FirstOrDefault(c =>
+                {
+                    var h = (c ?? string.Empty).Trim();
+                    return h.Length > 0 && GirdiSinirlari.FormulBaslangiclari.Contains(h[0]);
+                });
+                if (formulHucresi != null)
+                { errors.Add($"Satir {i + 1}: hucre formul karakteriyle basliyor"); continue; }
+
+                // ══ GF-6 / K7 (D7) - AD/MARKA UZUNLUGU ════════════════════════════════════
+                // Kolon sinirlari `GirdiSinirlari`den; CSV yolu bugune kadar HIC sormuyordu.
+                if (name.Length > GirdiSinirlari.UrunAdi)
+                { errors.Add($"Satir {i + 1}: ad cok uzun"); continue; }
+                if (brand.Length > GirdiSinirlari.UrunMarkasi)
+                { errors.Add($"Satir {i + 1}: marka cok uzun"); continue; }
                 if (!int.TryParse(cols[2].Trim(), out var categoryId)) { errors.Add($"Satir {i + 1}: gecersiz category_id"); continue; }
                 if (!decimal.TryParse(cols[3].Trim(), NumberStyles.Any, ci, out var price) || price <= 0) { errors.Add($"Satir {i + 1}: gecersiz fiyat"); continue; }
                 decimal? salePrice = null;
@@ -171,28 +207,69 @@ namespace Divisima.Bussiness.Concrete
                     grouped[key].stocks.Add((size, qty));
             }
 
-            int imported = 0, skipped = 0;
-            foreach (var kv in grouped)
+            // ══ GF-6 / K7 (D7 · T2-1) - HEPSI YA DA HICBIRI ═══════════════════════════════
+            //
+            // OLCULEN ONCE-DURUM: hatali satir SESSIZCE ATLANIYOR, gecerli olanlar
+            // YAZILIYORDU - yani bir dosyanin 3. satiri bozuksa admin KISMI bir katalog
+            // aliyor ve hangi urunlerin girdigini yalnizca yanit govdesindeki `errors`
+            // listesinden cikarabiliyordu. Duzeltme dosyasi tekrar yuklendiginde ilk parti
+            // "mevcut" diye ATLANIYOR, yani ikinci yukleme de tam sonuc vermiyordu.
+            //
+            // ARTIK: TEK BIR satir bile reddedilirse HICBIR SEY yazilmaz. Karar YAZMADAN
+            // ONCE verilir - "yaz sonra geri al" degil; boylece kimlik (identity) araligi da
+            // TUKETILMEZ.
+            if (errors.Count > 0)
             {
-                var h = kv.Value.head;
-                var exists = await _productDal.GetAsync(p => p.name == h.name && p.brand == h.brand && p.is_active);
-                if (exists != null) { skipped++; continue; }
-                h.is_active = true;
-                h.created_at = DateTime.Now;
-                await _productDal.AddAsync(h);
-                foreach (var (size, qty) in kv.Value.stocks)
-                    await _productStockDal.AddAsync(new ProductStock
-                    {
-                        product_id = h.id,
-                        size = size,
-                        stock_quantity = qty,
-                        is_active = true,
-                        created_at = DateTime.Now
-                    });
-                imported++;
+                // T2-5: TEK OZET olayi (satir basina DEGIL - gerekce `_securityEvents`in
+                // tanimda). `detail` alanina KULLANICI GIRDISI GIRMEZ: yalniz sayilar ve
+                // sabit metin - log satiri bolme yuzeyi ACILMAZ (ISecurityEventService'in
+                // kendi sozlesmesi).
+                await _securityEvents.LogAsync("ProductImportRejected", "Warning", null, null, null,
+                    $"CSV ice-aktarim REDDEDILDI: {errors.Count} hatali satir / {lines.Length - 1} veri satiri. "
+                    + "Hicbir urun yazilmadi.");
+                // `ErrorDataResult` VERI TASIMAZ - Sprint 8 madde 11'de kurucu seti BILINCLI
+                // olarak tek mesaja indirildi ve o dosyanin kendi yorumu "geri EKLENMEZ" diyor.
+                // Bu yuzden sebepler MESAJA yazilir. Icerik KULLANICI GIRDISI DEGILDIR: yalniz
+                // satir numarasi + sabit gerekce metni. Ilk 20 ile sinirli - 5000 satirlik bir
+                // dosya yaniti sisirmesin.
+                var ilkHatalar = string.Join(" | ", errors.Take(20));
+                var kalan = errors.Count > 20 ? $" (+{errors.Count - 20} satir daha)" : string.Empty;
+                return (HttpStatusCode.BadRequest,
+                    new ErrorResult($"{Messages.ImportRejectedRows} {ilkHatalar}{kalan}"));
             }
 
-            var summary = $"{imported} urun eklendi, {skipped} atlandi (mevcut)" + (errors.Count > 0 ? $", {errors.Count} hatali satir" : "");
+            int imported = 0, skipped = 0;
+            // Yazma dongusu TEK TRANSACTION: `AddAsync` aninda SaveChanges yapar, yani
+            // sarmalayici olmadan dongunun ortasindaki bir hata KISMI katalog birakirdi
+            // (`GF-3/K13` yorumunun isaret ettigi ayni bosluk). `ExecuteInTransactionAsync`
+            // SECILDI, elle Begin/Commit DEGIL - IUnitOfWork'un kendi yorumunun istedigi yol.
+            var yazim = await _unitOfWork.ExecuteInTransactionAsync(async () =>
+            {
+                foreach (var kv in grouped)
+                {
+                    var h = kv.Value.head;
+                    var exists = await _productDal.GetAsync(p => p.name == h.name && p.brand == h.brand && p.is_active);
+                    if (exists != null) { skipped++; continue; }
+                    h.is_active = true;
+                    h.created_at = DateTime.Now;
+                    await _productDal.AddAsync(h);
+                    foreach (var (size, qty) in kv.Value.stocks)
+                        await _productStockDal.AddAsync(new ProductStock
+                        {
+                            product_id = h.id,
+                            size = size,
+                            stock_quantity = qty,
+                            is_active = true,
+                            created_at = DateTime.Now
+                        });
+                    imported++;
+                }
+                return true;
+            });
+            if (!yazim)
+                return (HttpStatusCode.InternalServerError, new ErrorResult(Messages.ImportRejectedRows));
+
+            var summary = $"{imported} urun eklendi, {skipped} atlandi (mevcut)";
             InvalidateStorefrontCache();   // H47: vitrin listeleri bayat kalmasin
             return (HttpStatusCode.OK, new SuccessDataResult<object>(new { imported, skipped, errors }, summary));
         }

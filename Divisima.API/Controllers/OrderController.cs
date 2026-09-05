@@ -7,6 +7,7 @@ using Divisima.Core.Utilities.Enums;
 using Divisima.Core.Utilities.Results;
 using Divisima.Entity.Dtos.Order;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace Divisima.API.Controllers
@@ -29,6 +30,20 @@ namespace Divisima.API.Controllers
         }
 
         // Açıklayıcı yorum: Sipariş oluştur (müşteri - checkout)
+        //
+        // ══ GF-6 / K4 (D3 - ENVANTER KILITLEME) - "payment" KOVASI ═════════════════════════
+        //
+        // OLCULEN ONCE-DURUM: bu uc HICBIR oznitelik tasimiyordu, yani GENEL kovaya (100/dk)
+        // dusuyordu. Her basarili siparis stok REZERVE eder; kapida odemede rezervasyon ANINDA
+        // gercek dusume cevrilir. Yani dakikada 100 siparis acabilen bir istemci, hicbir sey
+        // odemeden katalogdaki stogu kilitleyebilir - misafir yolunda ayni yuzey GF-1'de
+        // "auth" kovasi + acik-siparis esigiyle daraltilmisti, UYE yolunda daraltilmamisti.
+        //
+        // KOVA "payment" (10/dk) SECILDI, YENI KOVA ACILMADI: ayni ailedeki tek yerlesik kova
+        // odur ve `RateLimitPolitikasi.OdemeLimiti` TEK KAYNAKTIR. Oznitelik konunca IKI TARAF
+        // BIRLIKTE acilir (GF-3/K9 sarti): yerlesik limiter `AddPolicy("payment")`i, dagitik
+        // taraf ise `KovaSec`in endpoint metadata dalini kullanir - ikisi de AYNI degeri okur.
+        [EnableRateLimiting(Divisima.Core.Security.RateLimiting.RateLimitPolitikasi.OdemeKapsami)]
         [Idempotency]
         [HttpPost("place")]
         [RequireUserType(UserTypeEnum.Customer)]

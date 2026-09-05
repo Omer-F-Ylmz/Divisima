@@ -34,9 +34,18 @@ namespace Divisima.Bussiness.Concrete
         private readonly ILogger<GuestCheckoutManager> _logger;
         // GUVENLIK-FIX-4: cop misafir siparisi guard'i icin - acik siparis sayimi ve esik.
         private readonly IOrderDal _orderDal;
-        // GF-3/K12: replay olcutu artik SEPET KALEMLERINI de karsilastiriyor (gerekce
-        // ReplayGuardiAsync'in basinda). Yalniz OKUMA - sema degismedi, migration YOK.
-        private readonly IOrderItemDal _orderItemDal;
+        // ══ GF-6 / K1 (D1) - REPLAY GUARD'I ARTIK ORTAK SERVISTE ═══════════════════════════
+        //
+        // `ReplayGuardiAsync` / `AyniSiparisMiAsync` / `SepetAnahtari` /
+        // `SiparisBuEpostayaMiAitAsync` bu siniftan `SiparisReplayGuardi`ye TASINDI (kopya
+        // DEGIL - tasima). Gerekce ve GF-1/K1 + GF-3/K12 olcumleri o dosyanin basinda.
+        // MISAFIR DAVRANISI DEGISMEDI: ayni yuklemler, ayni sira, ayni durum kodlari ve
+        // govdeler; degisen tek sey sahiplik ekseninin PARAMETRE olmasi (burada E-POSTA).
+        //
+        // `IOrderItemDal` bu siniftan KALDIRILDI: tek kullanicisi tasinan yardimciydi.
+        // Enjekte edilmis ama kullanilmayan bagimlilik birakilmiyor - ayni gerekce
+        // `OrderManager`da IOrderPlacedEventPublisher icin yazili (LAUNCH-FIX A1(b)).
+        private readonly ISiparisReplayGuardi _replayGuardi;
         private readonly IConfiguration _configuration;
         // GF-5 / K4: telafi silmesinin IKI adimini tek transaction'a almak icin.
         // BURADA BASKA HICBIR YERDE KULLANILMAZ - PlaceOrder kendi transaction'ini
@@ -59,11 +68,11 @@ namespace Divisima.Bussiness.Concrete
 
         public GuestCheckoutManager(ICustomerDal customerDal, IAddressDal addressDal, IOrderService orderService,
             IAuthService authService, ILogger<GuestCheckoutManager> logger, IOrderDal orderDal,
-            IOrderItemDal orderItemDal,
+            ISiparisReplayGuardi replayGuardi,
             IConfiguration configuration,
             IUnitOfWork unitOfWork)
         {
-            _orderItemDal = orderItemDal;
+            _replayGuardi = replayGuardi;
             _customerDal = customerDal;
             _addressDal = addressDal;
             _orderService = orderService;
@@ -119,7 +128,8 @@ namespace Divisima.Bussiness.Concrete
             // ORDINAL esitlikle karar veriyor. Kanonik kutu YALNIZ kotuye kullanim SAYACININ
             // eksenidir (bkz. PostaKutusu dosyasinin basi) - burada kullanilsaydi iki AYRI
             // hesabin siparisleri birbirinin replay'i sayilirdi.
-            var guardSonucu = await ReplayGuardiAsync(dto.request_id, email, dto);
+            var guardSonucu = await _replayGuardi.DegerlendirAsync(
+                dto.request_id, ReplaySahiplik.EpostaIle(email), dto.items, dto.coupon_code);
             if (guardSonucu != null) return guardSonucu.Value;
 
             // Açıklayıcı yorum: E-posta zaten kayıtlıysa misafir checkout'a izin verme - giriş yapsın (hesap ele geçirme önleme)
@@ -236,7 +246,8 @@ namespace Divisima.Bussiness.Concrete
                 _logger.LogWarning(ex, "MISAFIR EPOSTA YARISI: ayni e-posta icin eszamanlı ikinci "
                     + "istek tekil indekse takildi - karar yeniden veriliyor (500 DONDURULMEZ).");
 
-                var yarisSonucu = await ReplayGuardiAsync(dto.request_id, email, dto);
+                var yarisSonucu = await _replayGuardi.DegerlendirAsync(
+                    dto.request_id, ReplaySahiplik.EpostaIle(email), dto.items, dto.coupon_code);
                 if (yarisSonucu != null) return yarisSonucu.Value;
 
                 return (HttpStatusCode.Conflict, new ErrorResult(Messages.GuestEmailExists));
@@ -350,7 +361,8 @@ namespace Divisima.Bussiness.Concrete
             // kazanan siparis BASKA bir e-postaya aitse `order_number` DONDURULMEZ. Guard bu
             // dali goremez (yaris ondan SONRA kaybedilir), dolayisiyla kural burada TEKRAR
             // uygulanir - ayni yuklemi iki yerde SORMAK, sizintiyi acik birakmaktan iyidir.
-            if (replayMi && !await SiparisBuEpostayaMiAitAsync(replayYaniti.Data.id, email))
+            if (replayMi && !await _replayGuardi.SiparisSahibiMiAsync(
+                    replayYaniti.Data.id, ReplaySahiplik.EpostaIle(email)))
             {
                 _logger.LogWarning("MISAFIR REPLAY YARISI: kazanan siparis {OrderId} BASKA bir "
                     + "e-postaya ait - govde dondurulmedi, telafi uygulandi.", replayYaniti.Data.id);
@@ -376,113 +388,14 @@ namespace Divisima.Bussiness.Concrete
             return false;
         }
 
-        // ══ GF-1 / K1 - REPLAY GUARD'I TEK KAYNAK ═════════════════════════════════════════
+        // ══ GF-6 / K1 (D1) - REPLAY GUARD'I BU SINIFTAN TASINDI ═══════════════════════════
         //
-        // Akisin BASINDA ve `customers.email` tekil indeks ihlali YAKALANDIGINDA ayni yuklem
-        // sorulur. AYRI iki kopya YAZILMADI: "ayni kuralin ikinci kopyasi" bu depoda YEDI KEZ
-        // bedeli odenmis bir ailedir (37-MANTIK-FIX-1 / MF-3 sarti b).
-        //
-        // Donus: `null` = guard karar VERMEDI, akis DEVAM etsin.
-        //
-        // ══ GF-3 / K12 (GF1-B1) - "AYNI SIPARIS MI" OLCUTU GENISLEDI ══════════════════════
-        //
-        // OLCULEN ONCE-DURUM: karsilastirilan TEK sey E-POSTAYDI. Yani ayni `request_id` ile
-        // gelen ama SEPETI ya da KUPONU FARKLI bir istek, ilk siparisin `order_number`ini
-        // 200 + `replayed:true` olarak geri aliyordu - musteri ikinci siparisin verildigini
-        // saniyor, gercekte HICBIR SEY yazilmiyordu. Idempotency anahtarinin ISTEK GOVDESINE
-        // baglanmamasi klasik kusurudur.
-        //
-        // OLCUT (merkez karari D7): e-posta + sepet kalemleri (urun/beden/adet COKLU KUMESI)
-        // + kupon KANONIK degeri. Hepsi DB'deki siparisTEN turer - MIGRATION GEREKMEZ
-        // (dort kanaldan dogrulandi: entity, DbContext, migration, canli sema).
-        //
-        // IKI SEMANTIK TUZAK (on olcumde yakalandi, ikisi de burada kapatildi):
-        //  (1) `orders.coupon_code` KANONIK degeri tutar (`OrderManager` gecersiz kuponu NULL
-        //      yazar), gelen `dto.coupon_code` ise HAM. Ham ORDINAL kiyas MESRU bir replay'e
-        //      400 verirdi. Iki taraf da `KanonikKod`dan gecirilir; o metot null ve "" icin
-        //      AYNI degeri ("") dondurdugu icin NULL ≡ "" normalizasyonu DOGAL olarak saglanir
-        //      (kupon vermeyen istemci "" gonderir - CLAUDE.md bolum 5'te kayitli baglama tuzagi).
-        //  (2) IPTAL KALEMLERI DISLANIR (merkez karari D7).
-        //      ── DUZELTME (rapor denetcisi, CELISKI) ───────────────────────────────────────
-        //      ILK YAZIMDA BURAYA "aksi halde mesru replay 400 alirdi" YAZILMISTI ve BU TERSI
-        //      SOYLUYORDU. Mantik izi: siparisin kalemleri ne SIPARIS EDILDIGINI kaydeder;
-        //      sonradan gelen KISMI IPTAL o kaydi degistirmez. Dislama, kalem kumesini
-        //      KUCULTUR - yani kismi iptalden SONRA gelen ve ORIJINAL sepeti tasiyan bir
-        //      replay ESLESMEZ ve 400 alir. Yani dislama olcutu SIKILASTIRIR, gevsetmez.
-        //      Pratik etkisi ihmal edilebilir (replay saniyeler icinde gelir, arada iptal
-        //      olmasi beklenmez) ama YON YANLIS ANLATILMISTI. Davranis DEGISTIRILMEDI -
-        //      merkez karari boyle; semantik itiraz raporda ve pinde kayitli.
-        //
-        // ESLESMEZSE 400 - SIZINTISIZ: mevcut `OrderPlaceFailed` mesaji AYNEN kullanilir,
-        // yani ne siparisin VARLIGI ne `order_number` sizar (GUVENLIK-2/#1 karariyla tutarli).
-        private async Task<(HttpStatusCode, Result)?> ReplayGuardiAsync(string? requestId, string email,
-            GuestCheckoutDto dto)
-        {
-            if (string.IsNullOrWhiteSpace(requestId)) return null;
-
-            var oncekiler = await _orderDal.GetListNoTrackingAsync(o => o.request_id == requestId);
-            var onceki = oncekiler.FirstOrDefault();
-            if (onceki == null) return null;
-
-            var sahipler = await _customerDal.GetListNoTrackingAsync(c => c.id == onceki.customer_id);
-            var sahip = sahipler.FirstOrDefault();
-            if (sahip != null && string.Equals(sahip.email, email, StringComparison.Ordinal)
-                && await AyniSiparisMiAsync(onceki.id, onceki.coupon_code, dto))
-                return (HttpStatusCode.OK, new SuccessDataResult<OrderPlaceResponseDto>(
-                    new OrderPlaceResponseDto
-                    {
-                        id = onceki.id,
-                        order_number = onceki.order_number,
-                        replayed = true
-                    },
-                    Messages.OrderAlreadyPlaced));
-
-            _logger.LogWarning("MISAFIR REPLAY GUARD'I: request_id BASKA bir siparise ya da BASKA "
-                + "bir sepete ait (siparis {OrderId}) - istek reddedildi, hicbir kayit yazilmadi.", onceki.id);
-            return (HttpStatusCode.BadRequest, new ErrorResult(Messages.OrderPlaceFailed));
-        }
-
-        // GF-3/K12: gelen istek, `request_id`in isaret ettigi siparisin AYNISI mi?
-        // Kupon ve sepet TEK YERDE karsilastirilir - guard'in iki cagri yeri de buradan gecer,
-        // yani "ayni kuralin ikinci kopyasi" acilmaz.
-        private async Task<bool> AyniSiparisMiAsync(int siparisId, string? kayitliKupon, GuestCheckoutDto dto)
-        {
-            // KUPON: iki taraf da kanonik. `KanonikKod` null ve "" icin AYNI degeri dondurur.
-            if (!string.Equals(
-                    Divisima.Core.Utilities.Text.KimlikDizgesi.KanonikKod(kayitliKupon),
-                    Divisima.Core.Utilities.Text.KimlikDizgesi.KanonikKod(dto.coupon_code),
-                    StringComparison.Ordinal))
-                return false;
-
-            // SEPET: COKLU KUME karsilastirmasi (sira onemsiz, tekrar onemli).
-            var kalemler = await _orderItemDal.GetListNoTrackingAsync(
-                i => i.order_id == siparisId && !i.is_cancelled);
-
-            return string.Equals(
-                SepetAnahtari(kalemler.Select(i => (i.product_id, i.size, i.quantity))),
-                SepetAnahtari(dto.items.Select(i => (i.product_id, i.size, i.quantity))),
-                StringComparison.Ordinal);
-        }
-
-        // Sira BAGIMSIZ, tekrar DUYARLI anahtar. `size` bir KIMLIK dizgesidir (beden kodu) -
-        // kulturlu casing YASAK (CLAUDE.md 6c): `ToUpperInvariant` ve `Ordinal` siralama.
-        private static string SepetAnahtari(IEnumerable<(int urun, string beden, int adet)> kalemler) =>
-            string.Join("|", kalemler
-                .Select(k => k.urun + ":" + (k.beden ?? "").ToUpperInvariant() + ":" + k.adet)
-                .OrderBy(s => s, StringComparer.Ordinal));
-
-        // GF-1 / K1: bastaki replay guard'inin sahiplik yukleminin AYNISI - yaris dalinda
-        // yeniden sorulur. Siparis ya da musteri bulunamazsa GUVENLI TARAF secilir (false).
-        private async Task<bool> SiparisBuEpostayaMiAitAsync(int siparisId, string email)
-        {
-            var siparisler = await _orderDal.GetListNoTrackingAsync(o => o.id == siparisId);
-            var siparis = siparisler.FirstOrDefault();
-            if (siparis == null) return false;
-
-            var sahipler = await _customerDal.GetListNoTrackingAsync(c => c.id == siparis.customer_id);
-            var sahip = sahipler.FirstOrDefault();
-            return sahip != null && string.Equals(sahip.email, email, StringComparison.Ordinal);
-        }
+        // `ReplayGuardiAsync` · `AyniSiparisMiAsync` · `SepetAnahtari` ·
+        // `SiparisBuEpostayaMiAitAsync` -> `SiparisReplayGuardi` (Concrete/SiparisReplayGuardi.cs).
+        // GF-1/K1'in "TEK KAYNAK" gerekcesi, GF-3/K12'nin "AYNI SIPARIS MI" olcutu ve iptal
+        // kalemlerinin DISLANMASI kararinin tam metni ORADA yasar. Bu sinif artik yalniz
+        // CAGIRIR ve kendi eksenini (E-POSTA) verir; uye yolu ayni servisi customer_id
+        // ekseniyle cagirir. Kural TEK YERDE - "ayni kuralin ikinci kopyasi" ACILMADI.
 
         // K4: yalniz PlaceOrder BASARISIZ dondugunde cagrilir. Nesneler cagiranin elinde -
         // arama yok. Sira FK'ya saygili (adres -> musteri). Telafi kendisi duserse GURULTULU

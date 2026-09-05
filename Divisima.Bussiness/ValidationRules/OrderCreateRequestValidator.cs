@@ -1,3 +1,5 @@
+using System.Linq;
+using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Validation;
 using Divisima.Entity.Dtos.Order;
 using FluentValidation;
@@ -36,6 +38,27 @@ namespace Divisima.Bussiness.ValidationRules.FluentValidation
             // kaliyor ve tek savunma manager'daki tek satirlik ifade oluyor.
             RuleFor(o => o.use_store_credit).GreaterThanOrEqualTo(0)
                 .WithMessage("Kullanılacak mağaza kredisi negatif olamaz.");
+
+            // ══ GF-6 / K2 (D2) - TESLIMAT ADRESI ZORUNLU ══════════════════════════════════
+            //
+            // OLCULEN ONCE-DURUM (AV-3 / T1-B2, LAUNCH BLOKER): `address_id` `int?` idi ve
+            // `OrderManager` onu `if (dto.address_id.HasValue)` ile SORUYORDU - yani adres
+            // GONDERILMEZSE sahiplik kontrolu HIC KOSMUYOR ve siparis ADRESSIZ olusuyordu.
+            // Canlida 15 adressiz siparis olculdu (D-YAN). Misafir yolunda bu MUMKUN DEGIL:
+            // `GuestCheckoutManager` adresi kendisi yaziyor ve `address_id`yi HER ZAMAN veriyor.
+            //
+            // "YOK" (400, burasi) ile "SENIN DEGIL" (404, OrderManager) AYRI yanitlardir:
+            // ikincisi varlik sizdirmamak icin bilincli olarak "bulunamadi" der (GF-1/K4).
+            RuleFor(o => o.address_id)
+                .NotNull().WithMessage(Messages.OrderAddressRequired)
+                .GreaterThan(0).WithMessage(Messages.OrderAddressRequired);
+
+            // ══ GF-6 / K3 (D4) - ODEME YONTEMI TANIMLI KUMEDEN ════════════════════════════
+            // Gerekce ve olculen once-durum `GirdiSinirlari.GecerliOdemeYontemleri`nin basinda.
+            // Mesaj ACIK - misafir yolundaki `GuestOnlyCashOnDelivery` ile ayni aile.
+            RuleFor(o => o.payment_method)
+                .Must(v => GirdiSinirlari.GecerliOdemeYontemleri.Contains(v))
+                .WithMessage(Messages.OrderInvalidPaymentMethod);
 
             RuleFor(o => o.items).NotEmpty().WithMessage("Sepet boş olamaz.");
             RuleForEach(o => o.items).ChildRules(item =>

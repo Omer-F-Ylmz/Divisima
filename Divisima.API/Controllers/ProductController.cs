@@ -4,6 +4,7 @@ using Divisima.Core.Security.Authorization;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Enums;
 using Divisima.Core.Utilities.Results;
+using Divisima.Core.Utilities.Validation;
 using Divisima.Entity.Dtos.Product;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -41,6 +42,12 @@ namespace Divisima.API.Controllers
         // CSV başlık: name,brand,category_id,price,sale_price,description,color_hex,product_type,size,stock_quantity
         [HttpPost("import")]
         [RequireUserType(UserTypeEnum.Admin)]
+        // GF-6 / K7 (D7): istek govdesi tavani - sinir `GirdiSinirlari.CsvDosyaEnBuyukBayt`
+        // ile AYNI degerdir. Oznitelik SABIT ister (derleme zamani), bu yuzden ifade
+        // `5 * 1024 * 1024` olarak yazildi; ikisinin ayrisMAdigi `GuvenlikFix6SozlesmeTests`
+        // ile PINLI. Bu kapi govdeyi HIC OKUMADAN reddeder; yukaridaki `file.Length`
+        // kontrolu ise multipart icindeki TEK dosyanin boyutunu sorar (ikisi FARKLI sey).
+        [RequestSizeLimit(5 * 1024 * 1024)]
         [SwaggerOperation(Summary = "Toplu ürün içe-aktar (CSV)", Description = "CSV dosyasından çok sayıda ürünü tek seferde ekler. Admin yetkisi gerekir.")]
         [ProducesResponseType(typeof(SuccessDataResult<object>), (int)HttpStatusCode.OK)]
         [ProducesResponseType(typeof(ErrorResult), (int)HttpStatusCode.BadRequest)]
@@ -48,6 +55,34 @@ namespace Divisima.API.Controllers
         {
             if (file == null || file.Length == 0)
                 return StatusCode((int)HttpStatusCode.BadRequest, new ErrorResult(Messages.ImportEmpty));
+
+            // ══ GF-6 / K7 (D7) - DOSYA TURU VE BOYUT KAPISI ═══════════════════════════════
+            //
+            // OLCULEN ONCE-DURUM (AV-3 / T2-2): uc, gelen HER dosyayi metin gibi okuyordu -
+            // ne uzanti ne content-type soruluyordu. Boyut da yalnizca sunucunun genel
+            // multipart tavanina bagliydi.
+            //
+            // IKI OLCUT BIRLIKTE, "VEYA" DEGIL "VE": tarayicilar `.csv` icin content-type'i
+            // isletim sistemine gore FARKLI gonderir (`text/csv`, `application/vnd.ms-excel`,
+            // hatta `application/octet-stream`), yani content-type TEK BASINA hem yanlis
+            // pozitif hem yanlis negatif verir. Bu yuzden KARAR UZANTIYA baglandi ve
+            // content-type yalnizca ACIKCA CELISIYORSA reddeder (`image/`, `application/pdf`
+            // gibi). Uzanti karsilastirmasi ORDINAL/INVARIANT - `.CSV` bir KIMLIK dizgesidir
+            // ve Turkce `I` katlanmasi burada YANLIS sonuc verirdi (CLAUDE.md 6c).
+            if (file.Length > GirdiSinirlari.CsvDosyaEnBuyukBayt)
+                return StatusCode((int)HttpStatusCode.BadRequest, new ErrorResult(Messages.ImportFileTooLarge));
+
+            var uzanti = System.IO.Path.GetExtension(file.FileName ?? string.Empty);
+            if (!string.Equals(uzanti, ".csv", StringComparison.OrdinalIgnoreCase))
+                return StatusCode((int)HttpStatusCode.BadRequest, new ErrorResult(Messages.ImportFileTypeInvalid));
+
+            var tur = (file.ContentType ?? string.Empty).Trim();
+            if (tur.Length > 0
+                && !tur.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
+                && !tur.StartsWith("application/vnd.ms-excel", StringComparison.OrdinalIgnoreCase)
+                && !tur.StartsWith("application/octet-stream", StringComparison.OrdinalIgnoreCase))
+                return StatusCode((int)HttpStatusCode.BadRequest, new ErrorResult(Messages.ImportFileTypeInvalid));
+
             string content;
             using (var reader = new StreamReader(file.OpenReadStream()))
                 content = await reader.ReadToEndAsync();

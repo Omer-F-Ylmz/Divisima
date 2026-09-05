@@ -16,9 +16,22 @@ namespace Divisima.Core.Utilities.Constants
         public static string QuestionAsked = "Sorunuz alindi, yanitlaninca gorunur olacak.";
         public static string ReviewAlreadyExists = "Bu urune zaten yorum yaptiniz.";
         public static string OrderInvalidAddress = "Gecersiz teslimat adresi.";
+        // GF-6 / K2 (D2): adres ARTIK ZORUNLU. "Yok" (400) ile "senin degil" (404) AYRI
+        // mesajlardir - ikincisi varlik sizdirmamak icin `OrderInvalidAddress` olarak kalir.
+        public static string OrderAddressRequired = "Teslimat adresi secilmelidir.";
+        // GF-6 / K3 (D4): tanimsiz odeme yontemi. Misafir yolundaki
+        // `GuestOnlyCashOnDelivery` ile AYNI aile - sessizce varsayilana DUSURULMEZ.
+        public static string OrderInvalidPaymentMethod = "Gecersiz odeme yontemi.";
         public static string OrderInvalidStatusTransition = "Gecersiz siparis durumu gecisi.";
         public static string CodLimitExceeded = "Kapida odeme limiti asildi. Bu tutar icin online odeme kullanin.";
         public static string ImportEmpty = "Ice-aktarilacak veri bos veya gecersiz (baslik + en az 1 satir gerekli).";
+        // ══ GF-6 / K7 (D7) - ICE-AKTARIM KAPILARI ═════════════════════════════════════════
+        public static string ImportFileTooLarge = "Dosya cok buyuk (en fazla 5 MB).";
+        public static string ImportFileTypeInvalid = "Yalnizca .csv dosyasi ice aktarilabilir.";
+        public static string ImportTooManyRows = "Dosyada cok fazla satir var (en fazla 5000).";
+        // Tek bir satir bile reddedilirse HICBIR urun yazilmaz (tek transaction) - kismi
+        // ice aktarim ARTIK OLUSAMAZ. Sebepler yanittaki `errors` listesinde doner.
+        public static string ImportRejectedRows = "Ice-aktarim iptal edildi: hatali satirlar var, hicbir urun eklenmedi.";
         public static string ProductAdded = "Ürün başarıyla eklendi.";
         public static string ProductUpdated = "Ürün başarıyla güncellendi.";
         public static string ProductDeleted = "Ürün başarıyla silindi.";

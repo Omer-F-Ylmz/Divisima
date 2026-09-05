@@ -272,13 +272,22 @@ namespace Divisima.IntegrationTests
             var svc = scope.ServiceProvider.GetRequiredService<Divisima.Bussiness.Abstract.IProductService>();
             var sonuc = await svc.ImportFromCsv(csv);
 
-            // NOT: uc, hata AYRINTILARINI degil yalnizca SAYIYI donduruyor ("... 1 hatali satir").
-            // Olculen sey satirin REDDEDILDIGI; ayrintinin donmemesi ayri bir bulgu olarak
-            // deftere yazildi (kozmetik).
+            // ══ GF-6 / K7 (D7) - SOZLESME SIKILASTI, IDDIA AYNI KALDI ══════════════════════
+            //
+            // ONCE: hatali satir SESSIZCE ATLANIYOR, uc 200 + "... 1 hatali satir" donuyordu -
+            // yani gecerli satirlar YAZILIYOR, admin KISMI katalog aliyordu. Bu testin eski
+            // hali de tam bunu (sayiyi) olcuyordu.
+            // ARTIK: TEK bir hatali satir TUM ice-aktarimi reddeder (400) ve sebep MESAJDA
+            // ADIYLA doner. Bu testin IDDIASI DEGISMEDI - "bozuk product_type sessizce 0'a
+            // dusup ICERI ALINMAZ" - yalniz kanit artik DAHA GUCLU: satir sayilmakla kalmiyor,
+            // ice aktarimin TAMAMI durduruluyor.
+            sonuc.Item1.Should().Be(System.Net.HttpStatusCode.BadRequest,
+                "bozuk satir tasiyan dosya ARTIK TUMDEN reddedilir (kismi ice aktarim YOK)");
             var govde = JsonSerializer.Serialize(sonuc.Item2);
-            govde.Should().Contain("1 hatali satir",
-                $"bozuk product_type satiri HATALI sayilmali - sessizce 0'a dusup ICERI ALINMAMALI. Yanit: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(govde)}");
-            govde.Should().Contain("0 urun eklendi", $"hicbir urun eklenmemis olmali. Yanit: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(govde)}");
+            govde.Should().Contain("gecersiz product_type",
+                $"400 BASKA bir sebepten degil, BOZUK product_type'tan gelmeli (cift-anlam kirici). Yanit: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(govde)}");
+            govde.Should().Contain("hicbir urun eklenmedi",
+                $"hepsi-ya-da-hicbiri sozlesmesi govdede ACIKCA soylenmeli. Yanit: {Divisima.Core.Utilities.Text.KanitMaskesi.Maskele(govde)}");
 
             await using var son = NewContext();
             (await son.Products.CountAsync(p => p.name == ad)).Should().Be(0,

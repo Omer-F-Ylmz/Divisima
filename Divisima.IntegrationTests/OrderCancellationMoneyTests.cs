@@ -162,9 +162,12 @@ namespace Divisima.IntegrationTests
             var (customerId, productId) = await SeedAsync(credit: 100m, stock: 10, price: 50m);
 
             // 2 x 50 = 100 toplam; 40 cuzdandan, kalan 60 kapida NAKIT (henuz tahsil edilmedi)
+            // GF-6 / K2: `address_id` ARTIK ZORUNLU.
+            var adresId = await TestAdresHelper.AdresOlusturAsync(ConnStr, customerId);
             var place = await WithScopeAsync(sp => sp.GetRequiredService<IOrderService>().PlaceOrder(new OrderCreateRequestDto
             {
                 customer_id = customerId,
+                address_id = adresId,
                 coupon_code = "",
                 use_store_credit = 40m,
                 payment_method = 1,
@@ -202,9 +205,11 @@ namespace Divisima.IntegrationTests
             if (Skipped()) return;
             var (customerId, productId) = await SeedAsync(credit: 200m, stock: 10, price: 50m);
 
+            var adresId2 = await TestAdresHelper.AdresOlusturAsync(ConnStr, customerId);   // GF-6/K2
             var place = await WithScopeAsync(sp => sp.GetRequiredService<IOrderService>().PlaceOrder(new OrderCreateRequestDto
             {
                 customer_id = customerId,
+                address_id = adresId2,
                 coupon_code = "",
                 use_store_credit = 200m,
                 payment_method = 1,
@@ -247,9 +252,11 @@ namespace Divisima.IntegrationTests
             // 1 x 50 = 50 subtotal -> 2000 esiginin ALTINDA, yani kargo 49.90 UYGULANIR.
             var (customerId, productId) = await SeedAsync(credit: 500m, stock: 10, price: 50m);
 
+            var adresId3 = await TestAdresHelper.AdresOlusturAsync(ConnStr, customerId);   // GF-6/K2
             var place = await WithScopeAsync(sp => sp.GetRequiredService<IOrderService>().PlaceOrder(new OrderCreateRequestDto
             {
                 customer_id = customerId,
+                address_id = adresId3,
                 coupon_code = "",
                 use_store_credit = 0m,
                 payment_method = 1,
@@ -298,9 +305,11 @@ namespace Divisima.IntegrationTests
             var (customerId, productId) = await SeedAsync(credit: 500m, stock: 10, price: 50m);
 
             // Cuzdanla TAM odeme: 50 + 49.90 = 99.90 -> odenmis siparis; iptalde TAMAMI geri gelmeli.
+            var adresId4 = await TestAdresHelper.AdresOlusturAsync(ConnStr, customerId);   // GF-6/K2
             var place = await WithScopeAsync(sp => sp.GetRequiredService<IOrderService>().PlaceOrder(new OrderCreateRequestDto
             {
                 customer_id = customerId,
+                address_id = adresId4,
                 coupon_code = "",
                 use_store_credit = 99.90m,
                 payment_method = 1,

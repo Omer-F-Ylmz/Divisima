@@ -6,6 +6,7 @@ using Divisima.Core.Integrations.Iyzico;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Enums;
 using Divisima.Core.Utilities.Locking;
+using Divisima.Core.Utilities.Orders;
 using Divisima.Core.Utilities.Results;
 using Divisima.Core.Utilities.Sanitization;
 using Divisima.DataAccess.Abstract;
@@ -367,6 +368,21 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
             // patlarsa rollback gecisi de geri alir, odeme Pending'e doner ve yeniden giris TEMIZ olur.
             // Eszamanlilik ayrica saglamlasir: ikinci callback'in UPDATE'i satir kilidinde bloke olur,
             // yani tekillik artik yalniz uygulama kilidine bagli degil.
+            // ══ GF-6 / K5 (D5) - T4/S-1: TERMINAL SIPARIS DIRILTILMEZ ══════════════════════════
+            //
+            // OLCULEN ONCE-DURUM (AV-3 / T4/S-1, LAUNCH BLOKER): odeme satirinin Pending->Success
+            // CAS'i AYNI ODEMENIN iki kez islenmesini engelliyordu, ama SIPARISIN o arada
+            // TERMINAL duruma gecmis olmasini HIC SORMUYORDU. Iptal edilmis (`Cancelled`) bir
+            // siparis, gecikmis/yeniden gonderilmis bir basarili callback ile `Confirmed`a
+            // DIRILIYOR; stok rezervasyonu gercek dusume ceriliyor, `PaymentConfirmed` olayi
+            // yaziliyor ve musteri iptal ettigi siparis icin fatura + sadakat puani aliyordu.
+            //
+            // ARTIK: gecis makineden sorulur. Terminal ise DURUM YAZILMAZ; buna karsilik
+            //   - `payments` satiri Success olarak KAYDEDILIR (para gercekten alindi, izi kalir),
+            //   - `PaymentAfterTerminal` olayi **Critical** olarak yazilir.
+            // PARA IADESI OTOMATIK DEGIL - BILINEN KALEM (elle iade, GF-7). Otomatik iade bu
+            // dalgada ACILMADI: iade yolu `RefundManager` uzerinden gider ve o kapsam disidir.
+            bool terminalAtlandi = false;
             bool kazandi;
             try
             {
@@ -394,6 +410,21 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
                         payment.item_transaction_id = result.ItemTransactionId;
                         payment.paid_at = DateTime.Now;
                         await _paymentDal.UpdateAsync(payment);
+
+                        // GF-6 / K5 (D5): TERMINAL KAPISI - gerekce yukarida, `terminalAtlandi`nin
+                        // taniminda. Odeme satiri YUKARIDA zaten kaydedildi; buradan sonrasi
+                        // (durum, stok, olay) YALNIZ gecis gecerliyse kosar.
+                        if (!OrderStatusMachine.IsValidTransition(
+                                (OrderStatusEnum)order.status, OrderStatusEnum.Confirmed))
+                        {
+                            terminalAtlandi = true;
+                            await _securityEvents.LogAsync("PaymentAfterTerminal", "Critical",
+                                order.customer_id, null, null,
+                                "ODEME BASARILI ama siparis TERMINAL durumda - siparis durumu YAZILMADI. "
+                                + $"order={order.id} order_status={order.status} payment={payment.id}. "
+                                + "IADE ELLE YAPILIR.");
+                            return true;
+                        }
 
                         order.status = (byte)OrderStatusEnum.Confirmed;
                         // Açıklayıcı yorum: Ödeme başarılı - rezervasyonu gerçek stok düşümüne çevir
@@ -435,6 +466,21 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
                         payment.paid_price = result.PaidPrice;
                         payment.fraud_status = result.FraudStatus;
                         await _paymentDal.UpdateAsync(payment);
+
+                        // GF-6 / K5 (D5): TERMINAL KAPISI bu dalda da gecerlidir. Ozellikle
+                        // `Delivered` bir siparis, gecikmis bir BASARISIZ callback ile
+                        // `Cancelled`a CEKILEMEZ - mal fiziksel olarak teslim edilmistir;
+                        // rezervasyon iadesi ve cuzdan iadesi de o durumda YANLIS olurdu.
+                        if (!OrderStatusMachine.IsValidTransition(
+                                (OrderStatusEnum)order.status, OrderStatusEnum.Cancelled))
+                        {
+                            terminalAtlandi = true;
+                            await _securityEvents.LogAsync("PaymentAfterTerminal", "Critical",
+                                order.customer_id, null, null,
+                                "ODEME BASARISIZ ama siparis TERMINAL durumda - iptal YAZILMADI. "
+                                + $"order={order.id} order_status={order.status} payment={payment.id}.");
+                            return true;
+                        }
 
                         order.status = (byte)OrderStatusEnum.Cancelled;
                         await _orderDal.UpdateAsync(order);
@@ -492,6 +538,12 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
                 // BEDEL: eventual consistency (~1 dk). Musteri siparis onayini ANINDA gorur.
                 return (HttpStatusCode.OK, new SuccessResult(Messages.PaymentSuccess));
             }
+
+            // GF-6 / K5 (D5): terminal kapisi atesledigi dalda siparis durumu DEGISMEDI, yani
+            // ne fatura iptali ne de baska bir iptal yan etkisi kosmalidir - `Delivered` bir
+            // siparisin faturasini iptal etmek, duzeltmeye calistigimiz hasarin AYNISI olurdu.
+            if (terminalAtlandi)
+                return (HttpStatusCode.BadRequest, new ErrorResult(Messages.PaymentFailed));
 
             // IPTAL YAN ETKILERI - siparis Cancelled olarak KALICI olduktan SONRA.
             // Bu dalda artik fatura KESILMIYOR (onay dalina tasindi), ama cagri yine de yapilir:

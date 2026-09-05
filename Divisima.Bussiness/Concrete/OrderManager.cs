@@ -15,6 +15,7 @@ using Divisima.Core.Utilities.Orders;
 using Divisima.Core.Utilities.Pricing;
 using Divisima.Core.Utilities.Results;
 using Divisima.Core.Utilities.Shipping;
+using Divisima.Core.Utilities.Validation;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Invoice;
 using Divisima.Entity.Dtos.Order;
@@ -74,6 +75,10 @@ namespace Divisima.Bussiness.Concrete
         // GF-5 / K2 (D4): sahiplik ihlali izi. Kapsam gerekcesi ISecurityEventService'te.
         private readonly ISecurityEventService _securityEvents;
 
+        // GF-6 / K1 (D1): `request_id` replay guard'i. Misafir yolu ve uye yolu AYNI servisi
+        // FARKLI sahiplik ekseniyle cagirir - kural TEK YERDE (SiparisReplayGuardi.cs).
+        private readonly ISiparisReplayGuardi _replayGuardi;
+
         public OrderManager(
             IOrderDal orderDal, IOrderItemDal orderItemDal,
             IOrderSnapshotDal orderSnapshotDal, IOrderSnapshotItemDal orderSnapshotItemDal,
@@ -89,8 +94,11 @@ namespace Divisima.Bussiness.Concrete
             Divisima.Bussiness.Outbox.IOutboxService outboxService,
             // GF-5 / K2 (D4): sahiplik ihlali IZ birakir. Yalniz YAZAR - 404 sozlesmesi,
             // mesajlar ve donus kodlari DEGISMEDI.
-            ISecurityEventService securityEvents)
+            ISecurityEventService securityEvents,
+            // GF-6 / K1 (D1): `request_id` replay guard'i - misafir yoluyla ORTAK kaynak.
+            ISiparisReplayGuardi replayGuardi)
         {
+            _replayGuardi = replayGuardi;
             _securityEvents = securityEvents;
             _outboxService = outboxService;
             _creditTxDal = creditTxDal;
@@ -125,30 +133,41 @@ namespace Divisima.Bussiness.Concrete
             if (dto.items == null || dto.items.Count == 0)
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.OrderEmptyCart));
 
-            // Açıklayıcı yorum: Idempotency - aynı request_id ikinci kez sipariş üretmez (WebOrder kalıbı)
-            if (!string.IsNullOrWhiteSpace(dto.request_id))
-            {
-                var duplicate = await _orderDal.GetAsync(o => o.request_id == dto.request_id);
-                if (duplicate != null)
-                    // MFIX-B / K3: UC DONUS SITESININ UCU DE AYNI DAR DTO'yu doner. Bu dal
-                    // (request_id replay) canlida EN COK gezilen yoldur - sekli digerlerinden
-                    // AYIRMAK, istemcide "bazen nesne bazen sayi" belirsizligi yaratirdi.
-                    // GF-1 / K1: `replayed = true` - bu cagri YENI siparis YAZMADI. Cagiran
-                    // (misafir akisi) kendi on-yazdigi satirlari bu bayraga bakarak telafi eder;
-                    // `Success` bu soruyu YANITLAMIYORDU (bkz. OrderPlaceResponseDto).
-                    return (HttpStatusCode.OK, new SuccessDataResult<OrderPlaceResponseDto>(
-                        new OrderPlaceResponseDto
-                        {
-                            id = duplicate.id,
-                            order_number = duplicate.order_number,
-                            replayed = true
-                        },
-                        Messages.OrderAlreadyPlaced));
-            }
+            // ══ GF-6 / K1 (D1) - UYE REPLAY'I ARTIK SAHIPLIK SORUYOR ═══════════════════════════
+            //
+            // OLCULEN ONCE-DURUM (AV-3 / T1-B1, LAUNCH BLOKER): bu blok yalnizca
+            // `o.request_id == dto.request_id` soruyordu ve eslesen siparisin `id` +
+            // `order_number` alanlarini ISTEYEN KIM OLURSA OLSUN 200 ile doneriyordu.
+            // `orders.request_id` tekil indeksi GLOBAL oldugu icin, BASKASININ anahtarini
+            // gonderen bir uye o siparisin numarasini OGRENIYORDU. Misafir yolu ayni kapiyi
+            // GF-1/K1'de KAZANMISTI (sahiplik = e-posta); uye yoluna TASINMAMISTI.
+            //
+            // KURAL KOPYALANMADI, ORTAK SERVISE TASINDI (`SiparisReplayGuardi`): "ayni kuralin
+            // ikinci kopyasi" bu depoda YEDI kez bedeli odenmis bir ailedir. Buradaki eksen
+            // `customer_id` - controller onu TOKEN'dan set eder.
+            //
+            // UC DAL (D1):
+            //   baskasinin rid'i           -> 400 SIZINTISIZ (order_number YOK)
+            //   ayni musteri + ayni sepet  -> 200 replayed:true (mevcut siparis)
+            //   ayni musteri + baska sepet -> 400
+            // MFIX-B / K3 KORUNDU: replay dali hala AYNI dar DTO'yu doner.
+            var replaySonucu = await _replayGuardi.DegerlendirAsync(
+                dto.request_id, ReplaySahiplik.MusteriIdIle(dto.customer_id), dto.items, dto.coupon_code);
+            if (replaySonucu != null) return replaySonucu.Value;
 
-            // Açıklayıcı yorum: ADRES SAHİPLİK KONTROLÜ (IDOR engeli) - address_id verildiyse müşteriye AİT olmalı.
+            // Açıklayıcı yorum: ADRES SAHİPLİK KONTROLÜ (IDOR engeli) - address_id müşteriye AİT olmalı.
             // Aksi halde başkasının kayıtlı adresine sipariş verilebilir / adres bilgisi sızabilirdi.
-            if (dto.address_id.HasValue)
+            //
+            // ══ GF-6 / K2 (D2) - ADRES ARTIK ZORUNLU ═══════════════════════════════════════
+            // ESKI HAL `if (dto.address_id.HasValue)` IDI: adres GONDERILMEZSE bu blogun TAMAMI
+            // atlaniyor ve siparis ADRESSIZ yaziliyordu (AV-3 / T1-B2). Kapi ONCE validator'da
+            // (400 + `OrderAddressRequired`), BURADA da savunma amacli tekrar sorulur - bu
+            // manager'i validator'dan GECMEYEN bir cagiran da (misafir akisi) kullaniyor.
+            // Iki kapi AYNI mesaji verir; "ayni kuralin ikinci kopyasi" degil, AYNI SABIT.
+            if (!dto.address_id.HasValue || dto.address_id.Value <= 0)
+                return (HttpStatusCode.BadRequest, new ErrorResult(Messages.OrderAddressRequired));
+
+            Address? siparisAdresi;
             {
                 // GF-1 / K4 (B-1): SAHIPLIK IHLALI 404, 403 DEGIL - `SecureControllerBase`teki
                 // tek sozlesme. Bu dal "yok" ile "senin degil"i ZATEN tek yanitta birlestiriyordu
@@ -167,6 +186,9 @@ namespace Divisima.Bussiness.Concrete
                         await _securityEvents.SahiplikIhlaliAsync("address", dto.address_id.Value, dto.customer_id);
                     return (HttpStatusCode.NotFound, new ErrorResult(Messages.OrderInvalidAddress));
                 }
+                // GF-6 / K2 (D2): snapshot'in `shipping_address` alani BUGUNE KADAR `null`
+                // yaziliyordu. Adres nesnesi ZATEN ELDE - ikinci bir okuma yapilmiyor.
+                siparisAdresi = addr;
             }
 
             // Açıklayıcı yorum: 2) Tüm kalemler için ürün + stok kontrolü (overselling engeli)
@@ -395,7 +417,7 @@ namespace Divisima.Bussiness.Concrete
                 }
 
                 // Açıklayıcı yorum: 7) Snapshot al (sipariş anını dondur)
-                await CreateSnapshotAsync(order, lineData);
+                await CreateSnapshotAsync(order, lineData, siparisAdresi);
 
                 // Açıklayıcı yorum: 7b) İlk durum kaydı - zaman çizelgesi başlangıcı (transaction içinde, atomik)
                 await _statusHistory.RecordAsync(order.id, (byte)OrderStatusEnum.Pending, "Sipariş oluşturuldu");
@@ -425,7 +447,14 @@ namespace Divisima.Bussiness.Concrete
                 // gerçek stok düşümüne çevir (aksi halde 0 tutarlı Iyzico çağrısı yapılamaz).
                 if (total - creditToApply <= 0)
                 {
-                    order.status = (byte)OrderStatusEnum.Confirmed;
+                    // GF-6 / K5: durum yazimi TEK KAPIDAN. Bu noktada siparis Pending DOGDU,
+                    // yani gecis YAPISAL OLARAK gecerlidir; yine de sessiz gecistirme YOK -
+                    // makine degisirse burasi GURULTULU duser, sessizce YANLIS YAZMAZ.
+                    if (!DurumYaz(order, OrderStatusEnum.Confirmed))
+                    {
+                        await _unitOfWork.RollbackAsync();
+                        return (HttpStatusCode.InternalServerError, new ErrorResult(Messages.OrderPlaceFailed));
+                    }
                     order.is_online_payment_done = true;
                     await _orderDal.UpdateAsync(order);
                     await _stockService.ConfirmReservation(order.id);
@@ -435,7 +464,12 @@ namespace Divisima.Bussiness.Concrete
                 {
                     // Açıklayıcı yorum: KAPIDA ÖDEME - online ödeme beklenmez; sipariş onaylanır, ödeme teslimatta alınır.
                     // Stok hemen satışa çevrilir (rezervasyon -> gerçek düşüm). is_online_payment_done=false kalır (nakit).
-                    order.status = (byte)OrderStatusEnum.Confirmed;
+                    // GF-6 / K5: durum yazimi TEK KAPIDAN (gerekce DurumYaz'in basinda).
+                    if (!DurumYaz(order, OrderStatusEnum.Confirmed))
+                    {
+                        await _unitOfWork.RollbackAsync();
+                        return (HttpStatusCode.InternalServerError, new ErrorResult(Messages.OrderPlaceFailed));
+                    }
                     await _orderDal.UpdateAsync(order);
                     await _stockService.ConfirmReservation(order.id);
                     await _statusHistory.RecordAsync(order.id, (byte)OrderStatusEnum.Confirmed, "Kapıda ödeme - sipariş onaylandı");
@@ -506,21 +540,19 @@ namespace Divisima.Bussiness.Concrete
                 // bul ve dön (graceful idempotency - race loser hata yerine mevcut siparişi alır, çift sipariş olmaz).
                 if (!string.IsNullOrWhiteSpace(dto.request_id))
                 {
-                    var winner = await _orderDal.GetAsync(o => o.request_id == dto.request_id);
-                    if (winner != null)
-                        // GF-1 / K1: YARISI KAYBEDEN DAL DA `replayed = true` doner. Eskiden bu
-                        // dal `Success=TRUE` donduğu icin misafir akisinin telafisi ATESLEMIYOR ve
-                        // kaybeden istegin YAZDIGI musteri+adres YETIM kaliyordu - K1'in on-kontrolu
-                        // bu dali KAPATMAZ (on-kontrol gecer, yaris SONRA kaybedilir), o yuzden
-                        // bayrak BURADA da sart.
-                        return (HttpStatusCode.OK, new SuccessDataResult<OrderPlaceResponseDto>(
-                            new OrderPlaceResponseDto
-                            {
-                                id = winner.id,
-                                order_number = winner.order_number,
-                                replayed = true
-                            },
-                            Messages.OrderAlreadyPlaced));
+                    // GF-1 / K1: YARISI KAYBEDEN DAL DA `replayed = true` doner. Eskiden bu
+                    // dal `Success=TRUE` donduğu icin misafir akisinin telafisi ATESLEMIYOR ve
+                    // kaybeden istegin YAZDIGI musteri+adres YETIM kaliyordu - on-kontrol
+                    // bu dali KAPATMAZ (on-kontrol gecer, yaris SONRA kaybedilir), o yuzden
+                    // bayrak BURADA da sart.
+                    //
+                    // GF-6 / K1 (D1): bu dal da ARTIK AYNI GUARD'DAN gecer - on-kontrolle IKI
+                    // FARKLI kural olusmasin diye. Kazanan siparis BASKASININ ise 400 SIZINTISIZ
+                    // doner; `order_number` yaris dalindan da SIZMAZ. Guard `null` donerse
+                    // (kazanan bulunamadi) asagidaki 500'e dusulur - eski davranisla AYNI.
+                    var yarisSonucu = await _replayGuardi.DegerlendirAsync(
+                        dto.request_id, ReplaySahiplik.MusteriIdIle(dto.customer_id), dto.items, dto.coupon_code);
+                    if (yarisSonucu != null) return yarisSonucu.Value;
                 }
                 return (HttpStatusCode.InternalServerError, new ErrorResult(Messages.OrderPlaceFailed));
             }
@@ -535,8 +567,40 @@ namespace Divisima.Bussiness.Concrete
         }
 
         // Açıklayıcı yorum: Snapshot + snapshot kalemleri (Cafixo OrderSnapshot zinciri, iki timestamp)
+        // ══ GF-6 / K2 (D2) - SNAPSHOT ARTIK ADRESI DE DONDURUYOR ═══════════════════════════
+        //
+        // OLCULEN ONCE-DURUM: `shipping_address` SABIT `null` yaziliyordu. Snapshot'in isi
+        // "siparis anini dondurmak"tir; adres defterindeki satir sonradan DEGISTIRILEBILIR ya
+        // da KVKK silmede anonimlestirilebilir (`Address.phone` icin bu ZATEN yapiliyor) -
+        // yani siparisin GITTIGI adres, siparis anindan sonra HICBIR YERDE saklanmiyordu.
+        //
+        // KIRPMA URETIM NOKTASINDA: kolon `nvarchar(500)`; bilesenlerin toplam ust siniri
+        // (ad 150 + telefon 20 + acik adres 500 + ilce 60 + sehir 60 + posta 20) bunu ASABILIR
+        // ve EF insert-time HTTP 500 uretirdi - SD-7 ailesinin ta kendisi. Deger BURADA,
+        // yazilmadan ONCE kirpilir; cagirana tasima YOK.
+        private const int SnapshotAdresEnUzun = 500;
+
+        private static string? SnapshotAdresMetni(Address? adres)
+        {
+            if (adres == null) return null;
+            var parcalar = new[]
+            {
+                (adres.full_name ?? "").Trim(),
+                (adres.phone ?? "").Trim(),
+                (adres.full_address ?? "").Trim(),
+                string.Join(" ", new[] { (adres.district ?? "").Trim(), (adres.city ?? "").Trim() }
+                    .Where(p => p.Length > 0)),
+                (adres.zip_code ?? "").Trim()
+            }.Where(p => p.Length > 0);
+
+            var metin = string.Join(" · ", parcalar);
+            if (metin.Length == 0) return null;
+            return metin.Length <= SnapshotAdresEnUzun ? metin : metin.Substring(0, SnapshotAdresEnUzun);
+        }
+
         private async Task CreateSnapshotAsync(Order order,
-            List<(Product product, string size, int qty, decimal unitPrice)> lineData)
+            List<(Product product, string size, int qty, decimal unitPrice)> lineData,
+            Address? siparisAdresi)
         {
             var customer = await _customerDal.GetAsync(c => c.id == order.customer_id);
             var snapshot = new OrderSnapshot
@@ -544,7 +608,7 @@ namespace Divisima.Bussiness.Concrete
                 order_id = order.id,
                 customer_id = order.customer_id,
                 customer_full_name = customer != null ? customer.name : "",
-                shipping_address = null,
+                shipping_address = SnapshotAdresMetni(siparisAdresi),
                 status = order.status,
                 subtotal = order.subtotal,
                 discount_amount = order.discount_amount,
@@ -570,6 +634,27 @@ namespace Divisima.Bussiness.Concrete
                     created_at = DateTime.Now
                 });
             }
+        }
+
+        // ══ GF-6 / K5 (D5) - DURUM YAZIMININ TEK KAPISI ════════════════════════════════════
+        //
+        // OLCULEN ONCE-DURUM (AV-3 / T4-F5): `OrderStatusMachine` VARDI ama YALNIZ BIR yol
+        // (`ChangeOrderStatus`) ondan geciyordu. Diger BES yazim yeri durumu DOGRUDAN atiyor
+        // ve gecerliligi KENDI ELLE YAZILMIS on kosuluyla soruyordu - yani makinenin ELLE
+        // KOPYALARI olusmustu ("ayni kuralin ikinci kopyasi" ailesi). Ornekler:
+        //   `ConfirmManualPayment` -> "status != Pending" (Pending->Confirmed kuralinin kopyasi)
+        //   `CancelItem`           -> "status != Confirmed && != Preparing" (->Cancelled kopyasi)
+        // Kopyalar makine degistiginde SESSIZCE ayrisir.
+        //
+        // ARTIK: durum YALNIZ buradan yazilir ve gecis GECERSIZSE YAZILMAZ (false doner).
+        // `IsValidTransition` `from == to` icin true dondurur (idempotent no-op) - bu davranis
+        // makinenin kendi sozlesmesidir ve DEGISTIRILMEDI.
+        private static bool DurumYaz(Order order, OrderStatusEnum hedef)
+        {
+            if (!OrderStatusMachine.IsValidTransition((OrderStatusEnum)order.status, hedef))
+                return false;
+            order.status = (byte)hedef;
+            return true;
         }
 
         private string GenerateOrderNumber()
@@ -689,15 +774,29 @@ namespace Divisima.Bussiness.Concrete
             var order = await _orderDal.GetAsync(o => o.id == orderId);
             if (order == null)
                 return (HttpStatusCode.NotFound, new ErrorResult(Messages.OrderNotFound));
-            if (order.payment_type != 2)
+            if (order.payment_type != GirdiSinirlari.OdemeHavale)
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.ManualPaymentOnlyBankTransfer));
+            // ══ GF-6 / K5 (D5) - BU KONTROL BILINCLI OLARAK KALDI (MAKINE ONU IFADE EDEMEZ) ══
+            //
+            // "status != Pending" burada durum MAKINESININ kopyasi DEGIL, IDEMPOTENSI kapisidir.
+            // Olculdu: `OrderStatusMachine.IsValidTransition(Confirmed, Confirmed)` TRUE doner
+            // (`from == to` no-op, makinenin kendi sozlesmesi). Yani bu satir kaldirilip yerine
+            // yalniz `DurumYaz` konulsaydi, ZATEN ONAYLANMIS bir havale siparisi IKINCI KEZ
+            // onaylanir; `ConfirmReservation` + zaman cizelgesi + `PaymentConfirmed` olayi
+            // TEKRAR kosar ve musteri sadakat puanini/faturayi IKI KEZ alirdi. Bu, D5'in
+            // kaldirmak istedigi "elle kopya" degil, makinenin YANITLAYAMADIGI ayri bir sorudur.
+            // Yazimin KENDISI yine de tek kapidan gecer (asagidaki `DurumYaz`).
             if (order.status != (byte)OrderStatusEnum.Pending || order.is_online_payment_done)
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.OrderAlreadyProcessed));
 
             await _unitOfWork.BeginTransactionAsync();
             try
             {
-                order.status = (byte)OrderStatusEnum.Confirmed;
+                if (!DurumYaz(order, OrderStatusEnum.Confirmed))
+                {
+                    await _unitOfWork.RollbackAsync();
+                    return (HttpStatusCode.BadRequest, new ErrorResult(Messages.OrderInvalidStatusTransition));
+                }
                 order.is_online_payment_done = true;   // ödeme alındı (havale onaylandı)
                 await _orderDal.UpdateAsync(order);
                 await _stockService.ConfirmReservation(order.id);
@@ -759,7 +858,13 @@ namespace Divisima.Bussiness.Concrete
             await _unitOfWork.BeginTransactionAsync();
             try
             {
-                order.status = (byte)dto.order_status;
+                // GF-6 / K5: yazim TEK KAPIDAN. Yukaridaki :798 on kontrolu ayni makineyi
+                // sorar; burasi yazimin KENDISINI baglar - iki soru ARASINDA kod yok.
+                if (!DurumYaz(order, (OrderStatusEnum)dto.order_status))
+                {
+                    await _unitOfWork.RollbackAsync();
+                    return (HttpStatusCode.BadRequest, new ErrorResult(Messages.OrderInvalidStatusTransition));
+                }
                 // Açıklayıcı yorum: Teslim edildiğinde teslim zamanını kaydet (iade penceresi buradan sayılır, sipariş tarihinden değil).
                 if (order.status == (byte)OrderStatusEnum.Delivered && !order.delivered_at.HasValue)
                     order.delivered_at = DateTime.Now;
@@ -1083,9 +1188,12 @@ namespace Divisima.Bussiness.Concrete
                 // Açıklayıcı yorum: Aktif (iptal edilmemiş) kalem kaldı mı - kalmadıysa tüm siparişi iptal et
                 // PERFORMANS (H51): EXISTS - kalan kalem VAR MI (hepsini cekmeye gerek yok).
                 var hasRemaining = await _orderItemDal.AnyAsync(i => i.order_id == orderId && !i.is_cancelled);
-                if (!hasRemaining)
+                if (!hasRemaining && DurumYaz(order, OrderStatusEnum.Cancelled))
                 {
-                    order.status = (byte)OrderStatusEnum.Cancelled;
+                    // GF-6 / K5: yazim TEK KAPIDAN. Metodun basindaki "Confirmed|Preparing"
+                    // on kosulu (`:1012`) makinenin ->Cancelled kuralinin ELLE KOPYASIYDI;
+                    // artik KARAR makineye ait. Gecis reddedilirse siparis durumu DEGISMEZ -
+                    // kalem iptalleri ve iadeleri ZATEN yazildi, sessizce yanlis durum YAZILMAZ.
                     orderFullyCancelled = true;
                     // TUTARLILIK FIX (H44): son kalem iptaliyle sipariş TÜMÜYLE iptal -> kalan tutarı (kargo) da iade et
                     // (tüm-sipariş iptali yolu total'in tamamını=kargo dahil iade eder; yoksa müşteri kargoyu kaybederdi).

@@ -26,6 +26,15 @@ namespace Divisima.IntegrationTests
         // controller'da token'dan alınıyor (dto.customer_id = _currentUser.GetRequiredUserId()),
         // yani seed'lenmiş bir müşteri id'si zaten yok sayılırdı.
         // Her test kendi ürününü yaratır -> testler birbirinin stoğunu etkilemez.
+        // GF-6 / K2: `address_id` ARTIK ZORUNLU. Bu sinif `SqlBackedTestBase`ten TUREMIYOR
+        // (kendi `ConnStr`i yok), bu yuzden adres fabrikanin DbContext'i uzerinden yazilir.
+        private async Task<int> AdresOlusturAsync(int musteriId)
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<DivisimaDbContext>();
+            return await TestAdresHelper.AdresOlusturAsync(db, musteriId);
+        }
+
         private async Task<int> SeedProductAsync(int stockQuantity = 10)
         {
             using var scope = _factory.Services.CreateScope();
@@ -90,6 +99,8 @@ namespace Divisima.IntegrationTests
             var dto = new OrderCreateRequestDto
             {
                 customer_id = auth.CustomerId,
+                // GF-6 / K2: `address_id` ARTIK ZORUNLU (adressiz siparis LAUNCH BLOKER'di).
+                address_id = await AdresOlusturAsync(auth.CustomerId),
                 coupon_code = "",   // zorunlu binding: DTO alani nullable degil (bkz. rapor)
                 items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = 2 } }
             };
@@ -116,6 +127,7 @@ namespace Divisima.IntegrationTests
             var dto = new OrderCreateRequestDto
             {
                 customer_id = auth.CustomerId,
+                address_id = await AdresOlusturAsync(auth.CustomerId),   // GF-6/K2
                 coupon_code = "",   // zorunlu binding: DTO alani nullable degil (bkz. rapor)
                 items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = 50 } }
             };
@@ -161,9 +173,16 @@ namespace Divisima.IntegrationTests
             var clients = await Task.WhenAll(
                 Enumerable.Range(0, shoppers).Select(_ => TestAuthHelper.CreateCustomerClientAsync(_factory)));
 
+            // GF-6 / K2: adres ARTIK ZORUNLU. Adresler YARISTAN ONCE hazirlanir - yazim
+            // gecikmesi es zamanliligi (yani olculen seyi) kirletmesin.
+            var adresler = new Dictionary<int, int>();
+            foreach (var c in clients)
+                adresler[c.CustomerId] = await AdresOlusturAsync(c.CustomerId);
+
             OrderCreateRequestDto Make(int customerId) => new()
             {
                 customer_id = customerId,
+                address_id = adresler[customerId],
                 coupon_code = "",   // zorunlu binding: DTO alani nullable degil (bkz. rapor)
                 items = new() { new OrderItemRequestDto { product_id = productId, size = "M", quantity = perOrder } }
             };

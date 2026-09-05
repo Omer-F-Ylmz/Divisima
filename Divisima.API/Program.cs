@@ -740,7 +740,25 @@ app.UseMiddleware<IdempotencyMiddleware>();        // cift islem engeli (auth SO
 // `FallbackPolicy_ACIK_Uclari_KIRMAZ_ve_URETIM_UCLARI_ISARETLIDIR` her uretim ucunun ACIKCA
 // isaretli oldugunu tarar. Sessiz bir 401 yerine kirmizi bir test tercih edildi.
 app.MapControllers().RequireAuthorization();
-app.MapHub<NotificationHub>("/hubs/notification"); // B7
+// ══ GF-6 / K6 (D6 · AV-3 / X-2) - HUB YETKISI YOL DUZEYINDE DE ISARETLI ═══════════════════
+//
+// OLCULEN ONCE-DURUM: `NotificationHub` sinifi `[Authorize]` TASIYOR (GF-1/K5 pinledi), ama
+// YUKARIDAKI "KALAN BOSLUK" notunun soyledigi sey burada BIREBIR gecerliydi: bir onceki
+// satirdaki controller kapisi YALNIZ controller'lari kapsar, hub'i KAPSAMAZ -
+// yani hub'in korumasi TEK KANALA, sinif ozniteligine bagliydi. O oznitelik bir gun
+// silinirse ya da yeni bir hub ozniteliksiz eklenirse, yol VARSAYILAN OLARAK ACILIRDI.
+//
+// NOT (MK-8 / GF-5 dersi): bu yorumda o controller kapisinin ifadesi ADIYLA YAZILMAZ -
+// `GF-1/K5a` pini dosyadaki gecis sayisini sayar ve yorumdaki bir kopya pini YANLIS
+// ATESLER. Ilk yazimda tam bu oldu (beklenen 2, olculen 3); pin DOGRU davranip yakaladi.
+//
+// `RequireAuthorization()` ile koruma IKI KANALA cikti (oznitelik + yol). Ikisi de AYNI
+// varsayilan politikayi calistirir; CIFTE DEGERLENDIRME davranisi DEGISTIRMEZ - anonim
+// baglanti zaten 401 aliyordu, almaya devam eder.
+//
+// HEALTH UCLARI BILINCLI OLARAK ANONIM KALIR (asagida `AllowAnonymous` ile ISARETLI) -
+// orkestratör probe'lari kimlik tasimaz.
+app.MapHub<NotificationHub>("/hubs/notification").RequireAuthorization(); // B7 · GF-6/K6
 // GUVENLIK-FIX (G5): health uclari ACIKCA anonim olarak isaretlendi. Bugun ZORUNLU DEGIL
 // (varsayilan-kapali kural MapControllers ile SINIRLI, health uclari onun disinda) - isaret
 // NIYET beyani ve ileriye donuk emniyet: kapsam bir gun FallbackPolicy ile genisletilirse

@@ -273,11 +273,14 @@ namespace Divisima.IntegrationTests
         private async Task<(int orderId, string token, decimal amount)> NewPendingPaymentAsync(int qty = 2, int stock = 10)
         {
             var (customerId, productId) = await SeedAsync(stock);
+            // GF-6 / K2: `address_id` ARTIK ZORUNLU (adressiz siparis LAUNCH BLOKER'di).
+            var adresId = await TestAdresHelper.AdresOlusturAsync(ConnStr, customerId);
 
             var place = await WithScopeAsync(sp => sp.GetRequiredService<IOrderService>().PlaceOrder(
                 new OrderCreateRequestDto
                 {
                     customer_id = customerId,
+                    address_id = adresId,
                     coupon_code = "",
                     use_store_credit = 0m,
                     payment_method = 0,   // 0 = Online (Iyzico)
@@ -676,6 +679,109 @@ namespace Divisima.IntegrationTests
             var stok = await ReadStockAsync(productId);
             stok.reserved.Should().Be(0, "rezervasyon serbest birakilmali");
             stok.physical.Should().Be(10, "fiziksel stok dusmemeli");
+        }
+
+        // ══ GF-6 / K5 (D5 · AV-3 / T4-S1) - TERMINAL SIPARIS DIRILTILMEZ ═══════════════════
+        //
+        // OLCULEN ONCE-DURUM (LAUNCH BLOKER): odeme satirinin Pending->Success CAS'i AYNI
+        // ODEMENIN iki kez islenmesini engelliyor, ama SIPARISIN o arada terminal duruma
+        // gecmis olmasini SORMUYORDU. Iptal edilmis bir siparis, gecikmis/yeniden gonderilmis
+        // BASARILI bir callback ile `Confirmed`a DIRILIYOR; rezervasyon gercek stok dusumune
+        // ceriliyor ve `PaymentConfirmed` olayi (fatura + sadakat + referans + kupon defteri)
+        // yaziliyordu.
+        //
+        // REPRO R-6.6 - ADIM ADIM: (1) online odemeli siparis + odeme baslat, (2) siparisi
+        // IPTAL et (operatör/callback disi bir yol), (3) BASARILI callback gonder.
+        // BEKLENEN (saglam): durum `Cancelled` KALIR · odeme `Success` KAYDEDILIR (para
+        // gercekten alindi, izi kaybolmaz) · `PaymentAfterTerminal` **Critical** olayi yazilir.
+        // BEKLENEN (kirik): durum `Confirmed` olur - yani siparis DIRILIR.
+        [Fact]
+        public async Task GF6_K5_IPTAL_EDILMIS_SIPARIS_BASARILI_CALLBACKLE_DIRILMEZ()
+        {
+            if (Skipped()) return;
+            var (orderId, token, amount) = await NewPendingPaymentAsync(qty: 1, stock: 10);
+            var productId = await ReadOrderItemProductIdAsync(orderId);
+
+            // (2) Siparis IPTAL - callback DISI bir yoldan (operatör iptali gibi).
+            await using (var ctx = NewContext())
+            {
+                var o = await ctx.Set<Order>().SingleAsync(x => x.id == orderId);
+                o.status = (byte)OrderStatusEnum.Cancelled;
+                await ctx.SaveChangesAsync();
+            }
+
+            ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
+            {
+                Success = true,
+                PaymentId = "PAY-TERMINAL",
+                ItemTransactionId = "ITX-TERMINAL",
+                ItemTransactionCount = 1,
+                PaidPrice = amount,
+                Currency = "TRY",
+                FraudStatus = "1",
+                Installment = 1
+            };
+
+            await CallbackAsync(token, Sign(token));
+
+            (await ReadOrderAsync(orderId)).status.Should().Be((byte)OrderStatusEnum.Cancelled,
+                "IPTAL EDILMIS siparis basarili bir callback ile DIRILMEMELI (T4/S-1)");
+
+            // Para izi KAYBOLMAZ - iade ELLE yapilir (BILINEN, GF-7).
+            (await ReadPaymentAsync(orderId)).payment_status.Should().Be((byte)PaymentStatusEnum.Success,
+                "odeme GERCEKTEN alindi; satir Success olarak KAYDEDILMELI ki iade izlenebilsin");
+
+            // Rezervasyon gercek dusume CEVRILMEMELI - siparis iptal.
+            var stok = await ReadStockAsync(productId);
+            stok.physical.Should().Be(10,
+                "terminal dalda `ConfirmReservation` KOSMAMALI - fiziksel stok DUSMEMELI");
+
+            await using (var ctx = NewContext())
+            {
+                var olay = await ctx.Set<SecurityEvent>().AsNoTracking()
+                    .Where(e => e.event_type == "PaymentAfterTerminal").ToListAsync();
+                olay.Should().HaveCount(1, "olay TAM BIR KEZ yazilmali (vakum engeli: >= 1 pozitif olay)");
+                olay[0].severity.Should().Be("Critical", "terminal siparise odeme KRITIK bir olaydir");
+                olay[0].detail.Should().Contain($"order={orderId}",
+                    "cift-anlam kirici: olay BU siparise ait olmali");
+            }
+
+            // NEG KONTROL: `PaymentConfirmed` outbox mesaji YAZILMAMALI - yazilsaydi fatura,
+            // sadakat puani, referans odulu ve kupon defteri iptal edilmis siparis icin kosardi.
+            await using (var ctx = NewContext())
+                (await ctx.Set<OutboxMessage>().AsNoTracking()
+                    .CountAsync(m => m.event_type == "PaymentConfirmed"))
+                    .Should().Be(0, "terminal dalda onay yan etkileri TETIKLENMEMELI");
+        }
+
+        // CIFT-ANLAM KIRICI: yukaridaki pin "her callback reddediliyor" ile de yesil kalirdi.
+        // TERMINAL OLMAYAN bir siparis AYNI callback ile ONAYLANMALI ve olay YAZILMAMALIDIR.
+        [Fact]
+        public async Task GF6_K5_TERMINAL_OLMAYAN_SIPARIS_AYNI_CALLBACKLE_ONAYLANIR()
+        {
+            if (Skipped()) return;
+            var (orderId, token, amount) = await NewPendingPaymentAsync(qty: 1, stock: 10);
+
+            ControllableIyzicoClient.RetrieveOverride = _ => new IyzicoPaymentResult
+            {
+                Success = true,
+                PaymentId = "PAY-OK",
+                ItemTransactionId = "ITX-OK",
+                ItemTransactionCount = 1,
+                PaidPrice = amount,
+                Currency = "TRY",
+                FraudStatus = "1",
+                Installment = 1
+            };
+
+            var r = await CallbackAsync(token, Sign(token));
+            r.code.Should().Be(HttpStatusCode.OK, "Pending siparis normal yoldan onaylanmali");
+            (await ReadOrderAsync(orderId)).status.Should().Be((byte)OrderStatusEnum.Confirmed);
+
+            await using var ctx = NewContext();
+            (await ctx.Set<SecurityEvent>().AsNoTracking()
+                .CountAsync(e => e.event_type == "PaymentAfterTerminal"))
+                .Should().Be(0, "saglikli yolda terminal olayi YAZILMAMALI - kapi ayirt edici olmali");
         }
 
         // ── 8) KART IADESI ───────────────────────────────────────────────────────────────
@@ -1089,10 +1195,14 @@ namespace Divisima.IntegrationTests
                 await ctx.SaveChangesAsync();
             }
 
+            // GF-6 / K2: `address_id` ARTIK ZORUNLU.
+            var adresId = await TestAdresHelper.AdresOlusturAsync(ConnStr, customerId);
+
             var place = await WithScopeAsync(sp => sp.GetRequiredService<IOrderService>().PlaceOrder(
                 new OrderCreateRequestDto
                 {
                     customer_id = customerId,
+                    address_id = adresId,
                     coupon_code = "",
                     use_store_credit = storeCredit,
                     payment_method = 0,

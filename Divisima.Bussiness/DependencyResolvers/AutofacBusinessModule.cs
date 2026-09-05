@@ -100,6 +100,9 @@ namespace Divisima.Bussiness.DependencyResolvers.Autofac
 
             // Açıklayıcı yorum: Sipariş modülü kayıtları (Order zinciri)
             builder.RegisterType<OrderManager>().As<IOrderService>().InstancePerLifetimeScope();
+            // GF-6 / K1 (D1): `request_id` replay guard'i - misafir ve uye yolunun ORTAK kaynagi.
+            // Iki manager da bunu enjekte eder; kural artik TEK YERDE yasar.
+            builder.RegisterType<SiparisReplayGuardi>().As<ISiparisReplayGuardi>().InstancePerLifetimeScope();
             builder.RegisterType<EfOrderDal>().As<IOrderDal>().InstancePerLifetimeScope();
             builder.RegisterType<EfOrderItemDal>().As<IOrderItemDal>().InstancePerLifetimeScope();
             builder.RegisterType<EfOrderSnapshotDal>().As<IOrderSnapshotDal>().InstancePerLifetimeScope();

@@ -178,9 +178,13 @@ namespace Divisima.IntegrationTests
         {
             var productId = await NewProductAsync();
 
+            // GF-6 / K2: `address_id` ARTIK ZORUNLU.
+            var aAdres = await TestAdresHelper.AdresOlusturAsync(ConnStr, A.CustomerId);
+
             var place = await A.Client.PostAsJsonAsync("/api/Order/place", new OrderCreateRequestDto
             {
                 customer_id = A.CustomerId,
+                address_id = aAdres,
                 coupon_code = "",
                 use_store_credit = 0m,
                 payment_method = 1,
@@ -444,8 +448,13 @@ namespace Divisima.IntegrationTests
             });
             upsert.IsSuccessStatusCode.Should().BeTrue("adres eklenebilmeli");
             int addressId;
+            // GF-6 / K2: `PlaceOrderForAAsync` artik KENDI adresini de yaziyor (siparis
+            // adressiz olamaz), yani A'nin BIRDEN COK adresi olabilir. Yuklem bu yuzden
+            // `full_address` ile DARALTILDI - bu testin kastettigi adres BUDUR.
             await using (var ctx = NewContext())
-                addressId = (await ctx.Set<Address>().AsNoTracking().SingleAsync(a => a.customer_id == A.CustomerId)).id;
+                addressId = (await ctx.Set<Address>().AsNoTracking()
+                    .SingleAsync(a => a.customer_id == A.CustomerId
+                                      && a.full_address == "Sozlesme testi adresi")).id;
 
             var denemeler = new (string ad, Func<Task<HttpResponseMessage>> cagri)[]
             {
@@ -510,9 +519,12 @@ namespace Divisima.IntegrationTests
             });
             upsert.IsSuccessStatusCode.Should().BeTrue("on kosul: A adres ekleyebilmeli");
             int aAdresId;
+            // GF-6 / K2: yuklem `full_address` ile DARALTILDI - gerekce yukaridaki ayni
+            // duzeltmede (siparis akisi artik kendi adresini de yaziyor).
             await using (var ctx = NewContext())
                 aAdresId = (await ctx.Set<Address>().AsNoTracking()
-                    .SingleAsync(a => a.customer_id == A.CustomerId)).id;
+                    .SingleAsync(a => a.customer_id == A.CustomerId
+                                      && a.full_address == "K4 sahiplik testi adresi")).id;
 
             var bUrunId = await NewProductAsync();
 

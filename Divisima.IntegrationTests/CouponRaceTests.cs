@@ -178,6 +178,12 @@ namespace Divisima.IntegrationTests
                 }
             }
 
+            // GF-6 / K2: `address_id` ARTIK ZORUNLU - her musteri kendi adresini alir
+            // (eszamanlilik olcumu ADRES YAZIMIYLA kirlenmesin diye TURDAN ONCE hazirlanir).
+            var adresIds = new List<int>();
+            foreach (var cid in customerIds)
+                adresIds.Add(await TestAdresHelper.AdresOlusturAsync(ConnStr, cid));
+
             // 8 AYRI musteri, 8 AYRI DI scope -> gercek eszamanlilik. Kupon usage_limit = 1.
             var tasks = customerIds.Select((cid, idx) => Task.Run(async () =>
             {
@@ -185,6 +191,7 @@ namespace Divisima.IntegrationTests
                 return await scope.ServiceProvider.GetRequiredService<IOrderService>().PlaceOrder(new OrderCreateRequestDto
                 {
                     customer_id = cid,
+                    address_id = adresIds[idx],
                     coupon_code = couponCode,
                     use_store_credit = 0m,
                     payment_method = 1,
@@ -307,9 +314,14 @@ namespace Divisima.IntegrationTests
                 musteriId = c.id;
             }
 
-            static OrderCreateRequestDto Istek(int musteri, int urun, string kod) => new()
+            // GF-6 / K2: adres ARTIK ZORUNLU. CIFT-ANLAM KIRICI olarak da SART - adressiz
+            // istek 400'u KUPONDAN degil ADRESTEN alirdi ve bu testin iddiasi curur.
+            var p12Adres = await TestAdresHelper.AdresOlusturAsync(ConnStr, musteriId);
+
+            OrderCreateRequestDto Istek(int musteri, int urun, string kod) => new()
             {
                 customer_id = musteri,
+                address_id = p12Adres,
                 coupon_code = kod,
                 use_store_credit = 0m,
                 payment_method = 1,

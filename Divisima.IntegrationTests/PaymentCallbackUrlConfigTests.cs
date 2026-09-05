@@ -204,10 +204,14 @@ namespace Divisima.IntegrationTests
                 productId = p.id;
             }
 
+            // GF-6 / K2: `address_id` ARTIK ZORUNLU.
+            var adresId = await TestAdresHelper.AdresOlusturAsync(ConnStr, customerId);
+
             var place = await WithScopeAsync(sp => sp.GetRequiredService<IOrderService>().PlaceOrder(
                 new OrderCreateRequestDto
                 {
                     customer_id = customerId,
+                    address_id = adresId,
                     coupon_code = "",
                     use_store_credit = 0m,
                     payment_method = 0,

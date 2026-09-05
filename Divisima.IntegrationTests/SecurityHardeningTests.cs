@@ -669,9 +669,15 @@ namespace Divisima.IntegrationTests
             if (Skipped()) return;
             var user = await TestAuthHelper.CreateCustomerClientAsync(_factory!);
 
+            // GF-6 / K2: adres ARTIK ZORUNLU. CIFT-ANLAM KIRICI olarak da SART - adres
+            // verilmezse 400 IKI sebepten gelirdi ve bu test "negatif kredi" iddiasini
+            // artik kanitlamazdi.
+            var adresId = await TestAdresHelper.AdresOlusturAsync(ConnStr, user.CustomerId);
+
             var govde = new
             {
                 customer_id = user.CustomerId,
+                address_id = adresId,
                 coupon_code = "",
                 use_store_credit = -1000m,
                 payment_method = (byte)1,
