@@ -598,6 +598,22 @@ namespace Divisima.IntegrationTests
             fazla.Item2.Message.Should().Be(Divisima.Core.Utilities.Constants.Messages.ImportTooManyRows);
         }
 
+        // ══ GF-6 / F4 - SINIR DEGERININ KENDISI DE PINLI ═══════════════════════════════════
+        //
+        // DURUST BEYAN (MK-6 ile olculdu): yukaridaki sinir testi `CsvSatirEnCok`i HEM dosyayi
+        // uretirken HEM beklentide kullanir, yani SABITIN DEGISMESINI goremez (MUT-20: sabit
+        // 3'e dusuruldu -> 0 kirmizi). O test bir OFF-BY-ONE'i yakalar (`>` yerine `>=`),
+        // POLITIKA DEGERINI degil. Deger burada AYRICA sabitlenir.
+        [Fact]
+        public void K7_SATIR_SINIRI_DEGERI_PINLI()
+        {
+            GirdiSinirlari.CsvSatirEnCok.Should().Be(5000,
+                "satir siniri bir URUN KARARIDIR - sessizce degistirilirse bu pin kirmizi verir");
+            GirdiSinirlari.CsvDosyaEnBuyukBayt.Should().Be(5L * 1024L * 1024L);
+            GirdiSinirlari.UrunAdi.Should().Be(200, "products.name kolonu 200");
+            GirdiSinirlari.UrunMarkasi.Should().Be(120, "products.brand kolonu 120");
+        }
+
         // ══ GF-6 / F4 - D7'NIN PINSIZ SEVK EDILEN UC KAPISI ════════════════════════════════
         // Rapor denetcisi tespit etti: marka uzunlugu, `.csv` uzanti kontrolu ve content-type
         // kontrolu SEVK EDILMIS ama PINLENMEMISTI.
