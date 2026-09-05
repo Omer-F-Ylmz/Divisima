@@ -1190,10 +1190,14 @@ namespace Divisima.Bussiness.Concrete
                 var hasRemaining = await _orderItemDal.AnyAsync(i => i.order_id == orderId && !i.is_cancelled);
                 if (!hasRemaining && DurumYaz(order, OrderStatusEnum.Cancelled))
                 {
-                    // GF-6 / K5: yazim TEK KAPIDAN. Metodun basindaki "Confirmed|Preparing"
-                    // on kosulu (`:1012`) makinenin ->Cancelled kuralinin ELLE KOPYASIYDI;
-                    // artik KARAR makineye ait. Gecis reddedilirse siparis durumu DEGISMEZ -
-                    // kalem iptalleri ve iadeleri ZATEN yazildi, sessizce yanlis durum YAZILMAZ.
+                    // GF-6 / K5: yazim TEK KAPIDAN gecer. DURUST SINIR (MK-6 ile olculdu):
+                    // metodun basindaki "Confirmed veya Preparing" on kosulu KALDIRILMADI -
+                    // o kosul yalnizca ->Cancelled gecisini degil, KALEM IPTALININ kendisinin
+                    // hangi durumlarda mesru oldugunu da soyluyor ve makine bunu ifade edemez.
+                    // Dolayisiyla bu satirin bugunku katkisi SAVUNMA DERINLIGIDIR: on kosul
+                    // bir gun gevsetilirse durum yine de makinesiz YAZILAMAZ.
+                    // Gecis reddedilirse siparis durumu DEGISMEZ - kalem iptalleri ve iadeleri
+                    // ZATEN yazildi, sessizce yanlis durum YAZILMAZ.
                     orderFullyCancelled = true;
                     // TUTARLILIK FIX (H44): son kalem iptaliyle sipariş TÜMÜYLE iptal -> kalan tutarı (kargo) da iade et
                     // (tüm-sipariş iptali yolu total'in tamamını=kargo dahil iade eder; yoksa müşteri kargoyu kaybederdi).

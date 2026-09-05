@@ -410,10 +410,16 @@ namespace Divisima.IntegrationTests
         // ═════════════════════════════════════════════════════════════════════════════════════
 
         // OLCULEN ONCE-DURUM (T4-F5): `OrderStatusMachine` VARDI ama yalniz BIR yol ondan
-        // geciyordu. `ConfirmManualPayment` kendi "status != Pending" literaliyle karar
-        // veriyordu - makinenin ELLE KOPYASI.
+        // geciyordu; kalan bes yazim yeri durumu DOGRUDAN atiyordu.
         //
-        // DAVRANIS: IPTAL EDILMIS bir havale siparisi manuel onayla ONAYLANAMAZ.
+        // ══ PIN SINIRI - MK-6 ILE OLCULDU, DURUST BEYAN ════════════════════════════════════
+        // Bu pin `DurumYaz` kapisini AYIRT EDEMEZ: MUT-6'da kapi tumden devre disi birakildi
+        // (`if (false)`) ve pin YESIL kaldi - cunku `ConfirmManualPayment`in kendi
+        // IDEMPOTENSI kosulu ("status != Pending", BILINCLI olarak korundu) ayni istegi
+        // zaten reddediyor. Yani burada olculen sey "terminal siparis manuel onaylanamaz"
+        // DAVRANISIDIR ve o davranis GF-6 ONCESINDE de vardi - bu pin REGRESYON KORUMASIDIR.
+        // `DurumYaz` kapisinin KENDI kaniti KAYNAK pinindedir
+        // (`K5_DURUM_YAZIMI_TEK_KAPIDAN_GECER`, MUT-6b ile TAM 1 kirmizi).
         [Fact]
         public async Task K5_IPTAL_EDILMIS_HAVALE_SIPARISI_MANUEL_ONAYLANAMAZ()
         {
