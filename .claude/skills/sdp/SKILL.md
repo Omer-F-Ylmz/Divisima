@@ -1,9 +1,9 @@
 ---
 name: sdp
-description: Divisima Sahada Doğrulanmış Denetim Protokolü v1.4 — her dalga/denetim tarifi başında yüklenir
+description: Divisima Sahada Doğrulanmış Denetim Protokolü v1.5 — her dalga/denetim tarifi başında yüklenir
 ---
 
-# SDP — SAHADA DOGRULANMIS DENETIM PROTOKOLU v1.4 (KALICI; v1.1 27 Agustos 2026, v1.2 28 Agustos 2026, v1.4 5 Eylul 2026)
+# SDP — SAHADA DOGRULANMIS DENETIM PROTOKOLU v1.5 (KALICI; v1.1 27 Agustos 2026, v1.2 28 Agustos 2026, v1.4 5 Eylul 2026, v1.5 5 Eylul 2026)
 
 **Bu bolum BAGLAYICIDIR: bundan sonraki her CC isi bu protokole uyar.**
 v1.0 MTUR-OLCUM turunda sahada surulda; her v1.1 maddesi O TURDA OLCULEN bir
@@ -296,12 +296,14 @@ yazar. Kapatamiyorsa bosluk RAPORDA ADIYLA durur. (MANTIK-AV-1 ornegi: denetci h
 dokumlerini sir taramasina dahil etmedigini yazdi; ana akis tum scratchpad agacini - 47
 dosya, uzanti farketmeksizin, suzgec sinanmis - tarayip boslugu kapatti.)
 
-### 1.12 GUVENLIK TURU MODULU — TAM METIN ARSIVDE, BURADA v1.4 DELTASI
+### 1.12 GUVENLIK TURU MODULU — TAM METIN ARSIVDE, BURADA v1.4/v1.5 DELTASI
 
 **TAM METIN:** `42·GUVENLIK-AV-1 · SDP 1.12` (`docs/muhur/42-guvenlik-av-1.md`, bolum 6).
 Guvenlik dalgalarinda ORADAN okunur (MK-11/b somut gerekce). Arsiv BAYT-SABITTIR (MK-11/d);
-asagidaki uc madde arsivi DEGISTIRMEZ, onu **DEGISTIREREK TAMAMLAR** ve celiski halinde
-**BU METIN GECERLIDIR**. Ucu de GUVENLIK-AV-2 turunda OLCULEN bir surtunmeye dayanir.
+asagidaki **dort** madde arsivi DEGISTIRMEZ, onu **DEGISTIREREK TAMAMLAR** ve celiski halinde
+**BU METIN GECERLIDIR**. Ilk ucu GUVENLIK-AV-2, dorduncusu (1.12.8) GUVENLIK-AV-3 turunda
+OLCULEN bir surtunmeye dayanir. (Sayi ureten ifadeyle: `grep -c "^\*\*1\.12\..* EKI (v1\.[45])"`
+-> **4**; NEG `ZZZEKI` -> 0.)
 
 **1.12.2 EKI (v1.4) — ON KOSUL EKSENININ TANIMI.**
 ON KOSUL, bulguyu **KIM TETIKLEYEBILIR** sorusunu yanitlar; **okuyucu ya da etkilenen taraf
@@ -321,6 +323,16 @@ silindigini bagimsiz dogruladi), ucuncusunun yazdigi jeton-bicimli dosya **SILIN
 ve SAHIPSIZDI** (alti defterin hicbiri anmiyordu; ancak kural-uyum denetcisi yakaladi).
 Ek olcum: o degerdeki BUYUK HARFLI GUID'i `KanitMaskesi` **zaten maskelemezdi**
 (`char.IsLower` sarti) - yani "maske nasilsa yakalar" varsayimi da YANLIS.
+
+**1.12.8 EKI (v1.5) — BILINEN LISTESI DURUM SUTUNU TASIR.**
+BILINEN listesi **DURUM sutunuyla (`ACIK` / `KAPALI` / `BAGLAYICI`) kurulur; kapali kalem
+yeni bulguyu BASTIRMAZ.**
+*Gerekce OLCULDU (AV-3):* tura verilen BILINEN listesi 12 maddeyi DURUMSUZ, yani ACIK
+gorunumunde sundu; bir ajan bunlardan IKISINI (`00b:3` `LocalImageStorage` CWD ·
+`00b:13` kultur pinlemesi) "BILINEN - capraz dogrulama" diye isaretledi, oysa **IKISI DE
+KAPANMISTI** (iki bagimsiz olcum). Zarar bu turda 0 idi (yanlis NEGATIF yonunde), ama
+mekanizma terstir: **kapanmis bir kalem REGRESE OLURSA "bilinen, sayilmaz" diye tek satira
+iner ve RAPOR EDILMEZ.**
 
 **1.12.10 EKI (v1.4) — KAPSAM MATRISI KUMULATIFTIR.**
 Her AV turu, kapsam matrisini (**uc/controller x TUR**) muhre **KUMULATIF** yazar; sonraki

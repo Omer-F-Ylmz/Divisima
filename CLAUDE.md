@@ -413,6 +413,12 @@ ama servis edilen dosyalarin md5 kimligi IKINCI kez dogrulanamadi. "Rapor verdi"
 `appsettings.Development.json` ana agactan kopyalanir (gitignore'lu); her denetcinin
 scratchpad alt dizini ayri.
 
+**EK (53·AV-3):** ON OLCUM ajanlari da ayri worktree + ayri test DB alir; canli rig/DB
+paylasimi YALNIZ SALT-OKUR, yazan ajan TEK ve SERILESTIRILMIS; kurgu MAX mutabakati ajan
+basina DEGIL **TUR BASINA**. Gerekce OLCULDU: alti ajan ana agacta ve tek canli DB'de kostu -
+bir ajan musteriyi yanlis ajana atfetti, biri kirlenmis cikarimi geri aldi, bir denetci
+digerinin turu ORTASINDA kayit yaratti; **ajan basina MAX mutabakati UNSOUND kaldi.**
+
 
 ## MK-5
 
@@ -1044,7 +1050,7 @@ yalniz somut gerekceyle bakilir.
 - `50·GF-4·K7` AutoMapper 12.0.1 KALIR (lisans degisimi **15.0.0**); `NuGetAuditMode=all` UYARI seviyesi; deprecated adimindaki `\|\| true` BILINCLIDIR (o komut bulguda da exit 0 verir, kaldirmak olmayan bir kapiyi var sandirir). -> 50
 - `51·AV-2` **LAUNCH BLOKER OLCUTU:** `KRITIK` **∨** `YUKSEK`+`KIMLIKSIZ-UZAK` **∨** `[PARA]`/`[VERI-BOZAN]`. Digerleri launch SONRASI. Siddet ON KOSULDAN bagimsiz verilemez; `ADMIN` on kosullu kalem KRITIK OLAMAZ. -> 51
 - `51·AV-2` **AV KAPSAMI KUMULATIF MATRISLE OLCULUR; YER DEGISTIRME YASAK.** Her AV turu kapsam matrisini (uc/controller x tur) muhre kumulatif yazar ve sonraki tur onceki turun KOR KUMESINDEN baslar. Gerekce olculdu: AV-1'in kor 13'u ile AV-2'nin kor 17'sinin kesisimi **0**; 40 controller'in **30'u** en az bir turda kor kaldi. -> 51
-- `52·GF-5` **OLAY YUZEYI:** kayitsiz **ve kilitli** hesap girisi · logout (iki dal) · sahiplik ihlali `IdorAttempt` **kapsam Order+Payment** (kalan yedi manager BILINEN) · 429 **ornekleme ip+uc basina 60 sn**, `customer_id` NULL **kabul edilmis sinir** (middleware `UseAuthentication`'DAN ONCE) · bozuk imza. **IMZASIZ webhook 404 STATUKO = KABUL EDILMIS RISK** (otorite retrieve zinciri; K7 DUSTU - saglayici imza GONDERMIYOR, uygulansaydi tum callback+webhook 400 olurdu). ip/ua **`SecurityEventManager` ICINDE** doldurulur; sinir 60 = iki kolonun DARI. `detail` kolon genisligine KIRPILIR. -> 52
+- `52·GF-5` **OLAY YUZEYI:** kayitsiz **ve kilitli** hesap girisi · logout (iki dal) · sahiplik ihlali `IdorAttempt` **kapsam DUZELTILDI (`53·AV-3`): cagri yeri IKI - `IyzicoPaymentManager`(`order`) + `OrderManager`(`address`); "Order+Payment" YANLISTI** (bes uctan yalniz `payment/initialize` iz birakiyor) · 429 **ornekleme ip+uc basina 60 sn**, `customer_id` NULL **kabul edilmis sinir** (middleware `UseAuthentication`'DAN ONCE) · bozuk imza. **IMZASIZ webhook 404 STATUKO = KABUL EDILMIS RISK** (otorite retrieve zinciri; K7 DUSTU - saglayici imza GONDERMIYOR, uygulansaydi tum callback+webhook 400 olurdu). ip/ua **`SecurityEventManager` ICINDE** doldurulur; sinir 60 = iki kolonun DARI. `detail` kolon genisligine KIRPILIR. -> 52
 - `52·GF-5` **MISAFIR/UYE GIRDI SINIRLARI TEK KAYNAK `GirdiSinirlari`** (sabit DEGERLER; ortak RuleBuilder ACILMAZ - Seller'a kapsam tasmasin, o kendi literalini korur). `guest_name` <=100 **olcum SANITIZE SONRASI** (`Sanitize` UZATMAZ - bes `Replace(...,"")`+`Trim`; `HtmlEncode` AYRI metot ve bu yolda cagrilmiyor). `request_id` <=80 + `[A-Za-z0-9._-]`, **GUID SARTI ASLA** (dolu 122 degerin 54'u GUID DEGIL; frontend yedek dali `co-...` uretir ve PINLI). E-posta <=200. Sinir degerleri **SEMAYA capalanir**, sabite DEGIL. -> 52
 - `52·GF-5` **LOG MASKESI GLOBAL:** Serilog'un IKI sink'i de `MaskeliFormatter` (`ITextFormatter`) uzerinden yazar - **enricher yolu KAPALI** (`LogEvent.Exception` readonly, olculdu) ve yeni paket GEREKMEDI. Cerceve metinleri (SQL "Truncated value", EF `@pN=`) AYRI `LogMetniMaskesi`de; **`KanitMaskesi` olcutu GENISLETILMEZ** (`KanitMaskesiTests` sozlesmesi korunur). GF-3'un "elle `ex` gecirilmez" sozlesmesi SURER - formatter onun YERINE gecmez, ARKASINA eklenir. -> 52
 
@@ -1114,21 +1120,40 @@ sayilinca `E=8 · H=8 · KISMEN=6` (toplam 22 dogru, bolunme yanlis).
 diye yaziliydi; son parca CLAUDE.md'ye TASINMAMISTI (olculdu: muhur 1, CLAUDE.md 0).
 Etkisi sifirdi (Stock zaten 13'un uyesi) ama tasima kaybi GERCEKTI - **geri konuldu**.
 **D-7 KISMEN**: admin TAM, vitrin `'unsafe-inline'` KABUL EDILMIS RISK; **CSP FAZ B YOK** -> ERT-DEFTER.
+**GUVENLIK-AV-3 DAR (SALT OLCUM) `533f935` zemininde /53 — NO-GO 3** (T1-B1 uye `request_id`
+replay'i · T1-B2 adressiz siparis · T1-B4 COD parasiz "odenmis").
+Olcut **(B)**: `51·AV-2` disjunktlarina **"davranis kaniti bulunan"** on sarti eklendi; T4-F1
+(UNIQUE) ve T4-F2 (rowversion) **ADAY KUTUSUNDA** - migration ister, GF-6'da
+kirmizi-once denenir, hit yoksa GF-7. **KOR-30 GENISLEDI, YER DEGISTIRMEDI: 19 derinlemesine ·
+4 yalniz canli yetki · 5 yalniz kaynak eleme · 2 ilan edilmis kapsam disi.**
 
-**KUYRUK (AV-2 sonrasi yeniden dizildi):**
+**KUYRUK (AV-3 sonrasi yeniden dizildi):**
 
-1. **AV-3 DAR** (salt olcum) <- SIRADA: `POST api/order/place` · dosya yukleme yuzeyi
-   (`product/import`, `product-image/upload`) · **A06** (tedarik zinciri) ve **A10** (SSRF) ·
-   kor kalan 30 controller'dan `[PARA]`/`[VERI-BOZAN]` tasiyanlar. Kapsam matrisi KUMULATIF
-   (bkz. B8) - AV-3 **AV-2'nin kor kumesinden baslar**.
-2. **LAUNCH GO/NO-GO TURU**.
-3. **GF-6 (LAUNCH SONRASI):** SC-12 outbox payload sifreleme/ozetleme (SA-1 ile birlikte -
-   `AesEncryptionProvider` bugun TEK ANAHTARLI ve cozemedigi degeri OLDUGU GIBI donduruyor,
-   yani sifreleme once SA-2'yi ister) · SA-1/SA-2 at-rest kurcalama + anahtar rotasyonu ·
-   SB-1 (2FA dalinda CAS geri alma) · SD-1/SD-2/SD-4 anonim uc sozlesmesi · SC-3 SIEM
-   okuyucusu.
-4. Launch SONRASI digerleri: VITRIN-KALAN (10 kalem) · FIX-1B · ADMIN-FIX · IMPORT-FIX ·
+1. **ARSIV-4** (docs, hedef `<=60 KB`) <- SIRADA. Tarif merkezden.
+2. **GF-6 LAUNCH ONCESI:** **6a** uye yolu butunlugu (T1-B1 · T1-B2 · T1-B3 · T1-B4 - TEK KOK:
+   misafir yolunun kazandigi kapilar uyeye tasinmamis) · **6b** durum makinesi (T4/S-1 iptal
+   edilmis siparisi dirilten callback + T4-F5 iki elle kopya - TEK KOK: durum yazimi
+   `IsValidTransition`'dan gecmiyor) · **6c** X-2 hub `RequireAuthorization` (tek satir + pin) ·
+   **6d** T2-1 `product/import` transaction + satir siniri + tip kontrolu ·
+   **6e** T4-F1/T4-F2 **kirmizi-once denemesi**.
+3. **LAUNCH GO/NO-GO TURU**.
+4. **GF-7 (LAUNCH SONRASI):** AV-3'un 6b/6c/6d kalani + olu/yaniltici yuzey grubu (`53`/bolum 9) ·
+   SC-12 outbox payload
+   sifreleme/ozetleme (SA-1 ile birlikte - `AesEncryptionProvider` bugun TEK ANAHTARLI ve
+   cozemedigi degeri OLDUGU GIBI donduruyor, yani sifreleme once SA-2'yi ister) ·
+   SA-1/SA-2 at-rest kurcalama + anahtar rotasyonu · SB-1 (2FA dalinda CAS geri alma) ·
+   SD-1/SD-2/SD-4 anonim uc sozlesmesi · SC-3 SIEM okuyucusu.
+5. Launch SONRASI digerleri: VITRIN-KALAN (10 kalem) · FIX-1B · ADMIN-FIX · IMPORT-FIX ·
    FIX-1C · LOG-FIX · FIX-2 · FIX-3/B13
+
+Iki BILINEN kalem (`53·GUVENLIK-AV-3`):
+- **REZERVASYON BIRIKMESI - DEV RIG'TE `BackgroundJobs:Enabled=false`.** 197 rezervasyonun
+  **186'si suresi dolmus ama DURUYOR**; `available` KALICI dusuk ve sonraki her olcum turunun
+  stok sayimi kirlenir. Bayrak BILINEN'dir, **birikmenin olcusu DEGILDIR** (sinir genislemesi).
+  **PROD CHECKLIST: `BackgroundJobs:Enabled=true` -> IRL listesi.**
+- **KOR EKSENLER OWASP'TA: A02 · A03 · A05 · A04.** A03 AV-2'de `BOSLUK (istemci)` diye adiyla
+  kaydedilmisti; AV-3'te de kor, gerekcesi **`frontend/*` DOKUNULMAZ** - yasak yuzeyde
+  birakilmis bosluk. A04 **IKINCI KEZ** hicbir goreve girmedi.
 
 Bes BILINEN kalem (ayni-saniye jeton penceresi · miras oturumda step-up · 342 olu oturum ·
 IP davranis kaniti yok · K4 gecikmeli aile iptali) TAM METINLE `docs/muhur/45-guvenlik-fix-1b.md`
