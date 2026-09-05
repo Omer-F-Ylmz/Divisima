@@ -43,10 +43,11 @@ namespace Divisima.API.Controllers
         [HttpPost("import")]
         [RequireUserType(UserTypeEnum.Admin)]
         // GF-6 / K7 (D7): istek govdesi tavani - sinir `GirdiSinirlari.CsvDosyaEnBuyukBayt`
-        // ile AYNI degerdir. Oznitelik SABIT ister (derleme zamani), bu yuzden ifade
-        // `5 * 1024 * 1024` olarak yazildi; ikisinin ayrisMAdigi `GuvenlikFix6SozlesmeTests`
-        // ile PINLI. Bu kapi govdeyi HIC OKUMADAN reddeder; yukaridaki `file.Length`
-        // kontrolu ise multipart icindeki TEK dosyanin boyutunu sorar (ikisi FARKLI sey).
+        // ile AYNI degerdir. Oznitelik DERLEME ZAMANI sabiti ister, bu yuzden merkezi
+        // sabitten OKUYAMAZ ve deger elle esitlenmistir; ikisinin AYRISMADIGI
+        // `GuvenlikFix6SozlesmeTests.K7_ISTEK_TAVANI_ile_SABIT_AYRISMIYOR` ile pinli.
+        // Bu kapi govdeyi HIC OKUMADAN reddeder; yukaridaki `file.Length` kontrolu ise
+        // multipart icindeki TEK dosyanin boyutunu sorar (ikisi FARKLI sey).
         [RequestSizeLimit(5 * 1024 * 1024)]
         [SwaggerOperation(Summary = "Toplu ürün içe-aktar (CSV)", Description = "CSV dosyasından çok sayıda ürünü tek seferde ekler. Admin yetkisi gerekir.")]
         [ProducesResponseType(typeof(SuccessDataResult<object>), (int)HttpStatusCode.OK)]

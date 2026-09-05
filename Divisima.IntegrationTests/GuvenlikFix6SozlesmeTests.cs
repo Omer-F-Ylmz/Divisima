@@ -674,6 +674,23 @@ namespace Divisima.IntegrationTests
                 .Should().Be("payment", "kova adi TEK KAYNAKTAN okunur");
         }
 
+        // ── K7 (D7) - OZNITELIK TAVANI ILE SABIT AYRISMASIN ────────────────────────────────
+        //
+        // `[RequestSizeLimit]` DERLEME ZAMANI sabiti ister, yani `GirdiSinirlari`den
+        // OKUYAMAZ - iki deger elle esitlenmis durumda. Bu pin, birinin degisip digerinin
+        // KALMASINI yakalar. (Ilk yazimda kod yorumu "bu pin var" DIYORDU ama pin YOKTU -
+        // YORUM != OLCUM ailesi; yorum ancak pin YAZILINCA dogru oldu.)
+        [Fact]
+        public void K7_ISTEK_TAVANI_ile_SABIT_AYRISMIYOR()
+        {
+            var controller = KodSatirlari(Oku("Divisima.API/Controllers/ProductController.cs"));
+
+            Sayim(controller, "[RequestSizeLimit(5 * 1024 * 1024)]").Should().Be(1,
+                "istek govdesi tavani oznitelikte SABIT olarak durur");
+            GirdiSinirlari.CsvDosyaEnBuyukBayt.Should().Be(5L * 1024L * 1024L,
+                "oznitelikteki deger ile merkezi sabit AYNI olmali - biri degisirse bu pin kirilir");
+        }
+
         // ── K1 (D1) - KURAL TEK KAYNAKTA: IKINCI KOPYA ACILMADI ────────────────────────────
         //
         // "Ayni kuralin ikinci kopyasi" bu depoda YEDI kez bedeli odenmis bir ailedir. Bu pin
