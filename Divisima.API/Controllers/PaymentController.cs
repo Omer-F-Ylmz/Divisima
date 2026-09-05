@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Asp.Versioning;
 using Divisima.Bussiness.Abstract;
 using Divisima.Core.Security.Authorization;
+using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Enums;
 using Divisima.Entity.Dtos.Payment;
 using Microsoft.AspNetCore.Authorization;
@@ -93,7 +94,20 @@ namespace Divisima.API.Controllers
             if (string.IsNullOrWhiteSpace(storefront))
                 return StatusCode((int)r.Item1, r.Item2);   // yapilandirma yok - eski davranis
 
-            var status = r.Item1 == HttpStatusCode.OK ? "success" : "failed";
+            // ══ GF-6 / F2 (S-1) - UCUNCU DURUM `review` ═══════════════════════════════════
+            //
+            // OLCULEN ONCE-DURUM: bu satir YALNIZ iki durum uretiyordu ve "para alindi ama
+            // siparis IPTALDI" dali 200 dondugu icin `success` oluyordu - musteri iptal kalan
+            // siparis icin "odeme basarili" ekrani goruyordu (L3 denetcisi olctu).
+            //
+            // AYIRT ETME MESAJ KIMLIGIYLE: `HandleCallback` ucuncu durumu 200 + AYRI bir mesaj
+            // sabitiyle bildirir (gerekce Messages.PaymentReceivedOrderCancelled'in yaninda).
+            // Karsilastirma ORDINAL - mesaj bir KIMLIK dizgesi olarak kullaniliyor, kulturlu
+            // casing YASAK (CLAUDE.md 6c). Bu bag PINLI: sabit degisirse pin kirmizi verir.
+            var iptalliOdeme = string.Equals(r.Item2?.Message,
+                Messages.PaymentReceivedOrderCancelled, StringComparison.Ordinal);
+            var status = iptalliOdeme ? "review"
+                : (r.Item1 == HttpStatusCode.OK ? "success" : "failed");
             var url = $"{storefront}/index.html#/odeme/sonuc?order={orderId}&status={status}";
             return Redirect(url);
         }

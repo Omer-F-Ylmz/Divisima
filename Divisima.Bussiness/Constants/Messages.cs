@@ -32,6 +32,12 @@ namespace Divisima.Core.Utilities.Constants
         // Tek bir satir bile reddedilirse HICBIR urun yazilmaz (tek transaction) - kismi
         // ice aktarim ARTIK OLUSAMAZ. Sebepler yanittaki `errors` listesinde doner.
         public static string ImportRejectedRows = "Ice-aktarim iptal edildi: hatali satirlar var, hicbir urun eklenmedi.";
+        // ══ GF-6 / F2 (S-1) - UCUNCU DURUM: PARA ALINDI, SIPARIS IPTALDI ══════════════════
+        // Ne "basarili" ne "basarisiz". Gerekce IyzicoPaymentManager'in terminal donusunde.
+        // `PaymentController` bu mesaji TANIYARAK `status=review` yonlendirmesi yapar - yani
+        // metin bir SOZLESMEDIR; degistirilirse controller kosulu da degismelidir (PINLI).
+        public static string PaymentReceivedOrderCancelled =
+            "Ödemeniz alındı ancak sipariş iptal edilmişti; iade işlemi başlatılacaktır.";
         public static string ProductAdded = "Ürün başarıyla eklendi.";
         public static string ProductUpdated = "Ürün başarıyla güncellendi.";
         public static string ProductDeleted = "Ürün başarıyla silindi.";

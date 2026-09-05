@@ -526,6 +526,25 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
             // ama artik SESSIZ degiller: her adim ayri ayri sarilir, patlayan adim ADIYLA loglanir
             // ve siparis zaman cizelgesine operatorun gorecegi bir not dusulur. Onceden bunlar
             // ciplak "catch { }" idi: puan/referans/kupon sayaci sessizce dusuyordu.
+            // ══ GF-6 / F2 (S-1) - PARA ALINDI AMA SIPARIS IPTALDI: UCUNCU DURUM ═══════════════
+            //
+            // OLCULEN ONCE-DURUM (L3 denetcisi buldu, ana akis kendi komutuyla dogruladi): bu
+            // kontrol asagidaki `if (odemeGecerli)` blogunun ALTINDA duruyordu, dolayisiyla
+            // `terminalAtlandi` bayragi BASARILI dalda hicbir yaniti degistirmiyordu. Musteri,
+            // IPTAL KALAN bir siparis icin "Odeme basarili, siparisiniz onaylandi." mesajini ve
+            // `status=success` sonuc ekranini goruyordu. Bu tutarsizlik GF-6'nin ACTIGI bir
+            // yuzeydi: K5 oncesinde siparis `Confirmed`a DIRILIYORDU, yani 200 "tutarli"ydi.
+            //
+            // UCUNCU DURUM SECILDI (merkez karari, secenek a): ne "basarili" ne "basarisiz".
+            // ODEME GERCEKTEN ALINDI - 400 donmek musteriye "paran cekilmedi" dedirtirdi ve
+            // iade talebini geciktirirdi. Yanit 200 KALIR, MESAJ ayrisir; `PaymentController`
+            // bu mesaji taniyip `status=review` ile yonlendirir (`success` DEGIL).
+            //
+            // SIRA KRITIK: bu kontrol `odemeGecerli` blogunun USTUNDE durmali - altinda
+            // duran hali, duzeltilen kusurun ta kendisiydi.
+            if (terminalAtlandi && odemeGecerli)
+                return (HttpStatusCode.OK, new SuccessResult(Messages.PaymentReceivedOrderCancelled));
+
             if (odemeGecerli)
             {
                 // SPRINT 8 MADDE 3: DORT YAN ETKI BURADAN KALKTI.
