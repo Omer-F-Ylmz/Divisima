@@ -2463,6 +2463,13 @@
   function odemeSonucBaslikAnahtari(status) {
     return status === "cod" ? "pay_cod_title" : (odemeBasariliMi(status) ? "pay_ok_title" : "pay_fail_title");
   }
+  // GF-6 / F2 (S-1): UCUNCU DURUM - para alindi, siparis IPTALDI. Olculdu: bilinmeyen bir
+  // status "basarisiz" gibi gorunuyordu ("Odeme Tamamlanamadi"), oysa para CEKILDI.
+  // Metin SABIT TR - sozluk DOKUNULMADI (i18n kaydi VITRIN-KALAN'a). Baslik IKI YUZEYDE de
+  // ayni kaynaktan gelir (ekran + sekme) - MFIX-3'un ayrisma tuzagi yeniden ACILMASIN.
+  function odemeIncelemedeMi(status) { return status === "review"; }
+  var ODEME_INCELEME_BASLIK = "Ödemeniz alındı";
+  var ODEME_INCELEME_ALT = "Ödemeniz alındı ancak sipariş iptal edilmişti; iade işlemi başlatılacaktır.";
 
   async function renderPaymentResult(params) {
     var view = document.getElementById("checkoutView");
@@ -2490,10 +2497,10 @@
     var order = null;
     if (orderId) { try { order = unwrap(await api.orders.get(orderId)); } catch (e) { order = null; } }
 
-    var baslik = ceviri(odemeSonucBaslikAnahtari(status));
-    var alt = status === "cod"
+    var baslik = odemeIncelemedeMi(status) ? ODEME_INCELEME_BASLIK : ceviri(odemeSonucBaslikAnahtari(status));
+    var alt = odemeIncelemedeMi(status) ? ODEME_INCELEME_ALT : (status === "cod"
       ? ceviri("pay_cod_sub")
-      : ceviri(ok ? "pay_ok_sub" : "pay_fail_sub");
+      : ceviri(ok ? "pay_ok_sub" : "pay_fail_sub"));
 
     var ozet = "";
     if (order) {
@@ -3707,7 +3714,8 @@
           // Eskiden burada `indexOf("status=success")` vardi ve kapida odeme BASARISIZ sayiliyordu.
           var sm = location.hash.match(/[?&]status=([^&]*)/);
           var durum = sm ? decodeURIComponent(sm[1]) : "";
-          document.title = ceviri(odemeSonucBaslikAnahtari(durum)) + " · Divisima";
+          document.title = (odemeIncelemedeMi(durum)
+            ? ODEME_INCELEME_BASLIK : ceviri(odemeSonucBaslikAnahtari(durum))) + " · Divisima";
         }
       };
       // MFIX-3 / DEVIR-3: DOGRUDAN ACILIS YARISI. Sayfa dogrudan #/odeme/sonuc ile
