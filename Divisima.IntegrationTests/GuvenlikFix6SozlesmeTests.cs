@@ -198,8 +198,15 @@ namespace Divisima.IntegrationTests
                     .SingleAsync(o => o.customer_id == a.musteriId)).order_number;
 
             // B, A'nin request_id'sini gonderir.
+            //
+            // ══ SEPET BILINCLI OLARAK AYNI - MK-6 ILE OLCULDU ═══════════════════════════════
+            // ILK YAZIMDA B KENDI URUNUNU gonderiyordu ve pin, sahiplik yuklemi TAMAMEN
+            // KALDIRILDIGINDA BILE YESIL kaldi (MUT-1: `SahipMiAsync` -> `return true`,
+            // 0 kirmizi): reddi ureten sey sahiplik DEGIL, SEPET FARKIYDI - yani assert
+            // BEDAVA DOGRUYDU. B artik A'NIN URUNUNU, AYNI adet ve AYNI kuponla gonderiyor;
+            // geriye ayirt edici TEK olcut olarak MUSTERI KIMLIGI kaliyor.
             var bSonuc = await WithScopeAsync(sp => sp.GetRequiredService<IOrderService>()
-                .PlaceOrder(Istek(b.musteriId, b.adresId, b.urunId, rid)));
+                .PlaceOrder(Istek(b.musteriId, b.adresId, a.urunId, rid)));
 
             bSonuc.Item1.Should().Be(HttpStatusCode.BadRequest,
                 "baskasinin request_id'si SIZINTISIZ 400 almali - 200 + order_number DEGIL");
