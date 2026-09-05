@@ -110,7 +110,38 @@ namespace Divisima.IntegrationTests
         }
 
         [Fact]
-        public void F2_K4_request_id_UZUNLUK_SINIRI_KOLONLA_AYNI()
+        public void F2_K4_request_id_SINIRI_KOLON_GENISLIGIYLE_AYNI_OLMALI()
+        {
+            // ══ MK-6 TURUNDA YAKALANDI - PIN KENDINI KAYDIRIYORDU ═════════════════════════
+            // Asagidaki davranis pini sinirlari `GirdiSinirlari.RequestIdEnUzun`den TURETIYOR.
+            // Bu, KURALI olcer ama DEGERI OLCMEZ: sabit 80 -> 81 yapildiginda pin sinirla
+            // birlikte KAYDI ve mutasyon HIC YAKALANMADI (MUT-F2b, 0 kirmizi).
+            // Deger artik SEMAYA capalanmis durumda - K1'in IP icin yaptiginin aynisi.
+            var ctx = Oku("Divisima.Dal/Concrete/Context/DivisimaDbContext.cs");
+            var m = Regex.Match(ctx,
+                @"o\.request_id\)\.HasColumnName\(""request_id""\)\.HasMaxLength\((\d+)\)");
+            m.Success.Should().BeTrue("`orders.request_id` eslemesi DbContext'te bulunmali");
+
+            GirdiSinirlari.RequestIdEnUzun.Should().Be(int.Parse(m.Groups[1].Value),
+                "kapi siniri kolon genisligiyle AYNI olmali - DAR olsaydi gecerli bir id "
+                + "reddedilirdi, GENIS olsaydi EF insert-time 500 uretirdi");
+        }
+
+        [Fact]
+        public void F2_F4_eposta_SINIRI_KOLON_GENISLIGIYLE_AYNI_OLMALI()
+        {
+            // Ayni gerekce (MK-6/MUT-F2b dersi): deger semaya capalanir, sabite DEGIL.
+            var ctx = Oku("Divisima.Dal/Concrete/Context/DivisimaDbContext.cs");
+            var m = Regex.Match(ctx,
+                @"c\.email\)\.HasColumnName\(""email""\)\.IsRequired\(\)\.HasMaxLength\((\d+)\)");
+            m.Success.Should().BeTrue("`customers.email` eslemesi DbContext'te bulunmali");
+
+            GirdiSinirlari.EPosta.Should().Be(int.Parse(m.Groups[1].Value),
+                "e-posta siniri kolon genisligiyle AYNI olmali (C-2: 201+ karakter HTTP 500 uretiyordu)");
+        }
+
+        [Fact]
+        public void F2_K4_request_id_UZUNLUK_KAPISI_SINIRDA_AYIRT_EDER()
         {
             var dto = GecerliMisafir();
 
