@@ -781,7 +781,7 @@ yalniz somut gerekceyle bakilir.
 - `39·MANTIK-FIX-3·MERKEZ KARARLARI N2` | **N2** | Hata eslemesi once MAKINE-OKUNUR sinyal; yoksa HAM yanit capasi + cift bicim + kirilganlik kaydi | K3 ve K3b'nin ikisi de bu capaya dayaniyor - sunucu yanit sozlesmesi DEGISTIRILMEDI, istemcide politika kopyasi ACILMADI |
 - `36·MANTIK-AV-1·DALGA BOLUMLEMESI` i18n. **64 bozuk `invoice_items` satiri D-YAN'a** (veri temizligi, fix degil).
 - `37·MANTIK-FIX-1·MF-2 ONCESI ARA DURUM` **InvoiceManager KODUNA DOKUNULMADI (sart aynen korundu).**
-- `37·MF-1·MF-3 SARTLARI` **(a)-(d):** 409 semantigi YENIDEN ACILMAZ · **IKINCI kupon dogrulama noktasi ACILMAZ** ("ayni kuralin ikinci kopyasi" - 7 kez bedeli odendi) · musteri+adres yazimi `PlaceOrder` BASARISINA bagli. Tam blok -> 37, bayt-aynen `54·ARSIV-4` 2.6.
+- `37·MF-1·MF-3 SARTLARI` **(a)-(c):** 409 semantigi YENIDEN ACILMAZ · **IKINCI kupon dogrulama noktasi ACILMAZ** ("ayni kuralin ikinci kopyasi" - 7 kez bedeli odendi) · musteri+adres yazimi `PlaceOrder` BASARISINA bagli. Tam blok -> 37, bayt-aynen `54·ARSIV-4` 2.6.
 **GF-1..GF-2b kararlari OZ; tam metin muhur 44-48, kesilen 29 satir bayt-aynen 49'da.**
 
 - `44·GF-1·K1` request_id replay'i misafir 409'undan MUAF; e-posta ordinal eslesirse 200, eslesmezse sizintisiz 400. -> 44
@@ -934,6 +934,7 @@ birlikte etkiler).
 Hata kodu birlestirme (TR serbest metin capasi kirilgan) · **K7 mesaj/NotEmpty ayrismasi**
 (VITRIN-KALAN 3); cozum ORTAK SABIT REFERANSI — **ortak RuleBuilder ACILMAZ** (`52·GF-5`
 BAGLAYICI).
-**`ExecuteDeleteAsync` <-> transaction ROLLBACK KAPANDI** (`51·AV-2` S-B: ambient
-transaction'a KATILIR, rollback geri alir).
+**`ExecuteDeleteAsync` <-> transaction ROLLBACK OLCULMEDI.** AV-2'nin S-B ajani olctugunu
+SOHBET RAPORUNDA beyan etti, muhur 51'e TASINMADI - **KANIT KAYBI** (merkez hatasi);
+GF-6 kapisinda **5 dk izole EF probuyla YENIDEN OLCULUR**.
 **K4 TELAFISININ ATOMIKLESTIRILMESI GF-5/K4'te KAPANDI** (tek transaction).

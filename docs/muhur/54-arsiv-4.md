@@ -780,3 +780,94 @@ kaynak: 36·MANTIK-AV-1_MUHRU · DALGA BOLUMLEMESI (64 fatura satiri, tam cumle)
 
 **MANTIK-FIX-2 `[FATURA]`** - kargo AYRI KALEM · KDV `invoices.tax_rate`'ten · fatura ekrani
 i18n. **64 bozuk `invoice_items` satiri D-YAN'a** (veri temizligi, fix degil).
+
+---
+
+## 6. SON DUZELTME TURU — KANIT KAYBI · MERKEZ/CC HATALARI · GUNCEL OLCUMLER
+
+**NUMARA NOTU:** merkez tarifi "54'e §16 kaydi" dedi; `54`'te **§16 YOKTUR** (bolumler
+1 · 2 · 3 · 5 - "## 4." hic acilmadi, denetcinin N-4 bulgusu). Numara `53`'un
+**§16 KAPANIS KAPILARI** konvansiyonundan tasinmis gorunuyor. Kayit BURAYA, **§6**'ya
+alindi; sapma raporlandi, `53` DEGISTIRILMEDI (MK-11/d).
+
+### 6.1 N-1 — KANIT KAYBI (merkez hatasi) · satir OLCULMEDI'ye GERI ALINDI
+
+Duzeltme turunda B9/ACIK GIRDILER'e su yazilmisti:
+`ExecuteDeleteAsync <-> transaction ROLLBACK KAPANDI (51·AV-2 S-B: ambient transaction'a
+KATILIR, rollback geri alir)`. **ATIF DAYANAKSIZDI** - denetci olctu, ana akis BAGIMSIZ
+dogruladi:
+
+```
+docs/muhur/51-guvenlik-av-2.md icinde:
+  ExecuteDeleteAsync 0 · DeleteWhere 0 · rollback 0 · transaction 0 · ambient 0
+  POZ kontrol "AV-2" 7 (dosya gercekten okunuyor) · NEG "ZZZyok" 0
+51'deki S-B BASKA SEYDIR: TOCTOU/CAS personasi (51:238 ExecuteUpdateAsync envanteri,
+  51:283-285 Y-4 celiskisi "sayac sifirlaniyor / sifirlama geri aliniyor")
+```
+
+**KOK SEBEP (merkez kaydi):** AV-2'nin **S-B ajani** bu kalemi olctugunu **SOHBET
+RAPORUNDA** beyan etti; olcum **MUHUR 51'E TASINMADI**. Yani kayip ANA AKISIN uydurmasi
+DEGIL, **defter disi kalmis bir olcumun** ikinci elden aktarilmasidir - ama atif deftere
+yazilmadan **DOGRULANMALIYDI**; dogrulamamak ana akisin kusurudur.
+
+**AYRICA YON DE TERS:** uretim kodunun kendi yorumu (`GuestCheckoutManager`, K4 telafisi)
+`"Ortamda acik transaction YOKTUR (rollback onu dispose edip null'ladi), dolayisiyla silme
+ANINDA kalicidir"` ve `"Her biri kendi ExecuteDeleteAsync'ini (yani kendi ortuk
+transaction'ini) acar"` diyor. **YORUM != OLCUM** - kanit sayilmaz, ama elde bulunan tek
+metinsel isaret yazilanin TERSINI gosteriyor.
+
+**KARAR:** satir **OLCULMEDI**'ye geri alindi; kalem GF-6/GF-7 kuyrugunda KALIR.
+**GF-6 KAPISINDA 5 dk IZOLE EF PROBUYLA YENIDEN OLCULUR** (ambient transaction'a katilim
++ rollback geri alma davranisi; ayri test DB, uretim kodu DOKUNULMAZ).
+
+**AILE:** `bayat atif / YORUM != OLCUM` - bu turdaki IKINCI vaka. Onceki tur B4 "beyansiz
+ama DOGRU" idi; bu "beyan edilmis ama DAYANAKSIZ". **KALICI DERS: bir kapanis atfi
+deftere yazilmadan ONCE atfin gosterdigi muhurde ARANIR (POZ/NEG kontrollu); bulunamazsa
+kalem KAPANMAZ.**
+
+### 6.2 N-2 — EK-1 oz satiri etiketi
+
+`(a)-(d)` -> **`(a)-(c)`**. Eksik (d) - "K3'un bu dali ulasilabilir kildigi gercegi MF-3
+tarifinin GEREKCESINE girer" - bolum **2.6**'daki bayt-ayni blokta yasiyor; oz satirda
+YOK. Etiket artik tasidigi sart sayisiyla ORTUSUYOR.
+
+### 6.3 N-3 — GUNCEL BOYUT (bolum 5'in kaydi bayattir, bu satir gecerlidir)
+
+```
+1d67cf6 (ARSIV-4 oncesi zemin) : 78.925 B
+77df254 (kesim)                : 59.990 B   (kesim 18.935 · %23,99)
+5f34b8e (duzeltme)             : 59.875 B
+BU COMMIT (son duzeltme)       : 59.982 B   (hedef <=60.000 TUTTU, pay 18)
+KUMULATIF kesim 1d67cf6 -> HEAD: 18.943 B   (%23,99)
+Butce 81.920 DEGISMEDI; kalan 21.938 B.
+```
+
+### 6.4 N-6 — BAYT MUHASEBESI (denetcinin, blob deltasiyla BIREBIR)
+
+Denetci `5f34b8e` icin hunk bazli muhasebe kurdu (`LC_ALL=C`; UTF-8 locale'de `gawk`
+KARAKTER sayip -111 veriyordu, LC_ALL=C ile -115'e oturdu):
+
+```
++715,3  B7 provenans (B1)                EKL 118  SIL   0  NET +118
++749,2  D-YAN capasi                     EKL 156  SIL  99  NET  +57
++784    EK-1 oz satiri (37·MF-1)         EKL 272  SIL   0  NET +272
++817    52·GF-5 ozu (B2 yasagi + B3)     EKL 967  SIL 817  NET +150
+-829,19 EK KESIM (C3 fragman kuyrugu)    EKL   0  SIL 898  NET -898
++898,2  frame-src capasi                 EKL 154  SIL 132  NET  +22
++934,5  ACIK GIRDILER (B2b + EK KAPANIS) EKL 323  SIL 159  NET +164
+TOPLAM EKLENEN 1.990 / SILINEN 2.105 / NET -115 == blob deltasi
+```
+
+Ana akisin raporladigi **"+310 B"** rakami YENIDEN URETILEMEDI ve **GERI CEKILIR**;
+gecerli muhasebe yukaridakidir.
+
+### 6.5 KOR NOKTA — DENETCI SCRATCHPAD'I ANA AKISINKININ ALTINDAYDI
+
+Denetci kendi kor noktasi olarak yazdi ve ana akis dogruladi: ana akisin ara dosyalari
+(`claude-yeni.md`, `env-*.txt`, `n557.txt`, `kesik.txt` ...) denetcinin dizininin **BIR UST**
+dizinindeydi. Denetci **acmadigini BEYAN etti** (birincil kanit MK-4a beyanidir), ama
+**teknik izolasyon worktree duzeyinde VAR, scratchpad duzeyinde YOKTU**.
+
+**KARAR (merkez):** MK-4b'ye "denetci scratchpad'i ana akis scratchpad'inin ALTINDA
+DEGIL, **AYRI KOK**" sarti eklenir; **GF-6 TARIFINDE UYGULANIR**. CLAUDE.md'ye bu turda
+satir EKLENMEDI (pay 18 B) - kayit BURADA, tasima GF-6'nin muhrunde.
