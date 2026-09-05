@@ -24,7 +24,7 @@ namespace Divisima.Bussiness.Concrete
         //
         // NEDEN BURADA, CAGRI YERLERINDE DEGIL (merkez karari, GF-5 / D8): degerleri yedi cagri
         // yerine tasimak (a) `LogAsync` imzasini ya da cagri bicimlerini degistirir, (b) `AccountManager`a
-        // `IHttpContextAccessor` enjekte etmeyi gerektirirdi - oysa `SecureControllerBase.cs:22-27`
+        // `IHttpContextAccessor` enjekte etmeyi gerektirirdi - oysa `SecureControllerBase.cs`
         // "is katmani HTTP baglamini GORMEZ (bilincli sinir)" diyor ve o sinir bugune kadar
         // YALNIZ BIR KEZ, gerekcesi yazilarak delinmisti (AuthManager, GF-1b/K6). Ikinci bir
         // istisna acmak yerine okuma TEK NOKTAYA - olayin YAZILDIGI yere - alindi.
@@ -43,6 +43,25 @@ namespace Divisima.Bussiness.Concrete
             _httpContextAccessor = httpContextAccessor;
         }
 
+        // ══ GF-5 / F1 (BULGU-L3-1) - detail KOLON GENISLIGINE KIRPILIR ════════════════════
+        //
+        // OLCULEN ACIK: 429 dalinin yazdigi `detail`, istegin YOLUNU tasiyor ve yol KULLANICI
+        // KONTROLLUDUR. `KanitMaskesi.SatirGuvenli` kontrol karakterlerini katlar ama KIRPMAZ.
+        // Kolon 1000 karakter; daha uzun bir yol EF insert-time hatasi uretirdi. Yazma
+        // try/catch icinde oldugu icin musterinin gordugu 429 BOZULMAZDI - ama saldirgan
+        // yolunu uzatarak KENDI IZINI SESSIZCE DUSUREBILIRDI: A09 gorunurlugu tam da kaba
+        // kuvvet aninda kaybolurdu.
+        //
+        // NEDEN BURADA, CAGRI YERINDE DEGIL: bu, K1'in IP icin kurdugu kalibin AYNISIDIR -
+        // deger DB'ye giren TEK NOKTADA kolon genisligine indirilir. Cagri yerlerine
+        // birakilsaydi her yeni olay tipi bu kurali YENIDEN kesfetmek zorunda kalirdi;
+        // bugun yazan on iki cagri yeri var ve sayilari artiyor.
+        //
+        // AILE KAYDI: bu, dalganin kapattigi sinirlarin (ip 60 · guest_name 100 ·
+        // request_id 80) DORDUNCUSUDUR. Ilk uc kapatilirken `detail` GOZDEN KACTI ve
+        // MK-4b/L3 denetcisi yakaladi.
+        public const int DetayEnUzun = 1000;   // security_events.detail (sys.columns'tan olculdu)
+
         public async Task LogAsync(string eventType, string severity, int? customerId, string? ip, string? userAgent, string? detail)
         {
             // CAGIRAN DEGER VERDIYSE O KAZANIR: bugun yedi cagri yerinin yedisi de null geciyor,
@@ -51,6 +70,7 @@ namespace Divisima.Bussiness.Concrete
             // YALNIZCA bosluk doldurur, hicbir zaman UZERINE YAZMAZ.
             var izIp = ip ?? IstemciBilgisi.Ip(_httpContextAccessor);
             var izCihaz = userAgent ?? IstemciBilgisi.UserAgent(_httpContextAccessor);
+            var izDetay = detail is { Length: > DetayEnUzun } ? detail.Substring(0, DetayEnUzun) : detail;
 
             await _dal.AddAsync(new SecurityEvent
             {
@@ -59,28 +79,31 @@ namespace Divisima.Bussiness.Concrete
                 customer_id = customerId,
                 ip_address = izIp,
                 user_agent = izCihaz,
-                detail = detail,
+                detail = izDetay,
                 created_at = DateTime.Now
             });
             // Açıklayıcı yorum: Structured log (Serilog -> SIEM'e akıtılabilir)
+            // F1: log ve admin bildirimi de KIRPILMIS degeri kullanir - DB'ye giren neyse
+            // defterin diger iki kanalinda da O gorunur; aksi halde ayni olay uc kanalda
+            // UC FARKLI uzunlukta anlatilirdi.
             _logger.LogWarning("SECURITY {EventType} {Severity} customer={CustomerId} ip={Ip} {Detail}",
-                eventType, severity, customerId, izIp, detail);
+                eventType, severity, customerId, izIp, izDetay);
             // Açıklayıcı yorum: Kritik olayda admin'e anlık bildirim
             if (severity == "Critical")
-                await _notification.NotifyAdminsAsync($"[GÜVENLİK] {eventType}: {detail} (IP: {izIp})");
+                await _notification.NotifyAdminsAsync($"[GÜVENLİK] {eventType}: {izDetay} (IP: {izIp})");
         }
 
         // GF-5 / K2 (D4): sahiplik ihlali izi. Gerekce ve kapsam siniri ISecurityEventService'te.
         //
-        // OLAY TIPI `IdorAttempt` SECILDI, YENI AD UYDURULMADI: bu ad `ops/serilog-siem.md:31`de
-        // ve `SecurityEvent.cs:10` yorumunda ZATEN yaziliydi ama kodda HICBIR YERDE URETILMIYORDU
+        // OLAY TIPI `IdorAttempt` SECILDI, YENI AD UYDURULMADI: bu ad `ops/serilog-siem.md`de
+        // ve `SecurityEvent.cs` yorumunda ZATEN yaziliydi ama kodda HICBIR YERDE URETILMIYORDU
         // (AV-2 olcumu; "belgede VAR, kodda YOK" bes tipten biri). Boylece K8'in belge duzeltmesi
         // bu tipi SILMEK yerine DOGRULAMAK zorunda kalir - belge ile kod ayni yone cekilir.
         //
         // SEVERITY "Warning", "Critical" DEGIL - BILINCLI: tetikleyicinin ON KOSULU KIMLIKLI
         // oturumdur (SDP 1.12.2). Critical isaretlemek her denemede admin bildirimi atesler
-        // (`:39-40`) ve bugun o kanal BOS GRUBA yayin yapiyor - yani gurultu uretir, okuyucu
-        // uretmez. Ayrica `DataRetentionJob.cs:33` Critical satirlari SONSUZA KADAR tutuyor.
+        // (bu sinifin Critical dali) ve bugun o kanal BOS GRUBA yayin yapiyor - yani gurultu uretir, okuyucu
+        // uretmez. Ayrica `DataRetentionJob.cs` Critical satirlari SONSUZA KADAR tutuyor.
         public Task SahiplikIhlaliAsync(string kaynak, int kaynakId, int? istekSahibi) =>
             LogAsync("IdorAttempt", "Warning", istekSahibi, null, null, $"{kaynak}:{kaynakId}");
     }

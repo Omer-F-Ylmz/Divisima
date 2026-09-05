@@ -16,7 +16,7 @@ Bu belge tehdit modelini, uygulanan tüm güvenlik katmanlarını ve operasyonel
 | Refresh token | httpOnly + Secure + SameSite=Strict cookie (JS erişemez → XSS'te çalınamaz), rotation |
 | Hesap kilitleme | 5 başarısız denemede 15 dk kilit (brute-force) |
 | Şifre sıfırlama | Tek kullanımlık token (30 dk), enumeration-safe, sıfırlamada tüm oturum iptali |
-| 2FA/MFA | E-POSTA OTP: 6 hane, SHA-256 hash'li saklanır, 5 dk, tek kullanımlık, sabit-zamanlı karşılaştırma (`AuthManager.cs:349-364`, `:373-400`). `TotpService` (RFC 6238) sınıf olarak vardır ve DI'ya kayıtlıdır (`Program.cs:294`) ama üretim akışında hiç çağrılmaz (ölçüldü: tüketici 0) — Google Authenticator akışı bugün YOKTUR. |
+| 2FA/MFA | E-POSTA OTP: 6 hane, SHA-256 hash'li saklanır, 5 dk, tek kullanımlık, sabit-zamanlı karşılaştırma (`AuthManager.VerifyTwoFactor`). `TotpService` (RFC 6238) sınıf olarak vardır ve DI'ya kayıtlıdır (`Program.cs`) ama üretim akışında hiç çağrılmaz (ölçüldü: tüketici 0) — Google Authenticator akışı bugün YOKTUR. |
 | Bot koruması | `ICaptchaValidator` (Cloudflare Turnstile) — register/forgot/riskli login |
 
 ## 2. Yetkilendirme (IDOR)
@@ -36,7 +36,7 @@ Bu belge tehdit modelini, uygulanan tüm güvenlik katmanlarını ve operasyonel
 | PCI-DSS | Kart bilgisi sunucuya HİÇ gelmez (Iyzico Checkout Form iframe) |
 | IDOR | Kullanıcı yalnızca kendi siparişini öder (JWT) |
 | Sipariş durumu | Sadece Pending + ödenmemiş + tutar>0 siparişe ödeme |
-| Replay | Idempotency (yalnız Pending işlenir) + token 30 dk zaman aşımı. 30 dk sınırı **ProviderWebhook kanalında BİLİNÇLİ OLARAK UYGULANMAZ** (`IyzicoPaymentManager.cs:199`, `:270`); gerekçe `PaymentNotificationChannelEnum.cs:38-46` — gecikmiş ama gerçek bir bildirim, parası alınmış ödemeyi "Failed" diye defterliyordu (sipariş #33). |
+| Replay | Idempotency (yalnız Pending işlenir) + token 30 dk zaman aşımı. 30 dk sınırı **ProviderWebhook kanalında BİLİNÇLİ OLARAK UYGULANMAZ** (`IyzicoPaymentManager.HandleCallback`); gerekçe `PaymentNotificationChannelEnum.cs` — gecikmiş ama gerçek bir bildirim, parası alınmış ödemeyi "Failed" diye defterliyordu (sipariş #33). |
 | Race condition | Distributed lock (`IDistributedLock` — Redis RedLock) + kilit sonrası double-check |
 | Yedek teyit | Webhook (bant-dışı, idempotent) |
 
@@ -53,14 +53,14 @@ Bu belge tehdit modelini, uygulanan tüm güvenlik katmanlarını ve operasyonel
 - **Secrets:** `ISecretProvider` (config/env → Azure Key Vault/AWS Secrets Manager iskeleti). Kod dokunulmadan kasaya geçiş.
 
 ## 6. Altyapı & DoS
-- **Rate limiting:** Global 100/dk + auth 10/dk + payment 10/dk + **hassas 20/dk** (IP başına, endpoint-bazlı) — tek kaynak `RateLimitPolitikasi.Olustur` (`RateLimitPolitikasi.cs:70-79`), `RateLimit:*PermitLimit` ile ezilebilir. Redis yolundaki eski auth 5/dk **BİLİNÇLİ OLARAK TERK EDİLDİ** (`RateLimitPolitikasi.cs:62-64`). 429 reddi artık güvenlik olayı yazar (60 sn örneklemeyle, kova+IP başına).
+- **Rate limiting:** Global 100/dk + auth 10/dk + payment 10/dk + **hassas 20/dk** (IP başına, endpoint-bazlı) — tek kaynak `RateLimitPolitikasi.Olustur` (`RateLimitPolitikasi.cs`), `RateLimit:*PermitLimit` ile ezilebilir. Redis yolundaki eski auth 5/dk **BİLİNÇLİ OLARAK TERK EDİLDİ** (`RateLimitPolitikasi.cs`). 429 reddi artık güvenlik olayı yazar (60 sn örneklemeyle, kova+IP başına).
 - **Request limiti:** Kestrel body 1 MB + header 32 KB (dev payload DoS).
-- **Transport:** HTTPS redirect (`app.UseHttpsRedirection()`) + güvenli cookie. **HSTS uygulama katmanında DEĞİL, TEK KAYNAK nginx'tedir** (`ops/infra/nginx.conf:26`); `app.UseHsts()` GF-3/K6 ile kaldırıldı çünkü iki farklı STS başlığı üretiliyordu (ölçüldü: depoda `app.UseHsts()` 0 geçiş).
+- **Transport:** HTTPS redirect (`app.UseHttpsRedirection()`) + güvenli cookie. **HSTS uygulama katmanında DEĞİL, TEK KAYNAK nginx'tedir** (`ops/infra/nginx.conf`); `app.UseHsts()` GF-3/K6 ile kaldırıldı çünkü iki farklı STS başlığı üretiliyordu (ölçüldü: depoda `app.UseHsts()` 0 geçiş).
 - **Güvenlik başlıkları:** X-Frame-Options (clickjacking), X-Content-Type-Options (MIME), CSP, Referrer-Policy, Permissions-Policy, Server gizleme.
 
 ## 7. İzleme & Müdahale
 - **Güvenlik olay logu:** `SecurityEvent` — bugün üretilen tipler: `LoginFailed` (kayıtlı **ve** kayıtsız e-posta; ikisi `customer_id`nin dolu/null olmasıyla ayrılır), `AccountLocked`, `ChangePasswordFailed`, `AccountDeleted`, `TwoFactorChallenge`, `TwoFactorFailed`, `RefreshTokenReuse`, `ResetPassword`, `Logout`, `IdorAttempt` (sahiplik ihlali — **kapsam Order + Payment**, kalan yedi manager BİLİNEN), `RateLimitExceeded`, `PaymentSignatureInvalid`. `ip_address` ve `user_agent` GF-5/K1 ile `SecurityEventManager` içinde doldurulur (önceden 7 çağrının 7'sinde de null geçiliyordu). Akış Serilog Console + File sink'lerine gider — **SIEM bağlı DEĞİLDİR** (`ops/serilog-siem.md`).
-- **Anormallik/alerting:** `severity == "Critical"` olaylarda `NotifyAdminsAsync` çağrılır (`SecurityEventManager.cs:39-40`) ve SignalR `"admins"` grubuna yayın yapılır. **BUGÜN BU GRUP BOŞTUR**: `NotificationHub.JoinAdminGroup()` çağıranı yoktur (ölçüldü: istemci tarafında SignalR 0 geçiş) — hiçbir alarm bir insana ULAŞMAZ. Mail dalı YOKTUR. Okuyucu launch sonrasıdır.
+- **Anormallik/alerting:** `severity == "Critical"` olaylarda `NotifyAdminsAsync` çağrılır (`SecurityEventManager.cs`) ve SignalR `"admins"` grubuna yayın yapılır. **BUGÜN BU GRUP BOŞTUR**: `NotificationHub.JoinAdminGroup()` çağıranı yoktur (ölçüldü: istemci tarafında SignalR 0 geçiş) — hiçbir alarm bir insana ULAŞMAZ. Mail dalı YOKTUR. Okuyucu launch sonrasıdır.
 - **Correlation id:** Her istek izlenebilir; audit log (kim neyi ne zaman değiştirdi).
 - **Health checks:** /health (DB) + OpenTelemetry (tracing/metrics).
 
@@ -103,7 +103,7 @@ TokenBlacklist → Authorization → Controllers
 - **infra/waf-rules.md:** Cloudflare/AWS WAF/ModSecurity (OWASP CRS), DDoS, bot koruması, rate limiting.
 - **db/least-privilege.sql:** DB kullanıcısı yalnız CRUD (DDL/DROP/xp_cmdshell yok).
 - **db/encrypted-backup.sql:** TDE (AES-256 at-rest) + şifreli yedek.
-- **rotate-secrets.sh:** JWT signing key rotasyonu (Key Vault, 90 günlük). **Encryption key rotasyonu DESTEKLENMİYOR (SA-2):** `AesEncryptionProvider` tek anahtarlıdır (`keyId`/versiyonlama 0 geçiş) ve `Decrypt` çözemediği değeri OLDUĞU GİBİ döndürür (`AesEncryptionProvider.cs:53-57`) — anahtar değişirse eski şifreli alan düz metin sanılıp yeniden şifrelenir (çift şifreleme, sessiz veri kaybı). Script'in kendi uyarısında geçen re-encryption job'ı YOKTUR (`ops/rotate-secrets.sh:21-23`). Bugün `Encryption:Key` yalnız `customers.two_factor_secret` alanına uygulanır.
+- **rotate-secrets.sh:** JWT signing key rotasyonu (Key Vault, 90 günlük). **Encryption key rotasyonu DESTEKLENMİYOR (SA-2):** `AesEncryptionProvider` tek anahtarlıdır (`keyId`/versiyonlama 0 geçiş) ve `Decrypt` çözemediği değeri OLDUĞU GİBİ döndürür (`AesEncryptionProvider.cs`) — anahtar değişirse eski şifreli alan düz metin sanılıp yeniden şifrelenir (çift şifreleme, sessiz veri kaybı). Script'in kendi uyarısında geçen re-encryption job'ı YOKTUR (`ops/rotate-secrets.sh`). Bugün `Encryption:Key` yalnız `customers.two_factor_secret` alanına uygulanır.
 - **serilog-siem.md:** SIEM entegrasyonu için **TARİF** belgesi — bugün bağlı DEĞİL (aktif sink'ler yalnız Console + File, `Program.cs`; Elasticsearch/Seq paket referansı 0). SIEM launch sonrası.
 - **deployment-checklist.md:** production öncesi feature flag + secret + yetki kontrol listesi.
 - **Dockerfile (depo kökü, `ops/` altında DEĞİL):** non-root kullanıcı, minimal image, secret gömülmez, healthcheck.
@@ -145,7 +145,7 @@ yakalanamadığı için tek bir istek değil **tüm süreç** ölür (DoS).
    > Coupon ve Product'ı İKİŞER kez sayıyordu (1+1+1+2+2 = 7). Yani biçim körlüğü KISMİYDİ:
    > jenerik-olmayan güncelleme yollarından ikisi (Coupon, Product) zaten sayılmıştı.
    > Atlanan **üç** kalem Address, Category ve Collection'ın güncelleme yollarıdır —
-   > `AddressManager.cs:43`, `CategoryManager.cs:48`, `CollectionManager.cs:64`.
+   > `AddressManager.cs`, `CategoryManager.cs`, `CollectionManager.cs`.
    > Sayı `GuvenlikFix4SozlesmeTests` ile pinlidir - eşleme yüzeyi değişirse test kırmızı
    > verir ve bu paragraf güncellenmeden geçilemez.
 3. **JSON bağlama derinlik sınırı**: özel `MaxDepth` ayarı yok, yani System.Text.Json

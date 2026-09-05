@@ -6,6 +6,15 @@ namespace Divisima.Core.Utilities.Sanitization
     // Açıklayıcı yorum: Kullanıcı metnindeki tehlikeli HTML/script'i temizler (stored XSS savunması).
     // Yorum, adres, isim gibi serbest metin alanlarında kayıttan ÖNCE uygulanır. Savunma derinliği:
     // frontend de encode etmeli ama sunucu tarafı son kalkandır.
+    //
+    // ══ GF-5 / F3 - BU YORUM DUZELTILDI (ONCEKI HALI YANLISTI) ═════════════════════════════
+    // Onceki metin `Sanitize` icin "...sonra HTML-encode" diyordu. `Sanitize` ENCODE ETMEZ:
+    // govdesi bes adet `Regex.Replace(..., "")` + `Trim()`dir, yani metni yalnizca KISALTIR ya
+    // da aynen birakir. HTML kacisi AYRI bir metottur (`HtmlEncode`) ve cagrilmasi CAGIRANIN
+    // isidir - misafir checkout yolu ornegin onu CAGIRMAZ.
+    // NEDEN ONEMLI: GF-5/K4 uzunluk kapisini "sanitize SONRASI" olcuyor ve bu karar tam da
+    // "Sanitize UZATMAZ" olgusuna dayaniyor (`Sanitize(x).Length <= x.Length` HER ZAMAN).
+    // Yorum eski haliyle kalsaydi, o kararin dayanagi kaynakta YANLIS yaziyor olacakti.
     public static class InputSanitizer
     {
         // Açıklayıcı yorum: <script>, <iframe>, on* event, javascript: gibi tehlikeli desenleri sök

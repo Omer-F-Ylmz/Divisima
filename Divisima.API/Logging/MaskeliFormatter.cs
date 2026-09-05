@@ -32,7 +32,7 @@ namespace Divisima.API.Logging
     // bugunku PII'yi (ad-soyad, telefon) YAKALAMIYOR. Bu yuzden maske burada `LogMetniMaskesi`
     // uzerinden kosuyor: o sinif SQL Server'in "Truncated value: '...'" bicimini ve EF
     // parametre dokumlerini YAPISAL olarak yakalar, jeton/e-posta icin `KanitMaskesi`ye
-    // devreder. `KanitMaskesi`nin kendi olcutu GENISLETILMEDI (`KanitMaskesiTests.cs:42` pini
+    // devreder. `KanitMaskesi`nin kendi olcutu GENISLETILMEDI (`KanitMaskesiTests.cs` pini
     // korunuyor - merkez karari D10).
     public sealed class MaskeliFormatter : ITextFormatter
     {

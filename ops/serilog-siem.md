@@ -57,9 +57,10 @@ ayrılır) · `AccountLocked` · `ChangePasswordFailed` · `AccountDeleted` · `
 — hepsi `severity` (Info/Warning/Critical) ile.
 
 ### BU BELGENİN ESKİDEN SAYDIĞI AMA HÂLÂ ÜRETİLMEYEN TİPLER
-`PaymentFraud`, `PaymentAmountMismatch` — bu adlar kodda YALNIZ `Messages.*` sabiti olarak
-(müşteriye dönen metin) geçer, `security_events` tipi olarak DEĞİL.
-`NewDeviceLogin` — kodda yalnız `SecurityEvent.cs:10` YORUMUNDA geçer.
+`PaymentFraud`, `PaymentAmountMismatch` — bu adlar kodda YALNIZ müşteriye dönen metin sabiti
+olarak geçer (`Messages.PaymentFraudReject`, `Messages.PaymentAmountMismatch`),
+`security_events` tipi olarak DEĞİL.
+`NewDeviceLogin` — kodda yalnız `SecurityEvent.cs` YORUMUNDA geçer.
 
 > Ölçüm notu: `LogAsync("` çapası tek başına yetmez — iki çağrı yeri tipi **ternary** ile
-> seçer (`AuthManager.cs:325`, `AccountManager.cs:166`) ve o çapa onları kaçırır.
+> seçer (`AuthManager.cs`, `AccountManager.cs`) ve o çapa onları kaçırır.

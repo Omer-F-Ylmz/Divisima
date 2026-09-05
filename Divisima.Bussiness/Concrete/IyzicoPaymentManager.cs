@@ -246,7 +246,7 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
                     //
                     // OLCULEN ONCE-DURUM: `dto.token` HAM basiliyordu. CLAUDE.md'nin
                     // "MASKELEME URETIM NOKTASINDA YAPILIR" kurali TAM OLARAK bunu yasakliyor
-                    // ve ayni jeton `IyzicoClient.cs:203,206`da ZATEN maskeleniyordu - yani
+                    // ve ayni jeton `IyzicoClient.cs,206`da ZATEN maskeleniyordu - yani
                     // kural biliniyordu, bu dosyada uygulanmiyordu (GF-5 on olcumunde IKI ajan
                     // bagimsiz buldu). Sprint 8'de bir Iyzico odeme jetonunun depoya girmesi
                     // `secret-scan` job'ini KIRMISTI; bu satir ayni sinifin canli kalan orneginidir.
@@ -269,7 +269,7 @@ IReferralService referralService, IStoreCreditTransactionDal creditTxDal, IUnitO
                     // karari D1: K7'nin kod yarisi DUSTU, imza VARSA ve bozuksa 400 STATUKO).
                     //
                     // `customer_id` NULL: bu uc ANONIM (saglayici cagiriyor) ve odeme satiri
-                    // HENUZ okunmadi (`:258`). `detail` kullanici girdisi TASIMAZ - yalniz iki
+                    // HENUZ okunmadi (`payment` okumasi ASAGIDA). `detail` kullanici girdisi TASIMAZ - yalniz iki
                     // BOOL; jeton buraya KONMAZ (KVKK + log forging + sir hijyeni).
                     await _securityEvents.LogAsync("PaymentSignatureInvalid", "Warning", null, null, null,
                         $"imzaZorunlu={imzaZorunlu} imzaGeldi={!string.IsNullOrWhiteSpace(dto.signature)}");

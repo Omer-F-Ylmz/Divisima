@@ -19,9 +19,9 @@ namespace Divisima.Bussiness.Abstract
         // yapisal olarak TAMAMLANAMAZDI. Kalan yedi nokta BILINEN kalemdir:
         // "sahiplik olayi kapsami Order/Payment (GF-5)".
         //
-        // `EnsureOwner` GERI GETIRILMEDI: `SecureControllerBase.cs:40-44` onun BILINCLI olarak
+        // `EnsureOwner` GERI GETIRILMEDI: `SecureControllerBase.cs` onun BILINCLI olarak
         // kaldirildigini ve sahiplik kontrolunun IS KATMANINDA yapildigini kayda geciriyor
-        // (ayni karar `Messages.cs:184-189`da ikinci kez yazili). Bu yardimci yalnizca IZ yazar,
+        // (ayni karar `Messages.cs`da ikinci kez yazili). Bu yardimci yalnizca IZ yazar,
         // KARAR VERMEZ - 404 sozlesmesi ve mesajlar DEGISMEDI.
         //
         // IMZADA `ip` YOK - GEREKCE: GF-5/K1 ile IP/user-agent `SecurityEventManager`in ICINDE

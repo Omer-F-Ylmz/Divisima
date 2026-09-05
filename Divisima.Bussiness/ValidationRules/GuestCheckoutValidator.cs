@@ -22,7 +22,7 @@ namespace Divisima.Bussiness.ValidationRules.FluentValidation
     //
     // ══ GF-5 / K4 - YUKARIDAKI KAPSAM CUMLESI DARALTILDI (bilincli, merkez karari) ══════
     // "guest_name ... buraya KOPYALANMAZ" satiri VARLIK kurallari icindi ve DOGRUYDU:
-    // NotEmpty hala YALNIZ manager'da (GuestCheckoutManager.cs:74). Ama guest_name'in
+    // NotEmpty hala YALNIZ manager'da (GuestCheckoutManager.cs). Ama guest_name'in
     // UZUNLUGU o gun HICBIR YERDE dogrulanmiyordu ve AV-2 bunu LAUNCH BLOKER olarak olctu
     // (SD-7 `[VERI-BOZAN]`): 151 karakterlik ad -> EF insert-time 500, musteri satiri ZATEN
     // yazilmis -> YETIM MUSTERI (canli: id 179) + o e-postanin KALICI 409'u. Yani burasi
@@ -30,8 +30,8 @@ namespace Divisima.Bussiness.ValidationRules.FluentValidation
     // kopyalanmadi, EKSIK OLAN kural eklendi. Ikinci kopya SAYACI ARTMADI.
     //
     // UZUNLUK SANITIZE SONRASI OLCULUR (merkez karari, GF-5 / D3): DB'ye giden deger
-    // `InputSanitizer.Sanitize(dto.guest_name.Trim())` sonucudur (GuestCheckoutManager.cs:195
-    // ve :243), ham girdi DEGIL. OLCULEN YON - KAYDA GECER: `Sanitize` HTML-ENCODE ETMEZ
+    // `InputSanitizer.Sanitize(dto.guest_name.Trim())` sonucudur (GuestCheckoutManager.cs
+    // ve adres yaziminda), ham girdi DEGIL. OLCULEN YON - KAYDA GECER: `Sanitize` HTML-ENCODE ETMEZ
     // (o ayri bir metottur, `HtmlEncode`, ve bu yolda CAGRILMIYOR); govdesi bes adet
     // `Replace(..., "")` + `Trim()`, yani `Sanitize(x).Length <= x.Length` HER ZAMAN.
     // Dolayisiyla ham uzerinden olcmek TASMA URETMEZDI - yalnizca sigacak bir degeri
@@ -60,13 +60,22 @@ namespace Divisima.Bussiness.ValidationRules.FluentValidation
         public GuestCheckoutValidator()
         {
             // GF-5 / K4 (SD-7): guest_name UZUNLUGU. NotEmpty BURAYA EKLENMEDI - o kural
-            // manager'da (GuestCheckoutManager.cs:74) ve oradaki mesaj musteriye donuyor;
+            // manager'da (GuestCheckoutManager.cs) ve oradaki mesaj musteriye donuyor;
             // ikinci kopya acilmaz. Bos/whitespace burada GECER, manager reddeder.
             // Olcum SANITIZE SONRASI: DB'ye giden deger budur (gerekce sinif yorumunda).
             RuleFor(x => x.guest_name)
                 .Must(ad => string.IsNullOrWhiteSpace(ad)
                             || InputSanitizer.Sanitize(ad.Trim()).Length <= GirdiSinirlari.MusteriAdi)
                 .WithMessage($"Ad soyad en fazla {GirdiSinirlari.MusteriAdi} karakter olabilir.");
+
+            // GF-5 / F4 (C-2): guest_email UZUNLUGU. Bicim kontrolu (`@` iceriyor mu)
+            // manager'da (GuestCheckoutManager, PlaceGuestOrder girisi) ve ORASI DEGISMEDI -
+            // ikinci kopya acilmiyor. Buraya YALNIZ bugune kadar HICBIR YERDE olculmeyen
+            // UZUNLUK giriyor; sabit uye kayit ucuyla AYNI (kolon 200).
+            RuleFor(x => x.guest_email)
+                .MaximumLength(GirdiSinirlari.EPosta)
+                    .WithMessage($"E-posta en fazla {GirdiSinirlari.EPosta} karakter olabilir.")
+                .When(x => !string.IsNullOrWhiteSpace(x.guest_email));
 
             RuleFor(x => x.guest_phone).NotEmpty().WithMessage("Telefon boş olamaz.")
                 .Matches(GirdiSinirlari.TelefonDeseni).WithMessage("Geçerli bir telefon girin.");

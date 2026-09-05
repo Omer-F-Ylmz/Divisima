@@ -31,10 +31,10 @@ namespace Divisima.API.Middlewares
         //
         // SERVISLER METOT ENJEKSIYONUYLA ALINIR, CTOR'DAN DEGIL - CAPTIVE DEPENDENCY:
         // middleware TEK ORNEKTIR (pipeline'da bir kez kurulur), `ISecurityEventService` ise
-        // SCOPED (`AutofacBusinessModule.cs:196` InstancePerLifetimeScope). Ctor'a almak scoped
+        // SCOPED (`AutofacBusinessModule.cs` InstancePerLifetimeScope). Ctor'a almak scoped
         // servisi - ve onun `DbContext`ini - TUM UYGULAMA OMRUNE hapsederdi. Depodaki dogru
-        // kalip ZATEN var ve aynen izleniyor: `IdempotencyMiddleware.cs:45`
-        // (`InvokeAsync(HttpContext, ICacheService)`) ve `TokenBlacklistMiddleware.cs:28`.
+        // kalip ZATEN var ve aynen izleniyor: `IdempotencyMiddleware.cs`
+        // (`InvokeAsync(HttpContext, ICacheService)`) ve `TokenBlacklistMiddleware.cs`.
         public async Task InvokeAsync(HttpContext context, ISecurityEventService securityEvents, ICacheService cache)
         {
             // ══ KALITE SUPURMESI B3 - URL YOLU KIMLIK DIZGESIDIR, KULTURSUZ ESLESIR ═════════
@@ -77,19 +77,19 @@ namespace Divisima.API.Middlewares
                 //
                 // ORNEKLEME ZORUNLU: bu dal bir SEL anidir - saniyede yuzlerce kez kosabilir ve
                 // her red icin satir yazmak, tam da DB'nin zorlandigi anda yazma yuku EKLERDI
-                // (ustelik `DataRetentionJob.cs:33` non-Critical satirlari BIR YIL tutuyor).
+                // (ustelik `DataRetentionJob.cs` non-Critical satirlari BIR YIL tutuyor).
                 // `TryAddAsync` ATOMIK set-if-not-exists'tir (Redis SETNX / in-memory lock):
                 // ayni (kova + IP) icin 60 saniyede YALNIZ ILK cagri true doner. Check-then-act
                 // yarisi YOK - bu yuzden `ExistsAsync` + `Set` ikilisi KULLANILMADI.
                 //
                 // `customer_id` NULL - KABUL EDILMIS SINIR (merkez karari D6): bu middleware
-                // `app.UseAuthentication()`DAN ONCE kosuyor (`Program.cs` :687 vs :690), yani
+                // `app.UseAuthentication()`DAN ONCE kosuyor (`Program.cs`te bu middleware UseAuthentication cagrisindan ONCE kayitli), yani
                 // `context.User` HENUZ BOS. A09'un "ATIF" yarisi bu satirda KAPANMIYOR ve bu
                 // bilincli bir kayittir; kapanan yari "GORUNURLUK"tur. Middleware'i
                 // UseAuthentication SONRASINA almak rate limit'i kimlik dogrulamanin ARDINA
                 // koyardi - yani kaba kuvvet savunmasi, korumak istedigi isin PESINE duserdi.
                 //
-                // OLAY YAZIMI ISTEGI DUSURMEZ: `ExceptionMiddleware` (`Program.cs:665`) bu
+                // OLAY YAZIMI ISTEGI DUSURMEZ: `ExceptionMiddleware` (`Program.cs`) bu
                 // middleware'den ONCE kayitli, dolayisiyla buradan cikan bir istisna 429'u
                 // 500'e cevirirdi. Yazma bu yuzden kendi try/catch'inde - iz KAYBOLABILIR ama
                 // musterinin gordugu yanit ASLA degismez.

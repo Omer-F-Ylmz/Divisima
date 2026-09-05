@@ -190,7 +190,7 @@ namespace Divisima.IntegrationTests
         // AYNI siraya konmaz (SDP 1.12.10-b).
         //
         // ── PININ GORMEDIGI DAL (denetci karari (b), durust kayit) ───────────────────────
-        // `HashingHelper.cs:89` `if (iterasyon <= 0) return false;` HIC TURETME YAPMADAN
+        // `HashingHelper.cs` `if (iterasyon <= 0) return false;` HIC TURETME YAPMADAN
         // doner - yani "her dal ayni maliyeti oder" iddiasi O DAL ICIN GECERSIZDIR. Dal
         // URETIMDEN ULASILAMAZ (zarfa her zaman 100k yazilir; bozuk zarf ancak elle
         // uretilirse olusur), ama pin saf kaynak sayimi oldugu icin bunu GOREMEZ.
@@ -307,7 +307,7 @@ namespace Divisima.IntegrationTests
 
         // ── K5 (b) SignalR HUB'I ───────────────────────────────────────────────────────────
         //
-        // `Program.cs:641` `app.MapHub<NotificationHub>(...)` cagrisi RequireAuthorization
+        // `Program.cs` `app.MapHub<NotificationHub>(...)` cagrisi RequireAuthorization
         // TASIMAZ; korumanin TEK kaynagi hub SINIFININ uzerindeki [Authorize]. Bu yuzden
         // `SecurityHardeningTests`in controller taramasi bu yuzeyi GORMEZ (o tarama
         // `.OfType<ControllerActionDescriptor>()` ile suzuyor) - bosluk BURADA kapaniyor.

@@ -38,6 +38,22 @@ namespace Divisima.Core.Utilities.Validation
         // bu dalga misafir yolunu kapatiyor, uye yolunu SIKILASTIRMIYOR.
         public const int AdresAdSoyad = 120;
 
+        // ══ GF-5 / F4 (C-2) - E-POSTA UZUNLUGU ═════════════════════════════════════════════
+        //
+        // OLCULEN ACIK: `customers.email` kolonu 200 KARAKTER (sys.columns) ama HICBIR
+        // validator'da e-posta uzunluk kurali YOKTU - ne uye ne misafir yolunda ("email" ve
+        // "MaximumLength" ayni satirda 0 gecis, uc bagimsiz olcum). 202 karakterlik bir
+        // e-posta EF insert-time HTTP 500 uretiyordu; canli olarak yeniden uretildi.
+        //
+        // Bu, SD-7 (`guest_name` 151 -> 500) ile AYNI AILEDIR ve K4'te GOZDEN KACTI: o turda
+        // sinir "ilgili uye validator'unun olcutu" diye turetilmisti, e-postanin ise uye
+        // tarafinda da olcutu YOKTU - yani "yok"u kopyalamak bosluğu KORUMUS oldu.
+        //
+        // DEGER KOLONDAN TURER, URUN KARARI DEGIL: 200 = kolonun kendisi. Daha dar bir sinir
+        // (or. RFC 5321'in 254 baytlik yolu) burada UYDURMA olurdu - kolon 200 oldugu surece
+        // kirilma noktasi 200'dur. Kolon buyurse sabit onunla birlikte buyur.
+        public const int EPosta = 200;         // customers.email kolon 200
+
         public const int AdresBasligi = 60;    // addresses.title  kolon 60
         public const int Sehir = 50;           // addresses.city   kolon 60
         public const int Ilce = 50;            // addresses.district kolon 60
@@ -56,7 +72,7 @@ namespace Divisima.Core.Utilities.Validation
         // GUID SARTI BILINCLI OLARAK KONULMADI (merkez karari). Olculdu: dolu 122
         // `request_id`in 54'u GUID DEGIL, ve GUID-disi olanin en yenisi GUID olanin en
         // yenisinden DAHA YENI - yani GUID-disi bicim OLU DEGIL, CANLI. Ustelik istemcinin
-        // yedek dali (`frontend/api-bridge.js:2283`, `crypto.randomUUID` desteklenmeyen
+        // yedek dali (`frontend/api-bridge.js`, `crypto.randomUUID` desteklenmeyen
         // guvenli-olmayan baglam) "co-<zaman>-<8kar>" uretir ve o dal `FrontendDokunmaHedefi`
         // pini ile BILINCLI korunuyor; frontend bu dalgada DOKUNULMAZ. GUID zorunlulugu
         // o tarayicilarda her checkout'u 400 yapardi -> musteri ya odeyemez ya id'yi dusurup

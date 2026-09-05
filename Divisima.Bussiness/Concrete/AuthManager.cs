@@ -64,7 +64,7 @@ namespace Divisima.Bussiness.Concrete
         private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor? _httpContextAccessor;
         // GF-1b / F2: CAS yollarinda denetim izi (gerekce DenetimKaydiYazAsync'in basinda).
         private readonly IAuditLogDal _auditLogDal;
-        // Access token omru - iptal kaydinin TTL'i bundan turer (appsettings.json:8 ile AYNI).
+        // Access token omru - iptal kaydinin TTL'i bundan turer (appsettings.json ile AYNI).
         private const int AccessTokenOmruDk = 15;
 
         // Jeton bitisi okunamazsa kullanilan TTL. Access token omru 15 dk oldugundan bu
@@ -335,7 +335,7 @@ namespace Divisima.Bussiness.Concrete
                     //
                     // Bu satirda eskiden "olay yazilmaz" yaziyordu ve GEREKCESI su cumleydi:
                     // yanit kayitsiz adresin yanitiyla BIREBIR ayni kalsin. K2 kayitsiz dala
-                    // (`:259-266`) bir olay yazmasi eklediginde o gerekce TERSINE DONDU:
+                    // (kayitsiz e-posta dali) bir olay yazmasi eklediginde o gerekce TERSINE DONDU:
                     // kayitsiz dal bir DB INSERT yaparken bu dal yapmasaydi, KILITLI hesap
                     // OLCULEBILIR SEKILDE DAHA HIZLI yanit verir ve saldirgan "bu e-posta VAR
                     // ve kilitli" bilgisini SURE FARKINDAN cikarabilirdi - yani tam da
@@ -629,7 +629,7 @@ namespace Divisima.Bussiness.Concrete
         // JSON'u burada TAKLIT etmek, CAS'in eski degeri OKUMADIGI gercegini gizlerdi.
         // Kolon `nullable` ve serbest metin; okuyucu (AuditLogController) alani AYNEN gecirir.
         //
-        // `action` KOLONU 20 KARAKTER (DivisimaDbContext.cs:620) - OLCULDU, TAHMIN EDILMEDI:
+        // `action` KOLONU 20 KARAKTER (DivisimaDbContext.cs) - OLCULDU, TAHMIN EDILMEDI:
         // ilk yazimda "session_chain_revoked" (21) kullanildi ve SQL Server
         // "String or binary data would be truncated" ile DUSTU; K4B pini bunu yakaladi.
         // Eylem adlari bu yuzden KISA tutulur ve asagida kirpma da vardir - sinir asilirsa
@@ -1029,7 +1029,7 @@ namespace Divisima.Bussiness.Concrete
             {
                 // Tum aktif oturumlari TEK atomik sorgu ile kapat (foreach N+1 yerine - DRY + performans)
                 // GF-5 / K2: DONUS DEGERI ARTIK KULLANILIYOR. Onceden atiliyordu (AV-2 on
-                // olcumunde S-A8 olarak isaretlenmisti); ayni cagri `:636`da zaten bir
+                // olcumunde S-A8 olarak isaretlenmisti); ayni cagri `YenidenKullanimiIsleAsync` icinde zaten bir
                 // degiskene aliniyordu, yani tutarsizlikti. Deger cikis olayinin detayina
                 // giriyor - "tum cihazlardan cik" kac oturumu kapatti sorusu artik defterde.
                 var kapatilanOturum = await _userSessionDal.InvalidateAllForCustomerAsync(customerId);

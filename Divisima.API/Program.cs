@@ -101,7 +101,7 @@ var builder = WebApplication.CreateBuilder(args);
         // "xxxxx" acilisi engelleyebilirdi.
         // PROVENANS (ureten ifadeyle): alti giris `grep -n "CHANGE_ME" appsettings.json`
         // ciktisindaki anahtarlardir; YEDINCI giris `Encryption:Key` CHANGE_ME DEGIL, BOS
-        // DIZEDIR (`appsettings.json:39`) ve listeye UST-KUME olsun diye eklendi - bos deger
+        // DIZEDIR (`appsettings.json`) ve listeye UST-KUME olsun diye eklendi - bos deger
         // asagidaki dongude zaten atlanir. (Ilk yazimda "alti CHANGE_ME anahtarindan kuruldu"
         // deniyordu; yedi girisin ALTISI icin dogru - kural-uyum denetcisi duzeltti.)
         var hassasAnahtarlar = new[]
@@ -662,7 +662,7 @@ app.UseMiddleware<Divisima.API.Middlewares.ETagMiddleware>();
 //
 // UYGULAMA TARAFI KALDIRILDI, NGINX SATIRI SOZLESME OLDU. Kaldirmak korumayi DUSURMEZ -
 // olculdu: Dockerfile duz HTTP dinliyor, docker-compose Development'ta kosuyor ve
-// `ops/deployment-checklist.md:205` "yalniz nginx disari bakar" diyor; yani uygulamanin
+// `ops/deployment-checklist.md` "yalniz nginx disari bakar" diyor; yani uygulamanin
 // kendi HSTS'i disari HIC ULASMIYORDU. Pin: burada `UseHsts` 0 gecis · nginx tarafinda 1.
 if (app.Environment.IsDevelopment())
 {

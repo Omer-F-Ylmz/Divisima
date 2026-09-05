@@ -48,7 +48,7 @@ namespace Divisima.DataAccess.Interceptors
     // ait" sorusu YAPISAL OLARAK yanitlanamiyordu.
     //
     // NEDEN POST-SAVE, NEDEN "HIC YAZMA, SONRA YAZ" DEGIL: denetim satirlari is satiriyla
-    // AYNI SaveChanges icinde ekleniyor (`:73-75`) - bu, "is kaydedildi ama izi yok" durumunu
+    // AYNI SaveChanges icinde ekleniyor (`SavingChangesAsync` sonunda `AddRange` ile) - bu, "is kaydedildi ama izi yok" durumunu
     // YAPISAL OLARAK imkansiz kilan bir garantidir. Satirlari SavedChanges'e ertelemek o
     // garantiyi FEDA ederdi (ikinci yazma duserse denetim satiri HIC OLMAZDI). Bu yuzden
     // satir AYNI transaction'da yazilir, entity_id ise anahtar GERCEKLESTIKTEN sonra
@@ -56,8 +56,8 @@ namespace Divisima.DataAccess.Interceptors
     // en kotu durum GERILEME DEGIL, mevcut durumla AYNIDIR.
     //
     // KAPSAM SINIRI (durust kayit): `changes` alani `Added` icin HALA NULL kaliyor
-    // (`SerializeChanges` :90). Bilincli: doldurmak, KVKK redaksiyon sorgusunun
-    // (`AccountManager.cs:398-399`, `changes != null` filtreli) kapsamini bir anda
+    // (`SerializeChanges` govdesinin ilk satiri). Bilincli: doldurmak, KVKK redaksiyon sorgusunun
+    // (`AccountManager.cs`, `changes != null` filtreli) kapsamini bir anda
     // buyuturdu ve entity_id ile BIRLIKTE ele alinmasi gereken ayri bir karardir.
     public class AuditInterceptor : SaveChangesInterceptor
     {
@@ -65,7 +65,7 @@ namespace Divisima.DataAccess.Interceptors
         private static readonly HashSet<string> _ignored = new() { nameof(AuditLog), nameof(OutboxMessage) };
 
         // GF-5 / K3: anahtari GECICI olan girdilerle onlarin denetim satirlarinin eslesmesi.
-        // Interceptor SCOPED kayitlidir (`Program.cs:234`), yani bu liste ISTEK BASINADIR -
+        // Interceptor SCOPED kayitlidir (`Program.cs`), yani bu liste ISTEK BASINADIR -
         // statik olsaydi istekler arasi sizardi.
         private readonly List<(EntityEntry Girdi, AuditLog Satir)> _geciciAnahtarlilar = new();
 

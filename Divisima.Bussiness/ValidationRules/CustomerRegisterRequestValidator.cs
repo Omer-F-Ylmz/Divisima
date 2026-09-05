@@ -17,7 +17,12 @@ namespace Divisima.Bussiness.ValidationRules.FluentValidation
         public CustomerRegisterRequestValidator()
         {
             RuleFor(c => c.name).NotEmpty().WithMessage("Ad boş olamaz.").MaximumLength(GirdiSinirlari.MusteriAdi);
-            RuleFor(c => c.email).NotEmpty().EmailAddress().WithMessage("Geçerli bir e-posta giriniz.");
+            // GF-5 / F4 (C-2): uzunluk sınırı EKLENDİ - `customers.email` kolonu 200 karakter
+            // ve bugüne kadar HİÇBİR yolda uzunluk kontrolü yoktu (201+ karakter HTTP 500).
+            // Misafir yolu AYNI sabite bakar.
+            RuleFor(c => c.email).NotEmpty().EmailAddress().WithMessage("Geçerli bir e-posta giriniz.")
+                .MaximumLength(GirdiSinirlari.EPosta)
+                    .WithMessage($"E-posta en fazla {GirdiSinirlari.EPosta} karakter olabilir.");
             RuleFor(c => c.phone).NotEmpty().Matches(GirdiSinirlari.TelefonDeseni).WithMessage("Geçerli telefon giriniz.");
             // A2-FIX (SUPHELI #21): kural ARTIK BURADA TANIMLI DEGIL - tek merkez
             // Divisima.Core.Security.SifrePolitikasi. Ayni kural dort ayri yerde kopyalanmisti

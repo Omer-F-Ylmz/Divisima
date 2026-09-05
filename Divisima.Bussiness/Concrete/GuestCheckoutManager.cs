@@ -103,7 +103,7 @@ namespace Divisima.Bussiness.Concrete
             // ULASILABILIRLIK OLCULDU: dedup dalina ancak 409 kapisi GECILEREK varilir, yani
             // e-posta KAYITLI DEGILKEN - pratikte "ayni request_id, FARKLI e-posta". Istemci
             // anahtari yalniz (a) odeme sonuc ekrani basariyla render edilirse ya da (b) SEPET
-            // IMZASI degisirse yeniliyor (`api-bridge.js:2348`, `:2150-2152`); e-posta
+            // IMZASI degisirse yeniliyor (`api-bridge.js`, `:2150-2152`); e-posta
             // degistirmek imzayi DEGISTIRMEZ. Yaniti gorememis bir kullanicinin e-postasini
             // duzeltip tekrar denemesi bu yolu BIREBIR uretir.
             //
@@ -217,7 +217,7 @@ namespace Divisima.Bussiness.Concrete
             // OLCULEN ZARAR (L3 denetcisi, ONCE ve SONRA surumlerinde AYNI - dalga URETMEDI):
             // ayni e-postayla ESZAMANLI iki misafir checkout'ta ikisi de yukaridaki 409
             // kapisini gecebiliyor (henuz satir YOK), sonra ikisi de buraya geliyor ve
-            // kaybeden `customers.email` TEKIL INDEKSINE (`DivisimaDbContext.cs:320`
+            // kaybeden `customers.email` TEKIL INDEKSINE (`DivisimaDbContext.cs`
             // `HasIndex(c => c.email).IsUnique()`) toslayip ISLENMEYEN ISTISNA firlatiyordu.
             // Kullanici genel 500 goruyordu. Yetim satir birakmiyordu (kaybeden `PlaceOrder`a
             // HIC VARMIYOR - identity boslugu ile olculdu) ama 500 bir kusurdur.
@@ -340,7 +340,7 @@ namespace Divisima.Bussiness.Concrete
             // `Success=TRUE` donuyor, telafi ATESLEMIYOR, yukarida yazilan musteri+adres YETIM
             // kaliyordu. Bastaki guard ARDISIK replay'i kapatir ama ESZAMANLI yarisi KAPATMAZ -
             // iki istek de guard'i gecer, biri unique-index yarisini KAYBEDER ve
-            // `OrderManager.cs:478-485`ten `replayed=true` ile doner. O dal icin telafi SART.
+            // `OrderManager.cs`ten `replayed=true` ile doner. O dal icin telafi SART.
             var replayYaniti = siparisSonuc as SuccessDataResult<OrderPlaceResponseDto>;
             var replayMi = replayYaniti?.Data?.replayed ?? false;
             if (siparisSonuc == null || !siparisSonuc.Success || replayMi)
@@ -496,14 +496,14 @@ namespace Divisima.Bussiness.Concrete
                 // ESKI HAL `DeleteAsync(entity)` idi ve o `Context.SaveChangesAsync()` cagirir.
                 // YARIS DALINDA BU CALISMAZ, OLCULDU: `PlaceOrder` `orders.request_id` tekil
                 // indeksini ihlal edip `DbUpdateException` yiyor, `UnitOfWork.RollbackAsync`
-                // (UnitOfWork.cs:36-44) DB transaction'ini geri aliyor ama **ChangeTracker'i
+                // (UnitOfWork.cs) DB transaction'ini geri aliyor ama **ChangeTracker'i
                 // TEMIZLEMIYOR** - basarisiz `Order` hala `Added` durumda duruyor. Ayni scope'ta
-                // (Autofac InstancePerLifetimeScope, UnitOfWork.cs:8-9) paylasılan DbContext
+                // (Autofac InstancePerLifetimeScope, UnitOfWork.cs) paylasılan DbContext
                 // uzerinde telafinin `SaveChanges`i o insert'i YENIDEN deniyor, AYNI ihlalle
                 // patliyor ve telafi asagidaki catch'e dusup SESSIZCE hicbir sey silmiyordu.
                 // OLCULEN ONCE-DURUM: musteri=2 adres=2 siparis=1 (yani IKI yetim satir).
                 //
-                // `DeleteWhereAsync` -> `ExecuteDeleteAsync` (EfEntityRepositoryBase.cs:107-108)
+                // `DeleteWhereAsync` -> `ExecuteDeleteAsync` (EfEntityRepositoryBase.cs)
                 // dogrudan SQL DELETE uretir, change-tracker'a ve `SaveChanges`e HIC DOKUNMAZ -
                 // kirlenmis tracker bu yolu ENGELLEYEMEZ. Ortamda acik transaction YOKTUR
                 // (rollback onu dispose edip null'ladi), dolayisiyla silme ANINDA kalicidir.
@@ -517,25 +517,25 @@ namespace Divisima.Bussiness.Concrete
                 // biri kendi `ExecuteDeleteAsync`ini (yani kendi ortuk transaction'ini) acar;
                 // ILKI GECIP IKINCISI DUSERSE adres silinmis ama MUSTERI KALMIS olur - yani
                 // telafinin kendisi KISMI DURUM uretir. Uretim kodu bu kalemi ADIYLA deftere
-                // havale ediyordu (asagidaki "BILINCLI SINIRLAR 1", :313).
+                // havale ediyordu (asagidaki "BILINCLI SINIRLAR 1").
                 //
                 // NEDEN BURADA ACILABILIYOR (olculdu, sinifin basindaki "nested transaction
                 // yok" notuyla CELISMIYOR): bu metoda YALNIZ `PlaceOrder` DONDUKTEN SONRA
                 // giriliyor. Basarisiz dalda `UnitOfWork.RollbackAsync` transaction'i dispose
                 // edip alani null'lamis olur; basarili-ama-replay dalinda da PlaceOrder kendi
                 // transaction'ini KAPATMIS olur. Yani bu noktada ORTAMDA ACIK TRANSACTION
-                // YOKTUR (yukaridaki :498-499 notunun olctugu gercek) ve `ExecuteInTransactionAsync`
+                // YOKTUR (bu metodun basindaki notun olctugu gercek) ve `ExecuteInTransactionAsync`
                 // IC ICE bir transaction ACMAZ - kendi `tx`ini acar, isini yapar, kapatir.
                 //
                 // `ExecuteInTransactionAsync` SECILDI, elle Begin/Commit DEGIL: IUnitOfWork'un
-                // kendi yorumu (IUnitOfWork.cs:10-12) "yeni transaction'lar bunu kullanmali"
+                // kendi yorumu (IUnitOfWork.cs) "yeni transaction'lar bunu kullanmali"
                 // diyor - execution strategy tum begin->is->commit'i tek retriable birim yapar.
-                // Emsal AccountManager.cs:239-263'te (KVKK silme) ZATEN uretimde kosuyor.
+                // Emsal AccountManager.cs'te (KVKK silme) ZATEN uretimde kosuyor.
                 //
                 // SARMALAMA CATCH'IN **ICINDE**: disarida sarmak davranisi BOZARDI -
-                // `ExecuteInTransactionAsync` istisnayi RETHROW eder (UnitOfWork.cs:64) ve
+                // `ExecuteInTransactionAsync` istisnayi RETHROW eder (UnitOfWork.cs) ve
                 // telafi hatasi cagirana kadar cikip musteriye 500 dondururdu. Oysa sozlesme
-                // (asagidaki catch + :313-315) telafi hatasinin MUSTERIYE YANSIMAMASINI,
+                // (asagidaki catch + "BILINCLI SINIRLAR 1") telafi hatasinin MUSTERIYE YANSIMAMASINI,
                 // PlaceOrder'in kendi hatasinin donmesini soyluyor. Bu sozlesme DEGISMEDI.
                 await _unitOfWork.ExecuteInTransactionAsync(async () =>
                 {

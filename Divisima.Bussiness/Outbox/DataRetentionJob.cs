@@ -41,7 +41,7 @@ namespace Divisima.Bussiness.Outbox
             // Yani islenmemis satirlarin buyuk cogunlugu OLU idi ve HICBIR ZAMAN silinmiyordu.
             //
             // NEDEN ONEMLI - SIR HIJYENI: mail govdeleri DUZ JETON tasiyor
-            // (`AuthManager.cs:210-214` dogrulama, `:837-842` sifirlama). `customers`
+            // (`AuthManager.cs` dogrulama, `ResetPasswordRequest` sifirlama). `customers`
             // tablosunda ayni jetonlar GF-1b/K3 ile SHA-256 OZETLI saklanirken, outbox
             // payload'i HAM tasiyor - yani ozetleme BIR KANAL OTEDEN deliniyordu ve o kanal
             // suresiz birikiyordu. Bu kalem "maskeleme" ile KAPATILAMAZ: jetonun kullaniciya
@@ -54,7 +54,7 @@ namespace Divisima.Bussiness.Outbox
             // (SA-2), yani sifreleme once O kalemin duzeltilmesini ister. MIGRATION YOK.
             //
             // PENCERE JETON OMRUNDEN TURETILIR, ELLE YAZILMAZ: en uzun jeton omru sifirlama
-            // jetonununkidir (`AuthManager.cs:875` -> 30 dk). Uzerine 24 saat marj konur ki
+            // jetonununkidir (`AuthManager.cs` -> 30 dk). Uzerine 24 saat marj konur ki
             // outbox islemcisi gecici bir kesintiden sonra kuyrugu BOSALTABILSIN; 24 saatte
             // gonderilememis bir mail zaten OLUDUR ve icindeki jeton COKTAN gecersizdir.
             var jetonEnUzunOmur = TimeSpan.FromMinutes(30);   // password_reset_expiry

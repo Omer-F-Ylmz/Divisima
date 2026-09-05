@@ -2,11 +2,11 @@ using System.Text.RegularExpressions;
 
 namespace Divisima.Core.Utilities.Text
 {
-    // ══ LOG METNI MASKESI - CERCEVE ISTISNALARI ICIN (GF-5 / K6+K10 karari) ════════════════
+    // ══ LOG METNI MASKESI - CERCEVE ISTISNALARI ICIN (GF-5 / K6, merkez karari D10) ════════
     //
     // NEDEN AYRI BIR SINIF, NEDEN `KanitMaskesi` GENISLETILMEDI (merkez karari, GF-5 / D10):
     // `KanitMaskesi`nin olcutu "uzunluk >= 16 + en az bir rakam + en az bir KUCUK HARF"tir ve
-    // bu olcut PINLIDIR: `KanitMaskesiTests.cs:42` siparis numarasinin ("DVS20260823-…", rakam
+    // bu olcut PINLIDIR: `KanitMaskesiTests.cs` siparis numarasinin ("DVS20260823-…", rakam
     // VAR ama kucuk harf YOK) DOKUNULMADAN gectigini ACIKCA pinler. Olcutu genisletmek o pini
     // kirardi ve teshis degeri tasiyan dizgeleri de yutmaya baslardi. Bu yuzden buradaki
     // kurallar AYRI durur ve `KanitMaskesi`ye YALNIZCA devreder.

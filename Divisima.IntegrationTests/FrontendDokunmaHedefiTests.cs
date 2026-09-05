@@ -1647,7 +1647,7 @@ namespace Divisima.IntegrationTests
             // K3'un TAMAMI bypass oluyor, renderer OLU KODA doniyor ve pin YESIL kaliyordu.
             // Depoda MFIX-3b/M4 ile AYNI bosluk sinifi ("tanim + cagri = en az iki gecis").
             // KAPSAM DAR: guvenliYaz(kutu, ...) sozlesme sayfalarinda MESRU olarak kullaniliyor
-            // (api-bridge.js:3186), bu yuzden yasak DOSYA GENELINE degil FATURA MODALINA konur.
+            // (api-bridge.js), bu yuzden yasak DOSYA GENELINE degil FATURA MODALINA konur.
             var modal = FonksiyonGovdesi(bridge, "function faturaModalAc(");
             modal.Should().NotBeNullOrWhiteSpace("fatura modali TANIMLI olmali");
             modal.Should().Contain("faturaGovdesiniCiz(",
@@ -2239,19 +2239,40 @@ namespace Divisima.IntegrationTests
                 "telefon kurali en az DORT validator'da bulunmali - tarama bos donerse "
                 + "esitlik iddiasi BEDAVA dogru olurdu");
 
-            // VAKUM KIRICI 2: IKI BICIM DE GERCEKTEN VAR OLMALI. Bu, "hepsi referans oldu"
-            // ya da "hicbiri sabite baglanmadi" durumlarinin ikisini de yakalar - yani pin
-            // K4'un yaptigi seyi (uc referans + Seller literali) OLCER, varsaymaz.
-            bulgu.Select(x => x.bicim).Distinct().Should().HaveCount(2,
-                "K4 sonrasi hem SABITE REFERANS veren hem LITERAL tasiyan site bulunmali "
-                + "(Seller DOKUNULMAZ oldugu icin literalini korur)");
+            // ══ GF-5 / F3 (B-4) - "IKI BICIM DE OLMALI" ASSERT'I GEVSETILDI ═══════════════
+            // ONCEKI HALI `Distinct().HaveCount(2)` idi ve ILERI DONUK BIR TUZAKTI: Seller
+            // modulu acilip literali de ortak sabite BAGLANIRSA - yani bir IYILESTIRME
+            // yapilirsa - pin KIRMIZI verirdi. Bir pin, korudugu seyin DUZELTILMESINI
+            // cezalandiramaz (MK-4b denetcisi yakaladi).
+            //
+            // DURUST KAYIT: asagidaki `<= 2` bu kod yolunda AYIRT EDICI DEGILDIR - `bicim`
+            // yalnizca "referans" ya da "literal" degerini alabildigi icin Distinct sayisi
+            // zaten {1,2} kumesindedir. Sozlesmeyi ACIK yazmak icin duruyor; VAKUM KIRICI
+            // gorevini ALTTAKI assert devralir.
+            bulgu.Select(x => x.bicim).Distinct().Count().Should().BeLessThanOrEqualTo(2,
+                "yalnizca IKI bicim taninir: ortak sabite REFERANS ya da LITERAL");
+
+            // ASIL AYIRT EDICI: literal tasiyan site sayisi ARTAMAZ. Bugun tam BIR tanedir
+            // (SellerRegisterRequestValidator - DOKUNULMAZ). Yeni bir literal kopya eklenirse
+            // bu assert KIRMIZI verir; Seller yarin sabite baglanirsa sayi 0'a duser ve pin
+            // YESIL kalir - iyilestirme CEZALANDIRILMAZ, yeni kopya ise YAKALANIR.
+            bulgu.Count(x => x.bicim == "literal").Should().BeLessThanOrEqualTo(1,
+                "telefon deseninin LITERAL kopyasi ARTMAMALI - ortak sabite baglanmali "
+                + "(bugun tek literal Seller'dadir ve o DOKUNULMAZ)");
 
             // VAKUM KIRICI 3: cikarilan deger gercekten bir telefon karakter sinifi olmali.
+            // NOT (F3/B-5): niceleyici capasi ELLE YAZILMAZ - sabitten turer. Onceki hali
+            // `Contain("{7,20}")` idi ve sabit degistiginde tani "niceleyici YOK" diyordu;
+            // oysa gercek kusur "sabit DEGISTI"dir. Capa artik sabitin KENDISINDEN okunuyor,
+            // yani tani her zaman dogru yone bakar.
+            var niceleyici = System.Text.RegularExpressions.Regex.Match(sabitDeger, @"\{\d+,\d+\}").Value;
+            niceleyici.Should().NotBeNullOrEmpty("ortak sabit bir uzunluk niceleyicisi tasimali");
             foreach (var (dosya, deger, _) in bulgu)
             {
                 deger.Should().NotBeNullOrWhiteSpace("regex bos okunmus olamaz: " + dosya);
                 deger.Should().Contain("0-9", "telefon kurali rakam sinifi tasimali: " + dosya);
-                deger.Should().Contain("{7,20}", "telefon kurali uzunluk niceleyicisi tasimali: " + dosya);
+                deger.Should().Contain(niceleyici,
+                    "telefon kuralinin uzunluk niceleyicisi ortak sabitle AYNI olmali: " + dosya);
             }
 
             // ASIL IDDIA: TUM siteler AYNI DEGERE cozunmeli. Ihlalci dosya ADIYLA raporlanir.
