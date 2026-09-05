@@ -718,8 +718,65 @@ comm -13 (EKLENEN)    : 50·GF-4 54·ARSIV-4
   DORDU DE satirda ADIYLA duruyor, birlesik satir kendi capasini da kazandi.
 - `54·ARSIV-4` — bu dosyanin kendisi.
 
-**BOYUT:** CLAUDE.md **78.925 B -> 59.990 B** (kesim **18.935 B**, %23). Hedef `<=60.000`
-SAGLANDI; butce **81.920 DEGISMEDI** (kalan 21.930).
+**BOYUT:** CLAUDE.md **78.925 B -> 59.990 B** (kesim **18.935 B**, **%23,99** - ilk yazimda
+"%23" denmisti, denetci N1 duzeltmesi). Hedef `<=60.000` SAGLANDI; butce **81.920 DEGISMEDI**
+(kalan 21.930).
 **B0 / B1-B3 / B2-SUREC / B4 DOKUNULMADI:** HEAD'in ilk 557 satiri ile `cmp` **0 fark**
 (32.207 B = 32.207 B). B8'in `00a` blogu da `cmp` ile BIREBIR (14 satir / 1.148 B);
 EK-1 (36-39) ve `00b:` satirlari BIREBIR.
+
+**BEYANSIZ GUNCELLEME - DENETCI B4 (kayit):** kesim turunda B9/ACIK GIRDILER'e
+**"K4 TELAFISININ ATOMIKLESTIRILMESI GF-5/K4'te KAPANDI (tek transaction)"** satiri
+EKLENDI; iddia DOGRU (`docs/muhur/52-guvenlik-fix-5.md:72`) ama degisiklik listesinde
+ANILMAMISTI. Denetci bagimsiz dogruladi ve `[DURUSTLUK]` olarak isaretledi. **KAYIT:**
+kesim turu SADIK TASIMA turudur; deftere YENI BILGI eklemek AYRI bir istir ve BEYAN ISTER.
+
+---
+
+## 5. DUZELTME TURU (denetci bulgulari kapatildi) — ayni `54`, EK COMMIT
+
+Denetci `77df254` uzerinde kostu; **amend YOK**, duzeltmeler AYRI commit'tedir.
+Dort bulgunun dordu de kapatildi:
+
+| bulgu | ne yapildi | nerede |
+|---|---|---|
+| **B2** `[MANTIK]` DUSUK-ORTA — "ortak RuleBuilder ACILMAZ" YASAGI dustu, ayni isim ACIK IS olarak kaldi (sinyal TERSINE dondu) | B8/`52·GF-5` ozune yasak GERI KONDU; B9/ACIK GIRDILER satiri "K7 mesaj/NotEmpty ayrismasi (VITRIN-KALAN 3); cozum ORTAK SABIT REFERANSI — ortak RuleBuilder ACILMAZ (`52·GF-5` BAGLAYICI)" olarak YENIDEN YAZILDI | B8 · B9 |
+| **B3** `[MANTIK]` DUSUK — sinir degerleri TUTARSIZ kesildi (`request_id` kaldi, digerleri dustu) | `guest_name` <=100 (olcum SANITIZE SONRASI) · e-posta <=200 `request_id`in YANINA geri kondu | B8 |
+| **B1** `[MANTIK]` DUSUK — 439/441; B7 provenans etiketi ne CLAUDE.md'de ne arsivde | B7'ye TEK provenans satiri: `kaynak: 40·MANTIK-FIX-4 · KURGU KAYIT ENVANTERI (bayt-ayni kopya 54·ARSIV-4 2.2)` | B7 |
+| **B4** `[DURUSTLUK]` DUSUK — beyansiz defter guncellemesi | Yukaridaki **BEYANSIZ GUNCELLEME** kaydi | 54 bolum 3 |
+
+**EK KAPANIS (bulgu degil, merkez karari):** B9/ACIK GIRDILER'deki
+`ExecuteDeleteAsync <-> transaction ROLLBACK OLCULMEDI` -> **KAPANDI**
+(`51·AV-2` S-B: ambient transaction'a KATILIR, rollback geri alir).
+
+**EK KESIM:** B8 kuyrugundaki iki ARSIV-1/C3 fragman blogu (`MF-3 SARTLARI` +
+`64 invoice_items`) -> bolum **2.6**, bayt-aynen; yerine EK-1'e tek oz satir.
+Bu, B1-B3 duzeltmelerinin bayt maliyetini (**+310 B**) karsiladi ve hedefin ALTINDA kalindi.
+
+---
+
+### 2.6 B8 — ARSIV-1/C3 FRAGMAN KUYRUGU (DUZELTME TURUNDA KESILDI, BAYT-AYNI)
+
+Denetci bulgusu **B3**'un kardesi: bu iki blok B8'in SONUNDA, karar listesinin DISINDA
+duruyordu ve `00b:` listesinden sonra geliyordu. `MF-3 SARTLARI`nin OZU EK-1 listesine
+**tek oz satir** olarak tasindi (`37·MF-1·MF-3 SARTLARI`); `64 invoice_items` ve
+`InvoiceManager` satirlari EK-1'de **ZATEN VARDI**, bu yuzden oz satir ACILMADI.
+Asagisi CLAUDE.md'den cikarilan **892 baytin BAYT-AYNI kopyasidir**
+(md5 `27257b8254308aaa241af5cda9066dd5`, 16 satir).
+
+### Denetim duzeltmesi (ARSIV-1/C3) — fragman alintilar tam cumle sinirina cekildi
+
+kaynak: 37·MANTIK-FIX-1_MUHRU · MF-3 SARTLARI (409 semantigi, tam blok)
+
+**MF-3 SARTLARI:** (a) musteri+adres yazimi `PlaceOrder` BASARISINA baglanacak (transaction
+ya da erteleme) · (b) cozumde **IKINCI kupon dogrulama noktasi ACILMAZ** ("ayni kuralin
+ikinci kopyasi" - bu depoda 7 kez bedeli odendi) · (c) **409 semantigi YENIDEN ACILMAZ**
+(GUVENLIK-2/#1 kabul edilmis karar) - satir hic yazilmazsa 409 sorunu zaten DOGMAZ ·
+(d) K3'un bu dali ulasilabilir kildigi gercegi MF-3 tarifinin GEREKCESINE girer.
+
+#### 64 bozuk invoice_items satiri
+
+kaynak: 36·MANTIK-AV-1_MUHRU · DALGA BOLUMLEMESI (64 fatura satiri, tam cumle)
+
+**MANTIK-FIX-2 `[FATURA]`** - kargo AYRI KALEM · KDV `invoices.tax_rate`'ten · fatura ekrani
+i18n. **64 bozuk `invoice_items` satiri D-YAN'a** (veri temizligi, fix degil).

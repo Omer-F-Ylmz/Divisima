@@ -712,6 +712,9 @@ komut satirinda BES ARGUMAN var ve **BUNLAR URUN VARSAYILANI DEGILDIR** -
 
 ## KURGU KAYIT ENVANTERI — OZ (dalga bazli tam metin: her dalganin kendi muhrunde)
 
+kaynak: 40·MANTIK-FIX-4 · KURGU KAYIT ENVANTERI + `42·GUVENLIK-AV-1 · KURGU`
+(bayt-ayni kopya `54·ARSIV-4` 2.2)
+
 **Dalga bazli "kurgu kaydi uretti/uretmedi" satirlari, MAX serileri ve eski suit tabanlari
 `54·ARSIV-4` bolum 2.2'de BAYT-AYNI.** Burada yalniz GUNCEL taban durur.
 
@@ -743,7 +746,8 @@ dalgalarin kurgusu ayni oneki tasiyabilir; durust ifade tarih niteleyicisi ister
 ## D-YAN (tek isaretci)
 
 **D-YAN bloklari KUMULATIFTIR.** Tam liste `39·MANTIK-FIX-3`; kesilen bloklar bayt-aynen
-`54·ARSIV-4` bolum 2.2. Onceki bloklar arsiv dosyalarinda: 26 · 27 · 30-38 (INDEX ile cozulur).
+`54·ARSIV-4` bolum 2.2 (AV-1 kurgusu -> `42·GUVENLIK-AV-1 · KURGU ENVANTERI`). Onceki
+bloklar arsiv dosyalarinda: 26 · 27 · 30-38 (INDEX ile cozulur).
 **CANLI KVKK IHLALI: adres 55 / musteri 93** (silinmis hesap, TAM PII) - KR6 geregi
 DOKUNULMADI; duzeltme YENI silmelerde gecerli.
 **AV-3 devri (`53·AV-3` bolum 13):** DY-A musteri 192 desen disi · DY-B musteri 201/202
@@ -777,6 +781,7 @@ yalniz somut gerekceyle bakilir.
 - `39·MANTIK-FIX-3·MERKEZ KARARLARI N2` | **N2** | Hata eslemesi once MAKINE-OKUNUR sinyal; yoksa HAM yanit capasi + cift bicim + kirilganlik kaydi | K3 ve K3b'nin ikisi de bu capaya dayaniyor - sunucu yanit sozlesmesi DEGISTIRILMEDI, istemcide politika kopyasi ACILMADI |
 - `36·MANTIK-AV-1·DALGA BOLUMLEMESI` i18n. **64 bozuk `invoice_items` satiri D-YAN'a** (veri temizligi, fix degil).
 - `37·MANTIK-FIX-1·MF-2 ONCESI ARA DURUM` **InvoiceManager KODUNA DOKUNULMADI (sart aynen korundu).**
+- `37·MF-1·MF-3 SARTLARI` **(a)-(d):** 409 semantigi YENIDEN ACILMAZ · **IKINCI kupon dogrulama noktasi ACILMAZ** ("ayni kuralin ikinci kopyasi" - 7 kez bedeli odendi) · musteri+adres yazimi `PlaceOrder` BASARISINA bagli. Tam blok -> 37, bayt-aynen `54·ARSIV-4` 2.6.
 **GF-1..GF-2b kararlari OZ; tam metin muhur 44-48, kesilen 29 satir bayt-aynen 49'da.**
 
 - `44·GF-1·K1` request_id replay'i misafir 409'undan MUAF; e-posta ordinal eslesirse 200, eslesmezse sizintisiz 400. -> 44
@@ -809,7 +814,7 @@ yalniz somut gerekceyle bakilir.
 - `48·GF-2b·K4` rid YALNIZ 409'da yenilenir `[VERI-BOZAN]`; `sepetImzasi` GENISLETILMEZ, niyet imzasi AYRI ve onu ICERIR. -> 48
 - `48·GF-2b·K5` admin CSP `'unsafe-inline'`siz; vitrin `'unsafe-inline'` KABUL EDILMIS RISK; `frame-src` SUPHELI. -> 48
 - `50·GF-4·K1` `50·GF-4·K4` `50·GF-4·K5` `50·GF-4·K7` **TEDARIK ZINCIRI (dordu tek satirda):** action'lar 40-hane COMMIT SHA'sina pinli · paket kaynagi TEK (`NuGet.config` + `<clear />`, her projede `packages.lock.json`, CI `--locked-mode`) · imaj referansi TEK KAYNAK (dort site ayni tag+digest; digest **Schema 2 POZ/NEG cozucuyle**, etiketten okunan deger TEK BASINA gecersiz) · **AutoMapper 12.0.1 KALIR** (lisans degisimi 15.0.0), `NuGetAuditMode=all` UYARI, deprecated adimindaki `\|\| true` BILINCLI. Tam metin (K1/K4/K5/K7) -> `50·GUVENLIK-FIX-4`, kesilen satirlar `54·ARSIV-4` 2.4.
-- `52·GF-5` **A09 IZ/ATIF + MISAFIR BUTUNLUGU + MASKE:** olay yuzeyi = kayitsiz/kilitli giris · logout (iki dal) · sahiplik ihlali `IdorAttempt` **kapsam DUZELTILDI (`53·AV-3`): cagri yeri IKI - `IyzicoPaymentManager`(`order`) + `OrderManager`(`address`); "Order+Payment" YANLISTI** · 429 ornekleme ip+uc/60 sn (`customer_id` NULL kabul edilmis sinir) · bozuk imza. **IMZASIZ webhook 404 STATUKO = KABUL EDILMIS RISK** (K7 DUSTU - saglayici imza GONDERMIYOR). Girdi sinirlari TEK KAYNAK `GirdiSinirlari`, **sema'ya capalanir sabite DEGIL**; `request_id` <=80 + `[A-Za-z0-9._-]`, **GUID SARTI ASLA**. Log maskesi GLOBAL: iki Serilog sink'i de `MaskeliFormatter` (`ITextFormatter`), enricher yolu KAPALI, `KanitMaskesi` olcutu GENISLETILMEZ. Tam metin -> `52·GUVENLIK-FIX-5`, kesilen satirlar `54·ARSIV-4` 2.4.
+- `52·GF-5` **A09 IZ/ATIF + MISAFIR BUTUNLUGU + MASKE:** olay yuzeyi = kayitsiz/kilitli giris · logout (iki dal) · sahiplik ihlali `IdorAttempt` **kapsam DUZELTILDI (`53·AV-3`): cagri yeri IKI - `IyzicoPaymentManager`(`order`) + `OrderManager`(`address`); "Order+Payment" YANLISTI** · 429 ornekleme ip+uc/60 sn (`customer_id` NULL kabul edilmis sinir) · bozuk imza. **IMZASIZ webhook 404 STATUKO = KABUL EDILMIS RISK** (K7 DUSTU - saglayici imza GONDERMIYOR). Girdi sinirlari TEK KAYNAK `GirdiSinirlari` — **ortak RuleBuilder ACILMAZ** (Seller'a kapsam tasmasin, o kendi literalini korur), **sema'ya capalanir sabite DEGIL**; `request_id` <=80 + `[A-Za-z0-9._-]` **GUID SARTI ASLA** · `guest_name` <=100 (olcum SANITIZE SONRASI) · e-posta <=200. Log maskesi GLOBAL: iki Serilog sink'i de `MaskeliFormatter` (`ITextFormatter`), enricher yolu KAPALI, `KanitMaskesi` olcutu GENISLETILMEZ. Tam metin -> `52·GUVENLIK-FIX-5`, kesilen satirlar `54·ARSIV-4` 2.4.
 - `51·AV-2` **LAUNCH BLOKER OLCUTU:** `KRITIK` **∨** `YUKSEK`+`KIMLIKSIZ-UZAK` **∨** `[PARA]`/`[VERI-BOZAN]`. Digerleri launch SONRASI. Siddet ON KOSULDAN bagimsiz verilemez; `ADMIN` on kosullu kalem KRITIK OLAMAZ. -> 51
 - `51·AV-2` **AV KAPSAMI KUMULATIF MATRISLE OLCULUR; YER DEGISTIRME YASAK.** Her AV turu kapsam matrisini (uc/controller x tur) muhre kumulatif yazar ve sonraki tur onceki turun KOR KUMESINDEN baslar. Gerekce olculdu: AV-1'in kor 13'u ile AV-2'nin kor 17'sinin kesisimi **0**; 40 controller'in **30'u** en az bir turda kor kaldi. -> 51
 
@@ -826,25 +831,6 @@ Asagidaki maddeler kayit olarak duruyor; her birinin basinda guncel durumu yazil
 - `00b:197` **ACIK** 14. **`X-Api-Version` BASLIGI AYRISTIRILAMAZSA TUM API BLANKET 400 VERIYOR.** (Sprint 8
 - `00b:313` **ACIK** 20. **VARSAYILAN-KAPALI KURAL CONTROLLER'LARLA SINIRLI - MINIMAL-API UCU EKLENIRSE
 - `00b:229` **BAGLAYICI** 16. **`Webhook:AllowedIps` ALLOWLIST'I VAR AMA BOS - VE PROXY ARKASINDA CALISMAZ.**
----
-
-
-### Denetim duzeltmesi (ARSIV-1/C3) — fragman alintilar tam cumle sinirina cekildi
-
-kaynak: 37·MANTIK-FIX-1_MUHRU · MF-3 SARTLARI (409 semantigi, tam blok)
-
-**MF-3 SARTLARI:** (a) musteri+adres yazimi `PlaceOrder` BASARISINA baglanacak (transaction
-ya da erteleme) · (b) cozumde **IKINCI kupon dogrulama noktasi ACILMAZ** ("ayni kuralin
-ikinci kopyasi" - bu depoda 7 kez bedeli odendi) · (c) **409 semantigi YENIDEN ACILMAZ**
-(GUVENLIK-2/#1 kabul edilmis karar) - satir hic yazilmazsa 409 sorunu zaten DOGMAZ ·
-(d) K3'un bu dali ulasilabilir kildigi gercegi MF-3 tarifinin GEREKCESINE girer.
-
-#### 64 bozuk invoice_items satiri
-
-kaynak: 36·MANTIK-AV-1_MUHRU · DALGA BOLUMLEMESI (64 fatura satiri, tam cumle)
-
-**MANTIK-FIX-2 `[FATURA]`** - kargo AYRI KALEM · KDV `invoices.tax_rate`'ten · fatura ekrani
-i18n. **64 bozuk `invoice_items` satiri D-YAN'a** (veri temizligi, fix degil).
 # B9 — KUYRUK · DEVIR · VITRIN-KALAN · ERTELENMIS-DEFTER
 
 **Usul:** SIRADAKI IS + BAGLAYICI KAPANIS KAYITLARI; tam metinler ilgili muhurlerde, bu
@@ -909,8 +895,8 @@ KAPALI kalem yeni bulguyu BASTIRMAZ.** Tam metinler:
 
 **B-27 KAPANDI (AV-2):** `/api/payment/callback` artik `payment` kovasinda; canli sinir
 10 gecer / 11. istek 429, iki denetci AYRI AYRI olctu. **`00b:247` arsivi DEGISMEZ (MK-11/d).**
-**`frame-src` SUPHELISI ACIK** - gercek sandbox odemesi gerekiyor (`48·GF-2b` GOZ TURU'nun
-sekiz kaleminden kapanmayan tek kalem).
+**`frame-src` SUPHELISI ACIK** - gercek sandbox odemesi gerekiyor (`48·GF-2b · GOZ TURU` +
+`49·ARSIV-3 · K2`: sekiz kaleminden kapanmayan tek kalem).
 **D-7 KISMEN:** admin TAM, vitrin `'unsafe-inline'` KABUL EDILMIS RISK; **CSP FAZ B YOK.**
 
 ## DEVIR ID'LERI (tek satir; tam metin `40·MANTIK-FIX-4`)
@@ -945,6 +931,9 @@ birlikte etkiler).
 
 ## ACIK GIRDILER (`39·MF-3` kalanlari)
 
-`ExecuteDeleteAsync` <-> transaction ROLLBACK OLCULMEDI · hata kodu birlestirme (TR serbest
-metin capasi kirilgan) · ortak RuleBuilder / K7 mesaj ayrismasi.
+Hata kodu birlestirme (TR serbest metin capasi kirilgan) · **K7 mesaj/NotEmpty ayrismasi**
+(VITRIN-KALAN 3); cozum ORTAK SABIT REFERANSI — **ortak RuleBuilder ACILMAZ** (`52·GF-5`
+BAGLAYICI).
+**`ExecuteDeleteAsync` <-> transaction ROLLBACK KAPANDI** (`51·AV-2` S-B: ambient
+transaction'a KATILIR, rollback geri alir).
 **K4 TELAFISININ ATOMIKLESTIRILMESI GF-5/K4'te KAPANDI** (tek transaction).
