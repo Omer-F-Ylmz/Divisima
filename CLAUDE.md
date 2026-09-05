@@ -815,6 +815,9 @@ yalniz somut gerekceyle bakilir.
 - `48·GF-2b·K5` admin CSP `'unsafe-inline'`siz; vitrin `'unsafe-inline'` KABUL EDILMIS RISK; `frame-src` SUPHELI. -> 48
 - `50·GF-4·K1` `50·GF-4·K4` `50·GF-4·K5` `50·GF-4·K7` **TEDARIK ZINCIRI (dordu tek satirda):** action'lar 40-hane COMMIT SHA'sina pinli · paket kaynagi TEK (`NuGet.config` + `<clear />`, her projede `packages.lock.json`, CI `--locked-mode`) · imaj referansi TEK KAYNAK (dort site ayni tag+digest; digest **Schema 2 POZ/NEG cozucuyle**, etiketten okunan deger TEK BASINA gecersiz) · **AutoMapper 12.0.1 KALIR** (lisans degisimi 15.0.0), `NuGetAuditMode=all` UYARI, deprecated adimindaki `\|\| true` BILINCLI. Tam metin (K1/K4/K5/K7) -> `50·GUVENLIK-FIX-4`, kesilen satirlar `54·ARSIV-4` 2.4.
 - `52·GF-5` **A09 IZ/ATIF + MISAFIR BUTUNLUGU + MASKE:** olay yuzeyi = kayitsiz/kilitli giris · logout (iki dal) · sahiplik ihlali `IdorAttempt` **kapsam DUZELTILDI (`53·AV-3`): cagri yeri IKI - `IyzicoPaymentManager`(`order`) + `OrderManager`(`address`); "Order+Payment" YANLISTI** · 429 ornekleme ip+uc/60 sn (`customer_id` NULL kabul edilmis sinir) · bozuk imza. **IMZASIZ webhook 404 STATUKO = KABUL EDILMIS RISK** (K7 DUSTU - saglayici imza GONDERMIYOR). Girdi sinirlari TEK KAYNAK `GirdiSinirlari` — **ortak RuleBuilder ACILMAZ** (Seller'a kapsam tasmasin, o kendi literalini korur), **sema'ya capalanir sabite DEGIL**; `request_id` <=80 + `[A-Za-z0-9._-]` **GUID SARTI ASLA** · `guest_name` <=100 (olcum SANITIZE SONRASI) · e-posta <=200. Log maskesi GLOBAL: iki Serilog sink'i de `MaskeliFormatter` (`ITextFormatter`), enricher yolu KAPALI, `KanitMaskesi` olcutu GENISLETILMEZ. Tam metin -> `52·GUVENLIK-FIX-5`, kesilen satirlar `54·ARSIV-4` 2.4.
+- `55·GF-6` **REPLAY GUARD'I TEK SERVIS:** `request_id` replay kurali (kupon KANONIK + coklu-kume sepet + sizintisiz 400) `SiparisReplayGuardi`de TEK yerde; misafir ve uye yollari AYNI servisi FARKLI **sahiplik ekseniyle** cagirir (misafir=E-POSTA ordinal, uye=`customer_id`). Kopya ACILMAZ. -> 55
+- `55·GF-6` **DURUM YAZIMI TEK KAPIDAN + TERMINAL KORUMASI:** `OrderManager`da her `order.status` yazimi `DurumYaz` -> `OrderStatusMachine`den gecer (dogrudan atama 4 -> 0). Iyzico'nun IKI dali terminal siparisi DIRILTMEZ: `payments` Success KAYDEDILIR, `PaymentAfterTerminal`/Critical yazilir, yanit **200 + ayri mesaj** (`status=review`) - `success` DEGIL. Iade **ELLE** (BILINEN). `ShipmentManager` :65/:118 GF-6 ONCESINDEN makine korumali; `DurumYaz` `OrderManager`a OZELDIR. -> 55
+- `55·GF-6` **COD PARA ANLAMI `Delivered`DA (DAR):** `PaidOrderSpec.IsPaid(byte status, byte paymentType)` - COD yalniz `Delivered`. Core Entity'yi GOREMEZ, EF yuzu `Divisima.Entity.Specifications.OdenmisSiparisSpec`; **TAM MATRIS pini** ikisini baglar. GECEN SITELER YALNIZ **referans odulu + sadakat kazanimi**. **KUPON LIMITLERI ESKI KURALDA** - olculdu: gecirilince `usage_limit=1` kuponu SEKIZ es zamanli COD siparisinin HEPSI aldi (COD `Pending` DOGMAZ, sayilacak durum KALMAZ). Kupon limiti "para alindi mi" degil **"hak hala CANLI mi"** sorusudur. Sadakat: `PaymentConfirmedSideEffects` BOLUNMEZ; COD'da `Confirmed` dalinda ATLANIR, `Delivered`da ayni olay YENIDEN yazilir (dordu de idempotent). -> 55
 - `51·AV-2` **LAUNCH BLOKER OLCUTU:** `KRITIK` **∨** `YUKSEK`+`KIMLIKSIZ-UZAK` **∨** `[PARA]`/`[VERI-BOZAN]`. Digerleri launch SONRASI. Siddet ON KOSULDAN bagimsiz verilemez; `ADMIN` on kosullu kalem KRITIK OLAMAZ. -> 51
 - `51·AV-2` **AV KAPSAMI KUMULATIF MATRISLE OLCULUR; YER DEGISTIRME YASAK.** Her AV turu kapsam matrisini (uc/controller x tur) muhre kumulatif yazar ve sonraki tur onceki turun KOR KUMESINDEN baslar. Gerekce olculdu: AV-1'in kor 13'u ile AV-2'nin kor 17'sinin kesisimi **0**; 40 controller'in **30'u** en az bir turda kor kaldi. -> 51
 
@@ -853,17 +856,20 @@ kesilenler) ve `41·ARSIV-1`; ikisi de BAYT-SABIT (MK-11/d), bu tur DOKUNMADI.
   19 derinlemesine · 4 yalniz canli yetki · 5 yalniz kaynak eleme · 2 ilan edilmis kapsam disi.
 - **ARSIV-4 (docs) `1d67cf6` zemininde /54** — CLAUDE.md kesimi; karar envanteri ONCE/SONRA
   `comm` iki yon BOS.
+- **GF-6 LAUNCH ONCESI `3095568` zemininde /55 — KAPANDI. NO-GO 3'un UCU DE KAPANDI:**
+  T1-B1 (uye replay, K1) · T1-B2 (adressiz siparis, K2) · **T1-B4 (COD parasiz "odenmis",
+  F1 - DAR kapsam)**. Ayrica **T4-F1 (cift para iadesi) KAPANDI** - migration YOK, kalem
+  basina dagitik kilit + TAZE okuma; K8 probu ONCE 48 turda **41 ve 35** hit, SONRA **0**.
+  **T4-F2 GF-7'ye GEREKCELI ISTISNAYLA devredildi** (48/48 hit, `[VERI-BOZAN]`, seri
+  kontrolde kayip 0): para alanlari ZATEN atomik (H27 CAS), kayip yalniz PROFIL alanlarinda
+  ve ayni hesabin kendi es zamanli guncellemesinde. **TETIKLEYICI: GF-7 ILK KALEM.**
+  Suit 806/809 x3 (uc kirmizi = bilinen Docker uclusu) · Sql 411/411 · 24 mutasyon kosumu.
 
-## KUYRUK (`53·AV-3` sonrasi)
+## KUYRUK (`55·GF-6` sonrasi)
 
-1. **GF-6 LAUNCH ONCESI** <- SIRADA. **6a** uye yolu butunlugu (T1-B1 · T1-B2 · T1-B3 ·
-   T1-B4 - TEK KOK: misafir yolunun kazandigi kapilar uyeye tasinmamis) · **6b** durum
-   makinesi (T4/S-1 iptal edilmis siparisi dirilten callback + T4-F5 iki elle kopya - TEK
-   KOK: durum yazimi `IsValidTransition`'dan gecmiyor) · **6c** X-2 hub
-   `RequireAuthorization` (tek satir + pin) · **6d** T2-1 `product/import` transaction +
-   satir siniri + tip kontrolu · **6e** T4-F1/T4-F2 **kirmizi-once denemesi**.
-2. **LAUNCH GO/NO-GO TURU**.
-3. **GF-7 (LAUNCH SONRASI):** AV-3'un 6b/6c/6d kalani + olu/yaniltici yuzey grubu
+1. **LAUNCH GO/NO-GO TURU** <- SIRADA.
+2. **GF-7 (LAUNCH SONRASI) — ILK KALEM T4-F2** (rowversion migration; gerekce ve tetikleyici
+   `55·GF-6` bolum 5.1). Sonra: AV-3'un 6b/6c/6d kalani + olu/yaniltici yuzey grubu
    (`53` bolum 9) · SC-12 outbox payload sifreleme/ozetleme (SA-1 ile birlikte -
    `AesEncryptionProvider` bugun TEK ANAHTARLI ve cozemedigi degeri OLDUGU GIBI donduruyor,
    yani sifreleme once SA-2'yi ister) · SA-1/SA-2 at-rest kurcalama + anahtar rotasyonu ·
@@ -892,6 +898,12 @@ KAPALI kalem yeni bulguyu BASTIRMAZ.** Tam metinler:
   `available` KALICI dusuk. **PROD CHECKLIST: `BackgroundJobs:Enabled=true` -> IRL listesi**) ·
   **kor eksenler A02 · A03 · A05 · A04** (A03'un gerekcesi `frontend/*` DOKUNULMAZ - yasak
   yuzeyde birakilmis bosluk; A04 IKINCI KEZ hicbir goreve girmedi).
+- **`55·GUVENLIK-FIX-6`** — DURUM sutunlu tam liste muhurde (yedi kalem); uc tanesi **ACIK**:
+  **raporlama siteleri ESKI kuralda** (Dashboard · Merchandising · Recommendation · Seller —
+  COD siparisi ciro/siralama/oneride hala `Confirmed`da sayilir, GF-7) · **terminal siparise
+  gelen odemenin IADESI ELLE** (otomatik iade `RefundManager`dan gecer, kapsam disiydi;
+  musteri `status=review` ekrani gorur) · **`health` uclari BILINCLI anonim**
+  (`AllowAnonymous` ISARETLI — orkestratör probe'lari kimlik tasimaz, **BAGLAYICI**).
 
 **B-27 KAPANDI (AV-2):** `/api/payment/callback` artik `payment` kovasinda; canli sinir
 10 gecer / 11. istek 429, iki denetci AYRI AYRI olctu. **`00b:247` arsivi DEGISMEZ (MK-11/d).**
