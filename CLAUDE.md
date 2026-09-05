@@ -81,6 +81,12 @@ Kurallar kullanici tarafindan konulmustur; asistan bunlari kendi basina gevsetem
   gerekce `KanitMaskesi`'nin basinda; davranis `KanitMaskesiTests` ile pinli.
   **TESHIS DEGERI KORUNUR:** baglantida origin ve yol gorunur kalir
   (`http://localhost:5173/#/dogrula/RcR276Ak…`), yalniz jetonun kendisi gider.
+- **KOD YORUMUNDA SATIR NUMARASI YAZILMAZ — atif SEMBOL/METOT adiyla yapilir (52·GF-5).**
+  MK-11/d'nin kod yuzu. Gerekce OLCULDU: GF-5'in ekledigi yorumlarda **17 bayat atif** cikti;
+  hepsi ZEMINE karsi DOGRUYDU ve atifi yazan dalganin KENDISI ayni dosyalarda satirlari
+  kaydirdi (`Program.cs` atiflari TAM +10). Dordu MERKEZ KARARLARININ dayanagini tasiyordu.
+  Ozu hicbirinde yanlis degildi - bozulan sey CAPAYDI; satir numarasi, yazildigi anda dogru
+  olsa bile KENDINI KORUYAMAYAN bir capadir.
 - Run izleme **SHA bazlidir** (`head_sha=` ya da `?branch=main` + SHA eslesmesi).
   "En son run" ile calisilmaz — Dependabot kosulari araya girer ve yanlis run raporlanir.
 
@@ -476,6 +482,19 @@ dosyanin ORTASINA dustu (hata 6: 1 yerine 4 kirmizi). Iki vaka da ayni kokten: *
 duzenleyici, metnin BAYTLARINI korumaz.**
 **NUMARA:** mevcut en yuksek tam sayi MK-7 idi (MK-4b harflidir, tam sayi TUKETMEZ),
 dolayisiyla **MK-8** atandi - merkez beklentisiyle ORTUSUYOR.
+
+**EK (52·GF-5) — `Directory.Build.props` DEGISIKLIGI `-getProperty` PROBUYLA DOGRULANIR;
+KURAL, DERS DEGIL (UCUNCU TEKRAR).** XML yorumunda `--` dizisi dosyayi BOZAR ve `dotnet
+restore` bunu **exit 0** ile gecer, MSB4024 BASMAZ. GF-4'te bir kez odendi, GF-5'te AYNI
+tuzaga YENIDEN dusuldu (`dotnet --list-sdks` metni bir yoruma yazildi). Tek durust sinyal
+`dotnet msbuild <proje> -getProperty:<ozellik>` probudur; prob ayrica AYIRT ETME kaniti verir
+(bozukken MSB4024, duzeltilince deger).
+
+**EK (52·GF-5) — KAYNAK-SOZLESME PINLERI YORUMSUZ METIN UZERINDE KOSAR.** Aranan dizge
+uretim kodunda DEGIL onu ACIKLAYAN YORUMDA gecerse assert YANLIS atesler ya da BEDAVA dogru
+olur. GF-4/K4'te `<clear />` asserti dosyanin kendi yorumuyla tatmin oldu; GF-5'te
+`NotContain("action == \"Added\"")` kendi yorumunda geciyor diye yanlis kirmizi verdi.
+Tarama, yorumlari AYIKLANMIS metin uzerinde yapilir. (Mutasyon sinamasi zaten MK-6'da.)
 
 **KALICI DERSLER:**
 - **YASAK-BICIM ASSERT'I AYIRT EDICI DEGERLE KURULUR ve ayirt ediciligi KANITLANIR.**
@@ -890,6 +909,17 @@ Durust ureten ifade tarih niteleyicisi ister: `... AND created_at >= CAST(GETDAT
 -> **0**.
 Suit tabani `50·GUVENLIK-FIX-4` kapanisinda **Sql 382/382 · tam 743/746** (+13 pin;
 uc kirmizi = bilinen Docker uclusu, yerelde Docker YOK). Ureten ifade ayni.
+**GF-5 KURGU (`52·GUVENLIK-FIX-5`)** - ureten ifadeleriyle:
+`SELECT MAX(id) FROM customers` -> **184** (178 `gf5.b.1@` · 179 `gf5.guest.1@` **SD-7 yetimi,
+ESKI kodun urunu** · 182 `gf5.1@` · 184 `gf5.guest.5@`; **180/181/183 SAF KIMLIK BOSLUGU**,
+`SELECT COUNT(*) ... WHERE id BETWEEN 180 AND 183 AND id<>182` -> 0).
+siparis **287** · adres **126** · fatura **120** · `COUNT(*) user_sessions` **372** ·
+`security_events` **46** (altisinda ip+ua DOLU; GF-5 oncesi 0/40) · `audit_logs` 4328.
+`SELECT COUNT(*),MIN(id),MAX(id),SUM(CAST(id AS bigint)) FROM orders WHERE status=0 AND
+id<=210` -> **35 / 9 / 210 / 3837 BIREBIR**. Yetim adres 0 · yetim siparis 0 (depo geneli);
+musteri 184 TAM uretim imzasi tasiyor. Elle INSERT YOK, sema degisikligi YOK.
+Suit tabani `52·GUVENLIK-FIX-5` kapanisinda **Sql 382/382 · tam 777/780** (+34 pin;
+uc kirmizi = ayni bilinen Docker uclusu). Ureten ifade ayni.
 **AV-2 DORT KURGU KAYDI URETTI (SALT OLCUM turu, hepsi URETIM YOLUNDAN):** musteri
 **172** `av2.sb.1@` · **174** `av2.sf.1@` · **175** `av2.sd.2@` · **177** `av2.sc.1@`.
 URETIM IMZASI: dordunde de `password_hash` **69** / `password_salt` **16** (GF-1/K6 v2
@@ -1014,6 +1044,9 @@ yalniz somut gerekceyle bakilir.
 - `50·GF-4·K7` AutoMapper 12.0.1 KALIR (lisans degisimi **15.0.0**); `NuGetAuditMode=all` UYARI seviyesi; deprecated adimindaki `\|\| true` BILINCLIDIR (o komut bulguda da exit 0 verir, kaldirmak olmayan bir kapiyi var sandirir). -> 50
 - `51·AV-2` **LAUNCH BLOKER OLCUTU:** `KRITIK` **∨** `YUKSEK`+`KIMLIKSIZ-UZAK` **∨** `[PARA]`/`[VERI-BOZAN]`. Digerleri launch SONRASI. Siddet ON KOSULDAN bagimsiz verilemez; `ADMIN` on kosullu kalem KRITIK OLAMAZ. -> 51
 - `51·AV-2` **AV KAPSAMI KUMULATIF MATRISLE OLCULUR; YER DEGISTIRME YASAK.** Her AV turu kapsam matrisini (uc/controller x tur) muhre kumulatif yazar ve sonraki tur onceki turun KOR KUMESINDEN baslar. Gerekce olculdu: AV-1'in kor 13'u ile AV-2'nin kor 17'sinin kesisimi **0**; 40 controller'in **30'u** en az bir turda kor kaldi. -> 51
+- `52·GF-5` **OLAY YUZEYI:** kayitsiz **ve kilitli** hesap girisi · logout (iki dal) · sahiplik ihlali `IdorAttempt` **kapsam Order+Payment** (kalan yedi manager BILINEN) · 429 **ornekleme ip+uc basina 60 sn**, `customer_id` NULL **kabul edilmis sinir** (middleware `UseAuthentication`'DAN ONCE) · bozuk imza. **IMZASIZ webhook 404 STATUKO = KABUL EDILMIS RISK** (otorite retrieve zinciri; K7 DUSTU - saglayici imza GONDERMIYOR, uygulansaydi tum callback+webhook 400 olurdu). ip/ua **`SecurityEventManager` ICINDE** doldurulur; sinir 60 = iki kolonun DARI. `detail` kolon genisligine KIRPILIR. -> 52
+- `52·GF-5` **MISAFIR/UYE GIRDI SINIRLARI TEK KAYNAK `GirdiSinirlari`** (sabit DEGERLER; ortak RuleBuilder ACILMAZ - Seller'a kapsam tasmasin, o kendi literalini korur). `guest_name` <=100 **olcum SANITIZE SONRASI** (`Sanitize` UZATMAZ - bes `Replace(...,"")`+`Trim`; `HtmlEncode` AYRI metot ve bu yolda cagrilmiyor). `request_id` <=80 + `[A-Za-z0-9._-]`, **GUID SARTI ASLA** (dolu 122 degerin 54'u GUID DEGIL; frontend yedek dali `co-...` uretir ve PINLI). E-posta <=200. Sinir degerleri **SEMAYA capalanir**, sabite DEGIL. -> 52
+- `52·GF-5` **LOG MASKESI GLOBAL:** Serilog'un IKI sink'i de `MaskeliFormatter` (`ITextFormatter`) uzerinden yazar - **enricher yolu KAPALI** (`LogEvent.Exception` readonly, olculdu) ve yeni paket GEREKMEDI. Cerceve metinleri (SQL "Truncated value", EF `@pN=`) AYRI `LogMetniMaskesi`de; **`KanitMaskesi` olcutu GENISLETILMEZ** (`KanitMaskesiTests` sozlesmesi korunur). GF-3'un "elle `ex` gecirilmez" sozlesmesi SURER - formatter onun YERINE gecmez, ARKASINA eklenir. -> 52
 
 ## Acik SUPHELI (00b-supheli.md)
 
@@ -1067,7 +1100,14 @@ BASKA KUYRUGA: A-2 -> VITRIN-KALAN 8 · F-3 -> IMPORT-FIX
 AV-1 `c6721b7`/42 · ARSIV-2 `4c29f32`/43 · GF-1 `189ce81`/44 · GF-1b `00b012f`/45 ·
 GF-2a `1dd985b`/46 · GF-3 `33cac2e`/47 · GF-2b FAZ 1 `0fd3e62`/48 ·
 GF-4 TEDARIK ZINCIRI `4976974`/50 (cift yesil: run 33891017398 · 33891017496) ·
-**GUVENLIK-AV-2 (SALT OLCUM) `ce54d0c` zemininde /51**.
+**GUVENLIK-AV-2 (SALT OLCUM) `ce54d0c` zemininde /51** ·
+**GF-5 A09 IZ/ATIF + MISAFIR BUTUNLUGU + MASKE `027a88a`/52 — LAUNCH BLOKER 2/2 KAPANDI**
+(SD-7 misafir butunlugu · SC-1 A09 iz/atif). K7 DUSTU (D1).
+**S-C KAPSAMA MATRISI: `H=8` -> `H=3`, uCu de BILINEN** - 403 yetki reddi (katman engeli:
+`Divisima.Core` ProjectReference 0) · webhook IP allowlist reddi (dal sevk edilen
+yapilandirmada YAPISAL OLARAK ULASILAMAZ, `00b:229`) · satici login (Seller'a 0 satir).
+**ONCEKI TABANIN BOLUNMESI YANLISTI:** `51·AV-2` iki yerde "10/5/7" diyor; tablodan yeniden
+sayilinca `E=8 · H=8 · KISMEN=6` (toplam 22 dogru, bolunme yanlis).
 **PROVENANS DUZELTMESI (AV-2'de olculdu):** AV-2'nin kapsami `42·GUVENLIK-AV-1`de
 "at-rest sifreleme · 2FA/TOTP · TOCTOU/ExecuteUpdateAsync · A09 · olay isleyicileri ·
 13 anilmayan controller (Comparison/Collection ham entity suphesi) **· Stock yuzeyi**"
@@ -1077,21 +1117,18 @@ Etkisi sifirdi (Stock zaten 13'un uyesi) ama tasima kaybi GERCEKTI - **geri konu
 
 **KUYRUK (AV-2 sonrasi yeniden dizildi):**
 
-1. **GF-5 (LAUNCH ONCESI, TEK DALGA)** <- SIRADA. Dort kok:
-   **A09 iz/atif** (SC-1 LAUNCH BLOKER · SC-2 ayni kok · SC-4 logout izsiz · SC-10
-   403/404/429 izsiz · SC-13 elle yazim kapsami) · **misafir yolu butunlugu**
-   (SD-7 LAUNCH BLOKER `[VERI-BOZAN]` · SE-4 `request_id` dogrulamasi ·
-   `:503-504` atomiklestirme) · **maske** (SC-7=SE-2 odeme jetonu · SC-6/Y-3 EF ham
-   istisna -> PII · SE-3 e-fatura metni · SC-12 outbox duz jeton) · **imzasiz webhook** (SE-5).
-2. **AV-3 DAR** (salt olcum): `POST api/order/place` · dosya yukleme yuzeyi
+1. **AV-3 DAR** (salt olcum) <- SIRADA: `POST api/order/place` · dosya yukleme yuzeyi
    (`product/import`, `product-image/upload`) · **A06** (tedarik zinciri) ve **A10** (SSRF) ·
    kor kalan 30 controller'dan `[PARA]`/`[VERI-BOZAN]` tasiyanlar. Kapsam matrisi KUMULATIF
    (bkz. B8) - AV-3 **AV-2'nin kor kumesinden baslar**.
-3. **LAUNCH GO/NO-GO TURU**.
-4. Launch SONRASI: GF-5d anonim uc sozlesmesi (SD-1/SD-2/SD-4) · SA-1/SA-2 (at-rest
-   kurcalama + anahtar rotasyonu) · SB-1 (2FA dalinda CAS geri alma) · SC-3 SIEM okuyucusu ·
-   VITRIN-KALAN (10 kalem) · FIX-1B · ADMIN-FIX · IMPORT-FIX · FIX-1C · LOG-FIX · FIX-2 ·
-   FIX-3/B13
+2. **LAUNCH GO/NO-GO TURU**.
+3. **GF-6 (LAUNCH SONRASI):** SC-12 outbox payload sifreleme/ozetleme (SA-1 ile birlikte -
+   `AesEncryptionProvider` bugun TEK ANAHTARLI ve cozemedigi degeri OLDUGU GIBI donduruyor,
+   yani sifreleme once SA-2'yi ister) · SA-1/SA-2 at-rest kurcalama + anahtar rotasyonu ·
+   SB-1 (2FA dalinda CAS geri alma) · SD-1/SD-2/SD-4 anonim uc sozlesmesi · SC-3 SIEM
+   okuyucusu.
+4. Launch SONRASI digerleri: VITRIN-KALAN (10 kalem) · FIX-1B · ADMIN-FIX · IMPORT-FIX ·
+   FIX-1C · LOG-FIX · FIX-2 · FIX-3/B13
 
 Bes BILINEN kalem (ayni-saniye jeton penceresi · miras oturumda step-up · 342 olu oturum ·
 IP davranis kaniti yok · K4 gecikmeli aile iptali) TAM METINLE `docs/muhur/45-guvenlik-fix-1b.md`
