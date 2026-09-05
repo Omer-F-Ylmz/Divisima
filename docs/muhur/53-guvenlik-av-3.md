@@ -40,7 +40,18 @@ bulguyla AYNI SIRAYA KONMAZ - SDP 1.11.10).
 
 ---
 
-## 3. BULGU TABLOSU - 32 KALEM (kanal sutunu D2 DUZELTMELI)
+## 3. BULGU TABLOSU - 37 KALEM (kanal sutunu D2 DUZELTMELI)
+
+> **SAYI DUZELTMESI (`54·ARSIV-4` turunda, MK-11/d ISTISNASI - muhrun KENDI sayi hatasi).**
+> Bu baslik ilk yazimda **"32 KALEM"** diyordu; tablo **37 satir** tasiyor.
+> **Ureten ifade:** `awk '/^\| id \| siddet/{f=1;next} f&&/^\|---/{next} f&&/^\|/{print $2}
+> f&&!/^\|/{exit}' <bu dosya> | tr -d ' ' | sort -u | wc -l` -> **37**
+> (aile dagilimi T1 8 · T2 7 · T3 9 · T4 8 · T5 2 · X 3; POZ kontrol `^| T1-B1 |` -> 1,
+> NEG kontrol uydurma id -> 0).
+> **KOK:** sayi AV-3 raporunda dogdu ("EN RISKLI 10 + kalan 22"; gercek kalan 27) ve
+> URETEN IFADESIYLE kaydedilmedigi icin iki durak boyunca yakalanmadi - MK-3'un onlemek
+> icin yazildigi sinif. **YAYILIM:** bu baslik + `1d67cf6` commit mesaji; commit mesaji
+> GECMISTE KALIR (force-push YASAK). Kayit ayrica bolum 16'da.
 
 **D2 OLCUMU:** ana akisin konsolide tablosunda kanal sutunu 27 satirin **10'unda** HAM'dan
 uretilemiyordu; **besi YUKARI** sapmisti (T3-2/3/4/6/7: HAM `1 KANAL -> SUPHE`, tabloda 2)
@@ -488,3 +499,13 @@ alti defterin altisi da MK-4a beyanini basinda tasiyor, altisi da SHA 533f935
 **BU TUR SALT OLCUMDUR.** Kod / config / uretim davranisi **DEGISTIRILMEDI**; bu muhur ve
 CLAUDE.md deltasi **docs-only** tek commit'tir. Duzeltme dalgasi **GF-6**'dir ve
 **BU TURDA BASLATILMAZ**.
+
+### 16.1 SONRADAN DUZELTME (`54·ARSIV-4`, MK-11/d ISTISNASI)
+
+Bu muhur `1d67cf6` ile push edildikten SONRA **kendi sayi hatasi** bulundu ve `54·ARSIV-4`
+commit'inde duzeltildi: **bolum 3 basligi "32 KALEM" -> "37 KALEM"** (ureten ifade ve
+POZ/NEG kontrolu orada). **Baska hicbir satiri degismedi.**
+**MK-11/d "arsiv BAYT-SABITTIR" kurali neden delindi:** kural, muhurun ICERIGINI sonradan
+gelen bilgiyle degistirmeyi yasaklar; burada degisen sey muhurun KENDI tablosunu YANLIS
+SAYAN bir basliktir - yani duzeltme, muhuru kendi kanitiyla TUTARLI hale getirir.
+Istisna MERKEZ TARAFINDAN VERILDI ve kapsami TEK SATIRDIR.
