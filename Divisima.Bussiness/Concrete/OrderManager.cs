@@ -20,6 +20,7 @@ using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Invoice;
 using Divisima.Entity.Dtos.Order;
 using Divisima.Entity.Entities;
+using Divisima.Entity.Specifications;
 
 namespace Divisima.Bussiness.Concrete
 {
@@ -293,6 +294,9 @@ namespace Divisima.Bussiness.Concrete
                     // musterinin kupon hakkini TUKETIYORDU. Odemesi yarida kalan/basarisiz olan musteri, per_user_limit=1
                     // ise kuponunu KALICI olarak kaybediyordu. Global limitte (H50) duzeltilen kuralin KARDES kopyasiydi.
                     // Ayni kural: odenmis siparisler + hala TAZE bekleyen odeme (devam eden checkout).
+                    // GF-6 / F1: ESKI KURALDA KALDI - gerekce CouponManager'in global limit
+                    // sitesinde (olculmus geri tepme: COD yolunda limit UYGULANAMAZ hale geliyordu).
+                    // Onizleme ile enforcement AYNI ifadeyi kullanmaya devam eder (H52).
                     var userPendingGrace = DateTime.Now.AddMinutes(-PaidOrderSpec.PendingGraceMinutes);
                     var usedByUser = await _orderDal.CountAsync(o =>
                         o.customer_id == dto.customer_id && o.coupon_code == coupon.code &&
@@ -316,6 +320,7 @@ namespace Divisima.Bussiness.Concrete
                     // checkout'lar sayilmali ki limit asilmasin). Bayat Pending'ler artik limiti tutmaz.
                     var pendingGrace = DateTime.Now.AddMinutes(-PaidOrderSpec.PendingGraceMinutes);
                     // PERFORMANS (H51): COUNT(*) - populer kuponda 50.000 siparisi belleğe cekmek yerine tek sayi.
+                    // GF-6 / F1: ESKI KURALDA KALDI - gerekce CouponManager'in global limit sitesinde.
                     var globalUses = await _orderDal.CountAsync(o =>
                         o.coupon_code == coupon.code &&
                         (PaidOrderSpec.PaidStatuses.Contains(o.status)
@@ -883,6 +888,21 @@ namespace Divisima.Bussiness.Concrete
                 // uygulanir. `!= previousStatus` sarti MUKERRER mesaji engeller: zaten Confirmed
                 // olan bir siparise ayni durum tekrar yazilirsa olay URETILMEZ.
                 if (order.status == (byte)OrderStatusEnum.Confirmed && previousStatus != (byte)OrderStatusEnum.Confirmed)
+                    await SiparisOnaylandiOlayiYazAsync(order);
+
+                // ══ GF-6 / F1 (K4-DAR) - KAPIDA ODEMEDE SADAKAT TESLIMATTA KAZANILIR ═══════
+                //
+                // COD'da para TESLIMATTA alinir; puan `Confirmed`da verilirse musteri hicbir sey
+                // odemeden puan kazanir (AV-3 / T1-B4'un sadakat yuzu). Cozum, uygulayiciyi
+                // BOLMEK degil - `PaymentConfirmedSideEffects` TEK PARCA kalir ve `Confirmed`
+                // dalinda sadakat adimini ATLAR (gerekce orada). Teslimatta AYNI olay YENIDEN
+                // yazilir; dort adimin dordu de IDEMPOTENT oldugu icin yalnizca ATLANMIS olan
+                // sadakat adimi fiilen kosar (fatura/referans/kupon satiri NO-OP doner).
+                //
+                // `!= previousStatus` sarti MUKERRER olayi engeller (Confirmed dalindaki emsalin
+                // aynisi). Online/havale siparislerinde de olay yazilir ama sadakat ZATEN
+                // kazanilmis oldugu icin `EarnFromOrder`in H28 ledger kontrolu NO-OP doner.
+                if (order.status == (byte)OrderStatusEnum.Delivered && previousStatus != (byte)OrderStatusEnum.Delivered)
                     await SiparisOnaylandiOlayiYazAsync(order);
 
                 await _unitOfWork.CommitAsync();

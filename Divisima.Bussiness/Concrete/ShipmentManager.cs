@@ -20,10 +20,18 @@ namespace Divisima.Bussiness.Concrete
         private readonly ICarrierProvider _carrierProvider;
         private readonly IOrderStatusHistoryService _statusHistory;
         private readonly IOrderNotificationService _orderNotificationService;
+        // GF-6 / F1 (K4-DAR): kargo-kaynakli TESLIMAT da sadakat kazanimini tetiklemeli.
+        // Kapida odemede para TESLIMATTA alinir; kazanim `Confirmed`da ATLANIR ve BURADA kosar.
+        // Uygulayici BOLUNMEDI - ayni "PaymentConfirmed" olayi yeniden yazilir, dort adimin
+        // ucu idempotent oldugu icin fiilen yalniz sadakat adimi kosar (gerekce
+        // PaymentConfirmedSideEffects'in 2. adiminda).
+        private readonly Divisima.Bussiness.Outbox.IOutboxService _outboxService;
 
         public ShipmentManager(IShipmentDal shipmentDal, IOrderDal orderDal, ICarrierProvider carrierProvider,
-            IOrderStatusHistoryService statusHistory, IOrderNotificationService orderNotificationService)
+            IOrderStatusHistoryService statusHistory, IOrderNotificationService orderNotificationService,
+            Divisima.Bussiness.Outbox.IOutboxService outboxService)
         {
+            _outboxService = outboxService;
             _shipmentDal = shipmentDal;
             _orderDal = orderDal;
             _carrierProvider = carrierProvider;
@@ -124,6 +132,19 @@ namespace Divisima.Bussiness.Concrete
                         await _statusHistory.RecordAsync(order.id, (byte)OrderStatusEnum.Delivered, "Kargo teslim edildi");
                         // TUTARLILIK: müşteriye "teslim edildi" bildirimi (merkezi servis; onceden kargo-teslimatta ATLANIYORDU).
                         await _orderNotificationService.NotifyStatusChangeAsync(order, OrderStatusEnum.Delivered);
+
+                        // GF-6 / F1 (K4-DAR): teslimat OLAYI - gerekce `_outboxService`in taniminda.
+                        // `OrderManager.ChangeOrderStatus`in Delivered dalindaki emsalin AYNISI;
+                        // olay govdesi de AYNI alanlari tasir (tek yazici kalibi korunur).
+                        await _outboxService.WriteAsync("PaymentConfirmed",
+                            new Divisima.Bussiness.Events.PaymentConfirmedEvent
+                            {
+                                order_id = order.id,
+                                customer_id = order.customer_id,
+                                total_price = order.total_price,
+                                coupon_code = order.coupon_code,
+                                discount_amount = order.discount_amount
+                            });
                     }
                     await _shipmentDal.UpdateAsync(shipment);
                 }

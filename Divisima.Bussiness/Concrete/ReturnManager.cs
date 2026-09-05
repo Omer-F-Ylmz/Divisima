@@ -35,13 +35,24 @@ namespace Divisima.Bussiness.Concrete
 
         // DALGA B / B3: iade sonucunu musteriye bildirmek icin.
         private readonly Divisima.Bussiness.Outbox.IOutboxService _outboxService;
+        // GF-6 / F3 (T4-F1) - OLCULEN [PARA] ACIGI: `CreateReturn` "kalan iade edilebilir adet"i
+        // OKUYUP sonra YAZIYORDU; arada kisit da transaction da YOKTU. K8 probu 48 turda 41 ve 35
+        // kez CIFT IADE uretti (toplam iade adedi kalem adedini ASTI) - yani ayni kalem icin iki
+        // eszamanli talep, ikisi de "kalan yeter" gorup ikisi de yaziyordu.
+        // MIGRATION ISTENMEDI (merkez karari): korumanin tasiyicisi UNIQUE kisit yerine
+        // DAGITIK KILIT + aktif-iade kontrolu. Emsal: IyzicoPaymentManager'in `payment-order:{id}`
+        // kilidi ve OrderManager'in `coupon:{kod}` kilidi.
+        private readonly Divisima.Core.Utilities.Locking.IDistributedLock _distributedLock;
         private readonly Divisima.Core.Utilities.Mail.IMailLinkBuilder _links;
 
         public ReturnManager(IReturnRequestDal returnDal, IOrderDal orderDal, IOrderItemDal orderItemDal, IIyzicoClient iyzico, IStockService stockService,
             ICustomerDal customerDal, IStoreCreditTransactionDal creditTxDal, IUnitOfWork unitOfWork, IRefundService refundService,
             IProductDal productDal, Divisima.Bussiness.Outbox.IOutboxService outboxService,
-            Divisima.Core.Utilities.Mail.IMailLinkBuilder links)
+            Divisima.Core.Utilities.Mail.IMailLinkBuilder links,
+            // GF-6 / F3 (T4-F1): ayni order_item icin ESZAMANLI iki iade talebini serilestirir.
+            Divisima.Core.Utilities.Locking.IDistributedLock distributedLock)
         {
+            _distributedLock = distributedLock;
             _productDal = productDal;
             _returnDal = returnDal;
             _refundService = refundService;
@@ -92,15 +103,49 @@ namespace Divisima.Bussiness.Concrete
             if (item == null || dto.quantity <= 0)
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.ReturnInvalidItem));
 
+            // ══ GF-6 / F3 (T4-F1) - OKU-SONRA-YAZ SERILESTIRILDI ══════════════════════════
+            //
+            // Asagidaki "kalan adet" hesabi bir OKU-SONRA-YAZ'dir ve GF-6 oncesinde korumasizdi
+            // (olculdu: 48 turda 41 ve 35 CIFT IADE). Kilit ORDER_ITEM basinadir - yani iki
+            // FARKLI kalem icin es zamanli iade birbirini BEKLEMEZ; yalniz AYNI kalem serilesir.
+            // Anahtar `item.id` (order_items.id): (order_id, product_id, size) uclusunun
+            // BIREBIR karsiligi, ama tek bir sayi - kilit adinda ayrac/kacis sorunu yok.
+            // SURE 15 sn: bu blok yalniz iki okuma + bir yazma yapar; uzun tutmak, dusen bir
+            // surecten sonra kalemi gereksiz yere bloke ederdi.
+            using var kalemKilidi = await _distributedLock.AcquireAsync(
+                $"return:{item.id}", TimeSpan.FromSeconds(15));
+
             // Açıklayıcı yorum: ÇİFT İADE ENGELİ - kalan iade-edilebilir miktar = orijinal adet - reddedilmemiş iadeler.
             // Kritik: sadece Pending değil, Approved/Completed de miktarı TÜKETİR (yoksa 5 al -> 5 iade et -> tekrar 5 iade
             // et ile çift para iadesi alınırdı). Rejected iade miktarı serbest bırakır (yeniden talep edilebilir).
-            var priorReturns = await _returnDal.GetListAsync(r => r.order_id == order.id && r.product_id == dto.product_id
+            //
+            // GF-6 / F3: okuma artik TRACKED DEGIL (`GetListNoTrackingAsync`). Gerekce CLAUDE.md
+            // bolum 5'te yazili: `GetAsync`/`GetListAsync` TRACKED'dir ve ayni `DbContext` icinde
+            // ikinci okuma DB'deki TAZE degeri getirmez - kilidi aldiktan SONRA yeniden okumanin
+            // anlami tam da TAZE deger gormektir.
+            var priorReturns = await _returnDal.GetListNoTrackingAsync(r => r.order_id == order.id && r.product_id == dto.product_id
                 && r.size == dto.size && r.status != (byte)ReturnStatusEnum.Rejected);
             int alreadyReturned = priorReturns.Sum(r => r.quantity);
             int remaining = item.quantity - alreadyReturned;
             if (dto.quantity > remaining)
                 return (HttpStatusCode.Conflict, new ErrorResult(Messages.ReturnAlreadyRequested));
+
+            // ══ GF-6 / F3 - "AKTIF IADE VARSA 409" KONTROLU EKLENMEDI (OLCULMUS GEREKCE) ═══
+            //
+            // Merkez tarifi bu kontrolu istiyordu ("ayni kalem icin Pending/Approved varsa 409").
+            // UYGULANDI ve MEVCUT BIR PINI KIRDI:
+            //   ReturnFlowTests.IadeMiktari_SiparisEdilenAdedi_ASAMAZ_KismiIadeSonrasiKalanKadar
+            //   "kalan 1 adet de iade edilebilmeli: Bu urun icin zaten bekleyen bir iade talebi var."
+            // Yani kural, 2 adetlik bir kalemde ONCE 1 adet iade edip SONRA kalan 1 adedi iade
+            // etmeyi - urunun PINLENMIS mesru davranisini - engelliyordu.
+            //
+            // KORUMA ZATEN TAM: T4-F1'in kok sebebi kontrolun YOKLUGU degil, OKU-SONRA-YAZ'in
+            // SERILESTIRILMEMESIYDI. Yukaridaki kalem basina dagitik kilit + TAZE (no-tracking)
+            // okuma, ikinci istegin BIRINCININ satirini GORMESINI garanti eder; "kalan adet"
+            // hesabi o noktada dogru calisir. K8 probu bunu OLCTU: onceden 48 turda 41/35 cift
+            // iade, kilitten sonra 0.
+            //
+            // Kontrol EKLENMEDI, tarifden SAPMA olarak RAPORLANDI - karar merkezindir.
 
             await _returnDal.AddAsync(new ReturnRequest
             {

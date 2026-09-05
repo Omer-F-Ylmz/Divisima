@@ -1,4 +1,5 @@
 using Divisima.Bussiness.Abstract;
+using Divisima.Core.Utilities.Orders;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Entities;
 
@@ -17,11 +18,14 @@ namespace Divisima.Bussiness.Events
         private readonly IReferralService _referralService;
         private readonly ICouponDal _couponDal;
         private readonly ICouponUsageDal _couponUsageDal;
+        // GF-6 / F1: sadakat adimi COD'da TESLIMATA baglandi - karar siparis satirindan okunur.
+        private readonly IOrderDal _orderDal;
 
         public PaymentConfirmedSideEffects(IOrderConfirmationService orderConfirmation,
             ILoyaltyService loyaltyService, IReferralService referralService, ICouponDal couponDal,
-            ICouponUsageDal couponUsageDal)
+            ICouponUsageDal couponUsageDal, IOrderDal orderDal)
         {
+            _orderDal = orderDal;
             _orderConfirmation = orderConfirmation;
             _loyaltyService = loyaltyService;
             _referralService = referralService;
@@ -46,10 +50,32 @@ namespace Divisima.Bussiness.Events
             //    SONUC KONTROL EDILIR: bu servis istisna FIRLATMIYOR, hata durumunu DONUYOR.
             //    Kontrol etmezsek gercek bir hata "basarili" sayilir, mesaj Processed olur ve
             //    outbox'in yeniden deneme kazanci o adim icin KAYBOLURDU.
-            var sadakat = await _loyaltyService.EarnFromOrder(evt.customer_id, evt.total_price, evt.order_id);
-            if (!sadakat.Item2.Success)
-                throw new InvalidOperationException(
-                    $"Sadakat puani adimi basarisiz: {sadakat.Item2.Message}");
+            //    ══ GF-6 / F1 (K4-DAR) - KAPIDA ODEMEDE KAZANIM TESLIMATA BAGLI ═════════════
+            //
+            //    OLCULEN ONCE-DURUM (AV-3 / T1-B4): COD siparisi `Confirmed` DOGUYOR ve bu olay
+            //    o anda yaziliyordu - yani musteri TEK KURUS ODEMEDEN puan kazaniyordu.
+            //
+            //    UYGULAYICI BOLUNMEDI (merkez karari): dort adim TEK yerde kalir; yalnizca bu
+            //    adim, COD siparisleri icin `Delivered` sartina baglanir. Teslimatta ayni olay
+            //    YENIDEN yazilir (OrderManager.ChangeOrderStatus ve ShipmentManager'in teslimat
+            //    dali) ve kazanim O ZAMAN kosar. Diger uc adim idempotenttir - ikinci geciste
+            //    NO-OP donerler, yani "iki kez uygulanma" riski YOK.
+            //
+            //    DURUM SIPARIS SATIRINDAN OKUNUR, OLAYDAN DEGIL: olay govdesine alan eklemek
+            //    outbox'ta BEKLEYEN eski satirlarda o alani varsayilan (0 = online) yapardi ve
+            //    kapida odeme siparisleri o pencerede ESKI davranisa duserdi.
+            var siparis = await _orderDal.GetAsync(o => o.id == evt.order_id);
+            var kapidaOdemeBekliyor = siparis != null
+                && siparis.payment_type == PaidOrderSpec.KapidaOdemeTuru
+                && siparis.status != PaidOrderSpec.KapidaOdenmisDurum;
+
+            if (!kapidaOdemeBekliyor)
+            {
+                var sadakat = await _loyaltyService.EarnFromOrder(evt.customer_id, evt.total_price, evt.order_id);
+                if (!sadakat.Item2.Success)
+                    throw new InvalidOperationException(
+                        $"Sadakat puani adimi basarisiz: {sadakat.Item2.Message}");
+            }
 
             // 3) REFERANS ODULU. Idempotent dayanagi UX_store_credit_referee_reward (madde 3):
             //    davet edilen musteriye ikinci bir "davet edilen" odulu yazilamaz. Onceden tek

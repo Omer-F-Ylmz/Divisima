@@ -9,6 +9,7 @@ using Divisima.Core.Utilities.Results;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Dtos.Coupon;
 using Divisima.Entity.Entities;
+using Divisima.Entity.Specifications;
 
 namespace Divisima.Bussiness.Concrete
 {
@@ -131,6 +132,18 @@ namespace Divisima.Bussiness.Concrete
                 // limiti tuketiyor gorunuyordu. PlaceOrder (H50) artik "odenmis + taze bekleyen" sayiyor;
                 // ikisi AYRISINCA onizleme "kupon tukendi" derken siparis GECIYORDU (kodun kendi yorumunun
                 // uyardigi celiskI). Ayni kural + AYNI merkezi sure (PaidOrderSpec.PendingGraceMinutes).
+                // ══ GF-6 / F1 - BU SITE ESKI KURALDA KALDI (OLCULMUS GERI TEPME) ═══════════
+                // Merkez tarifi bu siteyi `OdenmisSiparisSpec`e gecirmeyi istiyordu. UYGULANDI ve
+                // OLCULDU: `CouponRaceTests.SonHakkaSekizParalelIstek...` reddedilen kumesini BOS
+                // buldu - yani `usage_limit=1` bir kuponu SEKIZ es zamanli COD siparisinin
+                // HEPSI aldi. KOK SEBEP: COD siparisi Pending DOGMAZ, `Confirmed` dogar; "odenmis"
+                // olcutunden Confirmed cikinca COD icin sayilacak HICBIR durum kalmaz ("taze
+                // bekleyen Pending" dali da COD'da HIC atesLEMEZ). Yani limit COD yolunda
+                // YAPISAL OLARAK uygulanamaz hale geliyordu - T1-B4'u kapatirken YENI bir
+                // [PARA] bypass'i aciliyordu.
+                // AYRIM: kupon limiti "para ALINDI MI" degil "kupon hakki hala CANLI MI" sorusudur.
+                // Gecis bu yuzden YALNIZ musteriye PARA CIKISI yapan sitelerde kaldi (referans
+                // odulu + sadakat kazanimi). Sapma raporlandi; karar merkezindir.
                 var couponGrace = DateTime.Now.AddMinutes(-PaidOrderSpec.PendingGraceMinutes);
                 var globalUses = await _orderDal.CountAsync(o =>
                     o.coupon_code == coupon.code &&
@@ -166,6 +179,7 @@ namespace Divisima.Bussiness.Concrete
             // tutarsizligini geri getirirdi.
             if (coupon.per_user_limit > 0)
             {
+                // GF-6 / F1: ESKI KURALDA KALDI - gerekce global limit sitesinde (olculmus geri tepme).
                 var userPendingGrace = DateTime.Now.AddMinutes(-PaidOrderSpec.PendingGraceMinutes);
                 var usedByUser = await _orderDal.CountAsync(o =>
                     o.customer_id == dto.customer_id && o.coupon_code == coupon.code &&

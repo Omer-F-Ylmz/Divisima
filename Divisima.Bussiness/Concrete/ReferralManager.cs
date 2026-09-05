@@ -9,6 +9,7 @@ using Divisima.Core.Utilities.Orders;
 using Divisima.Core.Utilities.Results;
 using Divisima.DataAccess.Abstract;
 using Divisima.Entity.Entities;
+using Divisima.Entity.Specifications;
 
 namespace Divisima.Bussiness.Concrete
 {
@@ -78,8 +79,10 @@ namespace Divisima.Bussiness.Concrete
 
             // Açıklayıcı yorum: Bu müşterinin tamamlanmış (Confirmed+) sipariş sayısı - en az bir tamamlanmış sipariş olmalı.
             // PERFORMANS (H51): EXISTS - odul kontrolu icin siparis satirlarini cekmeye gerek yok.
-            var hasCompletedOrder = await _orderDal.AnyAsync(o =>
-                o.customer_id == customerId && PaidOrderSpec.PaidStatuses.Contains(o.status));   // H52: merkezi kural
+            // GF-6 / F1 (K4-DAR): kapida odeme siparisi ODENMEDEN referans odulunu TETIKLEYEMEZ -
+            // COD yalniz Delivered'da sayilir. Yuklem TEK YERDE (OdenmisSiparisSpec).
+            var hasCompletedOrder = await _orderDal.AnyAsync(
+                OdenmisSiparisSpec.MusterininOdenmisSiparisiVar(customerId));
             if (!hasCompletedOrder) return; // henüz tamamlanmış sipariş yok
 
             // KALICI IDEMPOTENCY: bu müşteri için referans ödülü DAHA ÖNCE verildiyse tekrar VERME.

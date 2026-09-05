@@ -253,14 +253,34 @@ namespace Divisima.IntegrationTests
         }
 
         // Dort yan etkinin de BIRER kez uygulandigini tek yerde dogrular.
-        private static void DortYanEtkiUygulandi(Sayimlar s, string kanal)
+        //
+        // ══ GF-6 / F1 (K4-DAR) - "PARA CIKISI" ADIMLARI AYRISTI ════════════════════════════
+        // Sadakat puani ve referans odulu MUSTERIYE PARA CIKISIDIR. Kapida odemede para
+        // TESLIMATTA alinir, dolayisiyla bu iki adim COD'da `Confirmed`da DEGIL `Delivered`da
+        // kosar (AV-3 / T1-B4). Fatura ve kupon kullanim satiri DEGISMEDI - onlar muhasebe/
+        // defter kayitlaridir, "para alindi" iddiasi tasimazlar.
+        // `paraCikisi` parametresi bu ayrimi ACIK kilar: 0 beklemek de bir IDDIADIR.
+        private static void DortYanEtkiUygulandi(Sayimlar s, string kanal, int paraCikisi = 1)
         {
             s.Fatura.Should().Be(1, $"{kanal}: fatura kesilmeli");
-            s.SadakatKazanim.Should().Be(1, $"{kanal}: sadakat puani YAZILMALI - kart disi yollarda HIC yazilmiyordu (B10)");
+            s.SadakatKazanim.Should().Be(paraCikisi, $"{kanal}: sadakat puani beklenen {paraCikisi} olmali (GF-6/F1: COD'da teslimatta)");
             s.KuponSatiri.Should().Be(1, $"{kanal}: kupon kullanim satiri YAZILMALI - kart disi yollarda HIC yazilmiyordu (B10)");
             s.KuponSayaci.Should().Be(1, $"{kanal}: used_count kullanim satirindan TURETILIR, dolayisiyla 1 olmali");
-            s.RefereeOdul.Should().Be(1, $"{kanal}: davet edilene referans odulu YAZILMALI");
-            s.ReferrerOdul.Should().Be(1, $"{kanal}: davet edene referans odulu YAZILMALI");
+            s.RefereeOdul.Should().Be(paraCikisi, $"{kanal}: davet edilene referans odulu beklenen {paraCikisi} (GF-6/F1)");
+            s.ReferrerOdul.Should().Be(paraCikisi, $"{kanal}: davet edene referans odulu beklenen {paraCikisi} (GF-6/F1)");
+        }
+
+        // GF-6 / F1: siparisi TESLIM EDILDI durumuna tasir (Confirmed -> Preparing -> Shipped
+        // -> Delivered; makine ara adimlari ZORUNLU kilar). Her adim `ChangeOrderStatus`tan
+        // gecer, yani URETIM YOLUDUR - elle `status` yazilmaz.
+        private async Task TeslimEtAsync(int orderId)
+        {
+            foreach (var d in new[] { OrderStatusEnum.Preparing, OrderStatusEnum.Shipped, OrderStatusEnum.Delivered })
+            {
+                var r = await WithScopeAsync(sp => sp.GetRequiredService<IOrderService>()
+                    .ChangeOrderStatus(new OrderStatusChangeRequestDto { id = orderId, order_status = d }));
+                r.Item1.Should().Be(System.Net.HttpStatusCode.OK, $"{d} gecisi basarili olmali: {r.Item2.Message}");
+            }
         }
 
         // ── 1) KAPIDA ODEME ──────────────────────────────────────────────────────────────────
@@ -282,7 +302,21 @@ namespace Divisima.IntegrationTests
 
             await OutboxBosaltAsync();
 
-            DortYanEtkiUygulandi(await SayAsync(k, orderId), "kapida odeme");
+            // ══ GF-6 / F1 (K4-DAR) - REPRO R-6.4 ══════════════════════════════════════════
+            // ONAY ANINDA: fatura + kupon satiri VAR; sadakat ve referans odulu YOK - musteri
+            // henuz TEK KURUS odemedi. (ONCE-DURUM: ikisi de 1 idi, yani parasiz kazanim.)
+            DortYanEtkiUygulandi(await SayAsync(k, orderId), "kapida odeme / onay", paraCikisi: 0);
+
+            // TESLIMATTAN SONRA: para alindi -> kazanim ve odul YAZILIR.
+            await TeslimEtAsync(orderId);
+            await OutboxBosaltAsync();
+            DortYanEtkiUygulandi(await SayAsync(k, orderId), "kapida odeme / teslimat", paraCikisi: 1);
+
+            // IDEMPOTENSI: teslimat olayi ikinci kez islenirse kazanim ARTMAZ.
+            await OutboxBosaltAsync();
+            var tekrar = await SayAsync(k, orderId);
+            tekrar.SadakatKazanim.Should().Be(1, "teslimat olayinin yeniden teslimati puan COGALTMAMALI");
+            tekrar.RefereeOdul.Should().Be(1, "referans odulu de COGALMAMALI");
         }
 
         // ── 2) HAVALE/EFT ADMIN ONAYI ────────────────────────────────────────────────────────
@@ -339,8 +373,9 @@ namespace Divisima.IntegrationTests
             var orderId = await SiparisVerAsync(k, odemeYontemi: 1);
 
             await OutboxBosaltAsync();
+            // GF-6 / F1: COD onayinda para cikisi adimlari (sadakat + referans) HENUZ 0'dir.
             var ilk = await SayAsync(k, orderId);
-            DortYanEtkiUygulandi(ilk, "ilk islem");   // VAKUM KIRICI: once GERCEKTEN uygulandigi gorulur
+            DortYanEtkiUygulandi(ilk, "ilk islem", paraCikisi: 0);   // VAKUM KIRICI: once GERCEKTEN uygulandigi gorulur
 
             // AT-LEAST-ONCE TAKLIDI: isleyici mesaji Processed yapti; gercek bir yeniden teslimat
             // onu tekrar Pending gorur.
@@ -396,7 +431,8 @@ namespace Divisima.IntegrationTests
             sonrasi.Fatura.Should().Be(1,
                 "outbox isleyicisinin 1. adimi AYNI faturayi kesmeye calisir; InvoiceManager'in " +
                 "'bu siparis icin fatura zaten var' kontrolu NO-OP dondurmeli - IKINCI fatura OLMAZ");
-            DortYanEtkiUygulandi(sonrasi, "senkron fatura + outbox");
+            // GF-6 / F1: COD onayinda para cikisi adimlari 0 (teslimatta yazilir - ayri pin).
+            DortYanEtkiUygulandi(sonrasi, "senkron fatura + outbox", paraCikisi: 0);
         }
 
         // ── 5) MUKERRER MESAJ OLUSMAZ (kullanicinin (i) sarti) ───────────────────────────────

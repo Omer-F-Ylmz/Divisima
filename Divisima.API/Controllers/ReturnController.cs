@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Divisima.API.Filters;
 using Divisima.Bussiness.Abstract;
 using Divisima.Core.Security.Authorization;
 using Divisima.Core.Utilities.Enums;
@@ -19,6 +20,13 @@ namespace Divisima.API.Controllers
 
         [HttpPost("create")]
         [RequireUserType(UserTypeEnum.Customer)]
+        // ══ GF-6 / F3 (T4-F1) - CIFT IADE TALEBI ═══════════════════════════════════════════
+        // Bu uc bir PARA ucudur: her talep bir iade tutari tasir. Ag tekrari ya da cift-tik
+        // ikinci bir talep uretmemeli. `Idempotency-Key` GONDERILDIGINDE ilk yanit AYNEN
+        // doner (filtrenin kendi sozlesmesi); anahtar GONDERILMEZSE filtre kenara cekilir -
+        // o senaryonun korumasi `ReturnManager`daki KALEM BASINA dagitik kilit + aktif-iade
+        // kontrolüdür. Iki katman FARKLI seyi korur ve ikisi de gereklidir.
+        [Idempotency]
         [SwaggerOperation(Summary = "İade talebi oluştur")]
         public async Task<IActionResult> Create([FromBody] ReturnCreateRequestDto dto)
         {

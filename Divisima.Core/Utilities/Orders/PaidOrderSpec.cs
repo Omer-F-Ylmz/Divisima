@@ -53,5 +53,39 @@ namespace Divisima.Core.Utilities.Orders
         // Rapor/gelir/sıralama/öneri hesaplayan her yer bunu kullanmalı.
         public static bool IsSoldItem(byte orderStatus, bool itemIsCancelled) =>
             !itemIsCancelled && IsPaidStatus(orderStatus);
+
+        // ══ GF-6 / F1 (K4-DAR) - KAPIDA ODEMENIN "PARA" ANLAMI ═════════════════════════════
+        //
+        // OLCULEN ONCE-DURUM (AV-3 / T1-B4, LAUNCH BLOKER): kapida odeme siparisi olusur olusmaz
+        // `Confirmed` DOGUYOR (OrderManager, COD dali) ve `PaidStatuses` `Confirmed`i ICERDIGI
+        // icin siparis, HENUZ TEK KURUS ODENMEDEN "satildi/odendi" sayiliyordu. Somut zarar:
+        // kimse odeme yapmadan kupon global limitini TUKETEBILIYOR, kisi-basi hakkini
+        // harcayabiliyor ve referans odulunu TETIKLEYEBILIYORDU.
+        //
+        // KURAL: COD'da para TESLIMATTA alinir - dolayisiyla "odendi" YALNIZ `Delivered`tir.
+        // Online ve havale yollari DEGISMEDI (onlarda para siparis onayindan ONCE ya da admin
+        // onayiyla alinmis olur).
+        //
+        // NEDEN AYRI IMZA, NEDEN `PaidStatuses` DEGISTIRILMEDI: `PaidStatuses` bir `byte[]`dir ve
+        // 17 cagri sitesinin tamami YALNIZ `o.status` gecirir - odeme turunu GORMEZ. Diziyi
+        // degistirmek tum tuketicileri sessizce degistirirdi; ayri imza, GECIS EDEN siteyi
+        // ACIKCA gorunur kilar. Bu turda gecen siteler YALNIZ PARA olanlardir (kupon global +
+        // kisi-basi limit, referans odulu, sadakat kazanimi); raporlama siteleri (Dashboard ·
+        // Merchandising · Recommendation · Seller) ESKI kuralda KALDI - BILINEN kalem, GF-7.
+        //
+        // NEDEN `byte`/`byte`: `Divisima.Core`, `Divisima.Entity`yi GOREMEZ (Entity -> Core;
+        // ters yon DONGU olur - olculdu). Bu yuzden bu sinif `Order` tipini goremez ve
+        // EF'e cevrilebilir bir `Expression` BURADA yazilamaz. EF yuzu
+        // `Divisima.Entity.Specifications.OdenmisSiparisSpec`tedir ve IKISININ AYNI SEYI
+        // soyledigi TAM MATRIS pini ile (durum x odeme turu) sabitlenmistir.
+        public const byte KapidaOdemeTuru = 1;   // `Order.payment_type` kodlamasi (0 online · 1 COD · 2 havale)
+
+        // COD'da tek "odendi" durumu.
+        public const byte KapidaOdenmisDurum = (byte)OrderStatusEnum.Delivered;
+
+        public static bool IsPaid(byte status, byte paymentType) =>
+            paymentType == KapidaOdemeTuru
+                ? status == KapidaOdenmisDurum
+                : IsPaidStatus(status);
     }
 }
