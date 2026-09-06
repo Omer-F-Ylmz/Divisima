@@ -843,6 +843,13 @@ kesilenler) ve `41·ARSIV-1`; ikisi de BAYT-SABIT (MK-11/d), bu tur DOKUNMADI.
 
 ## KAPANANLAR (son uc dalga; oncekiler `docs/muhur/INDEX.md` ile cozulur)
 
+- **LF-1 DAGITIM ARTEFAKTLARI + LAUNCH GO /56** — uc dagitim blokeri (BL-1/BL-2/BL-3) kapandi;
+  **17 mutasyon**, uc ardisik tam dogrulama birebir (Sql 415/415 · tam 826/829, uc kirmizi =
+  bilinen Docker uclusu). **GITLEAKS YERELDE OLCEMEDIM** (kurulu degil + Docker yok) — olcut
+  bir PINE gomuldu, kesin kanit `secret-scan` ADIM SONUCU. Bir pin kendi mutasyonuyla kusurlu
+  cikti (**ciplak alt-dizge capasi UST DIZGEYE kordu** — "ankrajli mukerrer" ailesi) ve
+  sikilastirildi; **bayat ikili UCUNCU kez** yasandi (mutasyon geri alindiktan sonra build
+  yapilmadi), aritmetikle yakalandi.
 - **GF-4 TEDARIK ZINCIRI `4976974`/50** — cift yesil: run 33891017398 · 33891017496.
 - **GF-5 A09 IZ/ATIF + MISAFIR BUTUNLUGU + MASKE `027a88a`/52 — LAUNCH BLOKER 2/2 KAPANDI**
   (SD-7 misafir butunlugu · SC-1 A09 iz/atif). K7 DUSTU. **S-C MATRISI `H=8` -> `H=3`**; ucu
@@ -866,16 +873,30 @@ kesilenler) ve `41·ARSIV-1`; ikisi de BAYT-SABIT (MK-11/d), bu tur DOKUNMADI.
   ve ayni hesabin kendi es zamanli guncellemesinde. **TETIKLEYICI: GF-7 ILK KALEM.**
   Suit 806/809 x3 (uc kirmizi = bilinen Docker uclusu) · Sql 411/411 · 24 mutasyon kosumu.
 
-## KUYRUK (`55·GF-6` sonrasi)
+## KUYRUK (`56·LAUNCH GO` sonrasi)
 
-1. **LAUNCH GO/NO-GO TURU** <- SIRADA.
-2. **GF-7 (LAUNCH SONRASI) — ILK KALEM T4-F2** (rowversion migration; gerekce ve tetikleyici
+**LAUNCH GO VERILDI (`56·LAUNCH-GO-NO-GO`) — DAGITIM OMER'DE.** Uc dagitim blokeri LF-1'de
+kapandi: BL-1 `Cookies:Domain` uretimde fail-fast (bos birakilirsa `/api/auth/refresh` KALICI
+403 — SESSIZ ariza, belirti 15 dk sonra ve TUM kullanicilarda ayni anda) · BL-2 uretim
+sablonu + `docker-compose.prod.yml` · BL-3 olay tipi 12 -> 14 + alarm tablosu. Gerekceli
+istisna T4-F2 (`55·GF-6` 5.1) DEGISMEDI. **Dagitim sarti:** `ops/deployment-checklist.md`in
+20 sirali IRL adimi (9. `Cookies:Domain` ve 18. `BackgroundJobs:Enabled=true` ATLANAMAZ) +
+**GUNLUK `PaymentAfterTerminal`/`Critical` SQL sorgusu** (o olayin SIEM okuyucusu YOK,
+SignalR `"admins"` grubu BOS — tek okuyucu elle sorgu).
+
+1. **GF-7 (LAUNCH SONRASI) — ILK KALEM T4-F2** (rowversion migration; gerekce ve tetikleyici
    `55·GF-6` bolum 5.1). Sonra: AV-3'un 6b/6c/6d kalani + olu/yaniltici yuzey grubu
    (`53` bolum 9) · SC-12 outbox payload sifreleme/ozetleme (SA-1 ile birlikte -
    `AesEncryptionProvider` bugun TEK ANAHTARLI ve cozemedigi degeri OLDUGU GIBI donduruyor,
    yani sifreleme once SA-2'yi ister) · SA-1/SA-2 at-rest kurcalama + anahtar rotasyonu ·
    SB-1 (2FA dalinda CAS geri alma) · SD-1/SD-2/SD-4 anonim uc sozlesmesi · SC-3 SIEM okuyucusu.
-4. Launch SONRASI digerleri: VITRIN-KALAN (10 kalem) · FIX-1B · ADMIN-FIX · IMPORT-FIX ·
+   **LF-1 SONRASI EKLENENLER (`56` bolum 4-5, K-numaralariyla):** captcha SIL ya da BAGLA
+   (K1 — bugun `ValidateAsync` uretimde 0 cagri, secret zorunlulugu LF-1'de kalkti) · Key
+   Vault okuyucusunu BAGLA ya da iskeleti SIL (K2 — `ISecretProvider` tuketicisi 0, rotasyon
+   is akisi LF-1'de elle tetiklemeye indirildi) · kargo kaydi · K7 nginx ortak baslik include
+   · K8 Hangfire dashboard · K10 OTLP/alert checklist'e (olculdu: gecis 0) · raporlama
+   siteleri · frontend `odeme/sonuc` i18n.
+2. Launch SONRASI digerleri: VITRIN-KALAN (10 kalem) · FIX-1B · ADMIN-FIX · IMPORT-FIX ·
    FIX-1C · LOG-FIX · FIX-2 · FIX-3/B13
 
 ## BILINEN / KABUL EDILMIS RISK (tek isaretci; DURUM sutunlu tam liste ilgili muhurde)
