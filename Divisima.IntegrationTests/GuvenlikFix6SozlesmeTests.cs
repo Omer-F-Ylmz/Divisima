@@ -863,6 +863,62 @@ namespace Divisima.IntegrationTests
             Sayim(kargo, "order.status = (byte)OrderStatusEnum.").Should().Be(2);
         }
 
+        // ══ GF-6 / F5 (L3 BULGU-1) - TESLIMAT DALI TRANSACTION ICINDE ═════════════════════
+        // Davranis yuzu `GuvenlikFix6TeslimatAtomikTests`te (olay yazimi dusurulunce siparis
+        // Delivered OLMAZ). Bu pin, korumanin YERINDE oldugunu ve emsalle AYNI arac oldugunu
+        // sabitler.
+        [Fact]
+        public void F5_KARGO_TESLIMAT_DALI_TRANSACTION_ICINDE()
+        {
+            var kargo = KodSatirlari(Oku("Divisima.Bussiness/Concrete/ShipmentManager.cs"));
+
+            Sayim(kargo, "_unitOfWork.ExecuteInTransactionAsync(").Should().Be(1,
+                "teslimat dalinin DORT yazmasi ATOMIK olmali - olay kaybi TELAFISIZDIR");
+
+            // ARAC SECIMI - DURUST KAYIT: emsal `OrderManager` DEGILDIR. Olculdu:
+            // `OrderManager` elle `BeginTransactionAsync`/`CommitAsync` kullanir (5 gecis).
+            // `ExecuteInTransactionAsync` `IUnitOfWork`un KENDI yorumunun onerdigi yoldur
+            // (execution strategy tum begin->is->commit'i tek retriable birim yapar) ve
+            // uretimde ZATEN dort yerde kosuyor: AccountManager · GuestCheckoutManager ·
+            // IyzicoPaymentManager · ProductManager. ShipmentManager BESINCIDIR.
+            Sayim(KodSatirlari(Oku("Divisima.Bussiness/Concrete/GuestCheckoutManager.cs")),
+                "_unitOfWork.ExecuteInTransactionAsync(").Should().BeGreaterThan(0,
+                "emsal: GF-5/K4'un telafi silmesi de bu araci kullanir");
+
+            // Dort yazmanin DORDU DE sarmalayicinin ICINDE olmali: `WriteAsync` cagrisi
+            // transaction acilisindan SONRA gelmeli.
+            var txIdx = kargo.IndexOf("_unitOfWork.ExecuteInTransactionAsync(", StringComparison.Ordinal);
+            var olayIdx = kargo.IndexOf("_outboxService.WriteAsync(\"PaymentConfirmed\"", StringComparison.Ordinal);
+            txIdx.Should().BeGreaterThan(0);
+            olayIdx.Should().BeGreaterThan(txIdx, "olay yazimi transaction'in ICINDE olmali");
+        }
+
+        // ══ GF-6 / F6 (L3 BULGU-2) - VAAT <-> DAVRANIS ════════════════════════════════════
+        // Metin, GERCEKLESMEYEN bir islemi VAAT ETMEMELI: terminal dalinda otomatik iade YOK
+        // (olculdu: `IyzicoPaymentManager`da `RefundService` cagrisi 0).
+        [Fact]
+        public void F6_IPTALLI_ODEME_METNI_BASLATILDIGI_IDDIASINI_TASIMAZ()
+        {
+            var mesaj = Divisima.Core.Utilities.Constants.Messages.PaymentReceivedOrderCancelled;
+
+            mesaj.Should().NotContain("başlatıl", "metin BASLATILDIGI iddiasini TASIMAMALI");
+            mesaj.Should().NotContain("baslatil", "ASCII yazimi da kontrol edilir (MK-7: capa ezberden yazilmaz)");
+            // POZITIF: metin ne OLDUGUNU ve ne OLACAGINI soylemeli (vakum engeli - bos bir
+            // metin de yukaridaki iki asserti GECERDI).
+            mesaj.Should().Contain("Ödemeniz alındı", "para ALINDIGI soylenmeli");
+            mesaj.Should().Contain("iptal", "siparisin IPTAL oldugu soylenmeli");
+            mesaj.Should().Contain("destek", "musteriye NE OLACAGI soylenmeli");
+
+            // UC: terminal dalinda otomatik iade YOK - metin bu gercekle TUTARLI olmali.
+            Sayim(KodSatirlari(Oku("Divisima.Bussiness/Concrete/IyzicoPaymentManager.cs")), "_refundService")
+                .Should().Be(0, "terminal dalinda otomatik iade YOK - varsa metin de degismeli");
+
+            // VITRIN AYNI CUMLEYI TASIR (MFIX-3 ayrisma tuzagi): iki yuzey ayrisirsa musteri
+            // iki farkli sey okur.
+            Oku("frontend/api-bridge.js").Should().Contain(mesaj,
+                "vitrin metni backend sabitiyle BIREBIR AYNI olmali");
+        }
+
         // ══ GF-6 / F1 (K4-DAR) - TAM MATRIS: IKI BICIM AYRISAMAZ ═══════════════════════════
         //
         // Kural IKI yerde yasiyor - ZORUNLU olarak: `PaidOrderSpec.IsPaid(byte,byte)` bellek ici

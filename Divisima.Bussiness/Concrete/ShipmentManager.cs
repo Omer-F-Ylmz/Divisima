@@ -1,5 +1,6 @@
 using System.Net;
 using Divisima.Bussiness.Abstract;
+using Divisima.Core.DataAccess;
 using Divisima.Core.Integrations.Shipping;
 using Divisima.Core.Utilities.Constants;
 using Divisima.Core.Utilities.Enums;
@@ -27,10 +28,33 @@ namespace Divisima.Bussiness.Concrete
         // PaymentConfirmedSideEffects'in 2. adiminda).
         private readonly Divisima.Bussiness.Outbox.IOutboxService _outboxService;
 
+        // ══ GF-6 / F5 (L3 BULGU-1) - TESLIMAT YAZIMLARI ATOMIK ═════════════════════════════
+        //
+        // OLCULEN ONCE-DURUM (push oncesi L3 denetcisi buldu, ana akis KENDI komutuyla
+        // dogruladi): bu sinifta transaction sayisi **0** idi (POZ kontrol: `OrderManager` 5).
+        // Teslimat dali DORT yazmayi (`UpdateAsync` · zaman cizelgesi · bildirim outbox'i ·
+        // `PaymentConfirmed` olayi) HER BIRI AYRI `SaveChanges` olarak kosuyordu. Olay yazimi
+        // duserse siparis `Delivered` OLUYOR ama olay YAZILMIYOR -> kapida odemede sadakat
+        // puani ve referans odulu HIC verilmiyor. TELAFI YOLU DA YOK: admin ayni durumu
+        // tekrar yazdiginda uc BASARILI doner ama `order.status != Delivered` guard'i yuzunden
+        // YENI OLAY URETILMEZ - basarisizlik SESSIZ kalir. `[PARA]` LATENT.
+        //
+        // Bu bosluk GF-6/F1 ile ACILDI: kapida odemenin para anlami o dalgada teslimata
+        // baglandi ve teslimat olayi KRITIK hale geldi. Yorumu da yanlisti - "OrderManager'in
+        // Delivered dalindaki emsalin AYNISI" diyordu, oysa O emsal transaction ICINDE.
+        // (YORUM != OLCUM ailesi, bu dalgadaki ALTINCI vaka.)
+        //
+        // BILDIRIM DE ICERIDE - GUVENLI: `NotifyStatusChangeAsync` kritik yolda YALNIZ bir
+        // outbox SATIRI yazar; dis saglayici cagrilari (SignalR/FCM/SMS) kendi try/catch'inde
+        // ve outbox'in DISINDADIR (olculdu: `OrderNotificationManager`in kendi yorumu).
+        private readonly IUnitOfWork _unitOfWork;
+
         public ShipmentManager(IShipmentDal shipmentDal, IOrderDal orderDal, ICarrierProvider carrierProvider,
             IOrderStatusHistoryService statusHistory, IOrderNotificationService orderNotificationService,
-            Divisima.Bussiness.Outbox.IOutboxService outboxService)
+            Divisima.Bussiness.Outbox.IOutboxService outboxService,
+            IUnitOfWork unitOfWork)
         {
+            _unitOfWork = unitOfWork;
             _outboxService = outboxService;
             _shipmentDal = shipmentDal;
             _orderDal = orderDal;
@@ -123,28 +147,35 @@ namespace Divisima.Bussiness.Concrete
                     if (shipment.status == (byte)ShipmentStatusEnum.Delivered && order.status != (byte)OrderStatusEnum.Delivered
                         && OrderStatusMachine.IsValidTransition((OrderStatusEnum)order.status, OrderStatusEnum.Delivered))
                     {
-                        order.status = (byte)OrderStatusEnum.Delivered;
-                        // Açıklayıcı yorum: TUTARLILIK - teslim zamanını burada da kaydet (ChangeOrderStatus ile aynı).
-                        // Kargo-takipli teslimatta da iade penceresi teslim tarihinden sayılsın (yoksa created_at'e düşerdi).
-                        if (!order.delivered_at.HasValue) order.delivered_at = DateTime.Now;
-                        await _orderDal.UpdateAsync(order);
-                        // TUTARLILIK: kargo-takipli teslimat da zaman çizelgesine kaydedilir (yoksa müşteri "Teslim edildi" adımını göremezdi).
-                        await _statusHistory.RecordAsync(order.id, (byte)OrderStatusEnum.Delivered, "Kargo teslim edildi");
-                        // TUTARLILIK: müşteriye "teslim edildi" bildirimi (merkezi servis; onceden kargo-teslimatta ATLANIYORDU).
-                        await _orderNotificationService.NotifyStatusChangeAsync(order, OrderStatusEnum.Delivered);
+                        // GF-6 / F5: DORT YAZMA ATOMIK - gerekce `_unitOfWork`in taniminda.
+                        // Herhangi biri duserse HICBIRI kalmaz; ozellikle "siparis Delivered
+                        // oldu ama olay yazilmadi" durumu ARTIK OLUSAMAZ.
+                        await _unitOfWork.ExecuteInTransactionAsync(async () =>
+                        {
+                            order.status = (byte)OrderStatusEnum.Delivered;
+                            // Açıklayıcı yorum: TUTARLILIK - teslim zamanını burada da kaydet (ChangeOrderStatus ile aynı).
+                            // Kargo-takipli teslimatta da iade penceresi teslim tarihinden sayılsın (yoksa created_at'e düşerdi).
+                            if (!order.delivered_at.HasValue) order.delivered_at = DateTime.Now;
+                            await _orderDal.UpdateAsync(order);
+                            // TUTARLILIK: kargo-takipli teslimat da zaman çizelgesine kaydedilir (yoksa müşteri "Teslim edildi" adımını göremezdi).
+                            await _statusHistory.RecordAsync(order.id, (byte)OrderStatusEnum.Delivered, "Kargo teslim edildi");
+                            // TUTARLILIK: müşteriye "teslim edildi" bildirimi (merkezi servis; onceden kargo-teslimatta ATLANIYORDU).
+                            await _orderNotificationService.NotifyStatusChangeAsync(order, OrderStatusEnum.Delivered);
 
-                        // GF-6 / F1 (K4-DAR): teslimat OLAYI - gerekce `_outboxService`in taniminda.
-                        // `OrderManager.ChangeOrderStatus`in Delivered dalindaki emsalin AYNISI;
-                        // olay govdesi de AYNI alanlari tasir (tek yazici kalibi korunur).
-                        await _outboxService.WriteAsync("PaymentConfirmed",
-                            new Divisima.Bussiness.Events.PaymentConfirmedEvent
-                            {
-                                order_id = order.id,
-                                customer_id = order.customer_id,
-                                total_price = order.total_price,
-                                coupon_code = order.coupon_code,
-                                discount_amount = order.discount_amount
-                            });
+                            // GF-6 / F1 (K4-DAR): teslimat OLAYI - gerekce `_outboxService`in taniminda.
+                            // `OrderManager.ChangeOrderStatus`in Delivered dalindaki emsalin AYNISI -
+                            // F5'ten SONRA bu cumle GERCEKTEN dogru: o dal da transaction ICINDE.
+                            await _outboxService.WriteAsync("PaymentConfirmed",
+                                new Divisima.Bussiness.Events.PaymentConfirmedEvent
+                                {
+                                    order_id = order.id,
+                                    customer_id = order.customer_id,
+                                    total_price = order.total_price,
+                                    coupon_code = order.coupon_code,
+                                    discount_amount = order.discount_amount
+                                });
+                            return true;
+                        });
                     }
                     await _shipmentDal.UpdateAsync(shipment);
                 }
