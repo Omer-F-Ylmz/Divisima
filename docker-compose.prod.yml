@@ -1,0 +1,109 @@
+# ══ LF-1 / K3 - URETIM COMPOSE'U ═══════════════════════════════════════════════════════════
+#
+# NEDEN AYRI DOSYA: depodaki `docker-compose.yml` GELISTIRME icindir - icinde
+# `ASPNETCORE_ENVIRONMENT: Development`, `sa` parolasi ve "gercek secret DEGILDIR" diye
+# ISARETLI bir JWT anahtari vardir. O dosyayi uretimde kullanmak, fail-fast kapisini
+# Development dalindan gecirip TUM prod kontrollerini (yer-tutucu taramasi, Cookies:Domain,
+# MailSettings:Host, Iyzico:CallbackUrl) DEVRE DISI birakirdi.
+#
+# GERCEK DEGER BU DOSYAYA YAZILMAZ. Her secret ORTAMDAN gelir; yaninda `.env` dosyasi
+# tutuyorsaniz onu `.gitignore`a ekleyin. Kullanim:
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# VERITABANI BU DOSYADA YOKTUR - BILINCLI: uretim SQL Server'i yonetilen bir hizmet ya da
+# ayri bir konak olmalidir. Konteyner icinde `sa` ile calisan bir veritabani, `least-privilege`
+# kararini (ops/db/least-privilege.sql) ve yedekleme runbook'unu (ops/backup-dr-runbook.md)
+# gecersiz kilar.
+
+services:
+  redis:
+    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    # PORT DISARI ACILMAZ: Redis yalnizca api ile ayni agda gorunur.
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      # ORTAM: Production. Fail-fast'in TUM prod kontrolleri BU degere baglidir.
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:5000
+
+      # ══ ZORUNLU - hepsi ORTAMDAN gelir, varsayilan YOK ═════════════════════════════════
+      # Bos birakilirsa uygulama ACILMAZ; bu ISTENEN davranistir (sessiz yanlis calisma yerine
+      # gurultulu duruş). Anahtarlarin ne oldugu ve nereden alindigi:
+      # Divisima.API/appsettings.Production.example.json
+      ConnectionStrings__DivisimaDb: ${DIVISIMA_DB_CONNECTION:?zorunlu}
+      TokenOptions__SecurityKey: ${DIVISIMA_JWT_KEY:?zorunlu}
+      Encryption__Key: ${DIVISIMA_ENCRYPTION_KEY:?zorunlu}
+      Cookies__Domain: ${DIVISIMA_COOKIE_DOMAIN:?zorunlu}
+      MailSettings__Host: ${DIVISIMA_SMTP_HOST:?zorunlu}
+      MailSettings__Password: ${DIVISIMA_SMTP_PASSWORD:?zorunlu}
+      Iyzico__ApiKey: ${DIVISIMA_IYZICO_API_KEY:?zorunlu}
+      Iyzico__SecretKey: ${DIVISIMA_IYZICO_SECRET_KEY:?zorunlu}
+      Iyzico__CallbackUrl: ${DIVISIMA_IYZICO_CALLBACK_URL:?zorunlu}
+
+      # ══ ONERILEN / VARSAYILANI GUVENLI ════════════════════════════════════════════════
+      MailSettings__Port: "587"
+      MailSettings__User: ${DIVISIMA_SMTP_USER:-no-reply@divisima.com}
+      MailSettings__From: ${DIVISIMA_SMTP_FROM:-Divisima <no-reply@divisima.com>}
+      Iyzico__BaseUrl: ${DIVISIMA_IYZICO_BASE_URL:-https://api.iyzipay.com}
+      Iyzico__UseRealSdk: "true"
+      Storefront__BaseUrl: ${DIVISIMA_STOREFRONT_URL:-https://divisima.com}
+      Api__PublicBaseUrl: ${DIVISIMA_API_URL:-https://api.divisima.com}
+      Storage__PublicBaseUrl: ${DIVISIMA_API_URL:-https://api.divisima.com}
+      Redis__Enabled: "true"
+      # Anahtar adi `Redis:Connection`dir - `Redis:Configuration` DEGIL. Gelistirme
+      # compose'unda bu bir kez yanlis yazildi ve konteyner acilista patladi.
+      Redis__Connection: "redis:6379"
+      BackgroundJobs__Enabled: "true"
+      # Kapaliyken suresi dolan stok rezervasyonlari temizlenmez ve satilabilir stok KALICI
+      # dusuk kalir (AV-3'te olculdu) - bu yuzden uretimde ACIK.
+
+    ports:
+      # YALNIZ LOOPBACK: API dogrudan internete ACILMAZ; TLS, HSTS, CSP ve gercek istemci
+      # IP'si ters proxy'nin isidir (ops/infra/nginx.conf). Bu bagi kaldirmak, nginx'teki
+      # TEK KAYNAK guvenlik basliklarini BAYPAS eder.
+      - "127.0.0.1:5000:5000"
+
+    volumes:
+      # (a) YUKLENEN GORSELLER - konteyner yenilendiginde KAYBOLMAMALI. Adlandirilmis volume
+      #     SECILDI: imaj icerigiyle VE SAHIPLIGIYLE baslar, `USER divisima` yazabilir.
+      #     Bos bir host bind-mount root:root olur ve yuklemeler SESSIZCE basarisiz olurdu.
+      - uploads_data:/app/wwwroot/uploads
+      # (b) LOGLAR - gelistirme compose'unda BU VOLUME YOKTU (launch olcumu / K9): Serilog
+      #     `logs/divisima-.log` yaziyor, yani konteynerin yazilabilir katmanina; konteyner
+      #     yenilenince gunluk loglar ve olay izi GIDIYORDU.
+      - logs_data:/app/logs
+
+    healthcheck:
+      # `/health/ready` bagimliliklari da yoklar (DB, Redis); `/health/live` yalniz sureci.
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:5000/health/ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  redis_data:
+  uploads_data:
+  logs_data:

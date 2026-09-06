@@ -108,7 +108,8 @@ Uygulama, kesinti penceresini durust olcmek icin **ON DERLENIR** (`--no-build` i
 uretimde yayinlanmis ikili zaten hazirdir, `dotnet run`in derleme adimi RTO'ya girmez.
 
 **MIGRATION'LARIN GERCEK VERIYLE KOSMASI da D6'da dogrulandi:** uretilen idempotent script ile
-kurulan bos bir veritabanina (`56 FK / 45 tablo + __EFMigrationsHistory`, 12 migration kaydi)
+kurulan bos bir veritabanina (`56 FK / 45 tablo + __EFMigrationsHistory`, o gun 12 migration kaydi;
+**BUGUN 15** - LF-1/K4'te yeniden olculdu, asagidaki nota bakin)
 `dotnet ef database update` uygulandi -> **"No migrations were applied. The database is already
 up to date."** ve sayilar DEGISMEDI. Yani `database/mssql/01_schema.sql` ile migration'lar
 AYNI semayi uretiyor; D-SEMA'nin iddiasi olcumle KANITLANDI.
@@ -158,8 +159,15 @@ bastion'da sema kurtarmaya calisan operator, JWT anahtariyla hicbir ilgisi olmay
 cikti ama asil bedeli **tam da bu runbook'un anlattigi kurtarma yolunda** olurdu.
 
 > **SEMANIN TEK DOGRULUK KAYNAGI `Divisima.Dal/Migrations`'dir** (D-SEMA karari).
-> Bu depoda 12 migration vardir; `InitialCreate` en eskisidir. (Bu satir uzun sure
-> "Bu projede henuz migration yok" diyordu - on iki migration BAYATLAMISTI.)
+> Bu depoda **15** migration vardir; `InitialCreate` en eskisidir.
+> **URETEN IFADE (sayi ezberden yazilmaz - LF-1/K4):**
+> `ls Divisima.Dal/Migrations/*.cs | grep -v Designer | grep -v ModelSnapshot | wc -l` -> **15**
+> ve bos bir veritabanina uygulandiktan sonra `SELECT COUNT(*) FROM __EFMigrationsHistory` -> **15**
+> (iki bagimsiz kanal, LF-1 oncesi launch olcum turunda `LaunchProbeDb` ile dogrulandi:
+> 46 tablo · 15 satir · "Done."). `DivisimaDbContextModelSnapshot.cs` bir migration DEGILDIR,
+> sayima GIRMEZ - dosya sayisi 16'dir.
+> (Bu satir uzun sure "Bu projede henuz migration yok" diyordu, sonra "12"de BAYATLADI -
+> IKI KEZ. Bu yuzden artik UREten IFADEYLE yazili.)
 >
 > **.NET araci olmayan bir ortamda** (felaket kurtarma, ayricalikli bir bastion) sema
 > `database/mssql/01_schema.sql` ile kurulur. O dosya URETILMIS bir artefakttir

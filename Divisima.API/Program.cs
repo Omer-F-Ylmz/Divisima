@@ -104,6 +104,19 @@ var builder = WebApplication.CreateBuilder(args);
         // DIZEDIR (`appsettings.json`) ve listeye UST-KUME olsun diye eklendi - bos deger
         // asagidaki dongude zaten atlanir. (Ilk yazimda "alti CHANGE_ME anahtarindan kuruldu"
         // deniyordu; yedi girisin ALTISI icin dogru - kural-uyum denetcisi duzeltti.)
+        //
+        // ══ LF-1 / K2 - `Captcha:SecretKey` LISTEDEN CIKARILDI (OLCULMUS GEREKCE) ═══════════
+        // T3-1 OLCULDU: `ICaptchaValidator` depoda UC yerde gecer (arayuz · sinif · DI kaydi) ve
+        // `ValidateAsync` URETIMDE **SIFIR** yerden cagrilir. Yani `Captcha:Enabled` bir NO-OP'tur.
+        // Anahtari bu listede tutmak, HICBIR SEY YAPMAYAN bir ozellik icin gercek bir secret
+        // girilmedikce uretimde uygulamanin ACILMAMASI demekti - koruma degil, ENGEL.
+        // Ozelligin kaderi (sil ya da bagla) GF-7 kararidir; kod bu dalgada DOKUNULMADI.
+        //
+        // ══ LF-1 / K1 - `Cookies:Domain` LISTEYE EKLENDI ════════════════════════════════════
+        // Yer-tutucu taramasi icin: birinin oraya "CHANGE_ME" yazmasi yakalanir. AMA TEK BASINA
+        // YETMEZ - asagidaki dongu BOS degeri ATLAR (`continue`), oysa K1'in korudugu sey tam da
+        // BOSLUKTUR. Gercek kapi bu yuzden AYRI ve KOSULSUZDUR (bkz. asagidaki `Cookies:Domain`
+        // blogu). Iki kapi FARKLI seyi korur.
         var hassasAnahtarlar = new[]
         {
             "ConnectionStrings:DivisimaDb",
@@ -112,7 +125,7 @@ var builder = WebApplication.CreateBuilder(args);
             "MailSettings:Password",
             "Iyzico:ApiKey",
             "Iyzico:SecretKey",
-            "Captcha:SecretKey",
+            "Cookies:Domain",
         };
 
         // BILINEN-PUBLIC DEGER DENY-LIST'I (E-1a): `docker-compose.yml` ve iki workflow
@@ -189,6 +202,37 @@ var builder = WebApplication.CreateBuilder(args);
         if (!Uri.TryCreate(iyzicoCallback, UriKind.Absolute, out var cbUri) || cbUri.Scheme != Uri.UriSchemeHttps)
             throw new InvalidOperationException(
                 $"FATAL: Config - Iyzico:CallbackUrl mutlak bir HTTPS adresi olmalı (bulunan: '{iyzicoCallback}').");
+
+        // ══ LF-1 / K1 (BL-1) - `Cookies:Domain` PROD'DA ZORUNLU ════════════════════════════
+        //
+        // OLCULEN ZINCIR (launch hazirlik turu, DORT halka - hicbiri varsayim degil):
+        //   1) `ops/infra/nginx.conf` storefront ve API'yi AYRI HOST'ta sunar
+        //      (`server_name divisima.com` · `server_name api.divisima.com`).
+        //   2) `AuthController`in cerez yardimcisi: `Cookies:Domain` BOSSA `o.Domain` HIC SET
+        //      EDILMEZ -> cerezler `api.divisima.com`a HOST-ONLY yazilir.
+        //   3) Vitrin `csrf_token`i `document.cookie`den okur (`frontend/api-client.js`) -
+        //      host-only cerez `divisima.com` sayfasindan GORUNMEZ.
+        //   4) `AntiforgeryMiddleware` guvensiz metot + `refresh_token` cerezi + Bearer YOK
+        //      uclusunde `X-CSRF-Token` ile cerezin ESLESMESINI ister; token yenileme cagrisi
+        //      TAM BU uclüdur (govdesiz, `credentials: include`, Bearer tasimaz).
+        // SONUC: `/api/auth/refresh` KALICI 403 -> her kullanici access token'in 15 dakikalik
+        // omru dolunca oturumunu kaybeder ve YENILEYEMEZ. KACIS YOLU YOK (csrf govdeye bilincli
+        // olarak konmuyor).
+        //
+        // NEDEN ACILISTA: bu ariza SESSIZDIR. `Iyzico:CallbackUrl` bos kalirsa ilk odemede
+        // GURULTULU duser; bunda ise uygulama saglikli gorunur, health uclari 200 doner ve
+        // belirti ancak ILK ACCESS TOKEN SURESI DOLDUGUNDA - dagitimdan 15 dakika SONRA, ve
+        // TUM kullanicilarda ayni anda - ortaya cikar.
+        //
+        // DEVELOPMENT SERBEST: yerelde iki taraf da `localhost` (ayni host), host-only cerez
+        // CALISIR. Bu blok zaten `!IsDevelopment()` dalinin icinde.
+        var cerezAlanAdi = cfg["Cookies:Domain"];
+        if (string.IsNullOrWhiteSpace(cerezAlanAdi))
+            throw new InvalidOperationException(
+                "FATAL: Config - Cookies:Domain tanımlı değil. Üretimde storefront (divisima.com) ve API " +
+                "(api.divisima.com) AYRI HOST'tadır; alan adı verilmezse oturum çerezleri host-only yazılır, " +
+                "storefront'taki JS 'csrf_token'ı okuyamaz ve /api/auth/refresh KALICI 403 döner - her " +
+                "kullanıcı 15 dakikada oturumunu kaybeder. Üst alan adı biçiminde verin: \".divisima.com\".");
     }
 }
 

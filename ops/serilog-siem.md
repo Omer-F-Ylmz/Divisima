@@ -41,8 +41,10 @@ builder.Host.UseSerilog((ctx, cfg) => cfg
 | Aynı hesap AccountLocked | 3/saat | Hesap sahibine mail + SOC bildirimi | **VAR** (GF-5 öncesinde de vardı) |
 | PaymentFraud / AmountMismatch | herhangi | Anında SOC alarmı | **YOK** — bu iki tip kodda hâlâ ÜRETİLMİYOR (yalnız `Messages.*` sabiti olarak geçer) |
 | `PaymentSignatureInvalid` | herhangi | SOC alarmı + sağlayıcı imza biçimi kontrolü | **VAR** — K2 ile eklendi (`IyzicoPaymentManager`) |
-| `IdorAttempt` (sahiplik ihlali, **404**) | 5/dk | Kullanıcı oturumu incele + uyarı | **KISMEN** — K2 ile Order + Payment uçlarında yazılıyor; kalan yedi manager BİLİNEN boşluk |
+| `IdorAttempt` (sahiplik ihlali, **404**) | 5/dk | Kullanıcı oturumu incele + uyarı | **KISMEN** — K2 ile `IyzicoPaymentManager`(`order`) ve `OrderManager`(`address`) uçlarında yazılıyor ("Order + Payment" YANLIŞTI, AV-3'te ölçüldü); kalan yedi manager BİLİNEN boşluk |
 | `RateLimitExceeded` | 5/dk | IP incele | **VAR** — K2 ile eklendi; 60 sn örnekleme (kova+IP başına TEK satır) |
+| **`PaymentAfterTerminal`** (severity `Critical`) | **herhangi** | **Ödeme alındı ama sipariş terminal — ELLE İADE başlat** | **VAR** — GF-6/K5 ile eklendi (`IyzicoPaymentManager`, iki dal). **SIEM bağlı olmadığı için bugün OKUYUCUSU YOKTUR**: `security_events` için okuma ucu **0** (controller'larda geçiş 0) ve `NotifyAdminsAsync` SignalR `"admins"` grubuna yayın yapar, o grup **BOŞTUR**. Bu yüzden GÜNLÜK ELLE SQL sorgusu bir dağıtım şartıdır (`ops/deployment-checklist.md`). |
+| **`ProductImportRejected`** | 3/gün | İçe-aktarım dosyasını ve admin oturumunu incele | **VAR** — GF-6/K7 ile eklendi; satır başına DEĞİL, reddedilen dosya başına TEK özet olay |
 | Yeni ülke/cihazdan login | herhangi | Kullanıcıya doğrulama maili | **YOK** — `NewDeviceLogin` üretilmiyor |
 
 > **Durum kodu düzeltmesi:** eski tablo `IdorAttempt`i "403 sahiplik" diye yazıyordu.
@@ -50,11 +52,17 @@ builder.Host.UseSerilog((ctx, cfg) => cfg
 
 ## Güvenlik olay tipleri
 ### BUGÜN KODDA ÜRETİLEN (ölçüldü)
+**ON DORT tip** (LF-1/K4'te üreten ifadeyle sayıldı — önceki "12" listesi GF-6'nın eklediği
+iki tipi ATLIYORDU; ayrıca `AccountLocked` ve `ChangePasswordFailed` bir **ternary**'nin ilk
+argümanında üretildiği için basit bir `LogAsync("` çapası onları GÖRMÜYORDU):
+
 `LoginFailed` (kayıtlı **ve** kayıtsız e-posta; ikisi `customer_id`nin dolu/NULL olmasıyla
 ayrılır) · `AccountLocked` · `ChangePasswordFailed` · `AccountDeleted` · `TwoFactorChallenge` ·
 `TwoFactorFailed` · `RefreshTokenReuse` · `ResetPassword` · `Logout` (GF-5/K2) ·
-`IdorAttempt` (GF-5/K2) · `RateLimitExceeded` (GF-5/K2) · `PaymentSignatureInvalid` (GF-5/K2)
-— hepsi `severity` (Info/Warning/Critical) ile.
+`IdorAttempt` (GF-5/K2 — kapsam `IyzicoPaymentManager`(`order`) + `OrderManager`(`address`);
+"Order + Payment" YANLIŞTI, AV-3'te ölçüldü) · `RateLimitExceeded` (GF-5/K2) ·
+`PaymentSignatureInvalid` (GF-5/K2) · **`PaymentAfterTerminal` (GF-6/K5, `Critical`)** ·
+**`ProductImportRejected` (GF-6/K7)** — hepsi `severity` (Info/Warning/Critical) ile.
 
 ### BU BELGENİN ESKİDEN SAYDIĞI AMA HÂLÂ ÜRETİLMEYEN TİPLER
 `PaymentFraud`, `PaymentAmountMismatch` — bu adlar kodda YALNIZ müşteriye dönen metin sabiti

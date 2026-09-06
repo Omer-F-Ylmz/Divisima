@@ -243,7 +243,49 @@ bir karardır.
       sayfadan `/api/auth/*`'a giden isteklere **otomatik eklenir**)
 - [ ] Statik varlıklar için ayrı bir alan adı kullanılıyorsa, o alan adı `divisima.com`'un
       **alt alanı değil** (aksi halde CDN sağlayıcısı çerez kapsamına girer)
+## SIRALI DAĞITIM ADIMLARI (LF-1 — LAUNCH ÖLÇÜMÜNDEN ÜRETİLDİ)
+
+> Her adımın **kanıtı** yazılıdır: "yaptım" demek yetmez, kanıt alınır.
+> Şablon: `Divisima.API/appsettings.Production.example.json` (her anahtarın nereden alındığı
+> orada tek satır yorumla yazılı). Ortam değişkeni biçimi: `Bolum__Anahtar` (iki alt tire).
+> Üretim compose'u: `docker-compose.prod.yml` (geliştirme `docker-compose.yml` **KULLANILMAZ** —
+> o dosya `ASPNETCORE_ENVIRONMENT: Development` taşır ve TÜM prod fail-fast kapılarını atlar).
+
+| # | Adım | Kanıt nasıl alınır |
+|---|------|--------------------|
+| 1 | DNS: `divisima.com`, `www`, `api.divisima.com` A/AAAA kaydı | `dig +short` her üç ad için IP döner |
+| 2 | TLS sertifikası `/etc/ssl/divisima/` altında | `openssl x509 -noout -dates -in fullchain.pem` |
+| 3 | SQL Server: veritabanı **`COLLATE Turkish_CI_AS`** ile yaratıldı | DB **İÇİNDEN**: `SELECT DATABASEPROPERTYEX(DB_NAME(),'Collation')` |
+| 4 | Recovery model **FULL**, `AUTO_CLOSE` **OFF** | `SELECT recovery_model_desc, is_auto_close_on FROM sys.databases WHERE name='DivisimaDb'` |
+| 5 | En az yetkili DB kullanıcısı (`ops/db/least-privilege.sql`) | Betik 0 hata ile koşar; DDL denemesi reddedilir |
+| 6 | `TokenOptions:SecurityKey` üretildi (≥ 32 bayt) | `openssl rand -base64 48`; açılışta fail-fast SESSİZ geçerse doğru |
+| 7 | `Encryption:Key` üretildi (**TAM 32 bayt** base64) | `openssl rand -base64 32`; açılışta "TAM 32 bayt" hatası GELMEZSE doğru |
+| 8 | `ConnectionStrings:DivisimaDb` dolduruldu | `/health/ready` **200** |
+| 9 | **`Cookies:Domain` = `.divisima.com` (BL-1)** | Giriş sonrası tarayıcı konsolunda `document.cookie` içinde **`csrf_token` GÖRÜNMELİ**; görünmüyorsa `/api/auth/refresh` 15 dk sonra kalıcı 403 verir |
+| 10 | `ForwardedHeaders:KnownProxies` = LB/nginx IP'leri | `security_events` `RateLimitExceeded` satırının `ip_address` alanı **gerçek istemci IP'si** olmalı, proxy IP'si değil |
+| 11 | `MailSettings:*` gerçek SMTP (Host boşsa **açılış düşer**) | Şifre sıfırlama maili GELMELİ — admin kurtarma yolu buna bağlı (jeton DB'de **özet**, ham değer okunamaz) |
+| 12 | İyzico canlı: `ApiKey` · `SecretKey` · `BaseUrl` · `UseRealSdk=true` | Canlı `BaseUrl`; gerçek bir test ödemesi 3D akışını tamamlamalı |
+| 13 | **`Iyzico:CallbackUrl` mutlak HTTPS (fail-fast ZORUNLU)** | Boş/HTTP ise uygulama **AÇILMAZ** — açılması kanıttır |
+| 14 | CallbackUrl origin'i storefront CSP `form-action` listesiyle **AYNI** | Tarayıcı konsolunda CSP ihlali OLMAMALI (E2b'de "para çekildi, sipariş Pending" bu yüzden yaşandı) |
+| 15 | `Storefront:BaseUrl` = `https://divisima.com` | Ödeme sonrası `#/odeme/sonuc` adresine yönlendirmeli |
+| 16 | `ops/set-api-origin.sh` ile vitrinin API origin'i yazıldı | Betiğin `--verify` modu **EXIT 0** |
+| 17 | Redis ayakta, `Redis:Enabled=true`, `Redis:Connection` | Redis erişilemezse uygulama **AÇILMAZ** (D5'te ölçüldü) — açılması kanıttır |
+| 18 | `BackgroundJobs:Enabled=true` | Hangfire recurring job listesi dolu; satılabilir stok KALICI düşük KALMAMALI (kapalıyken rezervasyonlar temizlenmez) |
+| 19 | `AdminSeed` ile ilk admin açıldı, sonra **`Enabled=false`** | Admin girişi 200; ikinci açılışta YENİ admin OLUŞMAMALI (idempotent) |
+| 20 | **GÜNLÜK: `PaymentAfterTerminal` sorgusu** | `SELECT * FROM security_events WHERE event_type='PaymentAfterTerminal' AND severity='Critical' AND created_at >= CAST(GETDATE() AS date)` — **çıkan her satır ELLE İADE gerektirir** |
+
+> **20. ADIM NEDEN ELLE:** `security_events` için **okuma ucu YOKTUR** (controller'larda geçiş 0)
+> ve `Critical` olaylarda çağrılan `NotifyAdminsAsync` SignalR `"admins"` grubuna yayın yapar —
+> **o grup BOŞTUR** (`JoinAdminGroup()` çağıranı yok, `51·AV-2` BİLİNEN kalemi). Yani bu olayın
+> bugün **otomatik okuyucusu yoktur**; sorgu koşulmazsa iade gereken vaka GÖRÜLMEZ.
+
 ## Zorunlu adımlar
+- [ ] **`Cookies:Domain` üst alan adı biçiminde ayarlandı (`.divisima.com`) — LF-1/K1**
+      Boş bırakılırsa uygulama **AÇILMAZ** (fail-fast). Bu kapı LF-1'de eklendi; öncesinde
+      arıza **sessizdi** ve ancak ilk access token süresi dolduğunda (dağıtımdan ~15 dk sonra,
+      TÜM kullanıcılarda aynı anda) ortaya çıkardı.
+- [ ] **Günlük `PaymentAfterTerminal` / `Critical` sorgusu operasyon takvimine yazıldı**
+      (20. adım; otomatik okuyucu YOK)
 - [ ] `Iyzico:BaseUrl` = `https://api.iyzipay.com` (sandbox değil)
 - [ ] `Webhook:AllowedIps` = Iyzico production IP aralıkları
 - [ ] `AllowedOrigins` = yalnız gerçek frontend domain(ler)i

@@ -11,7 +11,12 @@ namespace Divisima.Bussiness.Abstract
         // GF-1/K4'un uc noktasinda da iz cagrisi 0 idi. Yani birinin baskasinin siparisini
         // yoklamasi hicbir yerde GORUNMUYORDU.
         //
-        // KAPSAM ORDER + PAYMENT ILE SINIRLI - BILINCLI (merkez karari): sahiplik-404 yuzeyi
+        // KAPSAM IKI CAGRI YERI ILE SINIRLI - BILINCLI (merkez karari):
+        //   `IyzicoPaymentManager` -> kaynak "order"   ·   `OrderManager` -> kaynak "address"
+        // (Bu satir eskiden "Order + Payment" diyordu; AV-3'te OLCULDU ve YANLIS cikti -
+        //  kapsam MANAGER adlariyla degil, YAZILAN KAYNAK adiyla tanimlanir. LF-1/K4'te
+        //  duzeltildi; ayni yanlis SECURITY.md ve ops/serilog-siem.md'de de vardi.)
+        // Sahiplik-404 yuzeyi
         // bugun YEDI manager'a dagilmis durumda ve bunlarin ALTISI (Address · Invoice · Return ·
         // Shipment · PriceDrop · StockNotification) AV-2'de KOR KALAN controller'lara ait.
         // Hepsine dokunmak, AV-2'nin ana bulgusunu ("kapsam GENISLEMEDI, YER DEGISTIRDI") fix

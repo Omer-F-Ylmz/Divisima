@@ -17,7 +17,7 @@ Bu belge tehdit modelini, uygulanan tüm güvenlik katmanlarını ve operasyonel
 | Hesap kilitleme | 5 başarısız denemede 15 dk kilit (brute-force) |
 | Şifre sıfırlama | Tek kullanımlık token (30 dk), enumeration-safe, sıfırlamada tüm oturum iptali |
 | 2FA/MFA | E-POSTA OTP: 6 hane, SHA-256 hash'li saklanır, 5 dk, tek kullanımlık, sabit-zamanlı karşılaştırma (`AuthManager.VerifyTwoFactor`). `TotpService` (RFC 6238) sınıf olarak vardır ve DI'ya kayıtlıdır (`Program.cs`) ama üretim akışında hiç çağrılmaz (ölçüldü: tüketici 0) — Google Authenticator akışı bugün YOKTUR. |
-| Bot koruması | `ICaptchaValidator` (Cloudflare Turnstile) — register/forgot/riskli login |
+| Bot koruması | **BUGÜN YOKTUR — `Captcha:Enabled` bayrağı ETKİSİZDİR (LF-1/K2, T3-1'de ölçüldü).** `ICaptchaValidator` depoda ÜÇ yerde geçer (arayüz · `TurnstileCaptchaValidator` · `Program.cs` DI kaydı) ve `ValidateAsync` üretim kodunda **SIFIR** yerden çağrılır — yani register/forgot/login uçlarında captcha ADIMI YOKTUR. Bayrağı açmak hiçbir şeyi değiştirmez; bu yüzden `Captcha:SecretKey` de fail-fast kapısından ÇIKARILDI (olmayan bir özellik için gerçek secret dayatmak dağıtımı korumasızca bloke ederdi). Kader kararı GF-7'de: okuyucuyu bağla ya da iskeleti sil. Bugünkü kaba-kuvvet savunması **hesap kilitleme + auth 10/dk rate limit**tir. |
 
 ## 2. Yetkilendirme (IDOR)
 - `[RequireUserType(Admin/Customer)]` custom policy + authorization handler.
@@ -50,7 +50,7 @@ Bu belge tehdit modelini, uygulanan tüm güvenlik katmanlarını ve operasyonel
 - **Field-level encryption:** `IEncryptionProvider` (AES-256-GCM — gizlilik + bütünlük). 2FA secret DB'de şifreli.
 - **Hassas veri maskeleme:** `Divisima.Core.Utilities.Text.KanitMaskesi` — ham gövdeyi/jetonu çıktıya veya loga koyan her yer buradan geçer. Ayrıca GF-5/K6 ile **global bir nokta** açıldı: Serilog'un iki sink'i de `MaskeliFormatter` (`ITextFormatter`) üzerinden yazar, çünkü sızan satırları uygulama kodu değil EF Core / SQL Server üretiyordu (ölçüldü: maskeli ve maskesiz satırın md5'i aynıydı). Çerçeve metinleri için ölçüt `LogMetniMaskesi`dedir (SQL "Truncated value" + EF parametre dökümü); `KanitMaskesi`nin kendi ölçütü GENİŞLETİLMEDİ. `SensitiveDataMask` sınıfı depoda durur ama **çağıranı yoktur (0) — ölü koddur**.
 - **Response sızıntısı:** password_hash/salt asla DTO'da değil (ayrı response DTO'ları).
-- **Secrets:** `ISecretProvider` (config/env → Azure Key Vault/AWS Secrets Manager iskeleti). Kod dokunulmadan kasaya geçiş.
+- **Secrets:** config/env'den okunur. `ISecretProvider` bir **İSKELETTİR ve BUGÜN KULLANILMIYOR** — LF-1/K5'te ölçüldü: `Program.cs` KOŞULSUZ `ConfigurationSecretProvider` kaydeder, `AzureKeyVaultSecretProvider` **hiçbir yerde kayıtlı değildir** ve `ISecretProvider`ın **tüketicisi 0**'dır. Bu satır eskiden "kod dokunulmadan kasaya geçiş" diyordu; **YANLIŞTI** — kasa okuyucusu yazılana kadar Key Vault'a yazılan bir değer uygulamaya ULAŞMAZ. Zamanlanmış rotasyon iş akışı bu yüzden LF-1'de devre dışı bırakıldı (yalnız elle tetiklenir). Karar GF-7'ye devredildi: ya okuyucu bağlanır ya iskelet silinir.
 
 ## 6. Altyapı & DoS
 - **Rate limiting:** Global 100/dk + auth 10/dk + payment 10/dk + **hassas 20/dk** (IP başına, endpoint-bazlı) — tek kaynak `RateLimitPolitikasi.Olustur` (`RateLimitPolitikasi.cs`), `RateLimit:*PermitLimit` ile ezilebilir. Redis yolundaki eski auth 5/dk **BİLİNÇLİ OLARAK TERK EDİLDİ** (`RateLimitPolitikasi.cs`). 429 reddi artık güvenlik olayı yazar (60 sn örneklemeyle, kova+IP başına).
@@ -59,7 +59,7 @@ Bu belge tehdit modelini, uygulanan tüm güvenlik katmanlarını ve operasyonel
 - **Güvenlik başlıkları:** X-Frame-Options (clickjacking), X-Content-Type-Options (MIME), CSP, Referrer-Policy, Permissions-Policy, Server gizleme.
 
 ## 7. İzleme & Müdahale
-- **Güvenlik olay logu:** `SecurityEvent` — bugün üretilen tipler: `LoginFailed` (kayıtlı **ve** kayıtsız e-posta; ikisi `customer_id`nin dolu/null olmasıyla ayrılır), `AccountLocked`, `ChangePasswordFailed`, `AccountDeleted`, `TwoFactorChallenge`, `TwoFactorFailed`, `RefreshTokenReuse`, `ResetPassword`, `Logout`, `IdorAttempt` (sahiplik ihlali — **kapsam Order + Payment**, kalan yedi manager BİLİNEN), `RateLimitExceeded`, `PaymentSignatureInvalid`. `ip_address` ve `user_agent` GF-5/K1 ile `SecurityEventManager` içinde doldurulur (önceden 7 çağrının 7'sinde de null geçiliyordu). Akış Serilog Console + File sink'lerine gider — **SIEM bağlı DEĞİLDİR** (`ops/serilog-siem.md`).
+- **Güvenlik olay logu:** `SecurityEvent` — bugün üretilen **14** tip (LF-1/K4'te üreten ifadeyle sayıldı; önceki "12" listesi **ikisini atlıyordu** ve iki `LogAsync` çağrısı türü bir **ternary**'nin ilk argümanında ürettiği için basit bir çapa onları görmüyordu): `LoginFailed` (kayıtlı **ve** kayıtsız e-posta; ikisi `customer_id`nin dolu/null olmasıyla ayrılır), `AccountLocked`, `ChangePasswordFailed`, `AccountDeleted`, `TwoFactorChallenge`, `TwoFactorFailed`, `RefreshTokenReuse`, `ResetPassword`, `Logout`, `IdorAttempt` (sahiplik ihlali — **kapsam `IyzicoPaymentManager`(`order`) + `OrderManager`(`address`)**; "Order + Payment" ifadesi YANLIŞTI, AV-3'te ölçüldü — kalan yedi manager BİLİNEN), `RateLimitExceeded`, `PaymentSignatureInvalid`, **`PaymentAfterTerminal` (severity `Critical`, GF-6/K5 — terminal siparişe gelen ödeme; elle iade gerektirir)**, **`ProductImportRejected` (GF-6/K7 — reddedilen CSV içe-aktarımının TEK özet olayı)**. `ip_address` ve `user_agent` GF-5/K1 ile `SecurityEventManager` içinde doldurulur (önceden 7 çağrının 7'sinde de null geçiliyordu). Akış Serilog Console + File sink'lerine gider — **SIEM bağlı DEĞİLDİR** (`ops/serilog-siem.md`).
 - **Anormallik/alerting:** `severity == "Critical"` olaylarda `NotifyAdminsAsync` çağrılır (`SecurityEventManager.cs`) ve SignalR `"admins"` grubuna yayın yapılır. **BUGÜN BU GRUP BOŞTUR**: `NotificationHub.JoinAdminGroup()` çağıranı yoktur (ölçüldü: istemci tarafında SignalR 0 geçiş) — hiçbir alarm bir insana ULAŞMAZ. Mail dalı YOKTUR. Okuyucu launch sonrasıdır.
 - **Correlation id:** Her istek izlenebilir; audit log (kim neyi ne zaman değiştirdi).
 - **Health checks:** /health (DB) + OpenTelemetry (tracing/metrics).
@@ -75,8 +75,8 @@ TokenBlacklist → Authorization → Controllers
 - [ ] `Encryption:Key` — 32 byte rastgele, Key Vault'ta
 - [ ] `TokenOptions:SecurityKey` — güçlü, kasada, periyodik rotasyon
 - [ ] `Iyzico:*` — production anahtarları, kasada
-- [ ] `Captcha:Enabled=true` + gerçek Turnstile secret
-- [ ] `Vault:Enabled=true` — gerçek kasa entegrasyonu
+- [ ] ~~`Captcha:Enabled=true` + gerçek Turnstile secret~~ — **BU MADDE KALKTI (LF-1/K2)**: bayrak etkisiz, doğrulayıcının çağrısı 0. Açmak sahte güvence üretir.
+- [ ] ~~`Vault:Enabled=true` — gerçek kasa entegrasyonu~~ — **BU MADDE KALKTI (LF-1/K5)**: kasa OKUYUCUSU yoktur (`ISecretProvider` tüketicisi 0), açmak hiçbir değeri kasadan getirmez.
 - [ ] DB kullanıcısı en az yetki (DDL yok)
 - [ ] `dotnet list package --vulnerable` temiz + CI'da Dependabot/Snyk
 - [ ] TLS 1.2+ zorunlu, HSTS preload
@@ -90,9 +90,9 @@ TokenBlacklist → Authorization → Controllers
 | Entegrasyon | Dev (flag=false) | Production (flag=true) |
 |-------------|------------------|------------------------|
 | Iyzico ödeme | Güvenli placeholder | Gerçek Iyzipay SDK (CF init + sunucu-sunucu retrieve) |
-| Captcha | Atlanır | Gerçek Turnstile siteverify (fail-closed) |
+| Captcha | Atlanır | **Atlanır — flag ETKİSİZ (LF-1/K2): `ValidateAsync` çağrı yeri 0** |
 | Cache/Lock/Blacklist | In-memory | Redis (dağıtık, RedLock) |
-| Secrets | appsettings/env | Azure Key Vault (managed identity, 5 dk cache) |
+| Secrets | appsettings/env | **appsettings/env — kasa okuyucusu YOK (LF-1/K5): `AzureKeyVaultSecretProvider` kayıtlı değil, `ISecretProvider` tüketicisi 0** |
 
 ## 9. CI/CD Güvenlik (`.github/`)
 - **security.yml:** dependency-scan (`dotnet list --vulnerable`, build kırar) + CodeQL (security-extended) + Gitleaks (secret taraması) + testler. Haftalık zamanlanmış tarama.

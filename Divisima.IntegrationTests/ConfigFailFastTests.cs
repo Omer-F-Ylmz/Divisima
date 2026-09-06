@@ -30,17 +30,21 @@ namespace Divisima.IntegrationTests
             private readonly string? _callbackUrl;
             // GF-3/K5: tek bir hassas anahtari BILINCLI olarak bozmak icin. null = bozma yok.
             private readonly (string Anahtar, string Deger)? _ezme;
+            // LF-1/K1: ayni fabrika Development bacagini da kosar - "uretimde ZORUNLU,
+            // development'ta SERBEST" iddiasinin IKI ayagi da AYNI duzenekle olculur.
+            private readonly string _ortam;
 
-            public ProdFactory(string? callbackUrl, (string, string)? ezme = null)
+            public ProdFactory(string? callbackUrl, (string, string)? ezme = null, string ortam = "Production")
             {
                 _callbackUrl = callbackUrl;
                 _ezme = ezme;
+                _ortam = ortam;
             }
 
             protected override void ConfigureWebHost(IWebHostBuilder builder)
             {
                 TestHostConfig.Apply(builder);
-                builder.UseEnvironment("Production");
+                builder.UseEnvironment(_ortam);
                 // GF-3/K5: placeholder taramasi artik alti hassas anahtari daha kapsiyor;
                 // asgari uretim ayarlari TEK KAYNAKTAN geliyor (ikinci kopya acilmadi).
                 TestHostConfig.UretimAsgariAyarlari(builder);
@@ -114,11 +118,11 @@ namespace Divisima.IntegrationTests
         // ══ GF-3 / K5 (AV-1: E-5 + E-1a) - DAVRANIS PINLERI ════════════════════════════════
         private const string GecerliCallback = "https://api.divisima.test/api/payment/callback";
 
-        private static Exception? AcilisHatasi(string anahtar, string deger)
+        private static Exception? AcilisHatasi(string anahtar, string deger, string ortam = "Production")
         {
             try
             {
-                using var f = new ProdFactory(GecerliCallback, (anahtar, deger));
+                using var f = new ProdFactory(GecerliCallback, (anahtar, deger), ortam);
                 _ = f.Services;
                 return null;
             }
@@ -133,7 +137,10 @@ namespace Divisima.IntegrationTests
         [InlineData("MailSettings:Password", "CHANGE_ME")]
         [InlineData("Iyzico:ApiKey", "CHANGE_ME")]
         [InlineData("Iyzico:SecretKey", "CHANGE_ME")]
-        [InlineData("Captcha:SecretKey", "CHANGE_ME")]
+        // `Captcha:SecretKey` BU LISTEDEN CIKARILDI (LF-1/K2) - yerine BILINCLI bir NEGATIF
+        // pin kondu: Uretimde_CaptchaSecretKey_YER_TUTUCU_olsa_bile_UYGULAMA_ACILIR.
+        // Bozulan pin ile yerine konan pin AYNI SEYI korumuyor; ayrim BILEREK verildi ve
+        // gerekcesi o testin basinda yazili.
         // DEGER PARCALI YAZILDI - `secret-scan` gerekcesi: tek parca halinde entropi 4.849
         // (gitleaks esigi 3.5) ve "SecurityKey" anahtarinin yaninda duruyor. Ikinci parca
         // TEK KARAKTERIN tekrari, yani entropi 0; birlestirilmis deger 32 bayt sinirini gecer
@@ -182,6 +189,74 @@ namespace Divisima.IntegrationTests
             hata!.ToString().Should().Contain("TokenOptions:SecurityKey");
             // Yer-tutucu dalindan DEGIL, deny-list dalindan durmali (iki dal ayrisiyor).
             hata.ToString().Should().Contain("public");
+        }
+
+        // ══ LF-1 / K1 (BL-1) - Cookies:Domain URETIMDE ZORUNLU ═════════════════════════════
+        //
+        // OLCULEN ONCE-DURUM ("kirmizi-once", LAUNCH HAZIRLIK OLCUMU / BL-1): Production +
+        // Cookies:Domain BOS ile uygulama SORUNSUZ ACILIYORDU. Zincir dort halkali ve her
+        // halkasi ayri ayri olculdu: nginx storefront'u (divisima.com) ve API'yi
+        // (api.divisima.com) AYRI HOST'ta sunar -> `AuthController` alan adi verilmezse
+        // cerezi HOST-ONLY yazar -> vitrin JS'i `csrf_token`i `document.cookie`den OKUYAMAZ ->
+        // `AntiforgeryMiddleware` double-submit eslesmesini bulamaz ve `/api/auth/refresh`
+        // KALICI 403 doner.
+        //
+        // NEDEN ACILIS KAPISI: ariza SESSIZDIR. Uygulama saglikli gorunur, `/health` 200 doner
+        // ve belirti ancak ILK access token'in 15 dakikalik omru dolunca - dagitimdan 15 dakika
+        // SONRA, TUM kullanicilarda AYNI ANDA - ortaya cikar. Bu sinif ariza, dagitim
+        // penceresinin KAPANDIGI bir anda ogrenilir.
+        [Theory]
+        [InlineData("")]        // hic verilmemis / bos
+        [InlineData("   ")]     // yalniz bosluk - `IsNullOrWhiteSpace` dalini AYRICA olcer
+        public void Uretimde_CookiesDomain_BOSSA_UYGULAMA_ACILMAZ(string deger)
+        {
+            var hata = AcilisHatasi("Cookies:Domain", deger);
+
+            hata.Should().NotBeNull(
+                "alan adi verilmeyen cerez host-only yazilir ve /api/auth/refresh KALICI 403 " +
+                "doner - belirti 15 dakika SONRA ve TUM kullanicilarda ayni anda cikar");
+            var metin = hata!.ToString();
+            // CIFT-ANLAM KIRICI: acilis BASKA bir eksik ayardan degil, TAM BU anahtardan durmali.
+            metin.Should().Contain("Cookies:Domain");
+            // Mesaj OPERATORE NE YAPACAGINI soylemeli - "eksik" demek yetmez; bicim de lazim.
+            metin.Should().Contain(".divisima.com",
+                "mesaj UST ALAN ADI bicimini ornekle vermeli, yoksa operator 'divisima.com' " +
+                "yazar ve ayni ariza noktasi noktasina tekrarlar");
+        }
+
+        // VAKUM KIRICI'nin K1 ayagi: DEVELOPMENT'ta ayni bos deger acilisi ENGELLEMEZ.
+        // Bu ayak olmadan yukaridaki pin "her ortamda patliyor" haliyle de yesil kalirdi ve
+        // "uretimde zorunlu, yerelde serbest" iddiasinin YARISI olculmemis olurdu.
+        // Yerelde iki taraf da localhost - yani AYNI host - oldugu icin host-only cerez CALISIR.
+        [Fact]
+        public void Developmentta_CookiesDomain_BOS_ise_UYGULAMA_ACILIR()
+        {
+            AcilisHatasi("Cookies:Domain", "", ortam: "Development")
+                .Should().BeNull(
+                    "yerelde storefront ve API ayni host'tadir; acilisi engellemek gereksiz " +
+                    "surtunme olur - kapi YALNIZ uretim bacaginda kosar");
+        }
+
+        // ══ LF-1 / K2 - Captcha:SecretKey FAIL-FAST'TEN CIKARILDI ══════════════════════════
+        //
+        // BOZULAN PIN ACIKCA KAYDA GECER: bu deger GF-3/K5'te yer-tutucu Theory'sinin BIR
+        // GIRDISIYDI ve LF-1'de o girdi SILINDI. Yerine konan pin AYNI SEYI KORUMUYOR - tam
+        // TERSINI pinliyor, cunku karar da tersine dondu.
+        //
+        // OLCULEN GEREKCE (T3-1, LAUNCH HAZIRLIK OLCUMU): captcha OLU BIR OZELLIKTIR -
+        // dogrulayicinin uretim kodunda SIFIR cagri yeri var, `Captcha:Enabled` bayragi hicbir
+        // dala girmiyor. Olmayan bir ozellik icin GERCEK BIR SECRET dayatmak, dagitimi
+        // hicbir sey korumadan bloke eder: operator ya uydurma bir deger yazar (kapiyi
+        // anlamsizlastirir) ya da gercek bir secret uretip HICBIR YERDE KULLANILMAYAN bir
+        // degeri uretime tasir. Ozelligin kaderi - okuyucuyu baglamak ya da iskeleti silmek -
+        // GF-7'ye devredildi; O KARAR VERILDIGINDE BU PIN DE TERSINE DONER.
+        [Fact]
+        public void Uretimde_CaptchaSecretKey_YER_TUTUCU_olsa_bile_UYGULAMA_ACILIR()
+        {
+            AcilisHatasi("Captcha:SecretKey", "CHANGE_ME")
+                .Should().BeNull(
+                    "captcha dogrulayicisinin uretimde SIFIR cagri yeri var (T3-1); olu bir " +
+                    "ozellik icin secret dayatmak dagitimi korumasizca bloke eder");
         }
 
         private static readonly Lazy<string> KokDizin = new(() =>

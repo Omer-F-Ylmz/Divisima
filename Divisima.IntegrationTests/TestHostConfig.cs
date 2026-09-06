@@ -111,6 +111,14 @@ namespace Divisima.IntegrationTests
             builder.UseSetting("Iyzico:ApiKey", "kurgu");
             builder.UseSetting("Iyzico:SecretKey", "kurgu");
             builder.UseSetting("Captcha:SecretKey", "kurgu");
+
+            // ══ LF-1 / K1 - Cookies:Domain URETIMDE ZORUNLU OLDU ═════════════════════════
+            // Bu satir EKLENMEDEN once TUM uretim-bacagi pinleri (ConfigFailFastTests'in
+            // "acilir" diyen POZ ayaklari dahil) KIRMIZI olurdu - cunku depodaki
+            // `appsettings.json`da "Cookies" bolumu HIC YOKTUR (olculdu: grep 0 satir).
+            // Deger burada TEK KAYNAKTAN veriliyor; "bos birakilirsa acilmaz" iddiasini olcen
+            // test degeri KENDI ezmesiyle bosaltir (ezme EN SON uygulanir).
+            builder.UseSetting("Cookies:Domain", ".divisima.test");
         }
     }
 }
