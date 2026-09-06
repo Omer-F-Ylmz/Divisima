@@ -474,23 +474,43 @@ namespace Divisima.IntegrationTests
                 "SECURITY.md secret maddesi DURUST olmali: iskelet var, okuyucu YOK");
         }
 
-        // ══ K2 - CAPTCHA OLU OZELLIK, BELGE DE OYLE DEMELI ═════════════════════════════════
-        [Fact]
-        public void CAPTCHA_BAYRAGININ_ETKISIZ_OLDUGU_BELGEDE_YAZAR()
+        // Uretim projelerinde (`Divisima.Core` HARIC - orada TANIM'lar yasar) verilen desenin
+        // CAGRI yerlerini dondurur; imza satirlari `imzaHarici` ile elenir. Yorumlar AYIKLANIR
+        // (MK-8 EKI): bir yorumda gecen cagri, cagri DEGILDIR.
+        private static List<string> CagriYerleri(string desen, string imzaHarici)
         {
-            // KAYNAK OLCUMU: dogrulayicinin uretimde cagrisi 0 (T3-1). Yorumsuz metinde
-            // `ValidateAsync` YALNIZ arayuz ve sinif tanimlarinda gecer - CAGRI yeri yoktur.
-            var cagrilar = new List<string>();
+            var bulunan = new List<string>();
             foreach (var proje in new[] { "Divisima.API", "Divisima.Bussiness" })
             {
                 var dizin = Path.Combine(Kok.Value, proje);
                 if (!Directory.Exists(dizin)) continue;
                 foreach (var dosya in Directory.EnumerateFiles(dizin, "*.cs", SearchOption.AllDirectories))
                     foreach (var satir in CsYorumsuz(File.ReadAllText(dosya)).Split('\n'))
-                        if (satir.Contains("ValidateAsync(", StringComparison.Ordinal)
-                            && !satir.Contains("Task<bool> ValidateAsync", StringComparison.Ordinal))
-                            cagrilar.Add($"{Path.GetFileName(dosya)}: {satir.Trim()}");
+                        if (satir.Contains(desen, StringComparison.Ordinal)
+                            && !satir.Contains(imzaHarici, StringComparison.Ordinal))
+                            bulunan.Add($"{Path.GetFileName(dosya)}: {satir.Trim()}");
             }
+            return bulunan;
+        }
+
+        // ══ K2 - CAPTCHA OLU OZELLIK, BELGE DE OYLE DEMELI ═════════════════════════════════
+        [Fact]
+        public void CAPTCHA_BAYRAGININ_ETKISIZ_OLDUGU_BELGEDE_YAZAR()
+        {
+            // KAYNAK OLCUMU: dogrulayicinin uretimde cagrisi 0 (T3-1). Yorumsuz metinde
+            // `ValidateAsync` YALNIZ arayuz ve sinif tanimlarinda gecer - CAGRI yeri yoktur.
+            //
+            // BU BIR YOKLUK IDDIASIDIR (SDP 1.2) ve NEGATIF KONTROLSUZ KABUL EDILEMEZ: "0 sonuc"
+            // ile "tarayici hicbir sey taramadi" ayni ciktiyi verir. Bu yuzden ayni tarayici,
+            // AYNI dizinlerde, GERCEKTEN CAGRILAN bir metotla once BILINEN-POZITIF sinamadan
+            // gecirilir (`LogAsync(` - depoda on yediden fazla cagri yeri var).
+            var bilinenPozitif = CagriYerleri("LogAsync(", "Task LogAsync");
+            bilinenPozitif.Should().NotBeEmpty(
+                "BILINEN-POZITIF: tarayici gercek cagri yerlerini bulabiliyor olmali - bu " +
+                "sinama olmadan asagidaki 'captcha cagrisi yok' sonucu, tarayicinin BOS " +
+                "calismasindan da gelebilirdi");
+
+            var cagrilar = CagriYerleri("ValidateAsync(", "Task<bool> ValidateAsync");
 
             cagrilar.Should().BeEmpty(
                 "captcha dogrulayicisinin URETIMDE cagri yeri YOKTUR (T3-1); bir cagri eklenirse " +
