@@ -262,20 +262,32 @@ namespace Divisima.IntegrationTests
         {
             var k = KodSatirlari(Oku("Divisima.API/Program.cs"));
 
-            // POZ: liste YEDI anahtar tasiyor. ALTISI `appsettings.json`da CHANGE_ME degeri
-            // olan anahtarlardir (`ConnectionStrings:DivisimaDb` · `TokenOptions:SecurityKey` ·
-            // `MailSettings:Password` · `Iyzico:ApiKey` · `Iyzico:SecretKey` ·
-            // `Captcha:SecretKey`); YEDINCISI `Encryption:Key` ve o CHANGE_ME DEGIL, **BOS
-            // DIZE**dir (`appsettings.json:39`) - kapi bos degeri zaten ATLAR, liste ust-kume
-            // olsun diye dahil edildi.
+            // POZ: liste YEDI anahtar tasiyor. BESI `appsettings.json`da CHANGE_ME degeri olan
+            // anahtarlardir (`ConnectionStrings:DivisimaDb` · `TokenOptions:SecurityKey` ·
+            // `MailSettings:Password` · `Iyzico:ApiKey` · `Iyzico:SecretKey`); ALTINCISI
+            // `Encryption:Key` ve o CHANGE_ME DEGIL, **BOS DIZE**dir - kapi bos degeri zaten
+            // ATLAR, liste ust-kume olsun diye dahil edildi. YEDINCISI `Cookies:Domain`dir.
             // DUZELTME KAYDI: ilk yazimda burada "ALTI CHANGE_ME + jwtKey = 7" yaziyordu ve
             // ARITMETIGI YANLISTI - `jwtKey` zaten `TokenOptions:SecurityKey`, yani o altinin
             // ICINDE. Kural-uyum denetcisi olcup yakaladi (MK-3: yoruma sayi yazilacaksa
             // URETEN IFADESIYLE yazilir).
+            //
+            // ══ LF-1'DE BILINCLI OLARAK DEGISTIRILDI - BOZULAN PIN KAYDI ══════════════════
+            // Bu pin GF-3'te `Captcha:SecretKey`i ARIYORDU ve LF-1/K2 onu listeden CIKARINCA
+            // KIRMIZI verdi (tam suit dogrulamasinda yakalandi, tahminle degil). Yerine
+            // `Cookies:Domain` kondu (LF-1/K1). KORUNAN SEY AYNI KALDI: "yer-tutucu taramasi
+            // TEK dongude, listelenen HER anahtara TAM 1 kez uygulanir" - uye sayisi da yedi.
+            // DEGISEN sey KUMENIN KOMPOZISYONU'dur ve ikisi de MERKEZ KARARIDIR:
+            //   - CIKAN  `Captcha:SecretKey`: dogrulayicinin uretimde 0 cagri yeri var (T3-1);
+            //     olu ozellik icin gercek secret dayatmak dagitimi korumasizca bloke ederdi.
+            //   - GIREN  `Cookies:Domain`: bos birakilirsa /api/auth/refresh KALICI 403 doner
+            //     ve her kullanici 15 dakikada oturumunu SESSIZCE kaybeder (BL-1).
+            // Iki kararin da DAVRANIS pini `ConfigFailFastTests`tedir; kompozisyonun kendisi
+            // `LaunchFix1SozlesmeTests.HassasAnahtarListesi_YEDI_UYELI_...` ile ayrica pinli.
             foreach (var anahtar in new[]
             {
                 "\"ConnectionStrings:DivisimaDb\"", "\"TokenOptions:SecurityKey\"", "\"Encryption:Key\"",
-                "\"MailSettings:Password\"", "\"Iyzico:ApiKey\"", "\"Iyzico:SecretKey\"", "\"Captcha:SecretKey\"",
+                "\"MailSettings:Password\"", "\"Iyzico:ApiKey\"", "\"Iyzico:SecretKey\"", "\"Cookies:Domain\"",
             })
                 Sayim(k, "            " + anahtar + ",").Should().Be(1,
                     $"{anahtar} hassas anahtar listesinde TAM 1 kez bulunmali");
