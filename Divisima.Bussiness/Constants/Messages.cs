@@ -36,8 +36,13 @@ namespace Divisima.Core.Utilities.Constants
         // Ne "basarili" ne "basarisiz". Gerekce IyzicoPaymentManager'in terminal donusunde.
         // `PaymentController` bu mesaji TANIYARAK `status=review` yonlendirmesi yapar - yani
         // metin bir SOZLESMEDIR; degistirilirse controller kosulu da degismelidir (PINLI).
+        // ══ GF-6 / F6 (L3 BULGU-2) - VAAT <-> DAVRANIS ═══════════════════════════════════
+        // ILK METIN "iade islemi BASLATILACAKTIR" diyordu; OLCULDU: terminal dalinda
+        // `RefundService` cagrisi **0** - yani hicbir sey baslatilmiyordu. "Otomatik iade YOK"
+        // BILDIRILMIS bir karardi, ama "islemin BASLATILDIGINI soyleyen metin" bildirilmemisti.
+        // Yeni metin BASLATILDIGI IDDIASINI TASIMAZ; ne olacagini DURUSTCE soyler.
         public static string PaymentReceivedOrderCancelled =
-            "Ödemeniz alındı ancak sipariş iptal edilmişti; iade işlemi başlatılacaktır.";
+            "Ödemeniz alındı ancak siparişiniz daha önce iptal edilmişti. İade için destek ekibimiz sizinle iletişime geçecektir.";
         public static string ProductAdded = "Ürün başarıyla eklendi.";
         public static string ProductUpdated = "Ürün başarıyla güncellendi.";
         public static string ProductDeleted = "Ürün başarıyla silindi.";

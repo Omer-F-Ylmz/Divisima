@@ -2469,7 +2469,10 @@
   // ayni kaynaktan gelir (ekran + sekme) - MFIX-3'un ayrisma tuzagi yeniden ACILMASIN.
   function odemeIncelemedeMi(status) { return status === "review"; }
   var ODEME_INCELEME_BASLIK = "Ödemeniz alındı";
-  var ODEME_INCELEME_ALT = "Ödemeniz alındı ancak sipariş iptal edilmişti; iade işlemi başlatılacaktır.";
+  // GF-6 / F6: metin BASLATILDIGI iddiasini TASIMAZ - terminal dalinda otomatik iade YOK
+  // (olculdu: RefundService cagrisi 0). Backend'deki `Messages.PaymentReceivedOrderCancelled`
+  // ile AYNI cumle; ikisi ayrisirsa musteri iki yuzeyde iki farkli sey okur.
+  var ODEME_INCELEME_ALT = "Ödemeniz alındı ancak siparişiniz daha önce iptal edilmişti. İade için destek ekibimiz sizinle iletişime geçecektir.";
 
   async function renderPaymentResult(params) {
     var view = document.getElementById("checkoutView");
