@@ -226,6 +226,28 @@ var builder = WebApplication.CreateBuilder(args);
         //
         // DEVELOPMENT SERBEST: yerelde iki taraf da `localhost` (ayni host), host-only cerez
         // CALISIR. Bu blok zaten `!IsDevelopment()` dalinin icinde.
+        // ══ LF-1 / F-TURU (B-4) - URETIMDE GELISTIRICI ORIGIN'I CORS'TA KALAMAZ ══════════
+        //
+        // OLCULDU: imaja gomulu `appsettings.json`in `AllowedOrigins` listesi
+        // `http://localhost:5173` TASIYOR. Bu liste bir DIZIDIR ve ancak INDEKSLI ortam
+        // degiskeniyle (`AllowedOrigins__0`) ezilir - operator duz bir `AllowedOrigins`
+        // degiskeni verirse HICBIR SEY degismez ve gelistirici origin'i uretimde ACIK KALIR.
+        // Sonuc: saldirganin yerelde kosturdugu bir sayfa, kurbanin tarayicisindan
+        // `credentials: include` ile API'ye cagri yapabilir ve yanit govdesini OKUYABILIR.
+        //
+        // K1 KALIBI: ariza SESSIZDIR - CORS yanlisligi hicbir log satiri uretmez ve yalnizca
+        // saldiri aninda "calisir". Bu yuzden kapi ACILISTA kosar.
+        var izinliOriginler = cfg.GetSection("AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+        var yerelOrigin = izinliOriginler.FirstOrDefault(o =>
+            o.Contains("localhost", StringComparison.OrdinalIgnoreCase)
+            || o.Contains("127.0.0.1", StringComparison.Ordinal));
+        if (yerelOrigin != null)
+            throw new InvalidOperationException(
+                $"FATAL: Config - AllowedOrigins üretimde yerel bir origin taşıyor ('{yerelOrigin}'). " +
+                "İmaja gömülü appsettings.json geliştirici origin'ini içerir ve bu liste bir DİZİdir: " +
+                "yalnızca İNDEKSLİ ortam değişkeniyle ezilir (AllowedOrigins__0, AllowedOrigins__1). " +
+                "Üretim origin'lerini o biçimde verin (docker-compose.prod.yml'de hazır satırlar var).");
+
         var cerezAlanAdi = cfg["Cookies:Domain"];
         if (string.IsNullOrWhiteSpace(cerezAlanAdi))
             throw new InvalidOperationException(

@@ -4,15 +4,31 @@
 | Flag | Dev | Production |
 |------|-----|------------|
 | `Iyzico:UseRealSdk` | false | **true** (gerçek Iyzipay anahtarlarıyla) |
-| `Captcha:Enabled` | false | **true** (gerçek Turnstile secret) |
 | `Redis:Enabled` | false | **true** (dağıtık cache/lock/blacklist) |
-| `Vault:Enabled` | false | **true** (secret'lar Key Vault'ta) |
+| `BackgroundJobs:Enabled` | true | **true** — kapalıysa süresi dolan stok rezervasyonları TEMİZLENMEZ ve satılabilir stok KALICI düşük kalır (AV-3'te ölçüldü) |
 
-## Secret'lar (Key Vault'a - appsettings'te ASLA)
+## ÜRETİMDE AÇILMAZ — ÖLÜ ÖZELLİKLER (LF-1/K2 · K5)
+
+> Bu iki bayrak eskiden yukarıdaki tabloda "production'da **true**" diye duruyordu.
+> **YANLIŞTI** — ikisi de bugün hiçbir şey yapmıyor ve açmak yalnızca sahte güvence üretir.
+> Ölçümler LF-1'de yapıldı; kader kararları (bağla ya da sil) GF-7'ye devredildi.
+
+| Bölüm | Üretim | Ölçülen gerçek |
+|-------|--------|----------------|
+| `Captcha` bölümündeki `Enabled` | **false — AÇMAYIN** | Doğrulayıcının `ValidateAsync` metodu üretim kodunda **0** yerden çağrılır (T3-1). Bayrağı açmak register/forgot/login akışına captcha adımı EKLEMEZ. Bu yüzden `Captcha--SecretKey` fail-fast listesinden de ÇIKARILDI — olmayan bir özellik için gerçek secret istenmez. Bugünkü kaba-kuvvet savunması: hesap kilitleme + auth 10/dk rate limit. |
+| `Vault` bölümündeki `Enabled` | **false — AÇMAYIN** | Kasa OKUYUCUSU YOKTUR: `AzureKeyVaultSecretProvider` hiçbir yerde kayıtlı değil, `ISecretProvider` tüketicisi **0**. Kasaya yazılan bir değer uygulamaya ULAŞMAZ. `secret-rotation.yml` bu yüzden ELLE tetiklemeye indirildi (zamanlama kaldırıldı). |
+
+## Secret'lar (env/compose - appsettings'te ASLA)
+
+> **NEREYE YAZILIR (LF-1/K5 — ölçülmüş gerçek):** bu değerler **ortam değişkeni** olarak
+> verilir (`docker-compose.prod.yml` `${...:?zorunlu}` satırları) ya da
+> `appsettings.Production.json` dosyasına yazılır. **Key Vault'a YAZMAYIN** — uygulamanın
+> kasa okuyucusu yoktur, kasaya konan değer uygulamaya ULAŞMAZ.
+
 - `TokenOptions--SecurityKey` (256-bit)
 - `Encryption--Key` (32 byte base64)
 - `Iyzico--ApiKey`, `Iyzico--SecretKey`
-- `Captcha--SecretKey`
+- `Cookies--Domain` (üst alan adı, `.divisima.com` — LF-1/K1; boşsa uygulama AÇILMAZ)
 - `ConnectionStrings--DivisimaDb`
 
 ## Veritabanı şeması - UYGULAMA AÇILMADAN ÖNCE (D-ŞEMA-FIX)

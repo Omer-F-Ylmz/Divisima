@@ -237,6 +237,45 @@ namespace Divisima.IntegrationTests
                     "surtunme olur - kapi YALNIZ uretim bacaginda kosar");
         }
 
+        // ══ LF-1 / F-TURU (B-4) - URETIMDE YEREL ORIGIN CORS'TA KALAMAZ ════════════════════
+        //
+        // DENETCI BULGUSU: `docker-compose.prod.yml` `AllowedOrigins` icin HICBIR ortam
+        // degiskeni vermiyordu ve imaja gomulu `appsettings.json` listesinde
+        // `http://localhost:5173` VAR. Uzerine yazilmadigi icin uretimde de KALIYORDU.
+        // TUZAK: `AllowedOrigins` bir DIZIdir - duz bir `AllowedOrigins` ortam degiskeni
+        // HICBIR SEY yapmaz; ancak `AllowedOrigins__0` gibi INDEKSLI anahtarlar ezer. Yani
+        // "ortam degiskeniyle veririm" diyen bir operator, verdigini SANIP vermeyebilir.
+        //
+        // K1 KALIBI: ariza SESSIZ - yanlis CORS hicbir log satiri uretmez ve yalnizca saldiri
+        // aninda "calisir" (saldirganin yerelde kosturdugu sayfa, kurbanin oturumuyla API'ye
+        // gidip yaniti OKUR). Bu yuzden kapi ACILISTA kosar.
+        [Theory]
+        [InlineData("http://localhost:5173")]
+        [InlineData("https://127.0.0.1:8443")]     // IP bicimi de ayni dala girmeli
+        public void Uretimde_ALLOWEDORIGINS_YEREL_BIR_ORIGIN_TASIYORSA_UYGULAMA_ACILMAZ(string origin)
+        {
+            var hata = AcilisHatasi("AllowedOrigins:0", origin);
+
+            hata.Should().NotBeNull(
+                "gelistirici origin'i uretim CORS listesinde kalirsa, yerelde kosan bir sayfa " +
+                "kurbanin oturumuyla API'ye gidip yaniti OKUYABILIR");
+            var metin = hata!.ToString();
+            metin.Should().Contain("AllowedOrigins",
+                "cift-anlam kirici: acilis baska bir ayardan degil TAM BU listeden durmali");
+            metin.Should().Contain("AllowedOrigins__0",
+                "mesaj INDEKSLI bicimi ogretmeli - operator duz bir degisken verirse hicbir sey " +
+                "degismez ve verdigini SANIR");
+        }
+
+        // VAKUM KIRICI: gercek uretim origin'leriyle host ACILIYOR. Bu ayak olmadan yukaridaki
+        // pin, "AllowedOrigins ne olursa olsun patliyor" durumunda da yesil kalirdi.
+        [Fact]
+        public void Uretimde_GERCEK_ORIGIN_ile_UYGULAMA_ACILIR()
+        {
+            AcilisHatasi("AllowedOrigins:0", "https://divisima.com")
+                .Should().BeNull("gercek uretim origin'i kapiyi GECMELI");
+        }
+
         // ══ LF-1 / K2 - Captcha:SecretKey FAIL-FAST'TEN CIKARILDI ══════════════════════════
         //
         // BOZULAN PIN ACIKCA KAYDA GECER: bu deger GF-3/K5'te yer-tutucu Theory'sinin BIR

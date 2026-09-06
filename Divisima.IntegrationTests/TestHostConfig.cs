@@ -119,6 +119,15 @@ namespace Divisima.IntegrationTests
             // Deger burada TEK KAYNAKTAN veriliyor; "bos birakilirsa acilmaz" iddiasini olcen
             // test degeri KENDI ezmesiyle bosaltir (ezme EN SON uygulanir).
             builder.UseSetting("Cookies:Domain", ".divisima.test");
+
+            // ══ LF-1 / F-TURU (B-4) - URETIM BACAGINDA CORS LISTESI TEMIZ OLMALI ═════════
+            // Depodaki `appsettings.json` `AllowedOrigins` listesi IKI uyeli ve IKINCISI
+            // `http://localhost:5173` (olculdu). Yeni fail-fast kapisi yerel origin gorunce
+            // acilisi durdurur; bu satirlar OLMADAN her uretim-bacagi pini kirmizi olurdu.
+            // DIZI EZME KURALI: yalniz INDEKSLI anahtar ezer, duz `AllowedOrigins` ETMEZ -
+            // ve indeks 1 ayrica ezilmeli, aksi halde localhost uyesi YERINDE KALIR.
+            builder.UseSetting("AllowedOrigins:0", "https://divisima.test");
+            builder.UseSetting("AllowedOrigins:1", "https://www.divisima.test");
         }
     }
 }

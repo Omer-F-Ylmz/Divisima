@@ -56,6 +56,32 @@ services:
       Iyzico__SecretKey: ${DIVISIMA_IYZICO_SECRET_KEY:?zorunlu}
       Iyzico__CallbackUrl: ${DIVISIMA_IYZICO_CALLBACK_URL:?zorunlu}
 
+      # ══ CORS - IMAJA GOMULU LISTEYI EZER (LF-1/F-TURU, B-4) ═══════════════════════════
+      # OLCULDU: imaja gomulu `appsettings.json` AllowedOrigins listesinde
+      # `http://localhost:5173` VAR. Dizi anahtarlari ancak INDEKSLI ortam degiskeniyle
+      # ezilir (`AllowedOrigins__0`); asagidaki iki satir OLMADAN uretim CORS listesi
+      # gelistirici origin'ini TASIMAYA DEVAM EDER. Fail-fast kapisi da bunu Production'da
+      # ACILISTA reddeder - yani bu satirlar EKSIKSE konteyner AYAGA KALKMAZ.
+      AllowedOrigins__0: ${DIVISIMA_ORIGIN_1:?zorunlu}
+      AllowedOrigins__1: ${DIVISIMA_ORIGIN_2:-}
+
+      # ══ TERS PROXY ARKASINDA ZORUNLU (checklist adim 10) ══════════════════════════════
+      # BOS BIRAKILIRSA X-Forwarded-For GUVENILMEZ sayilir ve TUM istekler LB'nin IP'sinde
+      # toplanir: rate-limit kovasi COKER, webhook IP allowlist'i anlamsizlasir, denetim
+      # kaydindaki IP proxy'nin IP'si olur.
+      ForwardedHeaders__KnownProxies__0: ${DIVISIMA_PROXY_IP:-}
+
+      # ══ ILK ADMIN (checklist adim 19) - ACILDIKTAN SONRA false'A CEKILIR ══════════════
+      AdminSeed__Enabled: ${DIVISIMA_ADMIN_SEED:-false}
+      AdminSeed__Email: ${DIVISIMA_ADMIN_EMAIL:-}
+      AdminSeed__Password: ${DIVISIMA_ADMIN_PASSWORD:-}
+
+      # ══ WEBHOOK IP ALLOWLIST (BAGLAYICI kayit 00b:229) ════════════════════════════════
+      # BILINCLI OLARAK BOS BIRAKILABILIR: liste BAYATLARSA (saglayici IP degistirir) gercek
+      # bildirimler 403 yer ve kaybolan callback'in TEK kurtarma yolu SESSIZCE olur - yani
+      # yanlis doldurulmus bir allowlist, bos birakmaktan DAHA TEHLIKELIDIR.
+      Webhook__AllowedIps__0: ${DIVISIMA_WEBHOOK_IP:-}
+
       # ══ ONERILEN / VARSAYILANI GUVENLI ════════════════════════════════════════════════
       MailSettings__Port: "587"
       MailSettings__User: ${DIVISIMA_SMTP_USER:-no-reply@divisima.com}

@@ -229,7 +229,8 @@ namespace Divisima.IntegrationTests
             metin.Should().NotContain("SA_PASSWORD",
                 "uretim compose'u bir `sa` parolasi TASIMAZ - veritabani bu dosyanin disinda, " +
                 "en az yetkili kullaniciyla baglanilir (ops/db/least-privilege.sql)");
-            metin.Should().NotContain("MSSQL_SA_PASSWORD");
+            // `NotContain("MSSQL_SA_PASSWORD")` SILINDI (F-turu / B-6): BEDAVA DOGRUYDU -
+            // yukaridaki assert onu mantiken ZATEN kapsiyor (ust dizge alt dizgeyi icerir).
 
             // K9: log ve yuklemeler VOLUME'de - aksi halde konteyner yenilenince GIDER.
             metin.Should().Contain("logs_data", "konteyner disi log kalicilgi (K9)");
@@ -259,7 +260,12 @@ namespace Divisima.IntegrationTests
         private static SortedSet<string> KaynaktanOlayTipleri()
         {
             var tipler = new SortedSet<string>(StringComparer.Ordinal);
-            foreach (var proje in new[] { "Divisima.Bussiness", "Divisima.API", "Divisima.Core" })
+            // F-TURU / B-7: `Divisima.Dal` ve `Divisima.Entity` de tarandi. ONCEKI HAL kordu -
+            // veri katmanina eklenecek bir olay tipi sayiyi 14'te BIRAKIRDI ve belgeler
+            // bayatlarken pin YESIL kalirdi. Tarayicinin bu dizinlerde de calistigi
+            // `TarayiciKapsami_BILINEN_POZITIFLE_SINANDI` ile ayrica sinaniyor.
+            foreach (var proje in new[]
+                     { "Divisima.Bussiness", "Divisima.API", "Divisima.Core", "Divisima.Dal", "Divisima.Entity" })
             {
                 var dizin = Path.Combine(Kok.Value, proje);
                 if (!Directory.Exists(dizin)) continue;
@@ -364,9 +370,16 @@ namespace Divisima.IntegrationTests
                     "(IyzicoPaymentManager -> \"order\")");
                 metin.Should().Contain("`address`",
                     $"{yol}: ikinci cagri yeri OrderManager -> \"address\"");
-                metin.Should().Contain("YANLIŞ",
-                    $"{yol}: eski \"Order + Payment\" ifadesinin YANLIS oldugu KAYITLI kalmali - " +
-                    "duzeltmenin silinmesi ayni hatanin ucuncu kez yazilmasina kapi acar");
+                // ══ CAPA OZGULLESTIRILDI (F-TURU / B-3) ════════════════════════════════════
+                // ILK YAZIMDA ciplak `Contain("YANLIŞ")` idi. Denetci mutasyonla gosterdi ki
+                // SECURITY.md'de bu kelimenin IKI gecisi var (biri K5'in kasa maddesinde) ve
+                // IdorAttempt duzeltmesi SILINSE BILE assert doyuyordu -> **0 KIRMIZI**.
+                // Capa artik DUZELTMENIN KENDI CUMLESINI ariyor: "Order + Payment" ifadesinin
+                // yanlis oldugunu soyleyen ibare, o ifadeye BITISIK olmali.
+                Regex.IsMatch(metin, @"Order \+ Payment[^\n]{0,40}YANLIŞ")
+                    .Should().BeTrue(
+                        $"{yol}: eski \"Order + Payment\" ifadesinin YANLIS oldugu, TAM O IFADENIN " +
+                        "yaninda kayitli kalmali - duzeltme silinirse ayni hata dorduncu kez yazilir");
             }
         }
 
@@ -382,9 +395,12 @@ namespace Divisima.IntegrationTests
             metin.Should().Contain("\"order\"", "birinci cagri yerinin YAZDIGI kaynak adi");
             metin.Should().Contain("OrderManager", "kapsamin ikinci cagri yeri");
             metin.Should().Contain("\"address\"", "ikinci cagri yerinin YAZDIGI kaynak adi");
-            metin.Should().Contain("YANLIS",
-                "eski \"Order + Payment\" ifadesinin YANLIS oldugu KAYITLI kalmali - ayni hata " +
-                "UC KEZ yazildi (GF-5 · SECURITY.md · serilog-siem.md), kaydi silinirse dorduncu gelir");
+            // B-3'un C# ayagi: burada `YANLIS` TEK gecistir, ama capa yine de ifadeye BITISIK
+            // aranir - dosyaya ileride baska bir "YANLIS" eklenirse pin kor kalmasin.
+            Regex.IsMatch(metin, @"Order \+ Payment[^\n]{0,40}YANLIS")
+                .Should().BeTrue(
+                    "eski \"Order + Payment\" ifadesinin YANLIS oldugu KAYITLI kalmali - ayni hata " +
+                    "UC KEZ yazildi (GF-5 · SECURITY.md · serilog-siem.md), kaydi silinirse dorduncu gelir");
         }
 
         // ══ RUNBOOK: MIGRATION SAYISI URETEN IFADEYLE (MK-3) ═══════════════════════════════
@@ -428,9 +444,51 @@ namespace Divisima.IntegrationTests
             metin.Should().Contain("`Cookies:Domain` üst alan adı biçiminde ayarlandı",
                 "LF-1/K1'in dagitim tarafindaki karsiligi - kapi acilisi durdurur ama operator " +
                 "DOGRU degeri de bilmelidir");
-            metin.Should().Contain("PaymentAfterTerminal",
-                "GUNLUK sorgu bir dagitim sartidir: bu olayin SIEM okuyucusu YOKTUR, alarm BOS " +
-                "gruba gider - tek gercek okuyucu elle kosulan SQL'dir");
+            // ══ CAPA OZGULLESTIRILDI (F-TURU / B-2) ════════════════════════════════════════
+            // ILK YAZIMDA ciplak `Contain("PaymentAfterTerminal")` idi ve denetci mutasyonla
+            // (adi `PaymentAfterTerminalXYZ` yapmak) **0 KIRMIZI** verdigini gosterdi - alt-dizge
+            // capasi UST DIZGEYLE tatmin olur. Bu, MUT-15'te SIEM tarafinda kapatilan sinifin
+            // AYNISIYDI ve burada HAYATTA KALMISTI.
+            // NEDEN ONEMLI: 20. adimin SQL'indeki olay adi bozulursa pin YESIL kalir, operatorun
+            // gunluk sorgusu SESSIZCE 0 satir doner - ve bu sorgu, o olayin TEK OKUYUCUSUDUR
+            // (SIEM bagli degil, SignalR "admins" grubu BOS).
+            // SINIR KARAKTERLI regex: ad bir tanimlayici sinirinda bitmeli.
+            Regex.IsMatch(metin, @"\bPaymentAfterTerminal\b(?![A-Za-z0-9_])")
+                .Should().BeTrue(
+                    "GUNLUK sorgu bir dagitim sartidir ve olayin adi TAM olmali - bozuk bir ad " +
+                    "sessizce 0 satir dondurur; bu olayin tek okuyucusu o sorgudur");
+            metin.Should().Contain("event_type='PaymentAfterTerminal'",
+                "sorgunun KENDISI listede durmali - 'bir sorgu kosun' demek yetmez");
+        }
+
+        // ══ F-TURU / B-1 - CHECKLIST, K2 ve K5'IN KALDIRDIGI ISI EMRETMEZ ══════════════════
+        //
+        // DENETCI BULGUSU (tek AKTIF kalem): LF-1 bu dosyaya kirk iki satir ekledi ama BAYRAK
+        // TABLOSUNA ve SECRET BASLIGINA DOKUNMADI. Sonuc: ayni depoda `SECURITY.md` "captcha
+        // bayragi etkisiz, acmak sahte guvence uretir" derken `deployment-checklist.md`
+        // operatore "Production'da Captcha:Enabled -> true (gercek Turnstile secret)" diye
+        // EMREDIYORDU; ayni sekilde "Vault:Enabled -> true" ve "Secret'lar (Key Vault'a)".
+        // Operatorun ELINE ALDIGI belge CHECKLIST'tir - yani K2/K5 fiilen YARIM KALMISTI.
+        [Fact]
+        public void DagitimListesi_OLU_OZELLIKLERI_ACMAYI_EMRETMEZ()
+        {
+            var metin = Oku("ops/deployment-checklist.md");
+
+            // Merkez tarifinin ADIYLA istedigi iki sayim.
+            Regex.Matches(metin, "Turnstile").Count.Should().Be(0,
+                "captcha dogrulayicisinin uretimde 0 cagri yeri var (T3-1); 'gercek Turnstile " +
+                "secret' istemek, hicbir sey korumayan bir adimi ZORUNLU gostermektir");
+            Regex.Matches(metin, "Vault:Enabled").Count.Should().Be(0,
+                "kasa OKUYUCUSU yok (ISecretProvider tuketicisi 0); bayragi acmak hicbir degeri " +
+                "kasadan getirmez");
+
+            // VAKUM KIRICI: dosya gercekten okundu ve bolum GERCEKTEN yeniden yazildi.
+            // (Iki sayim tek basina, dosya BOS olsa da yesil kalirdi.)
+            metin.Should().Contain("## Secret'lar (env/compose",
+                "secret'lar ortam degiskeni ya da appsettings.Production.json ile verilir - " +
+                "kasaya YAZILMAZ, cunku okuyucusu yok");
+            metin.Should().Contain("Cookies--Domain",
+                "LF-1/K1'in zorunlu kildigi anahtar secret listesinde de gorunmeli");
         }
 
         // ══════════════════════════════════════════════════════════════════════════════════
@@ -478,6 +536,21 @@ namespace Divisima.IntegrationTests
 
             Oku("SECURITY.md").Should().Contain("tüketicisi 0",
                 "SECURITY.md secret maddesi DURUST olmali: iskelet var, okuyucu YOK");
+
+            // ══ F-TURU / B-5 - AYNI YANLISIN URETIM KODUNDAKI IKINCI KOPYASI ═══════════════
+            // Denetci buldu: K5 bu iddiayi SECURITY.md'de "YANLISTI" diye isaretledi ama
+            // `ConfigurationSecretProvider.cs`in kendi yorumunda AYNEN birakmisti. Bu depoda
+            // "AYNI KURALIN IKINCI KOPYASI" ailesinin bedeli yedi kez odendi; burada kopya
+            // KURAL degil IDDIA, ama zarari ayni: kaynagi okuyan gelistirici, belgenin
+            // duzelttigi seyi kodda DOGRU sanir.
+            var saglayici = Oku("Divisima.Core/Utilities/Secrets/ConfigurationSecretProvider.cs");
+            Regex.IsMatch(saglayici, @"AzureKeyVaultSecretProvider ile değiştirilir[^\n]*\n[^\n]*kod dokunulmaz")
+                .Should().BeFalse(
+                    "kasaya gecis iddiasi bu dosyada da YANLISTI - okuyucu yazilana kadar kasadaki " +
+                    "deger uygulamaya ULASMAZ");
+            saglayici.Should().Contain("YANLIŞTI",
+                "duzeltmenin KAYDI dursun - ayni iddia SECURITY.md, secret-rotation.yml ve burada " +
+                "olmak uzere UC YERDE birden yaziliydi");
         }
 
         // Uretim projelerinde (`Divisima.Core` HARIC - orada TANIM'lar yasar) verilen desenin
@@ -486,7 +559,11 @@ namespace Divisima.IntegrationTests
         private static List<string> CagriYerleri(string desen, string imzaHarici)
         {
             var bulunan = new List<string>();
-            foreach (var proje in new[] { "Divisima.API", "Divisima.Bussiness" })
+            // F-TURU / B-7: `Divisima.Core` de tarandi - captcha DOGRULAYICISI orada yasiyor,
+            // yani bir cagri en kolay ORAYA eklenirdi ve onceki kapsam onu GORMEZDI.
+            // (`ValidateAsync` TANIMLARI `imzaHarici` ile elenir; asagidaki BILINEN-POZITIF
+            //  sinamasi tarayicinin bu dizinde de calistigini gosterir.)
+            foreach (var proje in new[] { "Divisima.API", "Divisima.Bussiness", "Divisima.Core" })
             {
                 var dizin = Path.Combine(Kok.Value, proje);
                 if (!Directory.Exists(dizin)) continue;
@@ -497,6 +574,45 @@ namespace Divisima.IntegrationTests
                             bulunan.Add($"{Path.GetFileName(dosya)}: {satir.Trim()}");
             }
             return bulunan;
+        }
+
+        // ══ F-TURU / B-7 - TARAYICI KAPSAMI BILINEN-POZITIFLE SINANIR ══════════════════════
+        //
+        // Denetci bulgusu: iki tarayici da DAR kapsamla kosuyordu - olay tipi cikarimi
+        // `Divisima.Dal`i, captcha cagri taramasi `Divisima.Core`u GORMUYORDU. Kapsam
+        // genisletildi; ama "genislettim" bir IDDIADIR ve kendisi de sinanmalidir: bir dizin
+        // listeye YAZILIP da (yol yanlissa, dizin bossa, uzanti tutmuyorsa) HIC TARANMAYABILIR
+        // ve sonuc yine "0 bulundu" olurdu - yani ayni korluk, bu kez GORUNMEZ bicimde.
+        //
+        // Bu yuzden her taranan dizin icin BILINEN-POZITIF bir cagri araniyor. Capalar HAM
+        // ciktidan kopyalandi (MK-7), ezberden yazilmadi.
+        [Theory]
+        [InlineData("Divisima.Core", "PostAsync(")]              // TurnstileCaptchaValidator
+        [InlineData("Divisima.Bussiness", "LogAsync(")]          // SecurityEventManager + digerleri
+        [InlineData("Divisima.API", "LogAsync(")]                // RedisRateLimitMiddleware
+        public void TarayiciKapsami_BILINEN_POZITIFLE_SINANDI(string proje, string bilinenCagri)
+        {
+            var dizin = Path.Combine(Kok.Value, proje);
+            Directory.Exists(dizin).Should().BeTrue($"{proje} dizini bulunmali");
+
+            var bulundu = Directory.EnumerateFiles(dizin, "*.cs", SearchOption.AllDirectories)
+                .Any(d => CsYorumsuz(File.ReadAllText(d)).Contains(bilinenCagri, StringComparison.Ordinal));
+
+            bulundu.Should().BeTrue(
+                $"BILINEN-POZITIF: tarayici '{proje}' icinde '{bilinenCagri}' cagrisini " +
+                "bulabiliyor olmali; bulamiyorsa o dizin FIILEN taranmiyor demektir ve " +
+                "oradaki her 'bulunamadi' sonucu DAYANAKSIZDIR");
+        }
+
+        // NEGATIF KONTROL, AYRI: ayni makine uydurma bir capayi BULMAMALI. Ayni Theory'ye
+        // katilirsa "bulundu" ve "bulunamadi" beklentileri karisir; ayri test daha durust.
+        [Fact]
+        public void TarayiciKapsami_NEGATIF_KONTROL_UYDURMA_CAPAYI_BULMAZ()
+        {
+            var dizin = Path.Combine(Kok.Value, "Divisima.Core");
+            Directory.EnumerateFiles(dizin, "*.cs", SearchOption.AllDirectories)
+                .Any(d => File.ReadAllText(d).Contains("ZZZOlmayanCagri(", StringComparison.Ordinal))
+                .Should().BeFalse("negatif kontrol: tarayici her seye 'var' dememeli");
         }
 
         // ══ K2 - CAPTCHA OLU OZELLIK, BELGE DE OYLE DEMELI ═════════════════════════════════
