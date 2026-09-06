@@ -1,7 +1,9 @@
 # 55 · GUVENLIK-FIX-6 (LAUNCH ONCESI: UYE YOLU + DURUM MAKINESI + HUB + ICE-AKTARIM)
 
 **Zemin:** `3095568f151c40cb6cb1c929a8bc1fbf1824bc1f`
-**Kapanis:** `6fa0d6caa56da53c47663aee89a82ec5df11bb7d` — dokuz commit, TEK push.
+**Kapanis:** `cb8e65e46e51f749237b4c2c01c289bbe9c950b1` — TEK push.
+**Bolum 1-14** `6fa0d6c` zeminini anlatir (dokuz commit); **§EK** push oncesi L3 bulgulariyla
+eklenen F5/F6'yi (`7edd899` · `cb8e65e`) ve son olcumleri tasir.
 **Kaynak:** `53·GUVENLIK-AV-3` (T1-B1..B4 · T4/S-1 · T4-F5 · X-2 · T2-1/T2-2/T2-5/T2-6 ·
 T4-F1/F2 aday) + `54·ARSIV-4` §6.1 (N-1 probu).
 **ORTAK KOK (merkez tespiti, dogrulandi):** misafir yolunun KAZANDIGI kapilar UYE yoluna
@@ -363,3 +365,115 @@ Ayrica **T4-F1 (cift para iadesi) KAPANDI** (F3, K8 onces/sonrasi 41-35 -> 0).
 **T4-F2 GF-7'ye gerekceli istisnayla devredildi.**
 
 **SIRADAKI IS: LAUNCH GO/NO-GO TURU.**
+
+---
+
+## §EK — PUSH ONCESI L3 BULGULARI (F5 · F6)
+
+Bolum 1-14 `6fa0d6c` zeminini anlatir. Push oncesi kosulan **L3 F1-F3 denetcisi** (13/13
+ONAY, itiraz YOK) tarif DISI **iki bulgu** cikardi; ikisi de ana akis tarafindan KENDI
+komutuyla dogrulandi ve merkez karariyla **push oncesi kapatildi**. Sonuc: `cb8e65e`.
+
+```
+7edd899 F5 (BULGU-1): kargo teslimat dali ATOMIK - [PARA] LATENT kapandi
+cb8e65e F6 (BULGU-2): iptalli odeme metni GERCEKLESMEYEN islemi VAAT ETMIYOR
+```
+
+### EK.1 BULGU-1 · `[PARA]` LATENT — GF-6'NIN KENDI ACTIGI YUZEY
+
+**OLCUM (denetci + ana akis, iki bagimsiz kanal):**
+`ShipmentManager`da transaction sayisi **0** (POZ kontrol: `OrderManager` **5**). Teslimat
+dali DORT yazmayi (`orders.status`+`delivered_at` · `order_status_history` · bildirim
+outbox'i · `PaymentConfirmed` olayi) **HER BIRI AYRI `SaveChanges`** olarak kosuyordu.
+
+**ZARAR ZINCIRI:** olay yazimi duserse siparis `Delivered` OLUR ama olay YAZILMAZ ->
+GF-6/F1'den sonra kapida odemede sadakat puani ve referans odulu **HIC verilmez**. Telafi
+de YOKTUR: admin ayni durumu tekrar yazdiginda uc **BASARILI** doner ama
+`order.status != Delivered` guard'i yeni olay uretmez -> **basarisizlik SESSIZ**.
+
+**BU BOSLUGU GF-6 ACTI:** F1 oncesinde teslimat olayi yoktu; F1 kapida odemenin para
+anlamini teslimata baglayinca o olay KRITIK hale geldi. Yani bulgu, dalganin KENDI
+degisikliginin yan etkisidir - zemin kusuru degil.
+
+**COZUM:** dort yazma `_unitOfWork.ExecuteInTransactionAsync` icine alindi. Bildirim de
+ICERIDE ve GUVENLI: `NotifyStatusChangeAsync` kritik yolda YALNIZ bir outbox SATIRI yazar;
+dis saglayici cagrilari (SignalR/FCM/SMS) kendi try/catch'inde ve outbox'in DISINDADIR
+(`OrderNotificationManager`in kendi yorumuyla olculdu).
+
+**ARAC SECIMI — DURUST KAYIT:** emsal `OrderManager` **DEGILDIR** (o elle
+`BeginTransactionAsync`/`CommitAsync` kullanir, 5 gecis). `ExecuteInTransactionAsync`
+`IUnitOfWork`un KENDI yorumunun onerdigi yoldur ve uretimde ZATEN dort yerde kosuyor
+(`AccountManager` · `GuestCheckoutManager` · `IyzicoPaymentManager` · `ProductManager`);
+`ShipmentManager` **besincidir**. Ilk pin yazimi bunu YANLIS varsaydi ve **isimli kirmizi**
+verdi - duzeltildi.
+
+**YORUM != OLCUM — ALTINCI VAKA (kayit).** F1'de yazdigim yorum
+"`OrderManager.ChangeOrderStatus`in Delivered dalindaki emsalin AYNISI" diyordu; **DEGILDI**
+- o dal transaction ICINDE, bu dal DISINDA. Cumle ancak F5'ten SONRA dogru oldu. Bu dalgada
+ayni ailenin onceki bes vakasi: `CancelItem` on kosulu · `[RequestSizeLimit]` "pin var" ·
+`R6_8a` adi · `MapControllers` yorumu · `K5` pin siniri.
+
+**PINLER:** kaynak (`ExecuteInTransactionAsync` 1 gecis + olay yazimi transaction'in ICINDE
+- indeks karsilastirmasiyla) **ve** DAVRANIS (`GuvenlikFix6TeslimatAtomikTests`):
+olay yazimi dusurulunce siparis `Shipped` KALIR · `delivered_at` NULL · zaman cizelgesi
+kaydi **0** (yani gercekten GERI ALINDI, "hic kosmadi" degil) · POZITIF KONTROL: hata
+yokken teslimat tamamlanir ve olay TAM **1** yazilir.
+Hata enjeksiyonu DI'da: `CreateHost` override + `ConfigureContainer` (CLAUDE.md bolum 5 -
+modul servisleri `AddScoped` ile EZILEMEZ); statik bayrak `InitializeAsync`te SIFIRLANIR.
+
+### EK.2 BULGU-2 · `[MANTIK]` — VAAT <-> DAVRANIS
+
+**OLCUM:** F2 metni "iade islemi **BASLATILACAKTIR**" diyordu; terminal dalinda
+`RefundService` cagrisi **0** - hicbir sey baslatilmiyordu. "Otomatik iade YOK" BILDIRILMIS
+bir karardi (EK bolum 13 / madde 2), ama **"islemin BASLATILDIGINI soyleyen metin"**
+bildirilmemisti. Bulgu, BILINEN kalemin SINIRINI genisletiyordu.
+
+**COZUM:** metin BASLATILDIGI iddiasini tasimayacak sekilde degistirildi:
+> Ödemeniz alındı ancak siparişiniz daha önce iptal edilmişti. İade için destek ekibimiz
+> sizinle iletişime geçecektir.
+
+Backend sabiti (`Messages.PaymentReceivedOrderCancelled`) ve vitrin metni **BIREBIR AYNI** -
+MFIX-3'un "iki yuzey birbiriyle celisiyor" ayrisma tuzagi yeniden ACILMASIN diye.
+
+**PIN:** metinde `"başlatıl"` **ve** ASCII yazimi `"baslatil"` **0** (MK-7: capa iki yazimda
+da sinanir) + POZITIF olcut (para ALINDIGI · siparisin IPTAL oldugu · musteriye NE OLACAGI
+soylenmeli — bos bir metin de yalniz `NotContain`lerden GECERDI) + terminal dalinda
+`RefundService` **0** + vitrin metni backend sabitiyle BIREBIR AYNI.
+
+**IRL / PROD CHECKLIST'E EKLENDI:** `security_events` tablosunda `PaymentAfterTerminal`
+severity `Critical` satirlari **GUNLUK ELLE KONTROL EDILIR**. Gerekce: bu olay bugun
+otomatik bir okuyucuya BAGLI DEGIL - SignalR "admins" grubu BOS yayin yapiyor
+(`JoinAdminGroup()` cagirani YOK, `51·AV-2` BILINEN kalemi) ve SIEM okuyucusu GF-7'de.
+Yani iade gerektiren her vaka, bu satirlar okunmazsa GORULMEZ.
+
+### EK.3 MUTASYONLAR (MK-6, 24 -> 26)
+
+```
+MUT-23b transaction sarmalayicisi NoTx ile degistirildi -> 2 KIRMIZI
+        (F5_OLAY_YAZIMI_DUSERSE... davranis + F5_KARGO_TESLIMAT_DALI... kaynak)
+        Geri alma md5 ile dogrulandi: yedek ve dosya BIREBIR; MUT izi 0; status 0.
+MUT-24  F6 metni eski haline dondurüldü -> TAM 1 (F6_IPTALLI_ODEME_METNI...)
+```
+
+MUT-23b, F5'in **kirmizi-once** kanitidir: sarmalayici olmadan siparis `Delivered` OLUYOR
+ve olay KAYBOLUYOR — yani bulgunun tarif ettigi hasar BIREBIR yeniden uretildi.
+(MUT-23'un ilk yazimi derlenemedi ve dongu DOGRU davranip geri aldi; MUT-19/19b'de de ayni
+sey oldu — "build dustu" bir mutasyonun GECERSIZ oldugunu soyler, kod saglam demez.)
+
+### EK.4 SON OLCUMLER (`cb8e65e`)
+
+```
+Release build   : 0 Hata / 1659 Uyari
+Category=Sql    : 415/415
+TAM SUIT x3     : 810/813 · 810/813 · 810/813   (ucuncusu DIVISIMA_TEST_DB=SON3)
+                  ucunde de AYNI uc kirmizi = bilinen Docker uclusu (1 ms)
+Bicim kapilari  : whitespace 0 · style 0
+Mutasyon        : 26 kosum
+```
+
+### EK.5 BILINEN LISTESINE ETKI
+
+Bolum 13'un **2. kalemi** ("terminal siparise gelen odemenin IADESI ELLE") **DURUM: ACIK**
+olarak KALIR - F6 metni duzeltti, iade mekanizmasini DEGISTIRMEDI. Uzerine **yeni bir
+operasyon sarti** eklendi: `PaymentAfterTerminal`/Critical satirlarinin GUNLUK elle kontrolu
+(EK.2). **6. kalem** (`KodSatirlari` blok yorum ayiklamiyor) DEGISMEDI.

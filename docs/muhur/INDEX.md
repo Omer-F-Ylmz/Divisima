@@ -68,7 +68,7 @@ onlari bayatlatmaz. Okuma usulu: CLAUDE.md B0 · MK-11 (b).
 | 52 | `52-guvenlik-fix-5.md` | # 52 · GUVENLIK-FIX-5 — A09 IZ/ATIF + MISAFIR BUTUNLUGU + MASKE (5 Eylul 2026) | — | 19048 | yeni usul |
 | 53 | `53-guvenlik-av-3.md` | # 53 · GUVENLIK-AV-3 DAR (SALT OLCUM) | — | 32279 | yeni usul |
 | 54 | `54-arsiv-4.md` | # 54 · ARSIV-4 (CLAUDE.md KESIMI, zemin 1d67cf6) | — | 49761 | yeni usul |
-| 55 | `55-guvenlik-fix-6.md` | # 55 · GUVENLIK-FIX-6 (LAUNCH ONCESI: UYE YOLU + DURUM MAKINESI + HUB + ICE-AKTARIM) | — | 20605 | yeni usul |
+| 55 | `55-guvenlik-fix-6.md` | # 55 · GUVENLIK-FIX-6 (LAUNCH ONCESI: UYE YOLU + DURUM MAKINESI + HUB + ICE-AKTARIM) | — | 26859 | yeni usul |
 
 **AD CAKISMASI UYARISI:** bu dosya **GF-3 (Eylul 2026)** dalgasinindir. Depoda ayrica
 **GUVENLIK-FIX-3 (Agustos 2026)** vardir ve onun pinleri `GuvenlikFix3SozlesmeTests.cs`
@@ -83,10 +83,10 @@ filtresinin anahtari) KAPATAN dalga BUDUR. `50-guvenlik-fix-4.md` = **4 Eylul 20
 donduruyor ve onbiri de **25 Agustos 2026** tarihli AGUSTOS dalgasinindir.
 Iki dalga KARISTIRILMAMALIDIR. (AV-2 turunda olculdu -> `51·GUVENLIK-AV-2`.)
 
-Toplam arsiv: 57 dosya · 1.071.706 B (OLCULDU: `ls -1 *.md | grep -v INDEX.md | xargs wc -c`;
+Toplam arsiv: 57 dosya · 1.077.960 B (OLCULDU: `ls -1 *.md | grep -v INDEX.md | xargs wc -c`;
 55 numarali muhur eklendikten SONRA yeniden olculdu. Bu satir ARSIV-1'de bir kez, GF-4'te
 bir kez daha bayatladi - her muhur eklendiginde YENIDEN OLCULUR, artirilmaz).
-**ARSIV artik CLAUDE.md'nin 17 KATI** (1.071.706 / 62.336 = 17) - ARSIV-4'un kesimi bu orani
+**ARSIV artik CLAUDE.md.nin 17 KATI** (1.077.960 / 62.932 = 17) - ARSIV-4'un kesimi bu orani
 BILEREK buyuttu: kalici bilgi arsivde, CLAUDE.md'de yalniz SIRADAKI IS ve BAGLAYICI KARAR.
 Bayt denklemi (TARIHSEL, d8f12dd zemini — GUNCELLENMEZ):
 747.240 = 44.393 (C1 sonrasi CLAUDE.md) + 702.847.

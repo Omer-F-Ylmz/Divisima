@@ -818,6 +818,7 @@ yalniz somut gerekceyle bakilir.
 - `55·GF-6` **REPLAY GUARD'I TEK SERVIS:** `request_id` replay kurali (kupon KANONIK + coklu-kume sepet + sizintisiz 400) `SiparisReplayGuardi`de TEK yerde; misafir ve uye yollari AYNI servisi FARKLI **sahiplik ekseniyle** cagirir (misafir=E-POSTA ordinal, uye=`customer_id`). Kopya ACILMAZ. -> 55
 - `55·GF-6` **DURUM YAZIMI TEK KAPIDAN + TERMINAL KORUMASI:** `OrderManager`da her `order.status` yazimi `DurumYaz` -> `OrderStatusMachine`den gecer (dogrudan atama 4 -> 0). Iyzico'nun IKI dali terminal siparisi DIRILTMEZ: `payments` Success KAYDEDILIR, `PaymentAfterTerminal`/Critical yazilir, yanit **200 + ayri mesaj** (`status=review`) - `success` DEGIL. Iade **ELLE** (BILINEN). `ShipmentManager` :65/:118 GF-6 ONCESINDEN makine korumali; `DurumYaz` `OrderManager`a OZELDIR. -> 55
 - `55·GF-6` **COD PARA ANLAMI `Delivered`DA (DAR):** `PaidOrderSpec.IsPaid(byte status, byte paymentType)` - COD yalniz `Delivered`. Core Entity'yi GOREMEZ, EF yuzu `Divisima.Entity.Specifications.OdenmisSiparisSpec`; **TAM MATRIS pini** ikisini baglar. GECEN SITELER YALNIZ **referans odulu + sadakat kazanimi**. **KUPON LIMITLERI ESKI KURALDA** - olculdu: gecirilince `usage_limit=1` kuponu SEKIZ es zamanli COD siparisinin HEPSI aldi (COD `Pending` DOGMAZ, sayilacak durum KALMAZ). Kupon limiti "para alindi mi" degil **"hak hala CANLI mi"** sorusudur. Sadakat: `PaymentConfirmedSideEffects` BOLUNMEZ; COD'da `Confirmed` dalinda ATLANIR, `Delivered`da ayni olay YENIDEN yazilir (dordu de idempotent). -> 55
+- `55·GF-6/F5-F6` **KUPON LIMITI "HAK CANLI MI" SORUSUDUR** - `PaidOrderSpec`ten BAGIMSIZ kalir (olculdu: gecirilince COD yolunda limit UYGULANAMAZ hale gelir). **KARGO TESLIMAT DALI TRANSACTION ICINDE** (`ExecuteInTransactionAsync`): dort yazma - durum · zaman cizelgesi · bildirim · `PaymentConfirmed` olayi - ATOMIKTIR; olay kaybi TELAFISIZDIR (admin ayni durumu tekrar yazamaz). Iptalli odeme metni BASLATILDIGI iddiasini TASIMAZ; `PaymentAfterTerminal`/Critical satirlari **PROD CHECKLIST: GUNLUK ELLE KONTROL** (otomatik okuyucu YOK). -> 55
 - `51·AV-2` **LAUNCH BLOKER OLCUTU:** `KRITIK` **∨** `YUKSEK`+`KIMLIKSIZ-UZAK` **∨** `[PARA]`/`[VERI-BOZAN]`. Digerleri launch SONRASI. Siddet ON KOSULDAN bagimsiz verilemez; `ADMIN` on kosullu kalem KRITIK OLAMAZ. -> 51
 - `51·AV-2` **AV KAPSAMI KUMULATIF MATRISLE OLCULUR; YER DEGISTIRME YASAK.** Her AV turu kapsam matrisini (uc/controller x tur) muhre kumulatif yazar ve sonraki tur onceki turun KOR KUMESINDEN baslar. Gerekce olculdu: AV-1'in kor 13'u ile AV-2'nin kor 17'sinin kesisimi **0**; 40 controller'in **30'u** en az bir turda kor kaldi. -> 51
 
@@ -902,7 +903,8 @@ KAPALI kalem yeni bulguyu BASTIRMAZ.** Tam metinler:
   **raporlama siteleri ESKI kuralda** (Dashboard · Merchandising · Recommendation · Seller —
   COD siparisi ciro/siralama/oneride hala `Confirmed`da sayilir, GF-7) · **terminal siparise
   gelen odemenin IADESI ELLE** (otomatik iade `RefundManager`dan gecer, kapsam disiydi;
-  musteri `status=review` ekrani gorur) · **`health` uclari BILINCLI anonim**
+  musteri `status=review` ekrani gorur; metin BASLATILDIGI iddiasini TASIMAZ - F6) ·
+  **`health` uclari BILINCLI anonim**
   (`AllowAnonymous` ISARETLI — orkestratör probe'lari kimlik tasimaz, **BAGLAYICI**).
 
 **B-27 KAPANDI (AV-2):** `/api/payment/callback` artik `payment` kovasinda; canli sinir
