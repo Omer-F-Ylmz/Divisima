@@ -333,11 +333,17 @@ namespace Divisima.IntegrationTests
         {
             var siem = Oku("ops/serilog-siem.md");
 
-            siem.Should().Contain("PaymentAfterTerminal",
-                "terminal siparise gelen odeme ELLE IADE gerektirir - alarm tablosunda YOKSA " +
-                "operator o satiri hic aramaz");
-            siem.Should().Contain("Critical", "PaymentAfterTerminal severity'si tabloda gorunmeli");
-            siem.Should().Contain("ProductImportRejected");
+            // ══ CAPA SIKILASTIRILDI - MUT-15 BUNU ORTAYA CIKARDI ═══════════════════════════
+            // ILK YAZIMDA capa cıplak `PaymentAfterTerminal` idi ve mutasyon (adi
+            // `PaymentAfterTerminalX` yapmak) **0 KIRMIZI** verdi: `Contain` bir UST DIZGEYLE
+            // de tatmin olur. Yani pin, olayin adinin BOZULMASINA kordu. Capa artik belgenin
+            // HAM metninden kopyalandi (MK-7) - alarm tablosunda ad `**\`...\`**` bicimindedir
+            // ve satirin ALARM SATIRI oldugunu da o bicim tasir.
+            siem.Should().Contain("| **`PaymentAfterTerminal`** (severity `Critical`) |",
+                "terminal siparise gelen odeme ELLE IADE gerektirir - ALARM TABLOSUNDA (yalniz " +
+                "tip listesinde degil) bir satiri olmali, yoksa operator onu hic aramaz");
+            siem.Should().Contain("| **`ProductImportRejected`** |",
+                "reddedilen ice-aktarim da alarm tablosunda kendi satirini tasimali");
 
             // ══ ILK YAZIMDA BU ASSERT YANLISTI - KAYDA GECIYOR ═════════════════════════════
             // Once `NotContain("Order + Payment")` yazildi ve TAM 1 KIRMIZI verdi. Sebep:
