@@ -232,6 +232,70 @@ namespace Divisima.IntegrationTests
                 "yeniden belirleyebilirdi");
         }
 
+        // ══════════════════════ SOFT-LAUNCH KAPISI (LD-1 EKI) ══════════════════════════════
+        //
+        // BU UC PIN GECICIDIR ve ACILIS GUNU KALDIRILIR - kaldirma adimlari
+        // `ops/deployment-checklist.md` > "ACILIS GUNU"nda madde madde yazili. Pinlerin
+        // amaci kapinin YANLISLIKLA acik kalmasini degil, YANLISLIKLA KAPALI KALMASINI da
+        // gorunur kilmak: kapi sessizce dururken "acildi" sanmak, acilmis sanip kapali
+        // kalmaktan daha az tehlikeli degildir.
+        [Fact]
+        public void SOFTLAUNCH_VITRIN_BASIC_AUTH_ARKASINDA_API_DEGIL()
+        {
+            var conf = File.ReadAllText(Path.Combine(Kok.Value, "ops", "infra", "nginx.conf"));
+            var bloklar = conf.Split("server {", StringSplitOptions.RemoveEmptyEntries);
+
+            var vitrin = bloklar.FirstOrDefault(b => b.Contains("server_name divisima.net", StringComparison.Ordinal));
+            vitrin.Should().NotBeNull("bilinen-pozitif: vitrin blogu bulunmali");
+            vitrin!.Should().Contain("auth_basic_user_file",
+                "SOFT-LAUNCH: vitrin kapi arkasinda olmali");
+
+            var api = bloklar.FirstOrDefault(b => b.Contains("server_name api.divisima.net", StringComparison.Ordinal));
+            api.Should().NotBeNull("bilinen-pozitif: api blogu bulunmali");
+            api!.Should().NotContain("auth_basic",
+                "API BLOGU KILITLENMEZ: Iyzico'nun sonuc POST'u ve orkestratör saglik problari " +
+                "kimlik TASIMAZ - 401 alirlardi ve odeme sonucu SESSIZCE kaybolurdu");
+        }
+
+        [Fact]
+        public void SOFTLAUNCH_NOINDEX_TUM_HOSTLARDA()
+        {
+            var basliklar = File.ReadAllText(Path.Combine(Kok.Value, "ops", "infra", "divisima-security-headers.conf"));
+            basliklar.Should().Contain("X-Robots-Tag",
+                "paylasilan baslik dosyasi vitrin+admin'i kapsar");
+
+            // API blogu bu dosyayi BILEREK include ETMEZ - orada AYRICA olmali, yoksa
+            // "TUM hostlarda noindex" iddiasi API icin YANLIS olurdu.
+            var conf = File.ReadAllText(Path.Combine(Kok.Value, "ops", "infra", "nginx.conf"));
+            var api = conf.Split("server {", StringSplitOptions.RemoveEmptyEntries)
+                .First(b => b.Contains("server_name api.divisima.net", StringComparison.Ordinal));
+            api.Should().Contain("X-Robots-Tag",
+                "API blogu paylasilan baslik dosyasini include ETMIYOR - noindex BURAYA da yazilmali");
+        }
+
+        // ══ LF-3(a) - SAGLIK KONTROLU IMAJDA VAR OLAN BIR ARACLA KOSAR ═════════════════════
+        //
+        // Bu pin KALICIDIR (soft-launch pinlerinden farkli olarak acilis gununde KALIR).
+        // Korudugu sey: healthcheck komutunun `aspnet` imajinda GERCEKTEN BULUNAN bir arac
+        // cagirmasi. `wget` o imajda YOKTUR - canli dagitimda olculdu ve konteyner uygulama
+        // saglikliyken KALICI "unhealthy" gorundu.
+        [Fact]
+        public void UretimComposeSaglikKontrolu_IMAJDA_OLMAYAN_ARACI_CAGIRMAZ()
+        {
+            var compose = File.ReadAllText(Path.Combine(Kok.Value, "docker-compose.prod.yml"));
+            var saglik = compose.Split('\n')
+                .FirstOrDefault(s => s.Contains("test: [\"CMD-SHELL\"", StringComparison.Ordinal)
+                                     && s.Contains("/health/ready", StringComparison.Ordinal));
+
+            saglik.Should().NotBeNull("bilinen-pozitif: api saglik kontrolu satiri bulunmali");
+            saglik!.Should().Contain("curl",
+                "aspnet:8.0 imajinda `curl` VAR (/usr/bin/curl - konteynerde olculdu)");
+            saglik.Should().NotContain("wget",
+                "aspnet:8.0 imajinda `wget` YOKTUR; wget cagiran bir healthcheck HER TURDA " +
+                "duser ve konteyner uygulama saglikliyken 'unhealthy' gorunur - " +
+                "`depends_on: service_healthy` bekleyen servis SONSUZA KADAR bekler");
+        }
+
         // ── nginx tarafi: maskeleyen ek GERI GELMEMELI.
         [Fact]
         public void Nginx_SITEMAP_PROXYSI_SORGU_EKI_TASIMAZ()

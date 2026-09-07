@@ -310,3 +310,146 @@ checklist'e tablo satırı + ölçüm komutuyla **eklendi**.
 
 **Tarayıcı kalemleri (üye ol → doğrulama maili · csrf_token çerezi · 16 dk sonra refresh ·
 sandbox 3D ödeme · SW/offline · konsolda CSP ihlali) göz turunda Ömer'de.**
+
+---
+
+## EK — SOFT-LAUNCH KAPISI (LD-1 eki)
+
+Site **canlı ama kapı arkasında**. Amaç: gerçek altyapıda çalışırken erken ziyaretçiyi ve
+**indekslenmeyi** önlemek.
+
+### Yapılan
+
+| # | Kalem | Kanıt |
+|---|---|---|
+| 1 | Vitrin + admin **HTTP Basic Auth** (`divisima`) | kimliksiz `/`·`/index.html`·`/admin.html`·`www` → **401**; doğru parolayla → **200 + 953.557 bayt**; yanlış parolayla → **401** |
+| 2 | **API kilitsiz** (bilinçli) | `/health` 200 · `/health/ready` 200 · `POST /api/payment/callback` → **400** (uygulamaya ULAŞIYOR, 401 değil) |
+| 3 | `X-Robots-Tag: noindex, nofollow` **üç hostta da** | `divisima.net` · `www` · `api` → hepsi taşıyor; **401 yanıtında da** var (`always` çalışıyor) |
+| 4 | Sitemap **geçici 404** | `https://divisima.net/sitemap.xml` → **404** |
+| 5 | Parola sunucuda üretildi | `/root/.htpasswd-parola.txt` **600 root:root** · `/etc/nginx/.htpasswd` **640 root:www-data** · değer **hiçbir yere basılmadı** |
+
+**Parolayı okuma:** `cat /root/.htpasswd-parola.txt`
+
+**API neden kilitlenmedi — dürüst sınır:** Basic Auth API'ye konsaydı İyzico'nun sonuç POST'u
+ve orkestratör sağlık probları **401** alırdı; ödeme sonucu sessizce kaybolurdu. API'yi bugün
+koruyan şey CORS allowlist'i + CSRF double-submit + yetkilendirmedir. Basic Auth **o katmanın
+yerine geçmez**; gizlilik değil, **erken ziyaretçi ve indekslenme** kapısıdır.
+
+### DUR-NOTU — ÖDEME YÖNTEMLERİ `.env` İLE KAPATILAMAZ
+
+Tarif "kapıda ödeme ve havale/EFT KAPALI" diyordu. **Ölçüldü:**
+
+```
+GirdiSinirlari.GecerliOdemeYontemleri = static readonly byte[] { 0, 1, 2 }   // DERLEME ZAMANI SABITI
+yapilandirmadan okunmuyor  ->  .env ile acilip kapatilamaz
+```
+
+Tarifin öngördüğü DUR-notu bu. Ayrıca **fiili durum ölçüldü** ve tarifin varsaydığından farklı:
+
+- **Havale/EFT (2): vitrinde HİÇ SUNULMUYOR.** UI yalnız `online`/`cod` üretir
+  (`payment_method: checkoutState.method === "cod" ? 1 : 0`). API doğrulayıcısı 2'yi kabul
+  eder ama erişilebilir bir yüzey yok.
+- **COD (1): misafir siparişinin TEK yolu** (`payment_method: 1` sabit — kullanıcı kararı
+  "seçenek iii", misafire oturum verilmez). **COD'u kapatmak misafir siparişini tamamen
+  kapatmak demektir.**
+
+Yani "checkout'ta yalnız online kalır" bugünün durumu **değildir** ve kod değişikliği
+olmadan sağlanamaz. Karar merkezde.
+
+### HUKUKİ METİNLER — ÖLÇÜLDÜ, EKSİK VAR
+
+`contents` tablosunda **10 kayıt**, hepsi `is_active=1`. Altı yasal gerekliliğe karşı:
+
+| Gereklilik | slug | Durum |
+|---|---|---|
+| KVKK aydınlatma | `kvkk` | VAR (621 B) |
+| Mesafeli satış | `mesafeli-satis` | VAR (943 B) |
+| **Ön bilgilendirme formu** | — | ❌ **YOK** |
+| Cayma/iade | `iade` | VAR (617 B) |
+| **Unvan · adres · MERSİS** | `iletisim` | ⚠️ **276 B, yetersiz** — metin kendini *"Bu bir tasarım simülasyonudur; iletişim bilgileri temsilidir"* diye ilan ediyor |
+| **ETBİS** | — | ❌ **YOK** |
+
+**4/6.** Tohumlanan metinler **tasarım örneğidir, hukuki metin değildir**; ticari bir sitede
+"temsilidir" ibaresi canlı kalamaz. Checklist'e ölçüm sorgusu + `LIKE '%temsilidir%' → 0`
+kontrolüyle **açılış günü ön koşulu** olarak eklendi.
+
+### KENDİ HATAM — VAKUMLAŞAN PİN
+
+Sitemap'i 404'e çevirip proxy bloğunu yoruma alınca, `DalgaCDagitimSozlesmesiTests`in
+`Contain("/api/seo/sitemap")` assert'i **bedava doğru** oldu: dizge artık **yalnızca yorumda**
+geçiyordu ve pin "sitemap sunuluyor" diye **yalan söylerdi**. MK-8 EKİ'nin tam olarak
+uyardığı durum. Pin **yorumsuz metin** üzerinde koşacak şekilde yeniden yazıldı; ayrıca
+"geri açma bloğu yorumda duruyor" ayrı bir assert'le pinlendi (silinirse geri açmak yeniden
+yazmak olurdu).
+
+**MK-6:** MUT-8 (API bloğuna `auth_basic`) → 1 isimli kırmızı · MUT-9 (paylaşılan başlıktan
+`X-Robots-Tag` silindi) → 1 isimli kırmızı. Geri alma ölçüm yedeğinden, md5 birebir.
+
+---
+
+## EK — LF-3 (LD-1'in açık iki bulgusu kapatıldı)
+
+### LF-3(a) — HEALTHCHECK `wget` → `curl` *(KAPANDI, canlı doğrulandı)*
+
+```
+ONCE : test: wget -q -O- …/health/ready   -> healthcheck log "wget: not found" (exit=1 x5)
+        uygulama /health · /health/ready · /health/live = 200 ama konteyner "unhealthy"
+SONRA: test: curl -fsS …/health/ready     -> healthcheck exit=0
+        docker ps: "Up 10 seconds (healthy)"   (~15 sn icinde)
+```
+
+Ayırt edici ölçüm konteynerin içinden alındı: `command -v wget` → **YOK**,
+`command -v curl` → **`/usr/bin/curl`**. Yani doğru araç imajda **zaten vardı**.
+**Pin KALICIDIR** (`UretimComposeSaglikKontrolu_IMAJDA_OLMAYAN_ARACI_CAGIRMAZ`);
+MUT-10 (`curl`→`wget`) → **1 isimli kırmızı**.
+
+CI bunu yakalayamazdı — CI üretim compose'unu koşmuyor. **Gerçek dağıtım gösterdi.**
+
+### LF-3(b) — EXPRESS KALIR · TDE YERİNE YEDEK DOSYASI ŞİFRELEME *(KAPANDI)*
+
+Lisans kararı şirket sahibinin; 10 GB sınırı bugünkü hacim için uzak. Express **TDE
+desteklemediği** için runbook'un *"yedekler şifreli olmalı"* maddesi **yedek artefaktı**
+düzeyinde karşılandı: günlük iş `.bak` ve `uploads.tar.gz`ı `age` ile şifreler ve
+**şifresiz kopyaları siler** (`ls | grep -cv '\.age$'` → **0**).
+
+**Geri yüklenebilirlik — ayırt edici çift kanıt:**
+
+| Girdi | Sonuç |
+|---|---|
+| Şifreli dosya doğrudan `RESTORE VERIFYONLY` | **`Msg 3241` — media family incorrectly formed** → içerik *gerçekten* şifreli, adı değişmiş bir `.bak` değil |
+| `age -d` ile çözülmüş dosya | **"The backup set on file 1 is valid"** (exit 0) |
+| `uploads-*.tar.gz.age` çözülüp `tar tzf` | exit 0 |
+
+> **DÜRÜST SINIR — bu TDE DEĞİLDİR.** `.mdf`/`.ldf` diskte **hâlâ şifresiz**; korunan
+> yalnızca dışarı taşınan yedek artefaktıdır.
+>
+> **ANAHTAR KAYBI = YEDEK KAYBI.** `/root/.divisima-backup.key` (600) sunucu **dışında** da
+> saklanmalı — aksi halde sunucunun kaybedildiği senaryoda, yani felaket kurtarmanın tam da
+> işe yarayacağı anda, yedekler açılamaz. Bu satır checklist'e ve runbook'a **kutu olarak**
+> eklendi; şifreleme, doğrulanmamış bir geri yükleme prosedürünü sessizce kullanılamaz hale
+> getirebilecek **yeni bir adım** ekler.
+
+### LF-3(c) — AdminSeed
+
+`DIVISIMA_ADMIN_SEED=true` bugün **açık** (ilk admin için). Ömer ilk girişi yaptığını
+bildirince `false` çekilip API yeniden başlatılacak. Checklist adım 19 zaten bunu istiyor.
+
+### LF-3(d) — BİLİNEN'e eklenen iki kalem
+
+`57·LAUNCH-DEPLOY-1` başlığıyla CLAUDE.md B9'a girdi: **SQL Server Express** (TDE yok →
+dosya şifrelemesi; anahtar kaybı = yedek kaybı) · **`KnownProxies` = Docker ağ geçidi**
+(`172.18.0.1`; ağ yeniden yaratılırsa değişir ve `.env` güncellenmelidir — yanlış kalırsa
+hız sınırı ve olay izi **sessizce** ağ geçidi IP'sinde toplanır).
+
+### KENDİ HATAM — İKİNCİ VAKUMLAŞAN PİN
+
+"AÇILIŞ GÜNÜ" bölümüne eklediğim **altı satırlık numaralı hukuki metin tablosu**,
+`LaunchFix1SozlesmeTests`in IRL adım sayacını kırdı: pin `^\| (\d+) \|` desenini **belge
+genelinde** sayıyordu ve 20 yerine **26** buldu (üç koşumda da kırmızı).
+
+Kusur eklenen tabloda değil **pindeydi**: koruduğu iddia *"IRL tablosunda 20 sıralı adım
+var"*dır, *"belgede başka hiçbir yerde numaralı tablo satırı yok"* değil. Sayım artık IRL
+tablosunun başlığından başlayıp bir sonraki başlıkta biter. Bu, bu dalgadaki **ikinci**
+vakumlaşan-pin vakası (birincisi sitemap `Contain`ıydı) — ikisi de aynı kökten: **bir pin,
+koruduğu şeyi belge/dosya geneli üzerinden ölçerse, ilgisiz her ekleme onu kırar ya da
+bedava doğru yapar.**

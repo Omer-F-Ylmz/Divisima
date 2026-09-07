@@ -431,8 +431,23 @@ namespace Divisima.IntegrationTests
         {
             var metin = Oku("ops/deployment-checklist.md");
 
-            // Numarali tablo satirlari: `| 1 | ... |` ... `| 20 | ... |`
-            var numaralar = Regex.Matches(metin, @"^\| (\d+) \|", RegexOptions.Multiline)
+            // ══ SAYIM BOLUME KAPSANDI (LD-1 soft-launch eki) ═══════════════════════════════
+            //
+            // ILK YAZIMDA sayim BELGE GENELINDEYDI: `^\| (\d+) \|`. Soft-launch turunda
+            // checklist'e "ACILIS GUNU" bolumu ve icinde ALTI SATIRLIK numarali bir hukuki
+            // metin tablosu eklendi; pin 20 yerine **26** saydi ve UC KOSUMDA DA kirildi.
+            //
+            // Kusur EKLENEN TABLODA DEGIL, PINDEYDI: pinin korudugu sey "IRL tablosunda 20
+            // sirali adim var" iddiasidir, "belgede baska hicbir yerde numarali tablo satiri
+            // YOK" degil. Belge genelinde saymak, ILGISIZ her tabloyu bu pine bagliyordu.
+            // Sayim artik IRL tablosunun BASLIGINDAN baslayip BIR SONRAKI baslikta biter.
+            var irlBasi = metin.IndexOf("| # | Adım | Kanıt nasıl alınır |", StringComparison.Ordinal);
+            irlBasi.Should().BeGreaterThan(0, "bilinen-pozitif: IRL tablosunun basligi bulunmali");
+            var kalan = metin[irlBasi..];
+            var sonrakiBaslik = kalan.IndexOf("\n#", StringComparison.Ordinal);
+            var irlBolumu = sonrakiBaslik > 0 ? kalan[..sonrakiBaslik] : kalan;
+
+            var numaralar = Regex.Matches(irlBolumu, @"^\| (\d+) \|", RegexOptions.Multiline)
                 .Select(m => int.Parse(m.Groups[1].Value))
                 .ToList();
 

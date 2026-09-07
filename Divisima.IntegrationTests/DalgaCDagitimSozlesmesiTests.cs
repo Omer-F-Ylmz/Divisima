@@ -41,6 +41,13 @@ namespace Divisima.IntegrationTests
             return d.FullName;
         });
 
+        // nginx `#` satir yorumlarini ATAR (MK-8 EKI: kaynak-sozlesme pinleri YORUMSUZ metin
+        // uzerinde kosar). Bu dosyalarda dizge icinde `#` YOKTUR - `add_header` degerleri ve
+        // yollar tirnak icinde ama `#` tasimiyor (olculdu), o yuzden basit ayirici yeterli.
+        private static string YorumsuzNginx(string metin) =>
+            string.Join("\n", metin.Split('\n')
+                .Select(s => { var i = s.IndexOf('#'); return i >= 0 ? s[..i] : s; }));
+
         private static string Oku(string goreliYol)
         {
             var tam = Path.Combine(KokDizin.Value, goreliYol.Replace('/', Path.DirectorySeparatorChar));
@@ -61,9 +68,28 @@ namespace Divisima.IntegrationTests
             conf.Should().Contain("server_name api.divisima.net", "API blogu KORUNMALI");
             conf.Should().Contain("server_name divisima.net", "storefront blogu EKLENMIS olmali - eksik olan buydu");
 
-            // SITEMAP ZINCIRI: robots.txt'in gosterdigi adresi SUNAN tanim olmali.
-            conf.Should().Contain("location = /sitemap.xml");
-            conf.Should().Contain("/api/seo/sitemap", "sitemap'i ureten uc BUDUR - statik bir dosya degil");
+            // ══ SITEMAP ZINCIRI - SOFT-LAUNCH'TA DURUM DEGISTI (LD-1 eki) ══════════════════
+            //
+            // ONCEKI HAL: `conf.Should().Contain("/api/seo/sitemap")`. Soft-launch kapisi
+            // sitemap'i GECICI olarak 404'e cevirip proxy blogunu YORUMA ALINCA bu assert
+            // BEDAVA DOGRU oldu - dizge artik YALNIZCA YORUMDA geciyordu ve pin "sitemap
+            // sunuluyor" diye YALAN SOYLERDI. MK-8 EKI'nin ta kendisi: kaynak-sozlesme
+            // pinleri YORUMSUZ metin uzerinde kosar.
+            //
+            // ACILIS GUNU: asagidaki iki assert TERS CEVRILIR (404 gider, proxy geri gelir);
+            // adim `ops/deployment-checklist.md` > "ACILIS GUNU" > 1. maddede yazili.
+            var aktif = YorumsuzNginx(conf);
+            aktif.Should().Contain("location = /sitemap.xml", "adres TANIMLI kalmali");
+            aktif.Should().Contain("return 404",
+                "SOFT-LAUNCH: sitemap GECICI olarak kapali - arama motoruna 'beni tara' daveti " +
+                "verilmiyor. Acilis gununde bu assert kaldirilir.");
+            aktif.Should().NotContain("/api/seo/sitemap",
+                "SOFT-LAUNCH: uretici uca proxy AKTIF OLMAMALI (yorumdaki kopya sayilmaz)");
+
+            // Geri acmanin TEK ADIM olmasi da pinli: yoruma alinmis blok DURUYOR olmali.
+            conf.Should().Contain("proxy_pass http://127.0.0.1:5000/api/seo/sitemap",
+                "acilis gunu geri acilacak blok YORUMDA saklanmali - silinirse geri acmak " +
+                "yeniden yazmak demek olur");
 
             // SPA fallback: hash router, bilinmeyen YOL yok.
             conf.Should().Contain("try_files $uri $uri/ /index.html");

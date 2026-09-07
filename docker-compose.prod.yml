@@ -117,7 +117,17 @@ services:
 
     healthcheck:
       # `/health/ready` bagimliliklari da yoklar (DB, Redis); `/health/live` yalniz sureci.
-      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:5000/health/ready || exit 1"]
+      #
+      # ══ LD-1 / LF-3 - `wget` DEGIL `curl`: IMAJDA WGET YOK ════════════════════════════
+      # OLCULEN ZARAR (canli dagitimda ortaya cikti): bu satir `wget` cagiriyordu ve
+      # `aspnet:8.0` imajinda wget KURULU DEGIL. Healthcheck her turda
+      # "/bin/sh: 1: wget: not found" ile dustu; uygulama UC SAGLIK UCUNDA DA 200 donerken
+      # konteyner KALICI "unhealthy" gorundu. Zarari sessizdir: `depends_on: service_healthy`
+      # bekleyen her servis SONSUZA KADAR bekler, izleme yanlis alarm uretir.
+      # AYIRT EDICI OLCUM: `command -v wget` -> YOK · `command -v curl` -> /usr/bin/curl
+      # CI bunu YAKALAYAMAZDI - CI uretim compose'unu KOSMUYOR; ancak GERCEK dagitim gosterdi.
+      # `-f` HTTP >=400'u hata sayar, `-s` sessiz, `-S` hatayi yine de yazar.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5000/health/ready || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5

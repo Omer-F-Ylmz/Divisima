@@ -412,3 +412,107 @@ değil), yani operatörün baktığı yer de sessizdir.
       sonra `outbox_messages` içinde o siparişin mesajı `status = 1 (Processed)` oldu.
       **Bayrak yanlışsa bu satır `status = 0`'da takılı kalır** — konfigürasyona bakmak
       yerine sonuca bakmak, bayrağın gerçekten yürürlükte olduğunun tek doğrudan kanıtıdır
+
+---
+
+# AÇILIŞ GÜNÜ — SOFT-LAUNCH KAPISINI KALDIRMA
+
+> **DURUM: site CANLI ama KAPI ARKASINDA** (LD-1 eki). Aşağıdaki adımlar tamamlanmadan
+> site herkese açık sayılmaz. Sıra önemlidir: **hukuki metinler ÖNCE, kapı SONRA** —
+> kapıyı önce açmak, eksik metinlerle satış yapılabilen bir pencere bırakır.
+
+## 0) HUKUKİ METİNLER — KAPIDAN ÖNCE (ölçülerek kapatılır)
+
+Türkiye'de mesafeli satış yapan bir sitede aşağıdakiler **bulunmak zorundadır**.
+Ölçüm (üreten ifade):
+
+```sql
+SELECT slug, LEN(body_tr) AS govde, is_active FROM contents
+WHERE slug IN ('kvkk','mesafeli-satis','on-bilgilendirme','iade','iletisim','etbis')
+ORDER BY slug;
+```
+
+| # | Gereklilik | slug | LD-1'de ÖLÇÜLEN durum |
+|---|---|---|---|
+| 1 | KVKK aydınlatma metni | `kvkk` | **VAR** (621 B) — içerik gözden geçirilmeli |
+| 2 | Mesafeli satış sözleşmesi | `mesafeli-satis` | **VAR** (943 B) — içerik gözden geçirilmeli |
+| 3 | **Ön bilgilendirme formu** | `on-bilgilendirme` | ❌ **KAYIT YOK** |
+| 4 | Cayma hakkı / iade koşulları | `iade` | **VAR** (617 B) — içerik gözden geçirilmeli |
+| 5 | **Unvan · adres · MERSİS · vergi no** | `iletisim` | ⚠️ **YETERSİZ** (276 B). Tohumlanan metin unvan/MERSİS/vergi no **taşımıyor** ve kendini *"Bu bir tasarım simülasyonudur; iletişim bilgileri temsilidir"* diye **ilan ediyor** — ticari bir sitede bu metnin canlı kalması kabul edilemez. |
+| 6 | **ETBİS kayıt/doğrulama bilgisi** | `etbis` | ❌ **KAYIT YOK** |
+
+- [ ] Yukarıdaki **altı** slug da mevcut, `is_active = 1` ve gövdesi **gerçek** metin
+      (tohumlanan "temsilidir" ifadesi **hiçbirinde** kalmadı):
+      `SELECT COUNT(*) FROM contents WHERE body_tr LIKE '%temsilidir%';` → **0**
+- [ ] Sorgu **6** satır döndü (bugün **4**)
+
+> **NOT:** `ContentSeeder` bu metinleri **tasarım örneği** olarak tohumlar. Tohum metni
+> hukuki metin DEĞİLDİR; avukat/muhasebeci onaylı içerikle **değiştirilmelidir**.
+> Bu bir yazılım maddesi değil, **işletme yükümlülüğüdür** — kod tarafı yalnızca
+> kaydın var olup olmadığını ölçebilir.
+
+## 1) SOFT-LAUNCH KAPISINI KALDIR
+
+- [ ] `ops/infra/nginx.conf` — storefront bloğundaki **`auth_basic` iki satırı** silindi
+- [ ] `ops/infra/divisima-security-headers.conf` — **`X-Robots-Tag`** satırı silindi
+      (admin.html'in KENDİ `noindex`i **KALIR** — o kalıcıdır)
+- [ ] `ops/infra/nginx.conf` — `location = /sitemap.xml` `return 404;` bloğu silindi,
+      hemen altındaki **yoruma alınmış proxy bloğu geri açıldı**
+- [ ] Sunucuda: `cp ops/infra/*.conf` → `/etc/nginx/…` · `nginx -t` **exit 0** · `systemctl reload nginx`
+- [ ] `rm -f /etc/nginx/.htpasswd /root/.htpasswd-parola.txt`
+- [ ] Doğrulandı: `https://divisima.net/` **401 değil 200** · `https://divisima.net/sitemap.xml`
+      **200 + XML** · yanıtta `X-Robots-Tag` **yok** (admin.html hariç)
+
+## 2) ÖDEME YÖNTEMLERİNİ AÇ
+
+> **LD-1 DUR-NOTU:** `GirdiSinirlari.GecerliOdemeYontemleri` bir **derleme zamanı sabitidir**
+> (`static readonly byte[]`), yapılandırmadan **okunmaz** — yani kapıda ödeme/havale `.env`
+> ile açılıp kapatılamaz. Ölçülen bugünkü durum: vitrin **havale/EFT'yi hiç sunmuyor**
+> (UI yalnız `online`/`cod` üretir) ve **misafir siparişi yalnızca kapıda ödemedir**
+> (`payment_method: 1` sabit, kullanıcı kararı). Yani "COD'u kapat" demek **misafir
+> siparişini tamamen kapatmak** demektir.
+
+- [ ] `.env` → `DIVISIMA_IYZICO_BASE_URL=https://api.iyzipay.com` + **canlı** ApiKey/SecretKey
+- [ ] `docker compose … up -d --force-recreate api` · `/health/ready` **200**
+- [ ] Gerçek kartla **küçük tutarlı** bir test siparişi verildi ve **iade edildi**
+- [ ] Kapıda ödeme iş akışı (teslimatta tahsilat) operasyonel olarak hazır
+
+## 3) İNDEKSLENMEYE HAZIR
+
+- [ ] `robots.txt` `Sitemap:` satırı doğru adresi gösteriyor
+- [ ] Search Console / Bing Webmaster'a site eklendi, sitemap gönderildi
+- [ ] `https://divisima.net/sitemap.xml` içinde `<loc>` kökü **gerçek** alan adı
+
+## 4) KAPI SONRASI İZLEME (ilk 48 saat)
+
+- [ ] **GÜNLÜK `PaymentAfterTerminal` sorgusu** (bu olayın tek okuyucusu odur):
+      `SELECT * FROM security_events WHERE event_type='PaymentAfterTerminal' ORDER BY id DESC;`
+- [ ] `SELECT event_type, COUNT(*) FROM security_events WHERE created_at >= DATEADD(day,-1,GETUTCDATE()) GROUP BY event_type;`
+- [ ] Başarısız arka plan işleri: panel → "Başarısız Arka Plan İşleri"
+- [ ] Yedek gerçekten üretildi: `ls -l /var/backups/divisima/` (gün başına 2 dosya)
+
+---
+
+## YEDEK ŞİFRELEME — TDE'NİN YERİNE (LD-1/LF-3b)
+
+**Neden dosya düzeyinde:** SQL Server **Express** sevk edildi (lisans kararı; 10 GB sınırı
+bugünkü hacim için uzak). Express **TDE desteklemez**, dolayısıyla runbook'un *"yedekler
+şifreli olmalı"* maddesi at-rest şifreleme ile karşılanamaz. Bunun yerine **yedek
+artefaktı** şifreleniyor (`age`), şifresiz kopya diskte **bırakılmıyor**.
+
+> **DÜRÜST SINIR — bu TDE DEĞİLDİR:** veritabanı dosyaları (`.mdf`/`.ldf`) diskte **hâlâ
+> şifresizdir**. Korunan şey yalnızca **yedek dosyasıdır** (kopyalanan, taşınan, dışarı
+> çıkarılan artefakt). Sunucu diskine erişen biri veriyi yine okuyabilir.
+
+- [ ] `age` kurulu · anahtar `/root/.divisima-backup.key` **600 root:root**
+- [ ] `/var/backups/divisima/` içinde **şifresiz kalıntı yok**:
+      `ls /var/backups/divisima | grep -cv '\.age$'` → **0**
+- [ ] **Geri yüklenebilirlik kanıtı** (ayırt edici — ikisi birden aranır):
+      - şifreli dosya doğrudan `RESTORE VERIFYONLY`'ye verilince **`Msg 3241` hata verir**
+        (içerik gerçekten şifreli, yalnızca adı değişmiş değil)
+      - `age -d -i /root/.divisima-backup.key` ile çözülen dosya
+        **"The backup set on file 1 is valid"** döner
+- [ ] **ANAHTAR KAYBI = YEDEK KAYBI.** `/root/.divisima-backup.key` sunucu dışında da
+      saklanmalı (parola yöneticisi / çevrimdışı kopya). Anahtar yalnız sunucudaysa,
+      sunucuyu kaybettiğiniz senaryoda yedekler **açılamaz** — yani felaket kurtarma
+      senaryosunun tam da işe yarayacağı anda çalışmaz.

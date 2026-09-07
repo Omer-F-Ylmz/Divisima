@@ -212,3 +212,31 @@ aksi halde cift islem ve kacan rate limit riski dogar.
 > Rate limit esikleri (`RateLimit:AuthPermitLimit` / `PaymentPermitLimit` /
 > `GlobalPermitLimit`) her iki yolda da okunur (D5). Once Redis yolu bu degerleri HIC
 > okumuyordu ve auth kovasi kaynakta sabit 5'ti.
+
+## YEDEK ŞİFRELEME (LD-1/LF-3b) — TDE YOK, DOSYA ŞİFRELEMESİ VAR
+
+Bu kurulumda SQL Server **Express**tir ve **TDE desteklemez**. "Yedekler şifreli olmalı"
+maddesi bu yüzden **yedek artefaktı düzeyinde** karşılanır:
+
+- Günlük iş (`/usr/local/bin/divisima-backup.sh`, cron 03:00) `.bak` ve `uploads.tar.gz`
+  üretir, ikisini de `age` ile şifreler ve **şifresiz kopyaları siler**.
+- Anahtar: `/root/.divisima-backup.key` (600). Açık anahtar gizli değildir, şifrelemede
+  kullanılır; **çözme yalnız özel anahtarla** yapılır.
+
+**Geri yükleme sırası (şifreli yedekten):**
+
+```bash
+age -d -i /root/.divisima-backup.key -o /tmp/geri.bak /var/backups/divisima/divisima-<TARIH>.bak.age
+docker cp /tmp/geri.bak divisima-mssql-1:/var/opt/mssql/data/geri.bak
+docker exec -u 0 divisima-mssql-1 chown mssql:root /var/opt/mssql/data/geri.bak
+# ONCE dogrula, SONRA geri yukle:
+#   RESTORE VERIFYONLY FROM DISK='/var/opt/mssql/data/geri.bak';
+#   RESTORE DATABASE Divisima FROM DISK='/var/opt/mssql/data/geri.bak' WITH REPLACE;
+```
+
+> **TATBİKAT ŞARTI:** bu prosedür **çözme adımı dahil** denenmeden "yedeğim var" denemez.
+> Şifreleme, doğrulanmamış bir geri yükleme prosedürünü **sessizce** kullanılamaz hale
+> getirebilecek yeni bir adım ekler.
+>
+> **ANAHTAR KAYBI = YEDEK KAYBI:** anahtarın sunucu dışında bir kopyası yoksa, sunucunun
+> kaybedildiği senaryoda yedekler açılamaz.

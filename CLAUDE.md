@@ -944,6 +944,16 @@ KAPALI kalem yeni bulguyu BASTIRMAZ.** Tam metinler:
   musteri `status=review` ekrani gorur; metin BASLATILDIGI iddiasini TASIMAZ - F6) ·
   **`health` uclari BILINCLI anonim**
   (`AllowAnonymous` ISARETLI — orkestratör probe'lari kimlik tasimaz, **BAGLAYICI**).
+- **`57·LAUNCH-DEPLOY-1`** — uc kalem, ucu de **BAGLAYICI/ACIK**: **SQL Server EXPRESS**
+  (lisans karari sirket sahibinin; 10 GB sinir bugunku hacim icin uzak. **TDE YOK** →
+  runbook'un "yedekler sifreli" maddesi **yedek DOSYASI** duzeyinde karsilandi: `age` ile
+  sifrelenir, sifresiz kopya diskte KALMAZ. **Bu TDE DEGILDIR** - `.mdf`/`.ldf` diskte hala
+  sifresiz. **ANAHTAR KAYBI = YEDEK KAYBI**, `/root/.divisima-backup.key` sunucu DISINDA da
+  saklanmali) · **`ForwardedHeaders:KnownProxies` = Docker AG GECIDI** (`172.18.0.1`), ag
+  yeniden yaratilirsa DEGISIR ve `.env` guncellenmelidir - yanlis kalirsa hiz siniri ve olay
+  izi SESSIZCE ag gecidi IP'sinde toplanir · **SOFT-LAUNCH KAPISI ACIK**: vitrin+admin Basic
+  Auth arkasinda, `noindex` uc hostta, sitemap 404. Kaldirma adimlari
+  `ops/deployment-checklist.md` > "ACILIS GUNU" (hukuki metinler ON KOSUL: bugun **4/6**).
 
 **B-27 KAPANDI (AV-2):** `/api/payment/callback` artik `payment` kovasinda; canli sinir
 10 gecer / 11. istek 429, iki denetci AYRI AYRI olctu. **`00b:247` arsivi DEGISMEZ (MK-11/d).**
