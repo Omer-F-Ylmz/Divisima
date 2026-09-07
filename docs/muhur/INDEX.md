@@ -70,7 +70,7 @@ onlari bayatlatmaz. Okuma usulu: CLAUDE.md B0 · MK-11 (b).
 | 54 | `54-arsiv-4.md` | # 54 · ARSIV-4 (CLAUDE.md KESIMI, zemin 1d67cf6) | — | 49761 | yeni usul |
 | 55 | `55-guvenlik-fix-6.md` | # 55 · GUVENLIK-FIX-6 (LAUNCH ONCESI: UYE YOLU + DURUM MAKINESI + HUB + ICE-AKTARIM) | — | 26859 | yeni usul |
 | 56 | `56-launch-go-no-go.md` | # 56 · LAUNCH GO/NO-GO + LAUNCH-FIX-1 (LF-1) | — | 35528 | yeni usul |
-| 57 | `57-launch-deploy.md` | # 57 · LAUNCH-DEPLOY-1 (LD-1) — SUNUCU KURULUMU | — | 10316 | yeni usul |
+| 57 | `57-launch-deploy.md` | # 57 · LAUNCH-DEPLOY-1 (LD-1) — SUNUCU KURULUMU | — | 17214 | yeni usul |
 
 **AD CAKISMASI UYARISI:** bu dosya **GF-3 (Eylul 2026)** dalgasinindir. Depoda ayrica
 **GUVENLIK-FIX-3 (Agustos 2026)** vardir ve onun pinleri `GuvenlikFix3SozlesmeTests.cs`

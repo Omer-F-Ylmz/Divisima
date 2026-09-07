@@ -873,6 +873,23 @@ kesilenler) ve `41·ARSIV-1`; ikisi de BAYT-SABIT (MK-11/d), bu tur DOKUNMADI.
   ve ayni hesabin kendi es zamanli guncellemesinde. **TETIKLEYICI: GF-7 ILK KALEM.**
   Suit 806/809 x3 (uc kirmizi = bilinen Docker uclusu) · Sql 411/411 · 24 mutasyon kosumu.
 
+## KUYRUK (`57·LAUNCH-DEPLOY-1` sonrasi)
+
+**CANLI: 7 Eylul 2026, SANDBOX odemede** (`57·LD-1`, zemin `34be485`). Uc ad TLS'li
+(bitis 2026-12-06), HTTP->HTTPS 301, HSTS tek kaynak nginx. Sema 46/15/56,
+`Turkish_CI_AS`, recovery FULL. **Iyzico canli gecisi TEK SATIR:** `.env`de
+`DIVISIMA_IYZICO_BASE_URL` -> `https://api.iyzipay.com` + canli anahtarlar.
+SAPMA: sunucu **Ubuntu 26.04** (tarif 24.04) · sshd parola girisi ACIKTI, kapatildi.
+
+**ACIK IKI KARAR:** (a) `docker-compose.prod.yml` healthcheck'i `wget` cagiriyor, imajda
+`wget` YOK (`curl` VAR) - uygulama saglikliyken konteyner "unhealthy". (b) SQL Server
+**Express**; checklist "Express DEGIL" diyor - 10 GB sinir, TDE yok, yedek sikistirmasi
+`Msg 1844` ile reddedildi.
+
+**KAPATILAN IKI KUSUR:** Hangfire oto-semasi <-> en-az-yetki celiskisi (ilk acilista
+`SQL 208`; sema artik dagitimda `sa` ile kurulur) · `KnownProxies` konteynerde SESSIZCE
+calismiyordu (hiz siniri + olay izi ag gecidi IP'sinde topluyordu). Ikisi checklist'te.
+
 ## KUYRUK (`56·LAUNCH GO` sonrasi)
 
 **LAUNCH GO VERILDI (`56·LAUNCH-GO-NO-GO`) — DAGITIM OMER'DE.** Uc dagitim blokeri LF-1'de

@@ -1,0 +1,61 @@
+# ══ LD-1 / FAZ 3 - VERITABANI KATMANI (BILINCLI SAPMA, AYRI DOSYA) ═════════════════════════
+#
+# NEDEN AYRI DOSYA: `docker-compose.prod.yml` veritabanini BILINCLI OLARAK ICERMEZ ve
+# gerekcesi o dosyanin basinda yazilidir - "uretim SQL Server'i yonetilen bir hizmet ya da
+# ayri bir konak olmalidir; konteyner icinde `sa` ile calisan bir veritabani least-privilege
+# kararini (ops/db/least-privilege.sql) ve yedekleme runbook'unu (ops/backup-dr-runbook.md)
+# GECERSIZ KILAR". O karar DEGISMEDI ve o dosyaya DOKUNULMADI.
+#
+# BILINCLI SAPMA (merkez karari, LD-1): launch TEK SUNUCUDA yapiliyor; yonetilen veritabani
+# LAUNCH SONRASINA birakildi. Sapmanin bedeli ve onu KUCULTEN onlemler:
+#
+#   - `sa` YALNIZ KURULUM icindir. Uygulama `divisima_app` ile baglanir ve o kullanicinin
+#     DDL yetkisi YOKTUR (ops/db/least-privilege.sql). Yani "konteynerde sa ile calisan
+#     veritabani" endisesinin ASIL kismi - uygulamanin sa ile baglanmasi - GECERLI DEGIL.
+#   - Port YALNIZ LOOPBACK'e baglidir: 1433 internetten ERISILEMEZ.
+#   - Veri ADLANDIRILMIS VOLUME'de; konteyner yenilenince KAYBOLMAZ.
+#   - Yedekleme runbook'unun gerektirdigi `FULL` recovery ve gunluk yedek FAZ 4'te kurulur.
+#
+# KULLANIM (iki dosya BIRLIKTE - tek proje, tek ag; `mssql` adi ancak boyle cozulur):
+#   docker compose -f docker-compose.prod.yml -f docker-compose.db.yml up -d
+#
+# IMAJ REFERANSI: tag + digest, depodaki DIGER DORT SITEYLE AYNI (GF-4/K5 tek kaynak kurali).
+# Digest degisecekse BES SITE BIRDEN degisir; `GuvenlikFix4SozlesmeTests` bunu zorlar.
+
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest@sha256:ba4c8329f48fb8f02e1416be6a930ebfd71268caee78aa985f3af4315e457c89
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      # `sa` parolasi YALNIZ kurulum/bakim icindir - uygulama bunu KULLANMAZ.
+      MSSQL_SA_PASSWORD: ${DIVISIMA_DB_SA_PASSWORD:?zorunlu}
+      MSSQL_PID: Express
+      # Sunucu genelinde Turkce collation. Veritabani ayrica ACIKCA
+      # `COLLATE Turkish_CI_AS` ile yaratilir - CLAUDE.md 6c: Latin1 bir kurulumda kimlik
+      # karsilastirmalari SESSIZCE yanlis calisir.
+      MSSQL_COLLATION: Turkish_CI_AS
+    # 4 GB RAM'li konakta SQL Server varsayilan olarak neredeyse TUMUNU almaya calisir ve
+    # API konteyneri OOM-killer'a yem olur. 2 GB sinir + 2 GB swap birlikte olculdu.
+    mem_limit: 2g
+    ports:
+      # YALNIZ LOOPBACK - veritabani internete ACILMAZ.
+      - "127.0.0.1:1433:1433"
+    volumes:
+      - mssql_data:/var/opt/mssql
+    healthcheck:
+      # `-C` sunucu sertifikasina guven (konteyner ici self-signed); `-b` hata durumunda
+      # SIFIR DISI cikis kodu - onsuz sqlcmd basarisizlikta da 0 doner ve healthcheck YALAN SOYLER.
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -b -Q 'SELECT 1' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  mssql_data:

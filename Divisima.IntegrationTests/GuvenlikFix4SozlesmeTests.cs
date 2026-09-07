@@ -81,11 +81,17 @@ namespace Divisima.IntegrationTests
 
         private const string ImajDigestsiz = "mcr.microsoft.com/mssql/server:2022-latest";
 
+        // LD-1 / FAZ 3: BESINCI SITE eklendi - `docker-compose.db.yml` (uretim veritabani
+        // katmani). Tek kaynak kurali GENISLEDI: digest degisecekse artik BES SITE BIRDEN
+        // degisir. Yeni dosyayi listeye YAZMAMAK, uretimde kosan veritabanini pinin
+        // KOR NOKTASINDA birakirdi - yani CI'nin ve yerelin kullandigi ikili pinliyken
+        // MUSTERININ VERISINI TUTAN ikili pinsiz kalirdi.
         private static readonly string[] ImajSiteleri =
         {
             ".github/workflows/ci.yml",
             ".github/workflows/security.yml",
             "docker-compose.yml",
+            "docker-compose.db.yml",
             "Divisima.IntegrationTests/CustomWebApplicationFactory.cs",
         };
 

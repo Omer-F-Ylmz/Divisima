@@ -63,7 +63,35 @@ sonucu verir — ortamda .NET araç zinciri varsa (a), yoksa (b):
       desteklemiyor (D6'da ölçüldü: `Msg 1844`), yani "yedekler şifreli olmalı" maddesi
       Express'te karşılanamaz
 
-> **SIRA:** şema → (opsiyonel `02_seed.sql`) → uygulama açılışı → frontend dağıtımı.
+### Hangfire şeması — AYRI ve ZORUNLU adım (LD-1'de ölçülerek eklendi)
+
+**Uygulama ilk açılışta ÇÖKER** (`SQL Error 208 – Invalid object name`, `RecurringJob.AddOrUpdate`)
+eğer bu adım atlanırsa. Kök sebep bir çelişkidir ve ikisi de bilinçli kararlardır:
+
+- `UseSqlServerStorage` varsayılanı `PrepareSchemaIfNecessary = true` — Hangfire **kendi
+  şemasını yaratmak** ister;
+- ama çalışma zamanı kullanıcısı `divisima_app`in **DDL yetkisi YOKTUR**
+  (`ops/db/least-privilege.sql`).
+
+Yani en az yetki kararı korunacaksa Hangfire şeması **dağıtım anında ayrıcalıklı bir hesapla**
+kurulmalıdır. Sürüm **kilitli graftan** okunur (`packages.lock.json` → bugün `1.8.6`);
+script paketin içindedir:
+
+- [ ] `~/.nuget/packages/hangfire.sqlserver/<kilitli sürüm>/tools/install.sql` sunucuya taşındı
+      ve **`sa` ile** uygulandı (`sqlcmd -b -I -f 65001 -d <DB> -i install.sql`)
+- [ ] Doğrulandı: `SELECT MAX(Version) FROM [HangFire].[Schema]` → dolu (LD-1'de **9**),
+      `HangFire` şemasındaki tablo sayısı > 0 (LD-1'de **11**)
+- [ ] Uygulama kullanıcısına **yalnız CRUD + EXECUTE** verildi, DDL **verilmedi**:
+      `GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::HangFire TO divisima_app;`
+      `GRANT EXECUTE ON SCHEMA::HangFire TO divisima_app;`
+- [ ] Ölçüldü: `divisima_app`in `HangFire` şemasında `ALTER/CONTROL/CREATE TABLE` izni **0**
+
+> **Sürüm sürüklenmesi uyarısı:** makinede birden çok `hangfire.sqlserver` sürümü olabilir
+> (LD-1'de üç tane vardı: 1.8.6 · 1.8.14 · 1.8.24). Yanlış sürümün script'i, kütüphanenin
+> beklediğinden **farklı** bir şema kurar. Sürüm `packages.lock.json`dan okunur, klasör
+> listesinden **seçilmez**.
+
+> **SIRA:** şema → **Hangfire şeması** → (opsiyonel `02_seed.sql`) → uygulama açılışı → frontend dağıtımı.
 > Migration üreten bir sürüm yayınlanıyorsa şema adımı **kod deploy'undan ÖNCE** koşar
 > (expand-migrate-contract; bkz. `ops/backup-dr-runbook.md`).
 
@@ -196,6 +224,18 @@ Ama sonucu **dağıtımın şekline bağlıdır** ve iki yönlü hata mümkünd�
 | nginx API ile **aynı makinede** (`proxy_pass http://127.0.0.1:5000`) | boş bırakılabilir | XFF güvenilir → **istemci başına** kova ✅ |
 | nginx/LB **ayrı makinede/konteynerde** (bulut LB, k8s ingress, compose ağı) | **boş** | XFF yok sayılır → **herkes tek kovada**: auth limiti tüm site için 10/dk ❌ |
 | aynısı | **dolu** | XFF güvenilir → istemci başına kova ✅ |
+| **API KONTEYNERDE, nginx KONAKTA** (LD-1'in sevk ettiği topoloji) | `127.0.0.1` | ❌ **SESSİZ BAŞARISIZLIK — LD-1'de CANLI ÖLÇÜLDÜ.** nginx `127.0.0.1:5000`'e proxy'lese bile paket konteynere **Docker köprü ağ geçidinden** (`172.18.0.1`) girer. `127.0.0.1` bu adresle **eşleşmez**, XFF güvenilmez sayılır ve `security_events.ip_address` **`::ffff:172.18.0.1`** olur. Ölçüm: 12 başarısız girişin 10'u 401 + 2'si 429 idi ve **11 satırın hepsi ağ geçidi IP'sini** taşıyordu. |
+| aynısı | **ağ geçidi IP'si** | ✅ Doğrulandı: değer `172.18.0.1` yapılıp API yeniden başlatılınca sonraki olaylar **gerçek istemci IP'sini** taşıdı. |
+
+> **KONTEYNER TUZAĞI (LD-1'de bedeli ölçülerek öğrenildi):** "nginx loopback'e proxy'liyor,
+> öyleyse `KnownProxies` boş/`127.0.0.1` olabilir" çıkarımı **konteynerli dağıtımda YANLIŞTIR**.
+> Doğru değeri **tahmin etmeyin, ölçün**:
+> ```bash
+> docker inspect divisima-api-1 --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}'
+> ```
+> Bu değeri `.env`de `DIVISIMA_PROXY_IP`e yazın. **Compose ağı silinip yeniden yaratılırsa
+> ağ geçidi adresi DEĞİŞEBİLİR** — ağ yeniden kurulduğunda bu adım TEKRARLANIR. Zararı
+> sessizdir: uygulama sağlıklı görünür, yalnızca hız sınırı ve olay izi yanlış çalışır.
 
 Depodaki `ops/infra/nginx.conf` **loopback'e** proxy'ler, yani belgelenen topolojide boş
 bırakmak doğrudur (GÜVENLİK DALGASI 2'de ölçüldü: `XFF=9.9.9.9` 10 istekte tükendi,

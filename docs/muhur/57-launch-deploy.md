@@ -181,3 +181,132 @@ ve ayar `/etc/sysctl.d/99-divisima.conf`e taşındı.
 FAZ 2 (uygulama + `.env`) · FAZ 3 (veritabanı + migration) · FAZ 4 (nginx + TLS) ·
 FAZ 5 (kanıt turu). `.env`de Ömer'in elle dolduracağı alanlar `CHANGE_ME` kalır; CC yalnız
 `grep -c CHANGE_ME` ile yokluğunu ölçer.
+
+---
+
+## FAZ 0 — CI KANITI (push sonrası, `34be485`)
+
+| Run | Sonuç | Kritik adımlar |
+|---|---|---|
+| Security CI `34128723792` | success | **`Gitleaks (secret taraması)` = SUCCESS** (adım sonucundan; annotation'dan **değil**) · codeql · dependency-scan |
+| CI - Build & Test `34128723840` | success | kilitli graf · Derle · `SQL gerektiren testler (ATLANMAMALI)` · `Testler + coverage` · whitespace · style · `migration'lar SENKRON` |
+
+Yerelde kırmızı olan üç `OrderEndpointTests` CI'da **yeşil** → "sebep Docker yokluğu" teşhisi
+bağımsız olarak bir kez daha doğrulandı. İsimli flake CI'da tekrarlamadı.
+
+---
+
+## FAZ 2 — UYGULAMA + `.env`
+
+Klon `/opt/divisima` @ `34be485` (SHA eşleşmesi doğrulandı). Anahtarlar **sunucuda** üretildi
+(`openssl rand`); hiçbir değer ekrana/deftere/loga basılmadı. `.env` **600 root:root**.
+
+`docker compose config` **exit 0** · boşluklu değerler doğru çözüldü (`User Id=…`,
+`Divisima <noreply@…>`) · çözülmemiş yer tutucu **0** · Ömer'in doldurduğu **5** anahtar
+sonrasında atama satırlarında `CHANGE_ME` **0**.
+
+**Ölçüm hatası (kendi):** `.env`i doğrulamak için `source` kullandım; bağlantı dizesindeki
+`User Id=` boşluğu bash'i kırdı. Compose `.env`i **kendi ayrıştırıcısıyla** okur — doğru
+kanal `docker compose config`di, `source` değil.
+
+---
+
+## FAZ 3 — VERİTABANI
+
+**Bilinçli sapma (merkez onayı):** veritabanı `docker-compose.db.yml` ile **ayrı dosyada**
+ayağa kalkar; `docker-compose.prod.yml`e **dokunulmadı**. Gerekçe ve sapmayı küçülten dört
+önlem o dosyanın başında. Yönetilen veritabanı **launch sonrasına** bırakıldı.
+
+```
+collation Turkish_CI_AS · recovery FULL · autoclose 0
+sys.tables 46 (45 + __EFMigrationsHistory)   [checklist 45 bekliyordu]
+__EFMigrationsHistory 15                      [yerel migration dosyası 15]
+sys.foreign_keys 56                           [checklist 56 bekliyordu]
+divisima_app: CRUD izni 4 · DDL izni 0
+```
+
+Migration script'i **EF 8.0.30** ile üretildi. Yerel `dotnet ef` **10.0.10**'du; MK-8'in
+kaydettiği çare uygulandı — izole `--tool-path` kurulumu. Script md5 yerel↔sunucu **birebir**,
+uygulandıktan sonra **silindi**.
+
+### BULGU-1 — EN AZ YETKİ ↔ HANGFIRE OTO-ŞEMA ÇELİŞKİSİ *(kapatıldı)*
+
+Uygulama ilk açılışta **çöktü**: `SQL Error 208`, `Program.cs` `RecurringJob.AddOrUpdate`.
+Hangfire kendi şemasını yaratmak ister; `divisima_app`in DDL yetkisi yoktur. **İkisi de
+doğru kararlardı ve kimse ikisini birlikte ölçmemişti.** Şema dağıtım anında `sa` ile kuruldu
+(sürüm **kilitli graftan**: 1.8.6), uygulamaya yalnız CRUD+EXECUTE verildi, DDL izni **0**
+ölçüldü. Adım `ops/deployment-checklist.md`e **eklendi** — orada yoktu.
+
+### BULGU-2 — `docker-compose.prod.yml` HEALTHCHECK'İ YAPISAL OLARAK KIRIK *(AÇIK)*
+
+```
+test: wget -q -O- http://127.0.0.1:5000/health/ready || exit 1
+konteynerde:  command -v wget -> YOK      healthcheck log: "wget: not found" (x5)
+              command -v curl -> /usr/bin/curl
+uygulama:     /health, /health/ready, /health/live -> HTTP 200 (üçü de)
+konteyner:    "unhealthy"
+```
+
+Uygulama sağlıklıyken konteyner sağlıksız görünür; sağlık kapısına bağlı her otomasyon
+(`depends_on: service_healthy`, izleme) **yanlış bilgi alır**. CI bunu yakalayamazdı — CI
+üretim compose'unu koşmuyor. **Tek token'lık düzeltme:** `wget -q -O-` → `curl -fsS`.
+Dosya "DOKUNULMAZ" ilan edildiği için **değiştirilmedi**; karar merkezde.
+
+### BULGU-3 — SQL SERVER SÜRÜMÜ **Express** *(AÇIK — checklist'i İHLAL EDİYOR)*
+
+`MSSQL_PID: Express` seçildi. Checklist **"SQL Server sürümü Express DEĞİL"** diyor ve
+gerekçesi ölçülmüştü (`Msg 1844`). Bu dağıtımda **aynı hata yeniden görüldü**:
+`BACKUP ... WITH COMPRESSION` reddedildi. Sıkıştırma kaldırılarak yedek çalışır hale getirildi,
+ama Express'in **10 GB veritabanı sınırı** ve **TDE yokluğu** duruyor — yani runbook'un
+"yedekler şifreli olmalı" maddesi bugün **karşılanamaz**. Alternatifler lisans gerektirir
+(Developer sürümü üretimde kullanılamaz); karar merkezde.
+
+---
+
+## FAZ 4 — NGINX + TLS + SERVİS + YEDEK
+
+Sertifika **üç adı birden** kapsıyor (`openssl x509` SAN: `api.divisima.net, divisima.net,
+www.divisima.net`), bitiş **2026-12-06**. `nginx.conf` deponun **birebir kopyası** (md5 aynı):
+certbot'un yolları yeniden yazması yerine `/etc/ssl/divisima/` **sembolik bağ** yapıldı —
+böylece sevk edilen conf ile depodaki conf ayrışmıyor. `nginx -t` exit 0 (iki `http2`
+kullanımdan-kalkma uyarısı + OCSP stapling uyarısı; üçü de ölümcül değil).
+
+Vitrin **`set-api-origin.sh` koşulduktan SONRA** kopyalandı (ters sıra storefront'u
+localhost'a bakar bırakırdı); `--verify` **exit 0**, yedi kontrolün hepsi `https://api.divisima.net`.
+
+`divisima.service` (systemd, iki compose dosyası birlikte) **enabled**. Günlük yedek
+(`03:00` cron, 7 gün): **gerçekten koşuldu** — 6.2 MB `.bak` + uploads tar üretildi ve
+`RESTORE VERIFYONLY` → **"The backup set on file 1 is valid"**.
+
+---
+
+## FAZ 5 — CANLI KANIT (sunucu tarafı)
+
+```
+https://divisima.net        200      https://www.divisima.net 200
+https://api.divisima.net/health 200  /health/ready 200
+http -> https                301 (divisima.net · api.divisima.net)
+HSTS  storefront 1 · api 1   (TEK KAYNAK nginx - app.UseHsts KALDIRILMIŞTI, doğrulandı)
+X-Frame-Options DENY · CSP frame-ancestors 'none' · X-Content-Type-Options nosniff
+admin.html  ->  X-Robots-Tag: noindex, nofollow
+```
+
+**LF-2'nin canlı kanıtı:** `https://divisima.net/sitemap.xml` → 200, `<loc>` kökü
+`https://divisima.net`, eski alan adı geçişi **0**. Ve saldırı denemesi:
+`api/seo/sitemap?baseUrl=https://saldirgan.example` → gövdede `saldirgan.example` **0 kez**.
+Kapatılan açık **üretimde de kapalı**.
+
+### BULGU-4 — `KnownProxies` KONTEYNERDE SESSİZCE ÇALIŞMIYORDU *(kapatıldı)*
+
+Auth hız sınırı canlıda doğru davrandı (**10× 401, sonra 429**), ama `security_events`
+satırlarının IP'si **`::ffff:172.18.0.1`** — yani Docker köprü ağ geçidi, gerçek istemci
+değil. nginx `127.0.0.1:5000`'e proxy'lese de paket konteynere **ağ geçidinden** girer;
+`KnownProxies=127.0.0.1` eşleşmez, XFF güvenilmez sayılır. Sonuç: **tüm istemciler tek
+kovada** — auth limiti site geneli 10/dk olur ve olay izi soruşturmaya yaramaz.
+
+Ağ geçidi **ölçüldü** (`docker inspect … .Gateway` → `172.18.0.1`), `.env` düzeltildi,
+API yeniden başlatıldı; sonraki olaylar **gerçek istemci IP'sini** taşıdı. Tuzak
+checklist'e tablo satırı + ölçüm komutuyla **eklendi**.
+
+**Tarayıcı kalemleri (üye ol → doğrulama maili · csrf_token çerezi · 16 dk sonra refresh ·
+sandbox 3D ödeme · SW/offline · konsolda CSP ihlali) göz turunda Ömer'de.**
