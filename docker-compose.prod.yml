@@ -84,13 +84,13 @@ services:
 
       # ══ ONERILEN / VARSAYILANI GUVENLI ════════════════════════════════════════════════
       MailSettings__Port: "587"
-      MailSettings__User: ${DIVISIMA_SMTP_USER:-no-reply@divisima.com}
-      MailSettings__From: ${DIVISIMA_SMTP_FROM:-Divisima <no-reply@divisima.com>}
+      MailSettings__User: ${DIVISIMA_SMTP_USER:-no-reply@divisima.net}
+      MailSettings__From: ${DIVISIMA_SMTP_FROM:-Divisima <no-reply@divisima.net>}
       Iyzico__BaseUrl: ${DIVISIMA_IYZICO_BASE_URL:-https://api.iyzipay.com}
       Iyzico__UseRealSdk: "true"
-      Storefront__BaseUrl: ${DIVISIMA_STOREFRONT_URL:-https://divisima.com}
-      Api__PublicBaseUrl: ${DIVISIMA_API_URL:-https://api.divisima.com}
-      Storage__PublicBaseUrl: ${DIVISIMA_API_URL:-https://api.divisima.com}
+      Storefront__BaseUrl: ${DIVISIMA_STOREFRONT_URL:-https://divisima.net}
+      Api__PublicBaseUrl: ${DIVISIMA_API_URL:-https://api.divisima.net}
+      Storage__PublicBaseUrl: ${DIVISIMA_API_URL:-https://api.divisima.net}
       Redis__Enabled: "true"
       # Anahtar adi `Redis:Connection`dir - `Redis:Configuration` DEGIL. Gelistirme
       # compose'unda bu bir kez yanlis yazildi ve konteyner acilista patladi.

@@ -13,7 +13,7 @@
  * CSRF: double-submit; "csrf_token" cookie'si okunup "X-CSRF-Token" başlığıyla geri gönderilir.
  *
  * Kullanım:
- *   const api = new DivisimaAPI("https://api.divisima.com");
+ *   const api = new DivisimaAPI("https://api.divisima.net");
  *   await api.auth.login(email, password);
  *   const products = await api.products.list();
  */

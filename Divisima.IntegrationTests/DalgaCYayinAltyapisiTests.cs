@@ -27,7 +27,7 @@ namespace Divisima.IntegrationTests
     // ortak ozelligi UYGULAMANIN CALISMASI degil, YAYINLANABILMESIYDI:
     //
     //   C1 storefront'u KIMIN sunacagi depoda TANIMSIZDI (Dockerfile yalniz API'yi publish
-    //      ediyor, nginx.conf'ta yalniz api.divisima.com blogu vardi)
+    //      ediyor, nginx.conf'ta yalniz api.divisima.net blogu vardi)
     //   C2 yuklenen gorseller konteynerin YAZILABILIR KATMANINDA - konteyner degisince kayip
     //   C3 ilk admin hic acilmamisti; ustelik AdminSeeder sifre politikasinin BESINCI ve
     //      GOZDEN KACMIS giris noktasiydi

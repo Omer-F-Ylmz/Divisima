@@ -72,7 +72,7 @@ namespace Divisima.IntegrationTests
         }
 
         // server_name TOKEN BAZLI eslesir - alt dize DEGIL. Gerekce olculdu: `\bdivisima\.com\b`
-        // deseni `api.divisima.com` ICINDE de eslesiyor ve iki blok karisiyor (bu pin ilk
+        // deseni `api.divisima.net` ICINDE de eslesiyor ve iki blok karisiyor (bu pin ilk
         // kosumda tam bunu yakaladi: storefront asserti API blogu uzerinde kosuyordu).
         private static string ServerBlogu(string conf, string serverName)
         {
@@ -144,12 +144,12 @@ namespace Divisima.IntegrationTests
             conf.Should().Contain("proxy_pass", "nginx.conf gercek bir ters proxy yapilandirmasi olmali");
 
             // API blogu: X-Frame-Options ZATEN vardi, geri alinmamali.
-            ServerBlogu(conf, "api.divisima.com").Should()
+            ServerBlogu(conf, "api.divisima.net").Should()
                 .MatchRegex(@"add_header\s+X-Frame-Options\s+""DENY""",
                     "api blogunun clickjacking korumasi geri alinmamali");
 
             // Storefront blogu: koruma TEK KAYNAKTAN (include) gelir.
-            ServerBlogu(conf, "divisima.com").Should()
+            ServerBlogu(conf, "divisima.net").Should()
                 .Contain("include " + BaslikDosyasi,
                     "storefront blogu guvenlik basliklarini tek kaynaktan almali (GUVENLIK DALGASI 2 / #4)");
 
@@ -175,7 +175,7 @@ namespace Divisima.IntegrationTests
         [Fact]
         public void KENDI_add_header_TANIMLAYAN_HER_STOREFRONT_LOCATIONU_BASLIK_DOSYASINI_INCLUDE_Eder()
         {
-            var storefront = ServerBlogu(Oku("ops/infra/nginx.conf"), "divisima.com");
+            var storefront = ServerBlogu(Oku("ops/infra/nginx.conf"), "divisima.net");
 
             var kendiBasligiOlanlar = Konumlar(storefront)
                 .Where(k => Regex.IsMatch(k.Govde, @"^\s*add_header", RegexOptions.Multiline))
@@ -209,10 +209,10 @@ namespace Divisima.IntegrationTests
             // CIFT-ANLAM KIRICI: storefront'ta CSP VAR ama API blogunda YOK - yani "hicbir yerde
             // CSP yok" diyen bir uygulama bu testi GECEMEZ.
             var conf = Oku("ops/infra/nginx.conf");
-            ServerBlogu(conf, "api.divisima.com").Should().NotContain("Content-Security-Policy",
+            ServerBlogu(conf, "api.divisima.net").Should().NotContain("Content-Security-Policy",
                 "uygulama her API yanitina zaten TAM bir CSP basiyor (SecurityHeadersMiddleware, UseStaticFiles'DAN once) - " +
                 "nginx'ten ikincisini eklemek her yanitta iki bagimsiz politika dogururdu, kazanc SIFIR");
-            ServerBlogu(conf, "divisima.com").Should().Contain("include " + BaslikDosyasi,
+            ServerBlogu(conf, "divisima.net").Should().Contain("include " + BaslikDosyasi,
                 "storefront STATIK dosyadir - hicbir middleware kosmaz, tek kaynak nginx'tir");
         }
 
@@ -220,7 +220,7 @@ namespace Divisima.IntegrationTests
         [Fact]
         public void IC_DOKUMANLAR_404_STOREFRONTUN_IHTIYACI_OLAN_DOSYALAR_SERVIS_EDILIR()
         {
-            var konumlar = Konumlar(ServerBlogu(Oku("ops/infra/nginx.conf"), "divisima.com"));
+            var konumlar = Konumlar(ServerBlogu(Oku("ops/infra/nginx.conf"), "divisima.net"));
 
             var kapali = new[]
             {
@@ -272,7 +272,7 @@ namespace Divisima.IntegrationTests
             Reddedilir("/test/mobil-erisilebilirlik.js", devKonumlar).Should().BeFalse(
                 "olcum betigi yerelde ACIK kalmali (Dalga 4 telafisi)");
 
-            var uretimKonumlar = Konumlar(ServerBlogu(Oku("ops/infra/nginx.conf"), "divisima.com"));
+            var uretimKonumlar = Konumlar(ServerBlogu(Oku("ops/infra/nginx.conf"), "divisima.net"));
             Reddedilir("/test/mobil-erisilebilirlik.js", uretimKonumlar).Should().BeTrue(
                 "ayni betik URETIMDE kapali olmali - ayrisma bilincli ve TEK YONLU");
         }
@@ -300,7 +300,7 @@ namespace Divisima.IntegrationTests
             c.Should().Contain("status = 1 (Processed)",
                 "#8: dogrulama konfigurasyona degil SONUCA bakmali");
             c.Should().Contain("subdomain takeover",
-                "#7: cerez .divisima.com kapsaminda - DNS hijyeni maddesi");
+                "#7: cerez .divisima.net kapsaminda - DNS hijyeni maddesi");
             c.Should().Contain(BaslikDosyasi,
                 "#4: include dosyasi kurulmazsa nginx acilmaz - kurulum maddesi olmali");
             c.Should().Contain("/.well-known/security.txt",

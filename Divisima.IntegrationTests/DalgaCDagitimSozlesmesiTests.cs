@@ -18,12 +18,12 @@ namespace Divisima.IntegrationTests
     //
     // OLCULEN ONCE-DURUM (hepsi Dalga C'de birebir tespit edildi):
     //   C1 Dockerfile yalniz Divisima.API'yi publish ediyordu, docker-compose'da frontend
-    //      servisi YOKTU, nginx.conf'ta TEK server block vardi (api.divisima.com) ve
+    //      servisi YOKTU, nginx.conf'ta TEK server block vardi (api.divisima.net) ve
     //      Divisima.API/wwwroot yalnizca uploads/products iceriyordu. Yani storefront'u KIMIN
     //      sunacagi depoda HICBIR YERDE tanimli degildi.
     //   C2 compose'da mssql_data ve redis_data volume'leri vardi, YUKLEMELER icin YOKTU ->
     //      konteyner degisince admin'in yukledigi tum urun gorselleri kaybolurdu.
-    //   C5 robots.txt "Sitemap: https://divisima.com/sitemap.xml" diyordu, sitemap'i URETEN uc
+    //   C5 robots.txt "Sitemap: https://divisima.net/sitemap.xml" diyordu, sitemap'i URETEN uc
     //      (/api/seo/sitemap) VARDI, ama o adresi SUNAN hicbir sey YOKTU. Ayrica og:image ve
     //      og:url YOKTU - paylasimlar gorselsiz cikiyordu.
     //   C6b Kargo ekrani KOR FORMDU - operatorden siparis ID'si elle isteniyordu.
@@ -58,8 +58,8 @@ namespace Divisima.IntegrationTests
             // asagidaki "icerir" assertlerinin hepsini bedavaya dusururdu).
             conf.Should().Contain("proxy_pass", "nginx.conf gercek bir ters proxy yapilandirmasi olmali");
 
-            conf.Should().Contain("server_name api.divisima.com", "API blogu KORUNMALI");
-            conf.Should().Contain("server_name divisima.com", "storefront blogu EKLENMIS olmali - eksik olan buydu");
+            conf.Should().Contain("server_name api.divisima.net", "API blogu KORUNMALI");
+            conf.Should().Contain("server_name divisima.net", "storefront blogu EKLENMIS olmali - eksik olan buydu");
 
             // SITEMAP ZINCIRI: robots.txt'in gosterdigi adresi SUNAN tanim olmali.
             conf.Should().Contain("location = /sitemap.xml");
@@ -128,7 +128,7 @@ namespace Divisima.IntegrationTests
             bas.Should().Contain("property=\"og:url\"", "kanonik paylasim adresi YOKTU");
 
             // Mutlak URL sarti: paylasim botlari goreli yolu cozemez.
-            bas.Should().Contain("content=\"https://divisima.com/icons/icon-512.png\"");
+            bas.Should().Contain("content=\"https://divisima.net/icons/icon-512.png\"");
 
             // Gorselin GERCEKTEN var oldugu dogrulanir - olmayan bir dosyaya isaret eden
             // og:image, etiketi hic koymamaktan daha kotudur (bot 404 alir).
@@ -141,8 +141,8 @@ namespace Divisima.IntegrationTests
                 "kare gorselle genis kart vaat edilmemeli - eski hali 'summary_large_image' idi ve HICBIR gorsel vermiyordu");
 
             // Organization schema'sindaki logo da var olan bir dosyayi gostermeli
-            // (once https://divisima.com/logo.png idi - depoda BOYLE BIR DOSYA YOK).
-            html.Should().NotContain("divisima.com/logo.png", "olmayan bir logo dosyasina isaret edilmemeli");
+            // (once https://divisima.net/logo.png idi - depoda BOYLE BIR DOSYA YOK).
+            html.Should().NotContain("divisima.net/logo.png", "olmayan bir logo dosyasina isaret edilmemeli");
         }
 
         [Fact]

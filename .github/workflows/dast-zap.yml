@@ -8,7 +8,7 @@ on:
       target_url:
         description: 'Taranacak URL (staging)'
         required: true
-        default: 'https://staging-api.divisima.com'
+        default: 'https://staging-api.divisima.net'
   schedule:
     - cron: '0 4 * * 0'   # haftalık pazar 04:00
 
@@ -28,7 +28,7 @@ jobs:
       - name: ZAP Baseline Scan (pasif - güvenli)
         uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25 # v0.15.0
         with:
-          target: ${{ github.event.inputs.target_url || 'https://staging-api.divisima.com' }}
+          target: ${{ github.event.inputs.target_url || 'https://staging-api.divisima.net' }}
           rules_file_name: '.zap/rules.tsv'
           cmd_options: '-a'   # alpha kuralları dahil
           fail_action: false   # bulgu build'i kırmaz, issue açar

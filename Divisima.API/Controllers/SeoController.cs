@@ -1,3 +1,4 @@
+using System.Security;
 using System.Text;
 using Divisima.DataAccess.Abstract;
 using Microsoft.AspNetCore.Authorization;
@@ -13,20 +14,56 @@ namespace Divisima.API.Controllers
     {
         private readonly IProductDal _productDal;
         private readonly ICategoryDal _categoryDal;
+        private readonly IConfiguration _config;
 
-        public SeoController(IProductDal productDal, ICategoryDal categoryDal)
+        public SeoController(IProductDal productDal, ICategoryDal categoryDal, IConfiguration config)
         {
             _productDal = productDal;
             _categoryDal = categoryDal;
+            _config = config;
         }
 
+        // ══ LD-1 / LF-2 - SITE KOKU TEK KAYNAKTAN, ISTEMCIDEN DEGIL (AV-3 / SD-4) ══════════
+        //
+        // OLCULEN ONCEKI HAL: imza `Sitemap([FromQuery] string? baseUrl)` idi ve govde
+        // `(baseUrl ?? "<sabit alan adi>")` yaziyordu. IKI AYRI KUSUR birdeydi:
+        //
+        //   (a) SABIT YEDEK YANLIS ALAN ADIYDI. Uc anonim istek - `/api/seo/sitemap` -
+        //       depo sahibinin SAHIP OLMADIGI bir alan adinin URL'lerini uretiyordu. nginx
+        //       proxy'si `?baseUrl=` ekiyle bunu MASKELIYORDU, yani kusur yalnizca uca
+        //       DOGRUDAN gelen istekte gorunurdu (saglik probu, tarayici, kopyalanan bir
+        //       baglanti). Maskeleyen ek de bu dalgada KALDIRILDI - iki yol artik AYNI.
+        //
+        //   (b) DAHA AGIRI: `baseUrl` ISTEMCI GIRDISIYDI ve dogrudan XML govdesine
+        //       yaziliyordu. `[AllowAnonymous]` bir uctan kim gelirse gelsin sitemap'in
+        //       ICERIGINI segebiliyordu; ustelik deger KACISLANMADIGI icin `<loc>` alanina
+        //       ham `<`/`&` sokulabiliyordu (XML enjeksiyonu). Arama motoruna sunulan bir
+        //       belgenin govdesi ISTEMCIYE birakilamaz.
+        //
+        // KARAR (merkez): sorgu parametresi TAMAMEN KALDIRILDI - opsiyonel birakmak "eski
+        // cagrilar calismaya devam etsin" diye ayni kapiyi acik tutardi. Site koku TEK
+        // KAYNAKTAN, `Storefront:BaseUrl` ayarindan okunur; bu ayar zaten uretimde ZORUNLU
+        // (`appsettings.Production.example.json`) ve odeme donusu de ona baglidir.
+        //
+        // BOSSA GURULTULU DUSULUR (500), sessizce bir varsayilana kacilmaz: yanlis alan adli
+        // bir sitemap, hic sitemap olmamasindan DAHA ZARARLIDIR - arama motoru onu indeksler
+        // ve geri almak haftalar surer.
         [HttpGet("sitemap")]
         [AllowAnonymous]
         [Produces("application/xml")]
-        public async Task<IActionResult> Sitemap([FromQuery] string? baseUrl)
+        public async Task<IActionResult> Sitemap()
         {
-            // Açıklayıcı yorum: baseUrl = frontend kök (ör. https://divisima.com)
-            var siteRoot = (baseUrl ?? "https://divisima.com").TrimEnd('/');
+            var yapilandirilan = _config["Storefront:BaseUrl"];
+            if (string.IsNullOrWhiteSpace(yapilandirilan))
+                return Problem(
+                    detail: "Storefront:BaseUrl tanımlı değil; sitemap üretilemez.",
+                    statusCode: StatusCodes.Status500InternalServerError);
+
+            // XML KACISLAMA - kaynak artik GUVENILIR (yapilandirma) olsa da govdeye giren her
+            // deger kacislanir. Gerekce: "deger guvenilir" varsayimi, degerin NEREDEN geldigi
+            // degistigi gun SESSIZCE cururu; kacislama ise hicbir sey maliyeti olmadan dogru
+            // kalir. `&` tasiyan bir kok (ör. izleme parametreli) kacislanmadan XML'i BOZAR.
+            var siteRoot = SecurityElement.Escape(yapilandirilan.TrimEnd('/'));
             var products = await _productDal.GetListAsync(p => p.is_active);
             var categories = await _categoryDal.GetListAsync(c => c.is_active);
 

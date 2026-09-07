@@ -18,7 +18,7 @@
 #   mekanizmanin kendisi degil, DOGRULANMAMIS olmasiydi.
 #
 # KULLANIM
-#   ops/set-api-origin.sh https://api.divisima.com      # yaz
+#   ops/set-api-origin.sh https://api.divisima.net      # yaz
 #   ops/set-api-origin.sh --verify                      # yalniz dogrula, DEGISTIRME
 #
 # YEREL GELISTIRME: depoda commit'li deger "http://localhost:5000"dir; yerelde HICBIR EK

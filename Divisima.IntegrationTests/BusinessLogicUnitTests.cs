@@ -123,16 +123,16 @@ namespace Divisima.IntegrationTests
     public class UrlValidatorTests
     {
         [Theory]
-        [InlineData("https://divisima.com", true)]
+        [InlineData("https://divisima.net", true)]
         [InlineData("https://api.iyzipay.com/callback", true)]
-        [InlineData("http://divisima.com", false)]             // https değil
+        [InlineData("http://divisima.net", false)]             // https değil
         [InlineData("https://localhost", false)]               // localhost
         [InlineData("https://127.0.0.1", false)]               // loopback
         [InlineData("https://169.254.169.254/latest/meta-data", false)] // cloud metadata (SSRF)
         [InlineData("https://192.168.1.10", false)]            // özel ağ
         [InlineData("https://10.0.0.5", false)]                // özel ağ
         [InlineData("https://172.16.5.5", false)]              // özel ağ
-        [InlineData("ftp://divisima.com", false)]              // şema geçersiz
+        [InlineData("ftp://divisima.net", false)]              // şema geçersiz
         [InlineData("", false)]
         [InlineData("saçma metin", false)]
         public void IsSafePublicHttpsUrl_BlocksUnsafeTargets(string url, bool expected)

@@ -52,7 +52,7 @@ cur.executemany(
     f"INSERT INTO customers (id,name,email,phone,user_type,password_salt,password_hash,is_active,"
     f"email_verified,two_factor_enabled,failed_login_attempts,loyalty_points,store_credit,created_at,"
     f"notify_email,notify_sms,notify_push) VALUES (?,?,?,'05000000000',?,x'00',x'00',1,1,0,0,?,?,{NOW},1,1,1)",
-    [(1,"Yonetici","admin@divisima.com",1,0,0.0),
+    [(1,"Yonetici","admin@divisima.net",1,0,0.0),
      (2,"Ayse Yilmaz","ayse@example.com",2,500,250.00),
      (3,"Yeni Musteri","yeni@example.com",2,0,0.0)])
 cur.execute(f"INSERT INTO coupons (id,code,discount_type,value,min_amount,max_discount_amount,expire_date,"

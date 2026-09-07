@@ -694,10 +694,10 @@ class EmailVerification:
         return "Invalid"
 
 ev = EmailVerification()
-tok = ev.register("test@divisima.com")
-check("Kayıt -> doğrulanmamış + token üretildi", ev.customers["test@divisima.com"]["verified"] == False and tok)
+tok = ev.register("test@divisima.net")
+check("Kayıt -> doğrulanmamış + token üretildi", ev.customers["test@divisima.net"]["verified"] == False and tok)
 check("Doğru token -> Verified", ev.verify(tok) == "Verified")
-check("Doğrulama sonrası verified=true", ev.customers["test@divisima.com"]["verified"] == True)
+check("Doğrulama sonrası verified=true", ev.customers["test@divisima.net"]["verified"] == True)
 check("Aynı token ikinci kez -> Invalid (token temizlendi)", ev.verify(tok) == "Invalid")
 check("Geçersiz token reddedilir", ev.verify("yanlis-token") == "Invalid")
 
@@ -1301,8 +1301,8 @@ def is_safe_url(url):
         if b[0] == 127: return False
     return True
 
-check("Geçerli public HTTPS URL kabul", is_safe_url("https://divisima.com/callback"))
-check("http:// reddedilir (yalnız https)", not is_safe_url("http://divisima.com/callback"))
+check("Geçerli public HTTPS URL kabul", is_safe_url("https://divisima.net/callback"))
+check("http:// reddedilir (yalnız https)", not is_safe_url("http://divisima.net/callback"))
 check("localhost reddedilir", not is_safe_url("https://localhost/callback"))
 check("İç ağ IP (192.168.x) reddedilir", not is_safe_url("https://192.168.1.1/x"))
 check("Cloud metadata (169.254.169.254) reddedilir", not is_safe_url("https://169.254.169.254/latest"))

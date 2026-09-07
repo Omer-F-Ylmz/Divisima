@@ -28,7 +28,7 @@
 - `TokenOptions--SecurityKey` (256-bit)
 - `Encryption--Key` (32 byte base64)
 - `Iyzico--ApiKey`, `Iyzico--SecretKey`
-- `Cookies--Domain` (üst alan adı, `.divisima.com` — LF-1/K1; boşsa uygulama AÇILMAZ)
+- `Cookies--Domain` (üst alan adı, `.divisima.net` — LF-1/K1; boşsa uygulama AÇILMAZ)
 - `ConnectionStrings--DivisimaDb`
 
 ## Veritabanı şeması - UYGULAMA AÇILMADAN ÖNCE (D-ŞEMA-FIX)
@@ -75,7 +75,7 @@ gerekmez, **yayında ise bu adım atlanırsa istekler son kullanıcının kendi 
 gider ve katalog boş gelir** (ölçüldü).
 
 ```bash
-ops/set-api-origin.sh https://api.divisima.com   # yaz
+ops/set-api-origin.sh https://api.divisima.net   # yaz
 ops/set-api-origin.sh --verify                   # doğrula (tutarsızsa exit 1)
 ```
 
@@ -93,16 +93,16 @@ uyuşmazlıkta ekrana kırmızı bir uyarı basar (sessizce yanlış origin'e d�
 
 ## Storefront'u kim sunuyor - DALGA C / C1
 
-İki origin: **API `api.divisima.com`**, **storefront `divisima.com`**. Bu ayrım depo genelinde
-varsayılıdır (`AllowedOrigins`, `Storefront:BaseUrl`, `Cookies:Domain=.divisima.com`).
+İki origin: **API `api.divisima.net`**, **storefront `divisima.net`**. Bu ayrım depo genelinde
+varsayılıdır (`AllowedOrigins`, `Storefront:BaseUrl`, `Cookies:Domain=.divisima.net`).
 
-- [ ] `ops/infra/nginx.conf` sunucuya kuruldu — **iki server block da** (`api.divisima.com`
-      ve `divisima.com`) yürürlükte
+- [ ] `ops/infra/nginx.conf` sunucuya kuruldu — **iki server block da** (`api.divisima.net`
+      ve `divisima.net`) yürürlükte
 - [ ] `frontend/` içeriği **`ops/set-api-origin.sh` koşulduktan SONRA** `/var/www/divisima`
       altına kopyalandı (sıra ters olursa storefront localhost'a bakar)
-- [ ] `https://divisima.com/sitemap.xml` **200 + XML** döndü (nginx `/api/seo/sitemap`'e
+- [ ] `https://divisima.net/sitemap.xml` **200 + XML** döndü (nginx `/api/seo/sitemap`'e
       proxy'ler; `robots.txt` bu adresi gösteriyor)
-- [ ] `https://divisima.com/admin.html` yanıtı `X-Robots-Tag: noindex` taşıyor
+- [ ] `https://divisima.net/admin.html` yanıtı `X-Robots-Tag: noindex` taşıyor
 - [ ] `ops/infra/divisima-security-headers.conf` **nginx.conf ile aynı dizine** kuruldu
       (varsayılan `/etc/nginx/`). Eksikse nginx **açılmaz** — bu bilinçli: sessiz bir
       başlık boşluğu yerine gürültülü bir hata
@@ -110,12 +110,12 @@ varsayılıdır (`AllowedOrigins`, `Storefront:BaseUrl`, `Cookies:Domain=.divisi
 - [ ] **Clickjacking (GÜVENLİK-FIX-3 / #4)** — yayın sonrası `curl -sI` ile ÜÇ adres
       ayrı ayrı kontrol edildi; **üçünde de** `X-Frame-Options: DENY` **ve**
       `Content-Security-Policy: frame-ancestors 'none'` görünüyor:
-      `https://divisima.com/` · `https://divisima.com/index.html` · `https://divisima.com/admin.html`
+      `https://divisima.net/` · `https://divisima.net/index.html` · `https://divisima.net/admin.html`
       > **Üçü de ayrı ayrı bakılır, gerekçesi ölçülmüş bir nginx davranışıdır:**
       > `add_header` bir önceki seviyeden YALNIZCA o seviyede hiç `add_header` yoksa
       > devralınır. Bu üç adres, kendi `add_header`ını tanımlayan location'lara düşer;
       > `include` satırı düşerse başlıklar **yalnız onlarda** sessizce kaybolur — yani
-      > sadece `https://divisima.com/robots.txt`e bakan bir doğrulama YEŞİL görünürdü.
+      > sadece `https://divisima.net/robots.txt`e bakan bir doğrulama YEŞİL görünürdü.
 - [ ] **İç dokümanlar kapalı (GÜVENLİK-FIX-3 / #6)** — hepsi **404**:
       `/API-CONTRACT.md` · `/INTEGRATION.md` · `/SEO-ANALYTICS.md` · `/vendor/README.txt` ·
       `/test/mobil-erisilebilirlik.js`
@@ -231,20 +231,20 @@ hata sessizdir, tek belirtisi "rate limit çok erken tetikleniyor" şikâyetidir
 
 ### Çerez kapsamı ve DNS hijyeni - GÜVENLİK DALGASI 2 / #7
 
-`Cookies:Domain = .divisima.com` **bilinçlidir**: storefront (`divisima.com`) ile API
-(`api.divisima.com`) farklı hostlardır ve CSRF double-submit'in çalışması için `csrf_token`
+`Cookies:Domain = .divisima.net` **bilinçlidir**: storefront (`divisima.net`) ile API
+(`api.divisima.net`) farklı hostlardır ve CSRF double-submit'in çalışması için `csrf_token`
 çerezinin storefront JS'i tarafından okunabilmesi gerekir (Sprint 8 madde 6'da ölçüldü).
 Bedeli: `refresh_token` (httpOnly, path `/api/auth`) **her alt alan adına** gönderilir.
 
 - [ ] Alt alan adları **sahipsiz bırakılmaz** — kullanılmayan `CNAME`/`A` kayıtları silinir
       (subdomain takeover ile ele geçirilen bir alt alan adı `/api/auth/*` servis ederse
       kullanıcıların refresh token'ını alır)
-- [ ] Üçüncü taraf bir servise alt alan adı devredilmez (`*.divisima.com` wildcard
+- [ ] Üçüncü taraf bir servise alt alan adı devredilmez (`*.divisima.net` wildcard
       yönlendirmesi verilmez)
 
 **YENİ BİR ALT ALAN ADI AÇILMADAN ÖNCE (GÜVENLİK-FIX-4 / Dalga-2 #7):**
 
-`Cookies:Domain = .divisima.com` **bugün var olanları değil, TÜM alt alan adlarını** kapsar —
+`Cookies:Domain = .divisima.net` **bugün var olanları değil, TÜM alt alan adlarını** kapsar —
 yarın açılacak `staging.`, `blog.`, `cdn.`, `docs.` de otomatik olarak dahildir. Yani çerez
 kapsamı bir kez verilen değil, **her yeni alt alan adında yeniden değerlendirilmesi gereken**
 bir karardır.
@@ -254,10 +254,10 @@ bir karardır.
       kayıt alanı (`divisima-cdn.com` gibi) kullanılır ya da `Cookies:Domain` daraltılır
 - [ ] **Az güvenilir / üçüncü taraf içerik bu alan adının alt alan adına KONMAZ** —
       barındırılan blog/durum sayfası/pazarlama aracı/müşteri yüklemesi gibi içerikler dahil.
-      Böyle bir alt alandaki tek bir XSS, `.divisima.com` kapsamındaki çerezlere erişir
+      Böyle bir alt alandaki tek bir XSS, `.divisima.net` kapsamındaki çerezlere erişir
       (`csrf_token` JS'ten okunabilir; `refresh_token` httpOnly ama aynı kapsamdaki bir
       sayfadan `/api/auth/*`'a giden isteklere **otomatik eklenir**)
-- [ ] Statik varlıklar için ayrı bir alan adı kullanılıyorsa, o alan adı `divisima.com`'un
+- [ ] Statik varlıklar için ayrı bir alan adı kullanılıyorsa, o alan adı `divisima.net`'un
       **alt alanı değil** (aksi halde CDN sağlayıcısı çerez kapsamına girer)
 ## SIRALI DAĞITIM ADIMLARI (LF-1 — LAUNCH ÖLÇÜMÜNDEN ÜRETİLDİ)
 
@@ -269,7 +269,7 @@ bir karardır.
 
 | # | Adım | Kanıt nasıl alınır |
 |---|------|--------------------|
-| 1 | DNS: `divisima.com`, `www`, `api.divisima.com` A/AAAA kaydı | `dig +short` her üç ad için IP döner |
+| 1 | DNS: `divisima.net`, `www`, `api.divisima.net` A/AAAA kaydı | `dig +short` her üç ad için IP döner |
 | 2 | TLS sertifikası `/etc/ssl/divisima/` altında | `openssl x509 -noout -dates -in fullchain.pem` |
 | 3 | SQL Server: veritabanı **`COLLATE Turkish_CI_AS`** ile yaratıldı | DB **İÇİNDEN**: `SELECT DATABASEPROPERTYEX(DB_NAME(),'Collation')` |
 | 4 | Recovery model **FULL**, `AUTO_CLOSE` **OFF** | `SELECT recovery_model_desc, is_auto_close_on FROM sys.databases WHERE name='DivisimaDb'` |
@@ -277,13 +277,13 @@ bir karardır.
 | 6 | `TokenOptions:SecurityKey` üretildi (≥ 32 bayt) | `openssl rand -base64 48`; açılışta fail-fast SESSİZ geçerse doğru |
 | 7 | `Encryption:Key` üretildi (**TAM 32 bayt** base64) | `openssl rand -base64 32`; açılışta "TAM 32 bayt" hatası GELMEZSE doğru |
 | 8 | `ConnectionStrings:DivisimaDb` dolduruldu | `/health/ready` **200** |
-| 9 | **`Cookies:Domain` = `.divisima.com` (BL-1)** | Giriş sonrası tarayıcı konsolunda `document.cookie` içinde **`csrf_token` GÖRÜNMELİ**; görünmüyorsa `/api/auth/refresh` 15 dk sonra kalıcı 403 verir |
+| 9 | **`Cookies:Domain` = `.divisima.net` (BL-1)** | Giriş sonrası tarayıcı konsolunda `document.cookie` içinde **`csrf_token` GÖRÜNMELİ**; görünmüyorsa `/api/auth/refresh` 15 dk sonra kalıcı 403 verir |
 | 10 | `ForwardedHeaders:KnownProxies` = LB/nginx IP'leri | `security_events` `RateLimitExceeded` satırının `ip_address` alanı **gerçek istemci IP'si** olmalı, proxy IP'si değil |
 | 11 | `MailSettings:*` gerçek SMTP (Host boşsa **açılış düşer**) | Şifre sıfırlama maili GELMELİ — admin kurtarma yolu buna bağlı (jeton DB'de **özet**, ham değer okunamaz) |
 | 12 | İyzico canlı: `ApiKey` · `SecretKey` · `BaseUrl` · `UseRealSdk=true` | Canlı `BaseUrl`; gerçek bir test ödemesi 3D akışını tamamlamalı |
 | 13 | **`Iyzico:CallbackUrl` mutlak HTTPS (fail-fast ZORUNLU)** | Boş/HTTP ise uygulama **AÇILMAZ** — açılması kanıttır |
 | 14 | CallbackUrl origin'i storefront CSP `form-action` listesiyle **AYNI** | Tarayıcı konsolunda CSP ihlali OLMAMALI (E2b'de "para çekildi, sipariş Pending" bu yüzden yaşandı) |
-| 15 | `Storefront:BaseUrl` = `https://divisima.com` | Ödeme sonrası `#/odeme/sonuc` adresine yönlendirmeli |
+| 15 | `Storefront:BaseUrl` = `https://divisima.net` | Ödeme sonrası `#/odeme/sonuc` adresine yönlendirmeli |
 | 16 | `ops/set-api-origin.sh` ile vitrinin API origin'i yazıldı | Betiğin `--verify` modu **EXIT 0** |
 | 17 | Redis ayakta, `Redis:Enabled=true`, `Redis:Connection` | Redis erişilemezse uygulama **AÇILMAZ** (D5'te ölçüldü) — açılması kanıttır |
 | 18 | `BackgroundJobs:Enabled=true` | Hangfire recurring job listesi dolu; satılabilir stok KALICI düşük KALMAMALI (kapalıyken rezervasyonlar temizlenmez) |
@@ -296,7 +296,7 @@ bir karardır.
 > bugün **otomatik okuyucusu yoktur**; sorgu koşulmazsa iade gereken vaka GÖRÜLMEZ.
 
 ## Zorunlu adımlar
-- [ ] **`Cookies:Domain` üst alan adı biçiminde ayarlandı (`.divisima.com`) — LF-1/K1**
+- [ ] **`Cookies:Domain` üst alan adı biçiminde ayarlandı (`.divisima.net`) — LF-1/K1**
       Boş bırakılırsa uygulama **AÇILMAZ** (fail-fast). Bu kapı LF-1'de eklendi; öncesinde
       arıza **sessizdi** ve ancak ilk access token süresi dolduğunda (dağıtımdan ~15 dk sonra,
       TÜM kullanıcılarda aynı anda) ortaya çıkardı.

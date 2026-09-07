@@ -190,7 +190,7 @@ namespace Divisima.IntegrationTests
     public class UrlValidatorExtraTests
     {
         [Theory]
-        [InlineData("https://divisima.com/callback")]
+        [InlineData("https://divisima.net/callback")]
         [InlineData("https://api.iyzico.com/payment")]
         public void IsSafePublicHttpsUrl_AllowsPublicHttps(string url)
         {
@@ -198,12 +198,12 @@ namespace Divisima.IntegrationTests
         }
 
         [Theory]
-        [InlineData("http://divisima.com")]              // https değil
+        [InlineData("http://divisima.net")]              // https değil
         [InlineData("https://localhost/x")]              // yerel (SSRF)
         [InlineData("https://127.0.0.1/x")]              // loopback (SSRF)
         [InlineData("https://192.168.1.1/admin")]        // özel ağ (SSRF)
         [InlineData("https://169.254.169.254/latest")]   // cloud metadata (SSRF - kritik)
-        [InlineData("ftp://divisima.com")]               // https değil
+        [InlineData("ftp://divisima.net")]               // https değil
         [InlineData("not-a-url")]
         public void IsSafePublicHttpsUrl_BlocksUnsafeAndInternal(string url)
         {

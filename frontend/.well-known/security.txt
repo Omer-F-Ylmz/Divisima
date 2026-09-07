@@ -1,9 +1,9 @@
 # Divisima - Güvenlik Açığı Bildirimi (RFC 9116)
-Contact: mailto:security@divisima.com
+Contact: mailto:security@divisima.net
 Expires: 2027-01-01T00:00:00.000Z
 Preferred-Languages: tr, en
-Canonical: https://divisima.com/.well-known/security.txt
-Policy: https://divisima.com/guvenlik-politikasi
+Canonical: https://divisima.net/.well-known/security.txt
+Policy: https://divisima.net/guvenlik-politikasi
 
 # Güvenlik açığı bulduysanız lütfen kötüye kullanmadan bize bildirin.
 # If you find a security vulnerability, please report it responsibly.

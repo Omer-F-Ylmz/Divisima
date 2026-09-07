@@ -207,11 +207,11 @@ var builder = WebApplication.CreateBuilder(args);
         //
         // OLCULEN ZINCIR (launch hazirlik turu, DORT halka - hicbiri varsayim degil):
         //   1) `ops/infra/nginx.conf` storefront ve API'yi AYRI HOST'ta sunar
-        //      (`server_name divisima.com` · `server_name api.divisima.com`).
+        //      (`server_name divisima.net` · `server_name api.divisima.net`).
         //   2) `AuthController`in cerez yardimcisi: `Cookies:Domain` BOSSA `o.Domain` HIC SET
-        //      EDILMEZ -> cerezler `api.divisima.com`a HOST-ONLY yazilir.
+        //      EDILMEZ -> cerezler `api.divisima.net`a HOST-ONLY yazilir.
         //   3) Vitrin `csrf_token`i `document.cookie`den okur (`frontend/api-client.js`) -
-        //      host-only cerez `divisima.com` sayfasindan GORUNMEZ.
+        //      host-only cerez `divisima.net` sayfasindan GORUNMEZ.
         //   4) `AntiforgeryMiddleware` guvensiz metot + `refresh_token` cerezi + Bearer YOK
         //      uclusunde `X-CSRF-Token` ile cerezin ESLESMESINI ister; token yenileme cagrisi
         //      TAM BU uclüdur (govdesiz, `credentials: include`, Bearer tasimaz).
@@ -251,10 +251,10 @@ var builder = WebApplication.CreateBuilder(args);
         var cerezAlanAdi = cfg["Cookies:Domain"];
         if (string.IsNullOrWhiteSpace(cerezAlanAdi))
             throw new InvalidOperationException(
-                "FATAL: Config - Cookies:Domain tanımlı değil. Üretimde storefront (divisima.com) ve API " +
-                "(api.divisima.com) AYRI HOST'tadır; alan adı verilmezse oturum çerezleri host-only yazılır, " +
+                "FATAL: Config - Cookies:Domain tanımlı değil. Üretimde storefront (divisima.net) ve API " +
+                "(api.divisima.net) AYRI HOST'tadır; alan adı verilmezse oturum çerezleri host-only yazılır, " +
                 "storefront'taki JS 'csrf_token'ı okuyamaz ve /api/auth/refresh KALICI 403 döner - her " +
-                "kullanıcı 15 dakikada oturumunu kaybeder. Üst alan adı biçiminde verin: \".divisima.com\".");
+                "kullanıcı 15 dakikada oturumunu kaybeder. Üst alan adı biçiminde verin: \".divisima.net\".");
     }
 }
 
@@ -451,11 +451,11 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("DivisimaFrontend", policy =>
-        policy.WithOrigins(builder.Configuration.GetSection("AllowedOrigins").Get<string[]>() ?? new[] { "https://divisima.com" })
+        policy.WithOrigins(builder.Configuration.GetSection("AllowedOrigins").Get<string[]>() ?? new[] { "https://divisima.net" })
               .AllowAnyHeader().AllowAnyMethod().AllowCredentials()
               // ══ DALGA-3-FIX (P1) - PREFLIGHT ONBELLEGI ═══════════════════════════════════
               //
-              // Storefront ile API AYRI ORIGIN'lerde (divisima.com <-> api.divisima.com) ve her
+              // Storefront ile API AYRI ORIGIN'lerde (divisima.net <-> api.divisima.net) ve her
               // korumali cagri `Authorization` basligi tasidigi icin BASIT ISTEK degildir:
               // tarayici once OPTIONS preflight gonderir. `Access-Control-Max-Age` YOKKEN bu
               // yanit ancak tarayicinin KISA varsayilani kadar onbelleklenir.
@@ -722,7 +722,7 @@ app.UseMiddleware<Divisima.API.Middlewares.ETagMiddleware>();
 //       `AddHsts` cagrisi depoda 0 eslesme, yani varsayilan aynen gecerli)
 //   (2) `ops/infra/nginx.conf` api blogu
 //   (3) `ops/infra/divisima-security-headers.conf` (storefront, uc include)
-// `api.divisima.com`da nginx `add_header` upstream basligini SILMEDIGI icin yanit IKI FARKLI
+// `api.divisima.net`da nginx `add_header` upstream basligini SILMEDIGI icin yanit IKI FARKLI
 // `Strict-Transport-Security` basligi tasiyordu; RFC 6797 "ilk baslik islenir" der, yani
 // nginx'in `includeSubDomains; preload` iceren daha SIKI politikasi FIILEN KAYBOLABILIRDI.
 //

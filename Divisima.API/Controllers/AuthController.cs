@@ -279,8 +279,8 @@ namespace Divisima.API.Controllers
 
                 // SAMESITE=STRICT: cookie yalnizca AYNI SITE'dan gelen isteklerde gonderilir.
                 // Dev'de storefront ve API ayni host (localhost, farkli PORT) - portlar
-                // same-site hesabina GIRMEZ, dolayisiyla calisir. Uretimde divisima.com ve
-                // api.divisima.com ayni kayitli alan adini paylastigi icin yine same-site.
+                // same-site hesabina GIRMEZ, dolayisiyla calisir. Uretimde divisima.net ve
+                // api.divisima.net ayni kayitli alan adini paylastigi icin yine same-site.
                 SameSite = SameSiteMode.Strict,
 
                 // PATH: cagiran belirler - iki cookie'nin kapsami FARKLI (bkz. RefreshPath /
@@ -290,9 +290,9 @@ namespace Divisima.API.Controllers
             if (expires.HasValue) o.Expires = expires.Value;
 
             // DOMAIN: dev'de BOS (host-only). Uretimde storefront ve API AYRI ALT ALAN ADLARINDA
-            // (divisima.com / api.divisima.com); host-only bir cookie'yi storefront'taki JS
+            // (divisima.net / api.divisima.net); host-only bir cookie'yi storefront'taki JS
             // OKUYAMAZ ve double-submit yarim kalir. Bu yuzden ust alan adi ("
-            // .divisima.com") yapilandirmadan verilir. OLCULEN kisit - varsayim degil.
+            // .divisima.net") yapilandirmadan verilir. OLCULEN kisit - varsayim degil.
             var domain = _config["Cookies:Domain"];
             if (!string.IsNullOrWhiteSpace(domain)) o.Domain = domain;
             return o;

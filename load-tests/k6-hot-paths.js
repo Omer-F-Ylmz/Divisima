@@ -1,5 +1,5 @@
 // Divisima - k6 yuk testi (sicak okuma + siparis yolu)
-// Calistirma:  k6 run -e BASE_URL=https://api.divisima.com -e TOKEN=<jwt> load-tests/k6-hot-paths.js
+// Calistirma:  k6 run -e BASE_URL=https://api.divisima.net -e TOKEN=<jwt> load-tests/k6-hot-paths.js
 // Kurulum:     https://k6.io/docs/get-started/installation/
 //
 // Amac: urun listesi (en cok cagrilan GET) ve siparis verme (en kritik POST) altinda

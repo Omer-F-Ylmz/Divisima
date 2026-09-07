@@ -79,10 +79,10 @@ services:
 
   # ══ DALGA C / C1 - STOREFRONT'U SUNAN SERVIS ══════════════════════════════════════════════
   # Bu servis YOKTU: frontend'i kimin sunacagi depoda tanimsizdi (Dockerfile yalniz API'yi
-  # publish ediyor, nginx.conf'ta yalniz api.divisima.com blogu vardi).
+  # publish ediyor, nginx.conf'ta yalniz api.divisima.net blogu vardi).
   # IKI ORIGIN korunuyor (kullanici karari): API :5000, storefront :5173 - yerelde bugune
   # kadar elle kurulan duzenin ta kendisi, artik `docker compose up` ile geliyor.
-  # Uretimde karsiligi ops/infra/nginx.conf'taki divisima.com blogudur.
+  # Uretimde karsiligi ops/infra/nginx.conf'taki divisima.net blogudur.
   frontend:
     # GF-4 KAPANIS (Y6 tamamlama): tag + digest pini - gerekce redis servisinde.
     image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10

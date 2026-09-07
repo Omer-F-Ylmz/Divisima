@@ -3,7 +3,7 @@
 ## SEO
 - **JSON-LD yapısal veri** — index.html'e eklendi (Organization + WebSite + SearchAction). Google zengin sonuç için okur.
 - **robots.txt** — `frontend/robots.txt`; admin ve /api gizlenir, sitemap gösterilir.
-- **Dinamik sitemap** — backend `GET /api/seo/sitemap?baseUrl=https://divisima.com` aktif ürün + kategorileri XML döner. Frontend host'ta `/sitemap.xml` bu uca proxy'lenir (nginx: `location = /sitemap.xml { proxy_pass http://api/api/seo/sitemap?baseUrl=https://divisima.com; }`).
+- **Dinamik sitemap** — backend `GET /api/seo/sitemap` aktif ürün + kategorileri XML döner. Frontend host'ta `/sitemap.xml` bu uca proxy'lenir (nginx: `location = /sitemap.xml { proxy_pass http://api/api/seo/sitemap; }`). **Site kökü sorgu parametresiyle VERİLMEZ** (LD-1/LF-2): `<loc>` değerleri `Storefront:BaseUrl` ayarından türer, ayar boşsa uç 500 döner. Eskiden kök bir `?baseUrl=` parametresiydi; uç `[AllowAnonymous]` olduğu için sitemap'in içeriğini herkes belirleyebiliyordu ve değer kaçışlanmadan XML'e yazılıyordu.
 
 ### SSR / Prerender (öneri — SPA SEO sınırı)
 SPA olduğu için ürün sayfaları JS ile render olur; bazı botlar bunu göremez. Seçenekler:

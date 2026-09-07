@@ -55,7 +55,7 @@ namespace Divisima.Core.Utilities.Mail
             if (string.IsNullOrWhiteSpace(from)) from = user;
 
             var mime = new MimeMessage();
-            // Açıklayıcı yorum: "Divisima <no-reply@divisima.com>" biçimi de düz adres de kabul edilir.
+            // Açıklayıcı yorum: "Divisima <no-reply@divisima.net>" biçimi de düz adres de kabul edilir.
             mime.From.Add(MailboxAddress.Parse(from));
             mime.To.Add(MailboxAddress.Parse(message.To));
             // GF-3/K4 (AV-1/A-3): Subject'te CRLF -> posta basligi enjeksiyonu (MimeKit

@@ -195,8 +195,8 @@ namespace Divisima.IntegrationTests
         //
         // OLCULEN ONCE-DURUM ("kirmizi-once", LAUNCH HAZIRLIK OLCUMU / BL-1): Production +
         // Cookies:Domain BOS ile uygulama SORUNSUZ ACILIYORDU. Zincir dort halkali ve her
-        // halkasi ayri ayri olculdu: nginx storefront'u (divisima.com) ve API'yi
-        // (api.divisima.com) AYRI HOST'ta sunar -> `AuthController` alan adi verilmezse
+        // halkasi ayri ayri olculdu: nginx storefront'u (divisima.net) ve API'yi
+        // (api.divisima.net) AYRI HOST'ta sunar -> `AuthController` alan adi verilmezse
         // cerezi HOST-ONLY yazar -> vitrin JS'i `csrf_token`i `document.cookie`den OKUYAMAZ ->
         // `AntiforgeryMiddleware` double-submit eslesmesini bulamaz ve `/api/auth/refresh`
         // KALICI 403 doner.
@@ -219,8 +219,8 @@ namespace Divisima.IntegrationTests
             // CIFT-ANLAM KIRICI: acilis BASKA bir eksik ayardan degil, TAM BU anahtardan durmali.
             metin.Should().Contain("Cookies:Domain");
             // Mesaj OPERATORE NE YAPACAGINI soylemeli - "eksik" demek yetmez; bicim de lazim.
-            metin.Should().Contain(".divisima.com",
-                "mesaj UST ALAN ADI bicimini ornekle vermeli, yoksa operator 'divisima.com' " +
+            metin.Should().Contain(".divisima.net",
+                "mesaj UST ALAN ADI bicimini ornekle vermeli, yoksa operator 'divisima.net' " +
                 "yazar ve ayni ariza noktasi noktasina tekrarlar");
         }
 
@@ -272,7 +272,7 @@ namespace Divisima.IntegrationTests
         [Fact]
         public void Uretimde_GERCEK_ORIGIN_ile_UYGULAMA_ACILIR()
         {
-            AcilisHatasi("AllowedOrigins:0", "https://divisima.com")
+            AcilisHatasi("AllowedOrigins:0", "https://divisima.net")
                 .Should().BeNull("gercek uretim origin'i kapiyi GECMELI");
         }
 

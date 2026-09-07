@@ -14,7 +14,7 @@ Bu klasör storefront'u backend'e bağlayan katmanı, admin panelini ve PWA dosy
 ## 1. API adresini ayarla
 Her iki dosyada da (`admin.html` ve storefront) API adresi:
 ```js
-const API_BASE = "https://api.divisima.com"; // kendi backend adresin
+const API_BASE = "https://api.divisima.net"; // kendi backend adresin
 localStorage.setItem("divisima_api_base", API_BASE); // admin.html bunu okur
 ```
 
@@ -23,7 +23,7 @@ localStorage.setItem("divisima_api_base", API_BASE); // admin.html bunu okur
 ```html
 <script src="/api-client.js"></script>
 <script>
-  const api = new DivisimaAPI("https://api.divisima.com");
+  const api = new DivisimaAPI("https://api.divisima.net");
 
   // Ürünleri çek ve mock veriyi değiştir
   async function loadProducts(){

@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http://localhost:5000; connect-src 'self' http://localhost:5000 https://api.divisima.com; font-src 'self' data:; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http://localhost:5000; connect-src 'self' http://localhost:5000 https://api.divisima.net; font-src 'self' data:; base-uri 'self'; form-action 'self'">
 <!-- API ORIGIN - TEK KAYNAK (DALGA-4-FIX-2 / M1). Storefront ile AYNI mekanizma:
      deger burada beyan edilir, yukaridaki CSP'nin img-src ve connect-src direktifleri
      AYNI origin'i tasir, ikisini birlikte yazan tek yer ops/set-api-origin.sh.
@@ -77,7 +77,7 @@
 <div class="login" id="loginScreen">
   <div class="box">
     <h1>DIVISIMA</h1>
-    <label class="f"><span>E-posta</span><input id="loginEmail" type="email" placeholder="admin@divisima.com"></label>
+    <label class="f"><span>E-posta</span><input id="loginEmail" type="email" placeholder="admin@divisima.net"></label>
     <label class="f"><span>Şifre</span><input id="loginPass" type="password" placeholder="••••••••"></label>
     <button class="btn" style="width:100%;margin-top:8px" data-act="login">Giriş Yap</button>
     <p class="muted" style="text-align:center;margin-top:14px;font-size:12px">Yönetici hesabıyla giriş yapın</p>
