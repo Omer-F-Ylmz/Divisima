@@ -109,9 +109,12 @@ namespace Divisima.API.Controllers
         [HttpGet("verify-email")]
         [AllowAnonymous]
         [SwaggerOperation(Summary = "E-posta doğrula")]
-        public async Task<IActionResult> VerifyEmail([FromQuery] string token)
+        // LF-5: imza (e-posta + 6 haneli kod) oldu. Gerekce AuthManager.VerifyEmail'in
+        // basinda: 6 hanelik kodu TUM musteriler icinde aramak, "kim denk gelirse" saldirisi
+        // acardi. Uc hala [AllowAnonymous] - dogrulama girisin ONCESINDE yapilir.
+        public async Task<IActionResult> VerifyEmail([FromQuery] string email, [FromQuery] string code)
         {
-            var r = await _authService.VerifyEmail(token);
+            var r = await _authService.VerifyEmail(email, code);
             return StatusCode((int)r.Item1, r.Item2);
         }
 

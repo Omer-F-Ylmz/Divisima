@@ -341,6 +341,7 @@ if (redisEnabled)
     builder.Services.AddStackExchangeRedisCache(o => o.Configuration = redisConn);
     // Açıklayıcı yorum: ICacheService Redis (IDistributedCache), lock Redis (RedLock)
     builder.Services.AddSingleton<ICacheService, Divisima.Core.Utilities.Caching.RedisCacheService>();
+    builder.Services.AddSingleton<Divisima.Core.Security.Tokens.IDogrulamaKoduServisi, Divisima.Core.Security.Tokens.DogrulamaKoduServisi>();
     builder.Services.AddSingleton<Divisima.Core.Utilities.Locking.IDistributedLock, Divisima.Core.Utilities.Locking.RedisDistributedLock>();
     // Açıklayıcı yorum: Redis dağıtık rate limiter (çok sunuculu ortamda merkezi sayaç)
     builder.Services.AddSingleton<Divisima.Core.Security.RateLimiting.IDistributedRateLimiter, Divisima.Core.Security.RateLimiting.RedisRateLimiter>();
@@ -356,6 +357,7 @@ else
     // diyordu, ki O YANLISTI. Bu satir yorumu DOGRU hale getirir.
     builder.Services.AddDistributedMemoryCache();
     builder.Services.AddSingleton<ICacheService, MemoryCacheService>();
+    builder.Services.AddSingleton<Divisima.Core.Security.Tokens.IDogrulamaKoduServisi, Divisima.Core.Security.Tokens.DogrulamaKoduServisi>();
     builder.Services.AddSingleton<Divisima.Core.Utilities.Locking.IDistributedLock, Divisima.Core.Utilities.Locking.InMemoryDistributedLock>();
     builder.Services.AddSingleton<Divisima.Core.Security.RateLimiting.IDistributedRateLimiter, Divisima.Core.Security.RateLimiting.InMemoryRateLimiter>();
 }

@@ -201,20 +201,29 @@ namespace Divisima.IntegrationTests
             mail.Should().NotBeNull("kayit dogrulama maili gonderilmis olmali");
             mail!.To.Should().Be(eposta.ToLowerInvariant(), "mail GERCEK adrese gitmeli");
 
-            // JETON DB'DEN OKUNUR - maildeki linkin gercekten O jetonu tasidigi dogrulanir.
-            string jeton;
-            await using (var ctx = NewContext())
-                jeton = (await ctx.Set<Customer>().AsNoTracking()
-                    .FirstAsync(c => c.email == eposta.ToLowerInvariant())).email_verification_token!;
+            // ══ LF-5 - BU PIN BILINCLI OLARAK DEGISTIRILDI (BOZDUKLARIM kaydi) ═════════════
+            //
+            // ESKI SOZLESME: "dogrulama maili TIKLANABILIR LINK tasir ve link o hesabin GERCEK
+            // jetonunu icerir". LF-5 ile dogrulama 6 HANELI KODA gecti ve maildeki baglanti
+            // BILINCLI OLARAK KALDIRILDI (gerekce: kisa omurlu, tek kullanimlik bir kodu
+            // tasiyan tiklanabilir baglanti iletilen her yerde calismaya devam eder ve
+            // kullaniciya "tikla" aliskanligi ogretir).
+            //
+            // ESKI PIN NEYI KORUYORDU: (a) mail govdesinin BEYAN EDILEN vitrin origin'ini
+            // kullanmasi - ikinci bir sabit origin olmamasi, (b) kullanicinin kodu ELLE
+            // girebilecegi bir yol bulunmasi. (a) ARTIK KONUSUZ - govdede hic URL yok, yani
+            // yanlis origin RISKI DE YOK. (b) ise TEK YOL haline geldi ve asagida DAHA GUCLU
+            // bicimde pinleniyor: kod govdede VAR, baglanti YOK.
+            mail.Body.Should().MatchRegex(@"doğrulama kodunuz: \d{6}",
+                "govde ALTI HANELI kodu tasimali - dogrulamanin TEK yolu bu");
+            mail.Body.Should().Contain("10 dakika", "kodun omru kullaniciya SOYLENMELI");
 
-            mail.Body.Should().Contain($"{VitrinTabani}/#/dogrula/",
-                "govde beyan edilen VITRIN origin'ini tasimali - ikinci bir sabit origin YOK");
-            mail.Body.Should().Contain(jeton, "link o hesabin GERCEK jetonunu tasimali");
-
-            // CIFT-ANLAM KIRICI: jeton govdede AYRICA duz kod olarak da kalmali. Giris ekranindaki
-            // mevcut dogrulama kutusu (E1'den beri calisan yol) buna dayaniyor; link EK bir yoldur.
-            mail.Body.Should().Contain("doğrulama kutusuna şu kodu gir",
-                "yedek yol (kodu elle girme) KORUNMALI");
+            // YASAK-BICIM ASSERT'I: govdede HICBIR baglanti olmamali. Ayirt edici deger
+            // secildi - "http" hem http:// hem https://'i yakalar ve eski govde ONU TASIYORDU.
+            mail.Body.Should().NotContain("http",
+                "LF-5: dogrulama maili BAGLANTI TASIMAZ - kod maili tiklanacak bir sey icermez");
+            mail.Body.Should().NotContain("#/dogrula/",
+                "eski dogrulama rotasi maile GERI GELMEMELI");
         }
 
         // ── A1(c) + A2: SIFRE SIFIRLAMA MAILI ────────────────────────────────────────────

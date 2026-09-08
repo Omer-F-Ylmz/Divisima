@@ -116,16 +116,27 @@ namespace Divisima.IntegrationTests
         {
             (await KayitAsync(email)).StatusCode.Should().Be(HttpStatusCode.Created, "on kosul: kayit basarili olmali");
 
-            string token;
+            const string bilinenKod = "515151";
+            string kanonikEposta;
             await using (var ctx = NewContext())
             {
                 var kanonik = email.Trim().ToLowerInvariant();
-                var c = await ctx.Set<Customer>().AsNoTracking().FirstOrDefaultAsync(x => x.email == kanonik);
+                kanonikEposta = kanonik;
+                var c = await ctx.Set<Customer>().FirstOrDefaultAsync(x => x.email == kanonik);
                 c.Should().NotBeNull("kayit KANONIK (invariant kucuk) e-posta ile saklanmali");
-                token = c!.email_verification_token!;
+
+                // LF-5: kod artik OZETLI saklaniyor, yani duz hali DB'den OKUNAMAZ. Bu bir
+                // ON KOSUL adimidir (asil olculen sey CASING'dir), o yuzden TestAuthHelper
+                // ile AYNI desen kullanilir: bilinen bir kodun ozeti uygulamanin KENDI
+                // servisiyle yazilir, dogrulama YINE GERCEK UCTAN yapilir.
+                var kodServisi = _factory!.Services
+                    .GetRequiredService<Divisima.Core.Security.Tokens.IDogrulamaKoduServisi>();
+                c!.email_verification_token = kodServisi.Ozetle(bilinenKod);
+                c.email_verification_sent_at = DateTime.Now;
+                await ctx.SaveChangesAsync();
             }
-            var v = await _factory!.CreateClient()
-                .GetAsync($"/api/auth/verify-email?token={Uri.EscapeDataString(token)}");
+            var v = await _factory!.CreateClient().GetAsync(
+                $"/api/auth/verify-email?email={Uri.EscapeDataString(kanonikEposta)}&code={bilinenKod}");
             v.IsSuccessStatusCode.Should().BeTrue("on kosul: dogrulama basarili olmali");
         }
 

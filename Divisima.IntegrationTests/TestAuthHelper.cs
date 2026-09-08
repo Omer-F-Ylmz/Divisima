@@ -53,20 +53,40 @@ namespace Divisima.IntegrationTests
             // 2) E-POSTA DOĞRULAMA - token'ı DB'den al (e-posta teslimi dış bağımlılık), doğrulamayı
             //    GERÇEK uçtan yap. Kayıt e-postayı küçük harfe çeviriyor (AuthManager), o yüzden
             //    aramada da küçük harf kullanılıyor.
-            string verificationToken;
+            // ══ LF-5 - KOD ARTIK DB'DEN OKUNAMAZ (bilincli) ═══════════════════════════════
+            //
+            // Dogrulama 6 haneli KODA gecti ve veritabaninda kodun DUZ HALI DEGIL, HMAC OZETI
+            // duruyor - yani bu yardimci eskisi gibi "token'i DB'den al" yapamaz. Bu, testin
+            // kaybi degil ISPATI: duz kodun saklanmadigini bu imkansizlik gosteriyor.
+            //
+            // COZUM ve NEDEN MESRU: yardimci BILINEN bir kod secer, ozetini UYGULAMANIN KENDI
+            // servisiyle (`IDogrulamaKoduServisi`) hesaplayip satira yazar, sonra dogrulamayi
+            // YINE GERCEK UCTAN duz kodla yapar. Ozetleme kuralinin IKINCI KOPYASI ACILMAZ -
+            // test, uretimin kullandigi ayni nesneyi cagirir. Dogrulama yolu (uc + sayac +
+            // sure kontrolu) HALA GERCEKTIR; yalnizca "maili okuma" adimi kisa devre edilir,
+            // ki o adim zaten dis bagimliliktir.
+            const string bilinenKod = "424242";
+            var lowered = email.ToLowerInvariant();
             using (var scope = factory.Services.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<DivisimaDbContext>();
-                var lowered = email.ToLowerInvariant();
-                var customer = await db.Set<Customer>().AsNoTracking()
+                var kodServisi = scope.ServiceProvider
+                    .GetRequiredService<Divisima.Core.Security.Tokens.IDogrulamaKoduServisi>();
+
+                var customer = await db.Set<Customer>()
                     .FirstOrDefaultAsync(c => c.email == lowered)
                     ?? throw new InvalidOperationException($"Kayit sonrasi musteri bulunamadi: {lowered}");
 
-                verificationToken = customer.email_verification_token
-                    ?? throw new InvalidOperationException("email_verification_token bos - kayit akisi degismis olabilir.");
+                if (string.IsNullOrWhiteSpace(customer.email_verification_token))
+                    throw new InvalidOperationException("email_verification_token bos - kayit akisi degismis olabilir.");
+
+                customer.email_verification_token = kodServisi.Ozetle(bilinenKod);
+                customer.email_verification_sent_at = DateTime.Now;   // sure penceresi taze
+                await db.SaveChangesAsync();
             }
 
-            var verify = await anon.GetAsync($"/api/auth/verify-email?token={Uri.EscapeDataString(verificationToken)}");
+            var verify = await anon.GetAsync(
+                $"/api/auth/verify-email?email={Uri.EscapeDataString(lowered)}&code={bilinenKod}");
             await EnsureAsync(verify, "verify-email");
 
             // 3) GİRİŞ (gerçek uç) -> gerçek JWT

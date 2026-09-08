@@ -1206,7 +1206,7 @@
         return r;
       },
       async register(payload) { return api.auth.register(payload); },
-      async verifyEmail(token) { return api.auth.verifyEmail(token); },
+      async verifyEmail(email, code) { return api.auth.verifyEmail(email, code); },
       async resend(email) { return api.auth.resendVerification(email); },
       async logout() {
         try { await api.auth.logout(); } finally {
@@ -1317,7 +1317,15 @@
       // gonder" GORUNMUYORDU. Ayni sekilde `#6b6b6b` ve `#a32d2d` koyu zeminde okunmuyordu.
       // Token'lar index.html'de iki tema icin de TANIMLI; yeni renk uretilmedi.
       '<div id="dvsVerifyMsg" style="font-size:13px;color:var(--muted);margin-bottom:10px"></div>' +
-      '<input id="dvsVerifyToken" placeholder="' + esc(ceviri("b_dogrulama_kodu")) + '" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--ivory);color:var(--ink)">' +
+      // ══ LF-5 / D3 - ALTI HANELI SAYISAL GIRIS ═══════════════════════════════════════════
+      // `inputmode=numeric` mobilde SAYI TUS TAKIMINI acar (kod sayisal oldugu icin harf
+      // klavyesi gostermek gereksiz surtunmedir). `autocomplete=one-time-code` iOS/Android'de
+      // SMS/e-posta kodunu otomatik doldurma onerisini tetikler. `maxlength=6` fazlasini
+      // BASTAN engeller; `pattern` sayisal klavyeyi ve dogrulamayi destekler.
+      '<input id="dvsVerifyToken" type="text" inputmode="numeric" autocomplete="one-time-code" ' +
+      'maxlength="6" pattern="[0-9]{6}" placeholder="6 haneli kod" ' +
+      'style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;' +
+      'background:var(--ivory);color:var(--ink);letter-spacing:6px;font-size:18px;text-align:center">' +
       '<div style="display:flex;gap:8px;margin-top:10px">' +
       '<button id="dvsVerifyGo" style="padding:9px 16px;border:none;border-radius:8px;background:var(--accent);color:#fff;cursor:pointer">' + ceviri("b_dogrula_btn") + '</button>' +
       // IKINCIL BUTON: `--btn` KULLANILMAZ - o ACIK temada #2b2724 (siyaha yakin) ve
@@ -1338,20 +1346,64 @@
     document.getElementById("dvsVerifyGo").onclick = async function () {
       var errEl = document.getElementById("dvsVerifyErr");
       errEl.textContent = "";
-      var tok = (document.getElementById("dvsVerifyToken").value || "").trim();
-      if (!tok) { errEl.textContent = ceviri("b_kodu_gir"); return; }
+      var kod = (document.getElementById("dvsVerifyToken").value || "").trim();
+      // ISTEMCI TARAFI ON KONTROL: sunucuya gitmeden bariz hatayi soyle. Bu bir GUVENLIK
+      // kontrolu DEGIL (sunucu yine dogrular) - amaci bos/eksik kodda bir deneme HARCAMAMAK,
+      // cunku sunucudaki sayac 5 ile sinirli.
+      if (!/^[0-9]{6}$/.test(kod)) { errEl.textContent = "6 haneli kodu gir."; return; }
       try {
-        await api.auth.verifyEmail(tok);
+        await api.auth.verifyEmail(email, kod);
         box.remove();
         notify(ceviri("b_eposta_dogrulandi_giris"),'ok');
-      } catch (e) { errEl.textContent = e.message || ceviri("b_dogrulama_basarisiz"); }
+      } catch (e) {
+        // Sunucu UC AYRI durumu ayirt ediyor (kod hatali · suresi doldu · cok deneme) ve
+        // metni GOVDEDE yolluyor; istemci onu OLDUGU GIBI gosterir. Kendi metnimizi
+        // uydurmak, sunucunun soyledigiyle ayrisan IKINCI bir dogruluk kaynagi acardi.
+        errEl.textContent = e.message || "Doğrulama başarısız.";
+      }
     };
-    document.getElementById("dvsVerifyResend").onclick = async function () {
+
+    // ══ LF-5 / D3 - "TEKRAR GONDER" 60 SANIYE SOGUMA + GERI SAYIM ═══════════════════════
+    // Sunucu sogumada SESSIZDIR (ayni 200 doner - gerekce AuthManager'da: farkli yanit
+    // adresin kayitli oldugunu ele verirdi). Bu yuzden soguma KULLANICIYA BURADA gorunur:
+    // buton pasiflesir ve kalan saniye yazilir. Aksi halde kullanici arka arkaya basar,
+    // her seferinde "gonderildi" gorur ama mail GELMEZ - sessiz bir yalan olurdu.
+    var yenidenBtn = document.getElementById("dvsVerifyResend");
+    var sayacId = null;
+    function sogumayiBaslat(saniye) {
+      var kalan = saniye;
+      yenidenBtn.disabled = true;
+      yenidenBtn.style.opacity = "0.55";
+      yenidenBtn.style.cursor = "default";
+      function tik() {
+        if (kalan <= 0) {
+          clearInterval(sayacId); sayacId = null;
+          yenidenBtn.disabled = false;
+          yenidenBtn.style.opacity = "";
+          yenidenBtn.style.cursor = "pointer";
+          yenidenBtn.textContent = ceviri("b_tekrar_gonder_btn");
+          return;
+        }
+        yenidenBtn.textContent = "Tekrar gönder (" + kalan + ")";
+        kalan--;
+      }
+      tik();
+      sayacId = setInterval(tik, 1000);
+    }
+    // Kutu ILK acildiginda kod YENI gonderilmistir - soguma ORADA baslar.
+    sogumayiBaslat(60);
+
+    yenidenBtn.onclick = async function () {
+      if (yenidenBtn.disabled) return;
       var errEl = document.getElementById("dvsVerifyErr");
       errEl.textContent = "";
       // GÜVENLİK-FIX (G2b): uç artık üç ayrı yanıt değil TEK yanıt dönüyor (varlık sızdırmıyor),
       // bu yüzden istemci de "gönderildi" diye kesin konuşamaz - adres kayıtlı olmayabilir.
-      try { await api.auth.resendVerification(email); notify(ceviri("b_kod_tekrar_gonderildi"),'info'); }
+      try {
+        await api.auth.resendVerification(email);
+        notify(ceviri("b_kod_tekrar_gonderildi"),'info');
+        sogumayiBaslat(60);
+      }
       catch (e) { errEl.textContent = e.message || ceviri("b_gonderilemedi"); }
     };
   }
@@ -3863,20 +3915,19 @@
     };
   }
 
-  async function dogrulaEkrani(token) {
-    authKutusu(ceviri("b_eposta_dogrulama"));
+  // ══ LF-5 / D3 - #/dogrula/<token> YOLU EMEKLIYE AYRILDI ═══════════════════════════════
+  //
+  // Dogrulama artik BAGLANTIYLA degil 6 HANELI KODLA yapiliyor ve yeni mailler baglanti
+  // TASIMIYOR. Ama ESKI mailler hala dolasimda: bu yol SILINSEYDI o baglantilar sessizce
+  // "Sayfa bulunamadi"ya duserdi. Bunun yerine yol KALIYOR ve kullaniciyi DOGRU yere
+  // yonlendiriyor - eski jeton ARTIK GECERSIZ oldugu icin dogrulama DENENMEZ bile.
+  // SOZLUK DOKUNULMAZ (merkez karari): metin sabit TR; i18n karsiligi VITRIN-KALAN'a yazildi.
+  async function dogrulaEkrani(_eskiToken) {
+    authKutusu("E-posta doğrulama");
     var govde = document.getElementById("dvsAuthGovde");
-    if (!token) { govde.textContent = ceviri("b_dogrulama_kodu_yok"); return; }
-    govde.textContent = ceviri("b_dogrulaniyor");
-    try {
-      await api.auth.verifyEmail(token);
-      govde.innerHTML = ceviri("b_epostan_dogrulandi");
-    } catch (e) {
-      document.getElementById("dvsAuthErr").textContent = e.message || ceviri("b_dogrulama_basarisiz");
-      // L3 DENETIMI BULDU: cumlenin ILK yarisi cevriliyken KUYRUGU Turkce yapistiriliyordu -
-      // EN/AR kullanicisi YARI CEVRILI bir cumle goruyordu. Kuyruk da sozluge tasindi.
-      govde.innerHTML = ceviri("b_kod_gecersiz") + ceviri("b_tekrar_gonder_ile");
-    }
+    govde.textContent =
+      "Bu doğrulama bağlantısı artık kullanılmıyor. Doğrulama 6 haneli kodla yapılıyor. " +
+      "Giriş ekranından üye girişi yapıp yeni kod isteyebilirsin.";
   }
 
   function ozelAuthRotasi() {

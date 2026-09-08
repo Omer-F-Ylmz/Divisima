@@ -20,7 +20,10 @@ namespace Divisima.Core.Utilities.Mail
     // baglanti ya da yarim URL URETILMEZ.
     public interface IMailLinkBuilder
     {
-        // hashYolu ornegi: "#/dogrula/<token>". Bas taraftaki '/' cakismasi burada cozulur.
+        // hashYolu ornegi: "#/sifre-sifirla/<token>". Bas taraftaki '/' cakismasi burada cozulur.
+        // (LF-5 NOTU: eski ornek "#/dogrula/<token>" idi ve BU DALGA onu BAYATLATTI - e-posta
+        // dogrulama artik 6 haneli KOD ve maili BAGLANTI TASIMIYOR. Ornek, halen CANLI olan
+        // cagri yerinden secildi: `AuthManager` sifre sifirlama dali.)
         string? VitrinBaglantisi(string hashYolu);
 
         // yolVeSorgu ornegi: "/api/StockNotification/unsubscribe?token=<...>"

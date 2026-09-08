@@ -28,6 +28,30 @@ namespace Divisima.Bussiness.Concrete
         private readonly ITokenHelper _tokenHelper;
         private readonly IMailService _mailService;
         private readonly ISecurityEventService _securityEvents;
+
+        // ══ LF-5 / D1 - E-POSTA DOGRULAMA ARTIK 6 HANELI KOD ═══════════════════════════════
+        // Kodun uretimi ve ozetlemesi TEK SERVISTE (`DogrulamaKoduServisi`); deneme sayaci
+        // dagitik onbellekte durur - gerekce `DogrulamaDenemeAnahtari`nin yaninda.
+        private readonly Divisima.Core.Security.Tokens.IDogrulamaKoduServisi _dogrulamaKodu;
+        private readonly Divisima.Core.Utilities.Caching.ICacheService _cache;
+
+        // Kodun omru. Sayacin TTL'i de BUDUR - sayac kodla birlikte dogar ve olur.
+        private static readonly TimeSpan DogrulamaKoduOmru = TimeSpan.FromMinutes(10);
+
+        // "Tekrar gonder" sogumasi. Amaci posta kutusunu ve saglayici kotasini korumak.
+        private static readonly TimeSpan DogrulamaSogumasi = TimeSpan.FromSeconds(60);
+
+        // Kod gecersiz olmadan once kac YANLIS deneme kabul edilir.
+        private const int DogrulamaEnCokDeneme = 5;
+
+        // Sayac HESAP BASINA tutulur (e-postanin kanonik hali). IP basina tutulsaydi ayni
+        // agdaki iki kullanici birbirinin sayacini tuketirdi; kod basina tutulsaydi saldirgan
+        // her denemede farkli kod yollayip sayaci HIC ilerletmezdi.
+        // E-posta KIMLIK dizgesidir: kultursuz kucultme (CLAUDE.md 6c). `KimlikDizgesi.KanonikKod`
+        // BILEREK kullanilmaz - o Turkce'ye ozgu harfleri katlar ve kendi basinda "e-postaya
+        // UYGULANMAZ" diye yazilidir; kayit yolu da bu satirdaki bicimi kullaniyor.
+        private static string DogrulamaDenemeAnahtari(string eposta) =>
+            "dogrulama:deneme:" + (eposta ?? "").Trim().ToLowerInvariant();
         // LAUNCH-FIX A1(c): dogrulama / sifre sifirlama maillerindeki TIKLANABILIR baglantinin
         // tek kaynagi. Gerekce IMailLinkBuilder'in basinda yazili.
         private readonly IMailLinkBuilder _links;
@@ -78,8 +102,12 @@ namespace Divisima.Bussiness.Concrete
             Divisima.Core.Security.JWT.IUserTokenRevocation tokenRevocation,
             IAuditLogDal auditLogDal,
             Divisima.Core.DataAccess.IUnitOfWork unitOfWork,
+            Divisima.Core.Security.Tokens.IDogrulamaKoduServisi dogrulamaKodu,
+            Divisima.Core.Utilities.Caching.ICacheService cache,
             Microsoft.AspNetCore.Http.IHttpContextAccessor? httpContextAccessor = null)
         {
+            _dogrulamaKodu = dogrulamaKodu;
+            _cache = cache;
             _unitOfWork = unitOfWork;
             _tokenBlacklist = tokenBlacklist;
             _tokenRevocation = tokenRevocation;
@@ -109,15 +137,22 @@ namespace Divisima.Bussiness.Concrete
         //
         // JETON HER IKI DURUMDA DA GOVDEDE KALIYOR: Giris ekranindaki mevcut dogrulama kutusu
         // (E1'den beri calisan yol) bozulmasin diye. Baglanti EK bir yoldur, YERINE GECEN degil.
-        private string DogrulamaGovdesi(string token)
+        // ══ LF-5 / D2 - KOD MAILI: BAGLANTI YOK ════════════════════════════════════════════
+        //
+        // BAGLANTI BILINCLI OLARAK KALDIRILDI. Gerekce: 6 haneli kod tasiyan bir maildeki
+        // tiklanabilir dogrulama baglantisi, kodun TEK KULLANIMLIK olma amacini zayiflatir -
+        // baglanti iletilen/yonlendirilen her yerde CALISMAYA devam eder ve kullaniciya
+        // "tikla" aliskanligi ogretir (kimlik avinin dayandigi tam davranis).
+        // Artik tek yol var: kullanici kodu KENDI actigi ekrana yazar.
+        //
+        // SIFRE SIFIRLAMA AKISI DOKUNULMADI - orada baglanti KALIR (merkez karari); o jeton
+        // uzun ve tek kullanimlik, ayri bir tehdit modeli.
+        private string DogrulamaGovdesi(string kod)
         {
-            var link = _links.VitrinBaglantisi("#/dogrula/" + Uri.EscapeDataString(token));
-            if (link == null)
-                return "Merhaba,\n\nDivisima hesabını doğrulamak için Giriş ekranındaki doğrulama "
-                     + $"kutusuna şu kodu gir:\n\n{token}\n\nDivisima";
-            return "Merhaba,\n\nDivisima hesabını doğrulamak için aşağıdaki bağlantıya tıkla:\n\n"
-                 + $"{link}\n\nBağlantı çalışmazsa Giriş ekranındaki doğrulama kutusuna şu kodu "
-                 + $"gir: {token}\n\nDivisima";
+            return "Merhaba,\n\n"
+                 + $"Divisima doğrulama kodunuz: {kod}\n\n"
+                 + "Kod 10 dakika geçerlidir.\n\n"
+                 + "Siz istemediyseniz bu e-postayı yok sayın.\n\nDivisima";
         }
 
         private string SifreSifirlamaGovdesi(string token)
@@ -191,8 +226,11 @@ namespace Divisima.Bussiness.Concrete
             }
 
             // Açıklayıcı yorum: E-posta doğrulama token'ı üret + doğrulama maili gönder
+            // LF-5 / D1: DUZ KOD SAKLANMAZ. Uretilen kod YALNIZ maile gider; veritabaninda
+            // HMAC ozeti durur. Degisken adi bunu gorunur kilsin diye `duzKod`.
             customer.email_verified = false;
-            customer.email_verification_token = SecureTokenGenerator.Generate();
+            var duzKod = _dogrulamaKodu.Uret();
+            customer.email_verification_token = _dogrulamaKodu.Ozetle(duzKod);
             customer.email_verification_sent_at = DateTime.Now;
             await _customerDal.AddAsync(customer);
 
@@ -210,7 +248,7 @@ namespace Divisima.Bussiness.Concrete
             {
                 To = customer.email,
                 Subject = "Divisima - E-posta adresinizi doğrulayın",
-                Body = DogrulamaGovdesi(customer.email_verification_token)
+                Body = DogrulamaGovdesi(duzKod)      // OZET DEGIL, DUZ KOD gider
             });
 
             return (HttpStatusCode.Created, new SuccessResult(Messages.RegisterSubmitted));
@@ -242,11 +280,14 @@ namespace Divisima.Bussiness.Concrete
             {
                 // Dogrulanmamis hesap: YENI jeton uretilir - kullanici eski jetonu kaybetmis olabilir
                 // ve bugune kadar 400 yiyip sikisiyordu.
-                mevcut.email_verification_token = SecureTokenGenerator.Generate();
+                var duzKodMevcut = _dogrulamaKodu.Uret();
+                mevcut.email_verification_token = _dogrulamaKodu.Ozetle(duzKodMevcut);
                 mevcut.email_verification_sent_at = DateTime.Now;
                 await _customerDal.UpdateAsync(mevcut);
+                // Yeni kod -> eski deneme sayaci sifirlanir (gerekce resend dalinda).
+                _cache.Remove(DogrulamaDenemeAnahtari(mevcut.email));
                 konu = "Divisima - E-posta adresinizi doğrulayın";
-                govde = DogrulamaGovdesi(mevcut.email_verification_token);
+                govde = DogrulamaGovdesi(duzKodMevcut);
             }
 
             await _outboxService.WriteAsync("EmailNotification", new MailMessageDto { To = mevcut.email, Subject = konu, Body = govde });
@@ -787,24 +828,66 @@ namespace Divisima.Bussiness.Concrete
 
 
         // Açıklayıcı yorum: E-posta doğrulama - token eşleşirse hesabı doğrulanmış işaretle
-        public async Task<(HttpStatusCode, Result)> VerifyEmail(string token)
+        // ══ LF-5 / D1 - DOGRULAMA ARTIK (E-POSTA + 6 HANELI KOD) CIFTIYLE YAPILIR ═══════════
+        //
+        // NEDEN IMZA DEGISTI - OLCULMUS GEREKCE, TARIFIN OTESINDE BIR DUZELTME:
+        // Eski uc YALNIZ jetonu aliyor ve `GetAsync(c => c.token == token)` ile TUM MUSTERILER
+        // icinde ariyordu. 43 karakterlik rastgele jetonda bu GUVENLIYDI - uzay taranamazdi.
+        // 6 HANELI kodda ise ayni desen tehlikeli hale gelir: saldirgan TEK bir kodu dener ve
+        // o an gecerli kodu O KOD OLAN **HERHANGI BIR** hesaba carpar. N kullanicili sistemde
+        // basari olasiligi N katina cikar - yani hedefsiz, "kim denk gelirse" saldirisi.
+        // E-posta ISTEYEREK arama TEK HESABA daraltilir ve deneme sayaci da o hesaba baglanir.
+        //
+        // SIZINTI SINIRI KORUNDU: yanit metni "kod gecersiz/suresi dolmus" ayrimini yapar ama
+        // ADRESIN KAYITLI OLUP OLMADIGINI ele vermez - kayitsiz adres de var olan adresin
+        // yanlis kodu da AYNI 400'u alir.
+        public async Task<(HttpStatusCode, Result)> VerifyEmail(string email, string kod)
         {
-            // Aciklayici yorum: BOS TOKEN GUARD (defense) - bos/null token, dogrulanmis (token=null) hesaba eslesmesin.
-            if (string.IsNullOrWhiteSpace(token))
-                return (HttpStatusCode.BadRequest, new ErrorResult(Messages.InvalidVerificationToken));
-            // Açıklayıcı yorum: Savunma derinliği - boş/null token null-alanlı kayıtlarla eşleşmesin
-            if (string.IsNullOrWhiteSpace(token))
+            if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(kod))
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.EmailVerificationInvalid));
 
-            var customer = await _customerDal.GetAsync(c => c.email_verification_token == token);
+            var anahtar = DogrulamaDenemeAnahtari(email);
+
+            // ── SAYAC ONCE OKUNUR: tukenmisse KOD DOGRULANMADAN reddedilir ────────────────
+            // Sirasi onemli - once dogrulayip sonra saymak, dogru kodu tukenmis sayacla bile
+            // kabul ederdi ve sinir ANLAMSIZ olurdu.
+            var mevcutDeneme = await _cache.GetAsync<long>(anahtar);
+            if (mevcutDeneme >= DogrulamaEnCokDeneme)
+                return (HttpStatusCode.BadRequest, new ErrorResult(Messages.EmailVerificationTooManyAttempts));
+
+            var customer = await _customerDal.GetByEmailAsync(email);
+
+            // Kayitsiz adres: SAYAC YINE ARTAR. Aksi halde "sayac artti mi" sorusu adresin
+            // kayitli olup olmadigini ele veren bir YAN KANAL olurdu.
             if (customer == null)
+            {
+                await _cache.IncrementAsync(anahtar, DogrulamaKoduOmru);
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.EmailVerificationInvalid));
+            }
+
             if (customer.email_verified)
                 return (HttpStatusCode.OK, new SuccessResult(Messages.EmailAlreadyVerified));
 
+            // ── SURE DOLDU MU ─────────────────────────────────────────────────────────────
+            // Ayri mesaj: kullanicinin yapmasi gereken sey FARKLI (yanlis kodda "tekrar yaz",
+            // suresi dolmusta "yeni kod iste"). Bu ayrim varlik SIZDIRMAZ - iki durum da
+            // ancak HESAP VARSA ve kod URETILMISSE olusur.
+            var gonderim = customer.email_verification_sent_at;
+            if (gonderim.HasValue && DateTime.Now - gonderim.Value > DogrulamaKoduOmru)
+                return (HttpStatusCode.BadRequest, new ErrorResult(Messages.EmailVerificationExpired));
+
+            if (!_dogrulamaKodu.Eslesiyor(kod, customer.email_verification_token))
+            {
+                var deneme = await _cache.IncrementAsync(anahtar, DogrulamaKoduOmru);
+                return deneme >= DogrulamaEnCokDeneme
+                    ? (HttpStatusCode.BadRequest, new ErrorResult(Messages.EmailVerificationTooManyAttempts))
+                    : (HttpStatusCode.BadRequest, new ErrorResult(Messages.EmailVerificationInvalid));
+            }
+
             customer.email_verified = true;
-            customer.email_verification_token = null;
+            customer.email_verification_token = null;   // KOD TEK KULLANIMLIK
             await _customerDal.UpdateAsync(customer);
+            _cache.Remove(anahtar);                     // basarida sayac temizlenir
             return (HttpStatusCode.OK, new SuccessResult(Messages.EmailVerified));
         }
 
@@ -841,9 +924,24 @@ namespace Divisima.Bussiness.Concrete
             }
             else if (customer != null)
             {
-                customer.email_verification_token = SecureTokenGenerator.Generate();
+                // ══ LF-5 / D1 - 60 SANIYE SOGUMA ═══════════════════════════════════════════
+                // Sogumada YENI KOD URETILMEZ ve MAIL GONDERILMEZ; yanit yine AYNI 200'dur.
+                // Farkli bir yanit (429 vb.) donmek, adresin KAYITLI oldugunu ele verirdi -
+                // bu ucun tum varlik nedeni o sizintiyi kapatmakti (G2b). Yani soguma
+                // ISTEMCIDE gorunur (geri sayim), SUNUCUDA sessizdir.
+                var sonGonderim = customer.email_verification_sent_at;
+                if (sonGonderim.HasValue && DateTime.Now - sonGonderim.Value < DogrulamaSogumasi)
+                    return (HttpStatusCode.OK, new SuccessResult(Messages.EmailVerificationRequested));
+
+                var duzKod = _dogrulamaKodu.Uret();
+                customer.email_verification_token = _dogrulamaKodu.Ozetle(duzKod);
                 customer.email_verification_sent_at = DateTime.Now;
                 await _customerDal.UpdateAsync(customer);
+
+                // YENI KOD -> ESKI DENEME SAYACI SIFIRLANIR. Aksi halde tukenmis bir sayac
+                // yeni kodu da DOGARKEN OLU birakirdi (kullanici "yeni kod istedim ama yine
+                // olmuyor" derdi). Sayacin omru KODUN omru kadardir.
+                _cache.Remove(DogrulamaDenemeAnahtari(customer.email));
                 await _outboxService.WriteAsync("EmailNotification", new MailMessageDto
                 {
                     To = customer.email,
@@ -851,7 +949,7 @@ namespace Divisima.Bussiness.Concrete
                     // ilk maili hic almadi, (b) misafir checkout'u bu ucu ILK KEZ tetikliyor.
                     // Ikisinde de "yeniden" YANLIS bir sey soyluyordu. Kayit mailiyle ayni konu.
                     Subject = "Divisima - E-posta adresinizi doğrulayın",
-                    Body = DogrulamaGovdesi(customer.email_verification_token)
+                    Body = DogrulamaGovdesi(duzKod)      // OZET DEGIL, DUZ KOD gider
                 });
             }
 

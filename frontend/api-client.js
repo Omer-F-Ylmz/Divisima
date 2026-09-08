@@ -426,7 +426,9 @@
           try { await api._post("/api/auth/logout", {}); }
           finally { api.setAccessToken(null); api.setRefreshToken(null); }
         },
-        async verifyEmail(token) { return api._get("/api/auth/verify-email" + api._qs({ token })); },
+        // LF-5: uc artik (e-posta + 6 haneli kod) istiyor. Gerekce sunucu tarafinda:
+        // 6 hanelik kodu tum musteriler icinde aramak "kim denk gelirse" saldirisi acardi.
+        async verifyEmail(email, code) { return api._get("/api/auth/verify-email" + api._qs({ email, code })); },
         // MFIX-3 / F-M3g: uc `ResendVerification([FromQuery] string email)` - GOVDE DEGIL
         // SORGU DIZESI bagliyor (AuthController.cs). Govdeyle cagrildiginda CANLI OLCULDU:
         // HTTP 400 "The email field is required."; sorgu dizesiyle 200. Misafir checkout'un

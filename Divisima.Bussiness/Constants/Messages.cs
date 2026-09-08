@@ -188,7 +188,12 @@ namespace Divisima.Core.Utilities.Constants
         // ── E-posta doğrulama ──
         public static string EmailVerified = "E-posta adresiniz doğrulandı.";
         public static string EmailAlreadyVerified = "E-posta zaten doğrulanmış.";
-        public static string EmailVerificationInvalid = "Geçersiz doğrulama bağlantısı.";
+        // LF-5: artik BAGLANTI degil KOD dogrulaniyor - metin de onu soylemeli.
+        // Bu mesaj IKI durumda doner (kayitsiz adres · yanlis kod) ve AYIRT ETMEZ:
+        // ayirt etseydi adresin kayitli olup olmadigini ele verirdi.
+        public static string EmailVerificationInvalid = "Kod hatalı. Lütfen kontrol edip tekrar deneyin.";
+        public static string EmailVerificationExpired = "Kodun süresi doldu. Yeni kod isteyin.";
+        public static string EmailVerificationTooManyAttempts = "Çok fazla hatalı deneme yapıldı. Yeni kod isteyin.";
         public static string EmailVerificationSent = "Doğrulama e-postası gönderildi.";
         // GUVENLIK-FIX (G2b): resend-verification'in TEK yaniti (PasswordResetMailSent kalibi).
         // Onceden UC ayri yanit vardi ve hem VARLIK hem DOGRULANMA DURUMU sizdiriyordu.

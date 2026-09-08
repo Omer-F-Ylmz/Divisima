@@ -98,6 +98,18 @@ namespace Divisima.Core.Utilities.Caching
             return await db.StringSetAsync(key, "1", ttl, When.NotExists);
         }
 
+        // LF-5 / D1: ATOMIK SAYAC. Redis `INCR` tek islemde artirir ve YENI degeri doner -
+        // oku-degistir-yaz yarisi YOKTUR. TTL YALNIZ ilk artirimda (`deger == 1`) kurulur:
+        // her denemede tazelenseydi saldirgan deneme yaparak pencereyi uzatabilirdi.
+        // `INCR` olmayan anahtari 0 kabul edip 1 yapar, yani ayrica "yoksa yarat" gerekmez.
+        public async Task<long> IncrementAsync(string key, TimeSpan ttl)
+        {
+            var db = _mux.GetDatabase();
+            var yeni = await db.StringIncrementAsync(key);
+            if (yeni == 1) await db.KeyExpireAsync(key, ttl);
+            return yeni;
+        }
+
         public void Remove(string key) => _cache.Remove(key);
 
         // Açıklayıcı yorum: Redis'te prefix invalidation için SCAN gerekir; production'da

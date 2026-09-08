@@ -39,6 +39,21 @@ namespace Divisima.Core.Utilities.Caching
         // Aciklayici yorum: ATOMIK set-if-not-exists (Redis SETNX / in-memory lock). true = BU cagri anahtari ekledi
         // (yoktu); false = zaten vardi. "Yalniz ilk kazanir" senaryolari (idempotency, kilit) icin - check-then-act race YOK.
         Task<bool> TryAddAsync(string key, TimeSpan ttl);
+
+        // ══ LF-5 / D1 - ATOMIK SAYAC (merkez onayi: sayac Redis'te, TTL = kodun omru) ═══════
+        //
+        // NEDEN YENI UYE GEREKTI (olculdu): e-posta dogrulama kodunun DENEME SAYACI icin
+        // mevcut uyelerin hicbiri YETMIYOR:
+        //   `GetAsync` + `SetAsync` -> OKU-DEGISTIR-YAZ; iki istek AYNI ANDA 0 okur, ikisi de
+        //      1 yazar ve sayac ILERLEMEZ. Saldirgan istekleri PARALEL gonderip 5 deneme
+        //      sinirini TUMDEN atlardi - yani sinir kagit uzerinde var, gercekte YOK.
+        //   `TryAddAsync` -> yalniz "ilk kazanir" der, KACINCI oldugunu SAYMAZ.
+        // Bu uye TEK ATOMIK islemde artirir ve YENI degeri doner (Redis `INCR`).
+        //
+        // TTL YALNIZ ILK ARTIRIMDA kurulur: sayacin omru KODUN omruyle ayni olmali; her
+        // denemede TTL tazelenirse saldirgan deneme yaparak pencereyi SONSUZA KADAR uzatirdi.
+        Task<long> IncrementAsync(string key, TimeSpan ttl);
+
         void Remove(string key);
         void RemoveByPrefix(string prefix);
     }

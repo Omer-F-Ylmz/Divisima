@@ -73,6 +73,15 @@ namespace Divisima.IntegrationTests
                 return Task.FromResult(_eklenen.Add(key));
             }
 
+            // LF-5: arayuze atomik sayac eklendi. Bu sahte yalniz hiz-limiti YOLUNU olcuyor
+            // ve sayaci KULLANMIYOR; sozlesmeyi karsilamak icin en yalin dogru davranis.
+            private readonly Dictionary<string, long> _sayaclar = new();
+            public Task<long> IncrementAsync(string key, TimeSpan ttl)
+            {
+                _sayaclar[key] = _sayaclar.TryGetValue(key, out var n) ? n + 1 : 1;
+                return Task.FromResult(_sayaclar[key]);
+            }
+
             public Task<T> GetOrSetAsync<T>(string key, Func<Task<T>> factory, TimeSpan? ttl = null) => factory();
             public Task<bool> ExistsAsync(string key) => Task.FromResult(_eklenen.Contains(key));
             public Task SetAsync<T>(string key, T value, TimeSpan ttl) => Task.CompletedTask;

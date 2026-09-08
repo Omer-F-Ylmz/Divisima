@@ -107,10 +107,60 @@ namespace Divisima.Core.Utilities.Caching
             }
         }
 
+        // LF-5 / D1: ATOMIK SAYAC. Redis'teki `INCR`in bellek karsiligi. `TryAddAsync` ile
+        // AYNI kilidi kullanir - iki uye de ayni anahtar uzayinda oku-degistir-yaz yapar ve
+        // ayri kilitler kullansalardi aralarinda yaris kalirdi.
+        // TTL YALNIZ ilk artirimda kurulur (gerekce ICacheService'te): sonraki artirimlar
+        // pencereyi UZATMAZ, yoksa saldirgan deneme yaparak sureyi sonsuza tasirdi.
+        // `IMemoryCache` bir girisin KALAN omrunu OKUMAZ; bu yuzden sona erme ANI degerin
+        // KENDISINDE tasinir (sayac, bitis) ve her yazimda MUTLAK sona erme kullanilir.
+        // Boylece ikinci artirim pencereyi uzatmaz - Redis `INCR` + tek seferlik EXPIRE ile
+        // ayni davranis.
+        // Sona erme ANI AYRI bir sozlukte tutulur; cache'e DUZ `long` yazilir.
+        //
+        // NEDEN BOYLE (bir pin bunu YAKALADI): ilk yazimda deger `(sayac, bitis)` DEMETI
+        // olarak saklaniyordu. Derleyici bundan sikayet etmez ama `GetAsync<long>` o anahtari
+        // okuyamaz (`TryGetValue(key, out long)` demette BASARISIZ olur) ve SESSIZCE `0`
+        // doner - yani "5 denemeyi asti mi" kontrolu HER ZAMAN `0` gorup GECIRIR.
+        // `LaunchFix5DogrulamaKoduTests.BES_YANLIS_DENEME_...` bunu yakaladi: bes yanlis
+        // denemeden sonra dogru kod HALA 200 aliyordu. Sayac artik `GetAsync<long>` ile
+        // okunabilen bicimde; yazan ve okuyan TEK TIP uzerinde anlasiyor.
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _sonlar = new();
+
+        public Task<long> IncrementAsync(string key, TimeSpan ttl)
+        {
+            lock (_addLock)
+            {
+                var simdi = DateTimeOffset.UtcNow;
+                long yeni;
+                DateTimeOffset bitis;
+
+                if (_cache.TryGetValue(key, out long mevcut)
+                    && _sonlar.TryGetValue(key, out var eskiBitis) && eskiBitis > simdi)
+                {
+                    yeni = mevcut + 1;
+                    bitis = eskiBitis;             // PENCERE UZAMAZ
+                }
+                else
+                {
+                    yeni = 1;
+                    bitis = simdi.Add(ttl);
+                }
+
+                _sonlar[key] = bitis;
+                _cache.Set(key, yeni, new MemoryCacheEntryOptions { AbsoluteExpiration = bitis });
+                _keys.TryAdd(key, 0);
+                return Task.FromResult(yeni);
+            }
+        }
+
         public void Remove(string key)
         {
             _cache.Remove(key);
             _keys.TryRemove(key, out _);
+            // Sayac son-tarihi de dusurulur; kalsaydi ayni anahtar yeniden kullanildiginda
+            // BAYAT bir bitis zamani pencereyi yanlis hesaplardi (ve sozluk sizardi).
+            _sonlar.TryRemove(key, out _);
         }
 
         // Açıklayıcı yorum: Yazma işleminde ilgili tüm cache'i temizle (ör. ürün eklenince "product:*")

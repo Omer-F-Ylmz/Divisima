@@ -1,0 +1,286 @@
+using System.Net;
+using System.Net.Http.Json;
+using Divisima.Core.Security.Tokens;
+using Divisima.DataAccess.Concrete.Context;
+using Divisima.Entity.Entities;
+using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+namespace Divisima.IntegrationTests
+{
+    // ══ LF-5 - E-POSTA DOGRULAMA = 6 HANELI KOD ════════════════════════════════════════════
+    //
+    // BUNLAR DAVRANIS PINLERIDIR - kaynak metni degil, GERCEK HTTP YIGINI olculur: uc, model
+    // baglama, DI, dagitik sayac ve veritabani birlikte kosar. Sahte DAL'la yazilsalardi
+    // "kod dogru ama DI kaydi eksik" gibi bir kusuru YAKALAYAMAZLARDI.
+    //
+    // KOD NASIL BILINIYOR: uretilen kod YALNIZ e-postaya gider (bu dalganin butun amaci bu).
+    // Test, kodun DUZ HALINI ogrenmeye CALISMAZ - bunun yerine BILINEN bir kodun ozetini
+    // UYGULAMANIN KENDI servisiyle satira yazar. Ozetleme kuralinin ikinci kopyasi ACILMAZ.
+    // HOST: `CustomWebApplicationFactory` KULLANILMAZ - o Testcontainers uzerinden DOCKER
+    // ister ve bu makinede Docker YOK (bilinen uc kirmizinin sebebi). Bunun yerine
+    // `AuthRateLimitPinTests`in Docker'siz kalibi izlenir: gercek `Program` host'u + SQL.
+    [Trait("Category", "Sql")]
+    public class LaunchFix5DogrulamaKoduTests : IAsyncLifetime
+    {
+        private const string DbName = "DivisimaLf5DogrulamaTest";
+        private static readonly string? ExplicitConn = Environment.GetEnvironmentVariable("DIVISIMA_TEST_SQL");
+
+        // ══ GF-3/F2 KAPISI - AD KOSUCU AD ALANINDAN GECER ══════════════════════════════════
+        // ILK YAZIM `InitialCatalog`i SABIT `DbName` ile eziyordu; GF-3/F2 pini bunu ANINDA
+        // yakaladi (isimli kirmizi, dosya adiyla birlikte). Tam korudugu kusur bu dalgada
+        // ZATEN yasandi: es zamanli iki kosum ayni test veritabanina girdi ve
+        // `There is already an object named 'audit_logs'` ile SAHTE kirmizi uretti.
+        // Ad artik TEK URETIM NOKTASINDAN (`TestDbAdi.Cozumle`) gecer.
+        private static string ConnStr
+        {
+            get
+            {
+                var baseConn = string.IsNullOrWhiteSpace(ExplicitConn)
+                    ? @"Server=(localdb)\MSSQLLocalDB;Trusted_Connection=True;TrustServerCertificate=True;"
+                    : ExplicitConn;
+                return new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(baseConn)
+                { InitialCatalog = TestDbAdi.Cozumle(DbName) }.ConnectionString;
+            }
+        }
+
+        private sealed class Lf5Factory : Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>
+        {
+            protected override void ConfigureWebHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)
+            {
+                TestHostConfig.Apply(builder);
+                builder.ConfigureServices(services =>
+                {
+                    var d = services.SingleOrDefault(x => x.ServiceType == typeof(DbContextOptions<DivisimaDbContext>));
+                    if (d != null) services.Remove(d);
+                    services.AddDbContext<DivisimaDbContext>(o => o.UseSqlServer(ConnStr));
+                });
+            }
+        }
+
+        private Lf5Factory? _factory;
+        private bool _sqlAvailable;
+
+        private static DivisimaDbContext NewContext() =>
+            new DivisimaDbContext(new DbContextOptionsBuilder<DivisimaDbContext>().UseSqlServer(ConnStr).Options);
+
+        public async Task InitializeAsync()
+        {
+            try
+            {
+                await using (var pre = NewContext())
+                {
+                    await TestDbKurulum.SilAsync(pre.Database);
+                    await TestDbKurulum.OlusturAsync(pre.Database);
+                }
+                _factory = new Lf5Factory();
+                _ = _factory!.Services;
+                _sqlAvailable = true;
+            }
+            catch (Exception ex) when (!string.IsNullOrWhiteSpace(ExplicitConn))
+            {
+                throw new InvalidOperationException(
+                    "DIVISIMA_TEST_SQL verildi ancak LF-5 test ortami hazirlanamadi - ATLANMAMALI.", ex);
+            }
+            catch { _sqlAvailable = false; }
+        }
+
+        public async Task DisposeAsync()
+        {
+            if (_factory != null) await _factory.DisposeAsync();
+            if (!_sqlAvailable) return;
+            try { await using var ctx = NewContext(); await TestDbKurulum.SilAsync(ctx.Database); } catch { }
+        }
+
+        private bool Skipped() => !_sqlAvailable;
+
+        private static string YeniEposta() => $"lf5-{Guid.NewGuid():N}@example.invalid";
+
+        // Kayit acar ve BILINEN kodu satira yazar; duz kodu dondurur.
+        private async Task<(string eposta, string kod)> KayitAcAsync(string? kodOverride = null,
+                                                                     DateTime? gonderimZamani = null)
+        {
+            var eposta = YeniEposta();
+            var kod = kodOverride ?? "314159";
+            var anon = _factory!.CreateClient();
+
+            var kayit = await anon.PostAsJsonAsync("/api/auth/register", new
+            {
+                name = "LF5 Test",
+                email = eposta,
+                phone = "5550000000",
+                password = "GecerliParola1",
+                accepted_terms = true,
+                accepted_privacy = true,
+                accepted_marketing = false
+            });
+            kayit.StatusCode.Should().Be(HttpStatusCode.Created, "kayit ucu calismali");
+
+            using var scope = _factory!.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<DivisimaDbContext>();
+            var kodServisi = scope.ServiceProvider.GetRequiredService<IDogrulamaKoduServisi>();
+            var kucuk = eposta.ToLowerInvariant();
+            var musteri = await db.Set<Customer>().FirstAsync(c => c.email == kucuk);
+            musteri.email_verification_token = kodServisi.Ozetle(kod);
+            musteri.email_verification_sent_at = gonderimZamani ?? DateTime.Now;
+            await db.SaveChangesAsync();
+
+            return (kucuk, kod);
+        }
+
+        private async Task<HttpResponseMessage> DogrulaAsync(string eposta, string kod) =>
+            await _factory!.CreateClient().GetAsync(
+                $"/api/auth/verify-email?email={Uri.EscapeDataString(eposta)}&code={Uri.EscapeDataString(kod)}");
+
+        // ── (1) DOGRU KOD -> 200 ve hesap GERCEKTEN dogrulanir ────────────────────────────
+        [Fact]
+        public async Task DOGRU_KOD_200_DONER_ve_HESAP_DOGRULANIR()
+        {
+            if (Skipped()) return;
+            var (eposta, kod) = await KayitAcAsync();
+
+            var yanit = await DogrulaAsync(eposta, kod);
+            yanit.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            // VAKUM KIRICI: 200 yetmez - DB'de gercekten degisti mi?
+            using var scope = _factory!.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<DivisimaDbContext>();
+            var musteri = await db.Set<Customer>().AsNoTracking().FirstAsync(c => c.email == eposta);
+            musteri.email_verified.Should().BeTrue("dogru kod hesabi dogrulamali");
+            musteri.email_verification_token.Should().BeNull("kod TEK KULLANIMLIK - kullanildiktan sonra silinmeli");
+        }
+
+        // ── (2) BES YANLIS DENEME -> KILIT; sonrasinda DOGRU KOD BILE gecmez ──────────────
+        [Fact]
+        public async Task BES_YANLIS_DENEME_KILITLER_ve_DOGRU_KOD_BILE_GECMEZ()
+        {
+            if (Skipped()) return;
+            var (eposta, kod) = await KayitAcAsync();
+
+            for (var i = 1; i <= 5; i++)
+            {
+                var y = await DogrulaAsync(eposta, "000000");
+                y.StatusCode.Should().Be(HttpStatusCode.BadRequest, $"{i}. yanlis deneme reddedilmeli");
+            }
+
+            // AYIRT EDICI: sinir gercekten ISLIYORSA artik DOGRU kod da kabul EDILMEMELI.
+            // Bu olmadan test "yanlis kod 400 doner" demis olurdu - ki o zaten sayacsiz da dogru.
+            var dogruDeneme = await DogrulaAsync(eposta, kod);
+            dogruDeneme.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+                "bes hatali denemeden SONRA dogru kod bile gecmemeli - yoksa sinir ANLAMSIZ olur");
+
+            var govde = await dogruDeneme.Content.ReadAsStringAsync();
+            govde.Should().Contain("Çok fazla", "kullaniciya SEBEBI soylenmeli: yeni kod istemesi gerekiyor");
+
+            using var scope = _factory!.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<DivisimaDbContext>();
+            var musteri = await db.Set<Customer>().AsNoTracking().FirstAsync(c => c.email == eposta);
+            musteri.email_verified.Should().BeFalse("kilitliyken hesap dogrulanmamali");
+        }
+
+        // ── (3) SURESI DOLMUS KOD -> 400 ve AYRI mesaj ────────────────────────────────────
+        [Fact]
+        public async Task SURESI_DOLMUS_KOD_400_ve_AYRI_MESAJ()
+        {
+            // Gonderim zamani 11 dakika geriye alinir (omur 10 dk).
+            var (eposta, kod) = await KayitAcAsync(gonderimZamani: DateTime.Now.AddMinutes(-11));
+
+            var yanit = await DogrulaAsync(eposta, kod);
+            yanit.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+            var govde = await yanit.Content.ReadAsStringAsync();
+            // CIFT-ANLAM KIRICI: 400 iki sebepten gelebilir (yanlis kod / sure). Kullanicinin
+            // YAPACAGI SEY farkli oldugu icin mesaj da ayrismali.
+            govde.Should().Contain("süresi doldu", "suresi dolan kodda kullanici YENI KOD istemeli");
+        }
+
+        // ── (4) DUZ KOD VERITABANINDA SAKLANMAZ ───────────────────────────────────────────
+        [Fact]
+        public async Task DUZ_KOD_VERITABANINDA_SAKLANMAZ()
+        {
+            if (Skipped()) return;
+
+            // ══ BU PIN KENDI YAZDIGINI OLCMEZ - MK-6 ILE DUZELTILDI ═══════════════════════
+            // ILK YAZIMDA `KayitAcAsync` cagriliyordu; o yardimci kayittan SONRA satiri
+            // BILINEN kodun ozetiyle EZIYOR. Yani test, KAYIT YOLUNUN yazdigini degil
+            // KENDI yazdigini dogruluyordu. MUT-16 (register'da `Ozetle(...)` kaldirilip DUZ
+            // KOD yazildi) bu yuzden **0 KIRMIZI** verdi - pin KORDU.
+            // Artik kayit ucu kosuluyor ve satira DOKUNULMADAN okunuyor.
+            var eposta = YeniEposta();
+            var anon = _factory!.CreateClient();
+            var kayit = await anon.PostAsJsonAsync("/api/auth/register", new
+            {
+                name = "LF5 Ozet",
+                email = eposta,
+                phone = "5550000000",
+                password = "GecerliParola1",
+                accepted_terms = true,
+                accepted_privacy = true,
+                accepted_marketing = false
+            });
+            kayit.StatusCode.Should().Be(HttpStatusCode.Created);
+
+            using var scope = _factory!.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<DivisimaDbContext>();
+            var kucuk = eposta.ToLowerInvariant();
+            var musteri = await db.Set<Customer>().AsNoTracking().FirstAsync(c => c.email == kucuk);
+
+            var saklanan = musteri.email_verification_token;
+            saklanan.Should().NotBeNullOrWhiteSpace("kayit bir dogrulama degeri yazmali");
+
+            // ASIL IDDIA: saklanan deger 6 HANELI BIR KOD OLAMAZ. Duz kod yazilsaydi bu
+            // assert kirmizi olurdu - MUT-16'nin yakalanmasi tam olarak buna bagli.
+            saklanan.Should().NotMatchRegex(@"^\d{6}$",
+                "veritabaninda 6 haneli DUZ KOD durmamali - HMAC ozeti durmali");
+            saklanan!.Length.Should().Be(64,
+                "HMAC-SHA256 hex = 64 karakter; 6 haneli bir deger bu uzunlukta OLAMAZ");
+            saklanan.Should().MatchRegex("^[0-9A-F]{64}$", "buyuk harf hex bekleniyor");
+        }
+
+        // ── (5) OZET BIBERLI: DUZ SHA-256 DEGIL ───────────────────────────────────────────
+        // Bu, dalganin GUVENLIK cekirdegidir. Duz SHA-256 olsaydi DB sizan bir saldirgan
+        // 10^6 ozeti onceden hesaplayip kodu SANIYEDE cozerdi. Biber sunucuda durdugu icin
+        // sozluk ONCEDEN HESAPLANAMAZ. Pin: uretilen ozet, biberSIZ SHA-256'dan FARKLI olmali.
+        [Fact]
+        public async Task OZET_BIBERLI_DUZ_SHA256_DEGIL()
+        {
+            if (Skipped()) return;
+            using var scope = _factory!.Services.CreateScope();
+            var kodServisi = scope.ServiceProvider.GetRequiredService<IDogrulamaKoduServisi>();
+
+            const string kod = "123456";
+            var biberli = kodServisi.Ozetle(kod);
+
+            var biberSiz = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(kod)));
+
+            biberli.Should().NotBe(biberSiz,
+                "ozet SUNUCU BIBERIYLE uretilmeli - duz SHA-256 olsaydi alti haneli kodun tum " +
+                "uzayi (10^6) onceden hesaplanip DB sizintisinda aninda cozulurdu");
+
+            // Ayni kod ayni ozeti vermeli (dogrulama calisabilsin).
+            kodServisi.Ozetle(kod).Should().Be(biberli, "ozetleme DETERMINISTIK olmali");
+            kodServisi.Eslesiyor(kod, biberli).Should().BeTrue("dogru kod eslesmeli");
+            kodServisi.Eslesiyor("654321", biberli).Should().BeFalse("yanlis kod eslesmemeli");
+        }
+
+        // ── (6) URETILEN KOD BICIMI: 6 HANE, SAYISAL, BASTAKI SIFIR KORUNUR ───────────────
+        [Fact]
+        public void URETILEN_KOD_ALTI_HANELI_SAYISAL()
+        {
+            if (Skipped()) return;
+            using var scope = _factory!.Services.CreateScope();
+            var kodServisi = scope.ServiceProvider.GetRequiredService<IDogrulamaKoduServisi>();
+
+            var kodlar = Enumerable.Range(0, 200).Select(_ => kodServisi.Uret()).ToList();
+
+            kodlar.Should().OnlyContain(k => k.Length == 6, "kod TAM 6 hane olmali");
+            kodlar.Should().OnlyContain(k => k.All(char.IsDigit), "kod SAYISAL olmali");
+            // VAKUM KIRICI: sabit bir deger donduren bir uygulama da yukaridakileri gecerdi.
+            kodlar.Distinct().Count().Should().BeGreaterThan(150,
+                "kodlar RASTGELE olmali - 200 uretimde 150'den az benzersiz deger, ureteci supheli kilar");
+        }
+    }
+}

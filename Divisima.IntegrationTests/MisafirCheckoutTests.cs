@@ -231,8 +231,14 @@ namespace Divisima.IntegrationTests
             await OutboxBosaltAsync();
             var mail = MailBul("doğrulayın", eposta);
             mail.Should().NotBeNull("misafire dogrulama maili gitmeli");
-            mail!.Body.Should().Contain($"{VitrinTabani}/#/dogrula/",
-                "tiklanabilir baglanti TEK KAYNAKTAN gelmeli");
+            // LF-5 (BOZDUKLARIM kaydi): eski assert "tiklanabilir baglanti TEK KAYNAKTAN
+            // gelmeli" diyordu. Dogrulama 6 haneli koda gecti ve maildeki baglanti BILINCLI
+            // OLARAK kaldirildi; korunan sey artik "misafire DOGRULAMA YOLU gonderiliyor mu"
+            // sorusudur ve o yol KODDUR. Ayni gucte, sadece yeni sozlesmeye gore.
+            mail!.Body.Should().MatchRegex(@"doğrulama kodunuz: \d{6}",
+                "misafire alti haneli dogrulama kodu gitmeli");
+            mail.Body.Should().NotContain("#/dogrula/",
+                "LF-5: dogrulama maili artik baglanti TASIMAZ");
         }
 
         // ── 5) SIPARIS ONAY MAILI MISAFIRE YOL GOSTERIR, UYEYE GEREKSIZ SATIR EKLEMEZ ───

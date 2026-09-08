@@ -15,7 +15,7 @@ namespace Divisima.Bussiness.Abstract
         Task<(HttpStatusCode, Result)> VerifyTwoFactor(string email, string code);
 
         // Açıklayıcı yorum: E-posta doğrulama
-        Task<(HttpStatusCode, Result)> VerifyEmail(string token);
+        Task<(HttpStatusCode, Result)> VerifyEmail(string email, string kod);
         Task<(HttpStatusCode, Result)> ResendVerification(string email);
 
         // Açıklayıcı yorum: Şifre sıfırlama + çıkış (oturum iptali)
