@@ -20,7 +20,7 @@
 
 ---
 
-## 2. TARİFİN ÖTESİNE GEÇEN İKİ KARAR (ölçülmüş gerekçe)
+## 2. TARİFTEN SAPAN ÜÇ KARAR (ölçülmüş gerekçe)
 
 ### 2.1 ÖZET HMAC OLDU — DÜZ SHA-256 DEĞİL *(merkez onayı alındı)*
 
@@ -47,6 +47,29 @@ E-posta istenerek arama **tek hesaba** daraltıldı ve deneme sayacı o hesaba b
 alır; kayıtsız adreste bile **sayaç artar** (artmasaydı "sayaç arttı mı" sorusu adresin
 kayıtlı olduğunu ele veren bir yan kanal olurdu).
 
+### 2.3 SOĞUMA **429 DEĞİL 200** — TARİFİN KABUL ÖLÇÜTÜNDEN BİLİNÇLİ SAPMA
+
+Tarif, kabul ölçütleri arasında **"soğuma 429"** diyordu. **429 DÖNÜLMEDİ.**
+
+Gerekçe: `resend-verification` ucunun **tüm varlık nedeni** (GÜVENLİK-FIX G2b) adresin kayıtlı
+olup olmadığını sızdırmamaktır — uç bu yüzden **her durumda aynı 200**'ü döner. Soğumada 429
+dönmek tam o sızıntıyı **geri açardı**: saldırgan bir adrese arka arkaya iki istek atar, 429
+alırsa **"bu adres KAYITLI"** bilgisini okur; kayıtsız adreste soğuma diye bir şey olmadığı
+için 200 alırdı. Yani tarifin istediği kabul ölçütü, tarifin **kendi** D1 ölçütüyle
+(*"adres var/yok sızdırmaz"*) **çelişiyordu**; çelişkiyi sızıntı lehine çözmek yanlış olurdu.
+
+**Soğuma istemcide görünür** (60 sn geri sayım), **sunucuda sessizdir.**
+
+**PİN BU YÜZDEN DURUM KODUNU DEĞİL YAN ETKİYİ ÖLÇER** (`SOGUMA_YENI_KOD_URETMEZ_ama_YANIT_AYNI_200`):
+yalnız "200 döndü" demek **çift anlamlı** olurdu — soğuma çalışsa da çalışmasa da 200 gelir.
+Pin, ikinci isteğin **yeni kod üretmediğini** ve **gönderim zamanını ilerletmediğini** ölçer
+(ikincisi ayrı bir tuzak: zaman her istekte ilerleseydi pencere hiç dolmazdı). **MUT-19**
+(soğuma dalı devre dışı) → **1 isimli kırmızı**.
+
+> **DÜRÜST KAYIT:** bu pin de dalga içi denetimde eklendi — soğuma, tarifin kabul listesinde
+> olmasına rağmen ilk turda **hiç pinlenmemişti**. Sapmanın kendisi savunulabilir; sapmanın
+> **pinsiz ve raporsuz** kalması olmazdı.
+
 ---
 
 ## 3. SAYAÇ REDİS'TE — MİGRATION YOK *(merkez kararı)*
@@ -66,7 +89,7 @@ ilerlemezdi** — saldırgan istekleri paralel gönderip 5 deneme sınırını t
 
 ---
 
-## 4. PİNLER (8) ve MK-6 MUTASYONLARI
+## 4. PİNLER (9) ve MK-6 MUTASYONLARI
 
 Hepsi **davranış** pinidir: gerçek `Program` host'u + gerçek uç + gerçek SQL. `CustomWebApplicationFactory`
 **kullanılmadı** (Testcontainers → Docker ister, bu makinede yok); `AuthRateLimitPinTests`in
@@ -81,6 +104,7 @@ Docker'sız kalıbı izlendi.
 | **16b** | aynı mutasyon, pin sıkılaştırıldıktan sonra | 1 kırmızı — `DUZ_KOD_VERITABANINDA_SAKLANMAZ` |
 | **17** | doğrulanmış hesap dalı 200'e geri döndürüldü | 1 kırmızı — `DOGRULANMIS_HESAP_VARLIK_ORAKULU_DEGIL` |
 | **18** | register maile **taze bir kod** yazar (saklanandan farklı) | 1 kırmızı — `DogrulamaMaili_...` · LF-5'in 7 pini **YEŞİL KALDI** |
+| **19** | 60 sn soğuma dalı devre dışı | 1 kırmızı — `SOGUMA_YENI_KOD_URETMEZ_ama_YANIT_AYNI_200` |
 
 ### 4.0 DALGA İÇİ DENETİMİN BULDUĞU KUSUR — **BU DALGA ÜRETTİ** (pin 7)
 

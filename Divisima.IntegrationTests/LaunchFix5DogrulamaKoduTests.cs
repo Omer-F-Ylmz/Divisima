@@ -316,5 +316,54 @@ namespace Divisima.IntegrationTests
             kodlar.Distinct().Count().Should().BeGreaterThan(150,
                 "kodlar RASTGELE olmali - 200 uretimde 150'den az benzersiz deger, ureteci supheli kilar");
         }
+
+        // ── (7) 60 SN SOGUMA: YANIT AYNI 200, AMA YENI KOD URETILMEZ ─────────────────────
+        //
+        // TARIFTEN BILINCLI SAPMA - MERKEZE RAPORLANIR. Tarif kabul olcutu olarak
+        // "soguma 429" diyordu. 429 DONULMEDI: bu ucun TUM VARLIK NEDENI (G2b) adresin
+        // kayitli olup olmadigini sizdirmamaktir; sogumada FARKLI bir durum kodu donmek
+        // tam o sizintiyi GERI ACARDI - saldirgan iki kez ust uste isteyip 429 alirsa
+        // "bu adres KAYITLI" bilgisini okur. Soguma bu yuzden ISTEMCIDE gorunur
+        // (geri sayim), SUNUCUDA sessizdir.
+        //
+        // BU YUZDEN PIN DURUM KODUNU DEGIL YAN ETKIYI OLCER - ki asil sart odur:
+        // ikinci istek YENI KOD URETMEMELI ve gonderim zamanini ILERLETMEMELIDIR.
+        // Yalniz "200 dondu" demek CIFT-ANLAMLI olurdu: soguma calissa da calismasa da 200.
+        [Fact]
+        public async Task SOGUMA_YENI_KOD_URETMEZ_ama_YANIT_AYNI_200()
+        {
+            if (Skipped()) return;
+            var (eposta, _) = await KayitAcAsync();
+            var anon = _factory!.CreateClient();
+            var yol = "/api/auth/resend-verification?email=" + Uri.EscapeDataString(eposta);
+
+            var ilk = await anon.PostAsync(yol, null);
+            ilk.StatusCode.Should().Be(HttpStatusCode.OK, "on kosul: ilk istek gecmeli");
+
+            string ozetIlk; DateTime? zamanIlk;
+            using (var s = _factory!.Services.CreateScope())
+            {
+                var db = s.ServiceProvider.GetRequiredService<DivisimaDbContext>();
+                var m = await db.Set<Customer>().AsNoTracking().FirstAsync(c => c.email == eposta);
+                ozetIlk = m.email_verification_token!;
+                zamanIlk = m.email_verification_sent_at;
+            }
+            ozetIlk.Should().NotBeNullOrWhiteSpace("VAKUM KIRICI: ilk istek GERCEKTEN kod uretmis olmali");
+
+            // Hemen ikinci istek - soguma penceresi (60 sn) ICINDE.
+            var ikinci = await anon.PostAsync(yol, null);
+            ikinci.StatusCode.Should().Be(HttpStatusCode.OK,
+                "SIZINTI SINIRI: soguma FARKLI bir durum kodu donmez - 429 adresin kayitli oldugunu ele verirdi");
+
+            using (var s = _factory!.Services.CreateScope())
+            {
+                var db = s.ServiceProvider.GetRequiredService<DivisimaDbContext>();
+                var m = await db.Set<Customer>().AsNoTracking().FirstAsync(c => c.email == eposta);
+                m.email_verification_token.Should().Be(ozetIlk,
+                    "soguma icindeki istek YENI KOD URETMEMELI - aksi halde 60 sn siniri ANLAMSIZ");
+                m.email_verification_sent_at.Should().Be(zamanIlk,
+                    "gonderim zamani ILERLEMEMELI - ilerleseydi soguma penceresi her istekte YENIDEN baslar ve HIC dolmazdi");
+            }
+        }
     }
 }
