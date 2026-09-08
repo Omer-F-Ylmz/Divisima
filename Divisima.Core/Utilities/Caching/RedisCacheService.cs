@@ -110,6 +110,17 @@ namespace Divisima.Core.Utilities.Caching
             return yeni;
         }
 
+        // `IncrementAsync` ile AYNI PRIMITIF (ham string). `GetAsync<T>` BURADA KULLANILAMAZ:
+        // o `IDistributedCache` uzerinden gider ve StackExchangeRedis girdileri HASH olarak
+        // saklar (`HMGET absexp sldexp data`); ham string bir anahtara carpinca **WRONGTYPE**
+        // firlatir. Canlida birebir bu oldu - gerekce `ICacheService.SayacOkuAsync`in basinda.
+        // Anahtar yoksa `RedisValue.Null` doner ve sayac 0'dir (SALT-OKUMA, anahtar YARATMAZ).
+        public async Task<long> SayacOkuAsync(string key)
+        {
+            var deger = await _mux.GetDatabase().StringGetAsync(key);
+            return deger.HasValue && long.TryParse(deger.ToString(), out var n) ? n : 0;
+        }
+
         public void Remove(string key) => _cache.Remove(key);
 
         // Açıklayıcı yorum: Redis'te prefix invalidation için SCAN gerekir; production'da

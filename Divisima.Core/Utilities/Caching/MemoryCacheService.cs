@@ -154,6 +154,19 @@ namespace Divisima.Core.Utilities.Caching
             }
         }
 
+        // `IncrementAsync` ile AYNI TEMSIL (duz `long` + ayri son-tarih sozlugu). Bellek
+        // uygulamasinda `GetAsync<long>` da calisirdi; uye YINE DE VAR cunku SOZLESME Redis
+        // tarafinda ZORUNLU (orada `GetAsync` WRONGTYPE firlatiyor - `ICacheService`in
+        // basindaki gerekce). Iki uygulamanin AYNI sozlesmeyi tasimasi, "yerelde calisti
+        // canlida patladi" ayrismasini YAPISAL OLARAK kapatir.
+        public Task<long> SayacOkuAsync(string key)
+        {
+            if (_cache.TryGetValue(key, out long mevcut)
+                && _sonlar.TryGetValue(key, out var bitis) && bitis > DateTimeOffset.UtcNow)
+                return Task.FromResult(mevcut);
+            return Task.FromResult(0L);
+        }
+
         public void Remove(string key)
         {
             _cache.Remove(key);

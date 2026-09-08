@@ -317,6 +317,73 @@ namespace Divisima.IntegrationTests
                 "kodlar RASTGELE olmali - 200 uretimde 150'den az benzersiz deger, ureteci supheli kilar");
         }
 
+        // Kaynak-sozlesme pini icin depo koku. Sessiz skip YOK: kok bulunamazsa GURULTULU
+        // duser - kaynagi okuyamayan bir pin yesil KALAMAZ.
+        private static readonly Lazy<string> Lf5Kok = new(() =>
+        {
+            var d = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
+            while (d != null && !System.IO.File.Exists(
+                       System.IO.Path.Combine(d.FullName, "frontend", "index.html")))
+                d = d.Parent;
+            if (d == null)
+                throw new InvalidOperationException("Depo koku bulunamadi (frontend/index.html).");
+            return d.FullName;
+        });
+
+        private static string Lf5Oku(string goreliYol)
+        {
+            var tam = System.IO.Path.Combine(
+                Lf5Kok.Value, goreliYol.Replace('/', System.IO.Path.DirectorySeparatorChar));
+            System.IO.File.Exists(tam).Should().BeTrue($"pinlenen kaynak bulunmali: {goreliYol}");
+            return System.IO.File.ReadAllText(tam);
+        }
+
+        // ── (8) SAYAC YAZAN ve OKUYAN AYNI PRIMITIFI KULLANIR ────────────────────────────
+        //
+        // ** KAYNAK-SOZLESME PINI ** (bu dosyadaki TEK istisna; digerleri davranis pinidir).
+        // DAVRANIS KANITI NEREDE: bu rig'de Redis YOK (Docker yok) - kusur YALNIZ Redis'te
+        // gorunur, bellek uygulamasinda GORUNMEZ. Davranis kaniti bu yuzden CANLI SUNUCUDA
+        // alindi ve muhur 58 bolum 4.4'te ONCE/SONRA olarak yazili:
+        //     ONCE  : istek 1 -> 400, istek 2 -> 500 (WRONGTYPE), istek 3 -> 500
+        //     SONRA : istek 1..4 -> 400, istek 5 -> "cok deneme" 400   (500 YOK)
+        //
+        // NEDEN PIN GEREKLI: kusur DAGITIMDAN ONCE hicbir testte gorunmuyordu ve TAM BU
+        // YUZDEN canliya cikti. Kaynak sozlesmesi, ayrismanin GERI GELMESINI engeller.
+        [Fact]
+        public void SAYAC_OKUMASI_ARTIRMAYLA_AYNI_PRIMITIFI_KULLANIR()
+        {
+            var authManager = Lf5Oku("Divisima.Bussiness/Concrete/AuthManager.cs");
+            var redis = Lf5Oku("Divisima.Core/Utilities/Caching/RedisCacheService.cs");
+
+            // (a) URETIM sayaci `SayacOkuAsync` ile okur - `GetAsync<long>` ile DEGIL.
+            authManager.Should().Contain("_cache.SayacOkuAsync(anahtar)",
+                "sayac okumasi artirmayla AYNI primitife bagli uye uzerinden yapilmali");
+            authManager.Should().NotContain("_cache.GetAsync<long>(anahtar)",
+                "CANLIDA KIRAN CAGRI BUYDU: Redis'te ham string anahtari IDistributedCache "
+                + "hash'i gibi okumak WRONGTYPE firlatir");
+
+            // (b) Redis uygulamasi sayaci HAM STRING olarak okur (`StringGetAsync`), yani
+            //     `StringIncrementAsync`in YAZDIGI temsille AYNI dunyada.
+            redis.Should().Contain("StringIncrementAsync", "sayac artirma ham string uzerinde");
+            redis.Should().Contain("StringGetAsync", "sayac okuma da AYNI temsilde olmali");
+
+            // AYIRT EDICILIK (MK-6 ruhu): `SayacOkuAsync` govdesi `_cache` (IDistributedCache)
+            // KULLANMAMALI. Dosya genelinde `_cache` cokca geciyor - bu yuzden sayim DEGIL,
+            // METODUN KENDI GOVDESI kesilip taranir; aksi halde assert BEDAVA dogru olurdu.
+            //
+            // PENCERE SABIT UZUNLUK OLAMAZ (ilk yazimda 400 karakter denendi ve pin YANLIS
+            // KIRMIZI verdi): pencere metodun DISINA tasip bir SONRAKI metodun `_cache`
+            // kullanimini yakaladi. Sinir, bir sonraki uye bildirimidir.
+            var bas = redis.IndexOf("public async Task<long> SayacOkuAsync", StringComparison.Ordinal);
+            bas.Should().BeGreaterThan(0, "vakum kirici: metot GERCEKTEN bulunmali");
+            var son = redis.IndexOf("\n        public ", bas + 10, StringComparison.Ordinal);
+            son.Should().BeGreaterThan(bas, "metodun bittigi yer bulunabilmeli");
+            var govde = redis.Substring(bas, son - bas);
+            govde.Should().Contain("StringGetAsync", "kesilen govde DOGRU metot olmali");
+            govde.Should().NotContain("_cache.",
+                "sayac okumasi IDistributedCache yolundan GECMEZ - ayrisma TAM ORADA dogar");
+        }
+
         // ── (7) 60 SN SOGUMA: YANIT AYNI 200, AMA YENI KOD URETILMEZ ─────────────────────
         //
         // TARIFTEN BILINCLI SAPMA - MERKEZE RAPORLANIR. Tarif kabul olcutu olarak

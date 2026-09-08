@@ -851,7 +851,13 @@ namespace Divisima.Bussiness.Concrete
             // ── SAYAC ONCE OKUNUR: tukenmisse KOD DOGRULANMADAN reddedilir ────────────────
             // Sirasi onemli - once dogrulayip sonra saymak, dogru kodu tukenmis sayacla bile
             // kabul ederdi ve sinir ANLAMSIZ olurdu.
-            var mevcutDeneme = await _cache.GetAsync<long>(anahtar);
+            //
+            // `SayacOkuAsync` - `GetAsync<long>` DEGIL. Ilk yazim `GetAsync<long>` kullaniyordu
+            // ve CANLIDA KIRDI: Redis'te sayac ham string, `GetAsync` ise `IDistributedCache`
+            // hash'i okuyor -> **WRONGTYPE**, ilk denemeden sonra her istek 500. Bellek
+            // uygulamasinda ikisi ayni sozluge gittigi icin TUM PINLER YESIL KALMISTI.
+            // Tam gerekce `ICacheService.SayacOkuAsync`in basinda.
+            var mevcutDeneme = await _cache.SayacOkuAsync(anahtar);
             if (mevcutDeneme >= DogrulamaEnCokDeneme)
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.EmailVerificationTooManyAttempts));
 

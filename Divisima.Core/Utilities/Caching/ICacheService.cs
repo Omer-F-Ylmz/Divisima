@@ -54,6 +54,23 @@ namespace Divisima.Core.Utilities.Caching
         // denemede TTL tazelenirse saldirgan deneme yaparak pencereyi SONSUZA KADAR uzatirdi.
         Task<long> IncrementAsync(string key, TimeSpan ttl);
 
+        // ══ SAYACI `GetAsync<long>` ILE OKUMA - CANLIDA BEDELI ODENDI (LF-5) ═══════════════
+        //
+        // Bu uye "gereksiz bir kolaylik" DEGIL; sayaci okumanin TEK DOGRU yolu budur.
+        // OLCULEN ZARAR: `VerifyEmail` sayaci once `GetAsync<long>` ile okuyordu. Bellek
+        // uygulamasinda ikisi AYNI sozluge gittigi icin testler YESIL kaldi - ama Redis'te
+        // ayni ad ALTINDA IKI FARKLI TEMSIL olusuyordu:
+        //     IncrementAsync -> `StringIncrementAsync`      -> HAM STRING
+        //     GetAsync<long> -> `IDistributedCache`          -> HASH (absexp/sldexp/data)
+        // Ikinci istekte `HMGET` ham string anahtara carpip **WRONGTYPE** firlatti; canlida
+        // e-posta dogrulamasi ILK DENEMEDEN SONRA 500 vermeye basladi (uc kanaldan olculdu:
+        // API logu · `redis-cli type` · kaynak). Dagitimdan ONCE hicbir pin goremezdi -
+        // test host'u Redis DEGIL bellek kullaniyor.
+        //
+        // KURAL: SAYAC YAZAN ve OKUYAN AYNI PRIMITIFI KULLANIR. `GetAsync<long>` ile sayac
+        // okunmaz; JSON serilestirmeli genel deger yolu ile atomik sayac yolu AYRI dunyalardir.
+        Task<long> SayacOkuAsync(string key);
+
         void Remove(string key);
         void RemoveByPrefix(string prefix);
     }

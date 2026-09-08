@@ -89,11 +89,16 @@ ilerlemezdi** — saldırgan istekleri paralel gönderip 5 deneme sınırını t
 
 ---
 
-## 4. PİNLER (9) ve MK-6 MUTASYONLARI
+## 4. PİNLER (10) ve MK-6 MUTASYONLARI
 
-Hepsi **davranış** pinidir: gerçek `Program` host'u + gerçek uç + gerçek SQL. `CustomWebApplicationFactory`
-**kullanılmadı** (Testcontainers → Docker ister, bu makinede yok); `AuthRateLimitPinTests`in
-Docker'sız kalıbı izlendi.
+**Onunun dokuzu davranış pinidir** (gerçek `Program` host'u + gerçek uç + gerçek SQL);
+`CustomWebApplicationFactory` **kullanılmadı** (Testcontainers → Docker ister, bu makinede
+yok), `AuthRateLimitPinTests`in Docker'sız kalıbı izlendi.
+
+**ONUNCU PİN (`SAYAC_OKUMASI_...`) KAYNAK-SÖZLEŞMESİDİR ve bu bilinçlidir** — pinlediği kusur
+yalnız Redis'te görünür, bu rig'de Redis yok. Davranış kanıtı **canlı sunucudadır** (§4.4
+önce/sonra ölçümü). *(Bu satır, ilk yazımda "hepsi davranış pinidir" diyordu; onuncu pin
+eklendiğinde önerme YANLIŞLAŞTI — "yorum ≠ ölçüm" ailesinin bu belgedeki örneği.)*
 
 | Mut | Ne | Sonuç |
 |---|---|---|
@@ -105,6 +110,8 @@ Docker'sız kalıbı izlendi.
 | **17** | doğrulanmış hesap dalı 200'e geri döndürüldü | 1 kırmızı — `DOGRULANMIS_HESAP_VARLIK_ORAKULU_DEGIL` |
 | **18** | register maile **taze bir kod** yazar (saklanandan farklı) | 1 kırmızı — `DogrulamaMaili_...` · LF-5'in 7 pini **YEŞİL KALDI** |
 | **19** | 60 sn soğuma dalı devre dışı | 1 kırmızı — `SOGUMA_YENI_KOD_URETMEZ_ama_YANIT_AYNI_200` |
+| **20** | sayaç okuması `GetAsync<long>`a döndürüldü | 1 kırmızı — `SAYAC_OKUMASI_...` · **8 davranış pini YEŞİL** |
+| **20b** | `SayacOkuAsync` `IDistributedCache`e döndürüldü | 1 kırmızı — aynı pin (iki yarısı da yük taşıyor) |
 
 ### 4.0 DALGA İÇİ DENETİMİN BULDUĞU KUSUR — **BU DALGA ÜRETTİ** (pin 7)
 
@@ -185,6 +192,50 @@ maile taze bir kod yazacak şekilde bozulduğunda **yalnız bu pin** kırmızı 
 yedi pini **yeşil kaldı** — yani boşluk gerçekti ve onu yalnız bu assert kapatıyor.
 
 ---
+
+### 4.4 CANLIDA KIRDI — RIG'İN YAPISAL KÖR NOKTASI (pin 10, KAYNAK-SÖZLEŞME)
+
+**Dağıtımdan SONRA, gerçek tarayıcıyla bakarken çıktı.** `curl` ile alınan ayırt edici prob
+temizdi (400); aynı URL tarayıcıda **500** verdi. Fark tarayıcı değildi — **kaçıncı istek
+olduğuydu.**
+
+```
+taze adres, ardışık üç istek:   istek 1 -> 400   istek 2 -> 500   istek 3 -> 500
+```
+
+**KÖK SEBEP (üç bağımsız kanaldan ölçüldü — API logu · `redis-cli type` · kaynak):**
+`RedisCacheService` aynı anahtar için **iki uyumsuz temsil** kullanıyordu:
+
+| | primitif | Redis'teki temsil |
+|---|---|---|
+| `IncrementAsync` (sayacı YAZAR) | `db.StringIncrementAsync` | ham **string** |
+| `GetAsync<long>` (sayacı OKURDU) | `IDistributedCache.GetStringAsync` | **hash** (`HMGET absexp sldexp data`) |
+
+İlk istekte anahtar yok → `GetAsync` 0 döner, `IncrementAsync` ham string yaratır. İkinci
+istekte `HMGET` ham string anahtara çarpar → **`WRONGTYPE`** → 500. Yani kusur **ikinci
+istekten itibaren** ve **her adres için** ortaya çıkıyordu.
+
+**NEDEN HİÇBİR PİN GÖRMEDİ — DÜRÜST KAYIT.** Test host'u Redis **kullanmıyor**; `Program.cs`
+Redis yoksa `MemoryCacheService`e düşüyor ve orada yazan da okuyan da **aynı sözlüğe**
+gidiyor. Dokuz pinin dokuzu da yeşildi. Daha kötüsü: bu dalganın **erken** bir düzeltmesi
+(`MemoryCacheService.IncrementAsync` demet→`long`) belleği *daha da* tutarlı yapıp ayrışmayı
+**maskeledi**. Bu, `53·AV-3`'ün "rig kör noktaları" ailesinin yeni ve **en pahalı** üyesi:
+**bellek ile Redis'in AYNI arayüzü FARKLI temsille karşılaması.**
+
+**DÜZELTME:** `ICacheService.SayacOkuAsync` — sayacı **yazanla aynı primitifle** okuyan üye.
+Redis'te `StringGetAsync`, bellekte aynı `long`. `VerifyEmail` artık bunu çağırır.
+
+**PİN (10) BİLİNÇLİ OLARAK KAYNAK-SÖZLEŞMESİDİR** — bu dosyadaki tek istisna. Gerekçe: kusur
+**yalnız Redis'te** görünür, bu rig'de Redis **yok** (Docker yok), dolayısıyla davranış pini
+YAZILAMAZ. Davranış kanıtı **canlı sunucudadır** (yukarıdaki önce/sonra). MUT-20 ve MUT-20b
+pinin **iki yarısının da yük taşıdığını** gösterdi; ikisinde de **diğer sekiz davranış pini
+yeşil kaldı** — yani "rig bunu göremez" iddiası da ölçülmüş oldu.
+
+> **KENDİ HATAM, İKİ KATMANLI:** (1) arayüze atomik bir yazma ekleyip okumasını **eski genel
+> yoldan** bıraktım; (2) "testler yeşil" ile "canlıda çalışır" arasındaki farkı, tam da bu
+> deponun defalarca bedelini ödediği yerde (**yerelde yeşil / canlıda kırmızı**) yeniden
+> ürettim. Kusuru dağıtım **sonrası** gerçek tarayıcı yakaladı — `curl` ile alınan tek
+> istekli prob **yeterli değildi**; ayırt edici deney **ARDIŞIK** istek olmalıydı.
 
 ## 5. VİTRİN (D3)
 

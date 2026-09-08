@@ -82,6 +82,12 @@ namespace Divisima.IntegrationTests
                 return Task.FromResult(_sayaclar[key]);
             }
 
+            // Sahte de olsa YAZAN ve OKUYAN AYNI KABI kullanir - gercek uygulamalarin
+            // sozlesmesi budur (`ICacheService.SayacOkuAsync` gerekcesi: Redis'te ayrisma
+            // canlida WRONGTYPE uretti).
+            public Task<long> SayacOkuAsync(string key) =>
+                Task.FromResult(_sayaclar.TryGetValue(key, out var n) ? n : 0);
+
             public Task<T> GetOrSetAsync<T>(string key, Func<Task<T>> factory, TimeSpan? ttl = null) => factory();
             public Task<bool> ExistsAsync(string key) => Task.FromResult(_eklenen.Contains(key));
             public Task SetAsync<T>(string key, T value, TimeSpan ttl) => Task.CompletedTask;
