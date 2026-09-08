@@ -345,7 +345,10 @@ namespace Divisima.IntegrationTests
         // gorunur, bellek uygulamasinda GORUNMEZ. Davranis kaniti bu yuzden CANLI SUNUCUDA
         // alindi ve muhur 58 bolum 4.4'te ONCE/SONRA olarak yazili:
         //     ONCE  : istek 1 -> 400, istek 2 -> 500 (WRONGTYPE), istek 3 -> 500
-        //     SONRA : istek 1..4 -> 400, istek 5 -> "cok deneme" 400   (500 YOK)
+        //     SONRA : istek 1..5 -> 400 "kod hatali", istek 6 -> 400 "cok deneme"  (500 YOK)
+        // Altinci istekte kilitlenir, besincide DEGIL: bes deneme HAKKI vardir, on-okuma
+        // `>= 5` gordugunde reddeder. (Ilk yazimda bu satir "1..4 / 5" diyordu - OLCUM
+        // duzeltti; tahminle yazilmis bir kanit satiri, kanit DEGILDIR.)
         //
         // NEDEN PIN GEREKLI: kusur DAGITIMDAN ONCE hicbir testte gorunmuyordu ve TAM BU
         // YUZDEN canliya cikti. Kaynak sozlesmesi, ayrismanin GERI GELMESINI engeller.

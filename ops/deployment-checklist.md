@@ -116,6 +116,12 @@ uyuşmazlıkta ekrana kırmızı bir uyarı basar (sessizce yanlış origin'e d�
 - [ ] Backend `Iyzico:CallbackUrl` origin'i **aynı** origin (form-action senkron kuralı -
       callback POST'u tarayıcıdan gelir; uyuşmazsa ödeme sonucu sessizce kaybolur)
 - [ ] `frontend/service-worker.js` içindeki `VERSION` bump'landı (eski önbellek temizlensin)
+      > **NE ZAMAN ATLANABİLİR (ölçüldü, LF-4/LF-5 dağıtımında bilinçli atlandı):** SW'nin
+      > `kodTasiyorMu` dalı navigasyonu ve **`.html`/`.js`**'yi **network-first** yapar, yani
+      > bump unutulsa bile *kod* taşıyan dosyaların yeni sürümü gelir. Risk **cache-first**
+      > varlıklardadır: `manifest.json`, ikonlar, fontlar. Kural: **bu varlıklardan biri
+      > değiştiyse bump ZORUNLU**, yalnız `.js`/`.html` değiştiyse atlanabilir — ve atlandığı
+      > raporda YAZILIR. (LF-4+LF-5'te `manifest.json` ve ikonlar değişmedi; ölçüldü.)
 - [ ] Yayın sonrası: storefront gerçek adresinden açıldı, katalog **dolu** geldi ve
       konsolda `[DIVISIMA YAPILANDIRMA]` satırı **yok**
 
@@ -450,6 +456,27 @@ ORDER BY slug;
 > hukuki metin DEĞİLDİR; avukat/muhasebeci onaylı içerikle **değiştirilmelidir**.
 > Bu bir yazılım maddesi değil, **işletme yükümlülüğüdür** — kod tarafı yalnızca
 > kaydın var olup olmadığını ölçebilir.
+
+## 0b) TEST VERİSİ TEMİZLİĞİ — KAPIDAN ÖNCE
+
+> **NEDEN AYRI MADDE:** soft-launch penceresinde canlı veritabanına **ölçüm amaçlı** satırlar
+> yazıldı. Bunlar kapı açılmadan silinmezse gerçek katalogda/müşteri listesinde **görünür**.
+> Kayıt burada tutulur çünkü "defterde yazıyordu" bir dağıtım adımı **değildir** — kapıyı
+> açan kişi bu dosyaya bakar.
+
+- [ ] **Tur için eklenen 5 test ürünü** silindi (CSV ile içe aktarılmıştı, LD-1 göz turu).
+      Ölçüm: `SELECT COUNT(*) FROM products WHERE <içe aktarım işareti>;` → **0**
+- [ ] **LF-5 doğrulama maili kanıtı için açılan hesap** silindi:
+
+```sql
+-- LF-5 (8 Eylül 2026): Brevo'dan GERÇEK kod maili geldiğini kanıtlamak için açıldı.
+-- Ömer'in ASIL hesabına dokunulmadı (o zaten email_verified = 1).
+SELECT id, email, email_verified FROM customers WHERE email = N'omery3899+lf5@gmail.com';
+-- Silme: önce bağlı satır YOK olduğu doğrulanır (sipariş/adres açılmadı), sonra:
+-- DELETE FROM customers WHERE email = N'omery3899+lf5@gmail.com';
+```
+
+- [ ] Silme sonrası ölçüm: yukarıdaki `SELECT` **0 satır**
 
 ## 1) SOFT-LAUNCH KAPISINI KALDIR
 

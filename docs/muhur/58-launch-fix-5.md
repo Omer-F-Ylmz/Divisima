@@ -200,7 +200,12 @@ temizdi (400); aynı URL tarayıcıda **500** verdi. Fark tarayıcı değildi �
 olduğuydu.**
 
 ```
-taze adres, ardışık üç istek:   istek 1 -> 400   istek 2 -> 500   istek 3 -> 500
+ÖNCE  (39f4c5b öncesi, taze adres):   istek 1 -> 400   istek 2 -> 500   istek 3 -> 500
+SONRA (39f4c5b, taze adres):         istek 1..5 -> 400 "kod hatalı"
+                                     istek 6    -> 400 "Çok fazla hatalı deneme yapıldı."
+                                     (500 YOK; 5 deneme hakkı, 6. istek reddedilir)
+SONRA (aynı URL, GERÇEK TARAYICI):   üç ardışık istek -> 400 / 400 / 400
+SONRA (eski ZEHİRLİ anahtar):        probe@example.invalid -> 400  (500 YOK)
 ```
 
 **KÖK SEBEP (üç bağımsız kanaldan ölçüldü — API logu · `redis-cli type` · kaynak):**
@@ -254,3 +259,56 @@ kullanıcıyı yeni kod istemeye yönlendirir.
 
 **SÖZLÜK DOKUNULMADI** (merkez kararı): yeni metinler sabit TR. i18n karşılıkları
 **VİTRİN-KALAN**'a yazıldı.
+
+---
+
+## 6. DAĞITIM ve CANLI KANIT
+
+**Dağıtılan SHA `39f4c5b`** (LF-4 + LF-5 **TEK** dağıtım). Sunucu `34be485`ten geliyordu,
+yani bu dağıtım LD-1 FAZ 3-5 kayıtlarını, soft-launch kapısını, LF-4'ü ve LF-5'i **birlikte**
+taşıdı. Sürükleme (drift) dağıtımdan **önce** bayt düzeyinde ölçüldü: iki compose dosyası
+hedefle **aynı**, iki frontend dosyası `set-api-origin.sh` yazımıydı ve yeniden üretildi,
+`.env` gitignore'lu + `chmod 600` → checkout **dokunamaz**.
+
+**API imajı YENİDEN KURULDU.** Yalnız `--force-recreate` yapılsaydı C# değişikliği **bayat
+imajla** sessizce dışarıda kalırdı — bu deponun üç kez bedelini ödediği "bayat ikili" ailesi.
+
+| Kanıt | Ölçüm |
+|---|---|
+| Uç imzası değişti | `"The token field is required."` → `"Kod hatalı…"` |
+| LF-4 PWA muafiyeti | `/manifest.json` `/service-worker.js` `/pwa-register.js` `/robots.txt` **401 → 200** |
+| Kapı **kapalı KALDI** | `/` hâlâ **401** (soft-launch bozulmadı) |
+| Gerçek tarayıcı | `manifest.json` · `pwa-register.js` · `/icons/icon-192.png` kimlik**siz** yüklendi |
+| Konteyner sağlığı | LF-3 `curl -fsS` düzeltmesi ilk kez canlıda → **healthy**, failing streak **0** |
+| Dağıtımdan sonra istisna | `WRONGTYPE` / "Beklenmeyen hata" sayısı **0** |
+
+### 6.1 UÇTAN UCA CANLI KANIT — KOD EKRANA BASILMADAN
+
+Brevo'nun **gerçekten teslim ettiği** kodun hesabı doğrulaması, değeri hiçbir yere yazmadan
+ölçüldü (SIR KURALI): kod outbox payload'ından **sunucu kabuk değişkenine** alındı, yalnız
+**uzunluğu** (6) rapor edildi.
+
+```
+resend HTTP=200  ->  kod uzunlugu=6 (deger BASILMADI)
+verify HTTP=200  ->  {"success":true,"message":"E-posta adresiniz doğrulandı."}
+DB      : email_verified = 1 · email_verification_token = NULL (tek kullanımlık UYGULANDI)
+outbox  : id 25 · status=1 (Processed) · 11:23:54 -> 11:24:14 · error NULL
+saklanan: email_verification_token uzunluk 64 (HMAC hex) — düz 6 hane DEĞİL
+```
+
+### 6.2 D-YAN (temizlenecek) ve DÜZELTİLEN VARSAYIM
+
+- **`customers` satırı `omery3899+lf5@gmail.com`** — gerçek kod maili kanıtı için açıldı,
+  açılıştan önce **silinir**. Adım `ops/deployment-checklist.md` > "0b) TEST VERİSİ TEMİZLİĞİ".
+- **BAYAT VARSAYIM DÜZELTİLDİ:** tarif "mevcut doğrulanmamış kayıtlar, Ömer'in hesabı dahil
+  D-YAN" diyordu. **Ölçüldü: Ömer'in asıl hesabı ZATEN doğrulanmış** (`email_verified = 1`,
+  token NULL) — SMTP düzeltmesinden sonra drenaj edilen 22 mail bunu çoktan kapatmış. Bu
+  yüzden onun hesabına **dokunulmadı**; kanıt `+lf5` etiketli ayrı bir adresle alındı.
+
+### 6.3 SERVICE WORKER `VERSION` BUMP'I ATLANDI — ÖLÇÜLMÜŞ GEREKÇE
+
+Dağıtım betiği bunu hatırlatır; **bilinçli atlandı.** SW'nin `kodTasiyorMu` dalı navigasyonu
+ve `.html`/`.js`'yi **network-first** yapar (kaynak okundu, yorum değil), yani bump unutulsa
+bile kod taşıyan dosyaların yeni sürümü gelir. Risk **cache-first** varlıklardadır
+(`manifest.json`, ikonlar) ve **ölçüldü: bu dalgada ikisi de değişmedi (0 dosya).** Kural
+checklist'e yazıldı: *cache-first varlık değiştiyse bump ZORUNLU.*
