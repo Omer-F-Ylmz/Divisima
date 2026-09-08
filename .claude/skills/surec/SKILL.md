@@ -115,6 +115,8 @@ description: Divisima dalga sureci (degismez) — merkez koordinasyon, DUR, push
   (`Server=localhost`) kullaniliyor.
 - **Uretim kodu**: yalniz kullanicinin acikca izin verdigi kalemlerde. Kapsam disi
   bulgular duzeltilmez, **SUPHELI DAVRANISLAR** basligiyla raporlanir.
+- **Ek skill yuklemesi**: deploy/ops tarifi basinda `ops` yuklenir; `frontend/` dosyalarina
+  dokunan dalgada `vitrin` yuklenir.
 
 
 ---

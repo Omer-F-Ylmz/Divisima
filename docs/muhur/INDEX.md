@@ -72,6 +72,7 @@ onlari bayatlatmaz. Okuma usulu: CLAUDE.md B0 · MK-11 (b).
 | 56 | `56-launch-go-no-go.md` | # 56 · LAUNCH GO/NO-GO + LAUNCH-FIX-1 (LF-1) | — | 35528 | yeni usul |
 | 57 | `57-launch-deploy.md` | # 57 · LAUNCH-DEPLOY-1 (LD-1) — SUNUCU KURULUMU | — | 28494 | yeni usul |
 | 58 | `58-launch-fix-5.md` | # 58 · LAUNCH-FIX-5 (LF-5) — E-POSTA DOĞRULAMA = 6 HANELİ KOD | — | 19483 | yeni usul |
+| 59 | `59-skill-ops.md` | # 59 · SKILL-OPS — IKI PROJE SKILL'I (`ops` · `vitrin`) | — | 9178 | yeni usul |
 
 **AD CAKISMASI UYARISI:** bu dosya **GF-3 (Eylul 2026)** dalgasinindir. Depoda ayrica
 **GUVENLIK-FIX-3 (Agustos 2026)** vardir ve onun pinleri `GuvenlikFix3SozlesmeTests.cs`
@@ -86,14 +87,15 @@ filtresinin anahtari) KAPATAN dalga BUDUR. `50-guvenlik-fix-4.md` = **4 Eylul 20
 donduruyor ve onbiri de **25 Agustos 2026** tarihli AGUSTOS dalgasinindir.
 Iki dalga KARISTIRILMAMALIDIR. (AV-2 turunda olculdu -> `51·GUVENLIK-AV-2`.)
 
-Toplam arsiv: 60 dosya · 1.161.465 B (OLCULDU: `ls -1 *.md | grep -v INDEX.md | xargs wc -c`;
-58 numarali muhur eklendikten SONRA yeniden olculdu. Bu satir ARSIV-1'de bir kez, GF-4'te
+Toplam arsiv: 61 dosya · 1.170.643 B (OLCULDU: `ls -1 *.md | grep -v INDEX.md | xargs wc -c`;
+59 numarali muhur eklendikten SONRA yeniden olculdu; ARITMETIK CAPRAZ KONTROL:
+1.161.465 + 9.178 = 1.170.643, fark TAM 59'un boyutu. Bu satir ARSIV-1'de bir kez, GF-4'te
 bir kez daha bayatladi - her muhur eklendiginde YENIDEN OLCULUR, artirilmaz. ARITMETIK
 CAPRAZ KONTROL: 1.141.982 + 19.483 = 1.161.465, yani fark TAM 58'in boyutu. NOT: bu satir
 LF-5 icinde BES KEZ BAYATLADI - muhur 58, dalga ici denetimin UC bulgusu, CANLIDA cikan
 DORDUNCU kusur ve dagitim kaniti ile 6.604 -> 9.038 -> 10.723 -> 12.407 -> 15.882 -> 19.483
 buyudu; "artirilmaz, YENIDEN OLCULUR" kurali tam bunun icin var).
-**ARSIV artik CLAUDE.md.nin 17 KATI** (1.161.465 / 67.041 = 17) - ARSIV-4'un kesimi bu orani
+**ARSIV artik CLAUDE.md.nin 17 KATI** (1.170.643 / 67.409 = 17) - ARSIV-4'un kesimi bu orani
 BILEREK buyuttu: kalici bilgi arsivde, CLAUDE.md'de yalniz SIRADAKI IS ve BAGLAYICI KARAR.
 Bayt denklemi (TARIHSEL, d8f12dd zemini — GUNCELLENMEZ):
 747.240 = 44.393 (C1 sonrasi CLAUDE.md) + 702.847.
