@@ -66,7 +66,7 @@ ilerlemezdi** — saldırgan istekleri paralel gönderip 5 deneme sınırını t
 
 ---
 
-## 4. PİNLER (6) ve MK-6 MUTASYONLARI
+## 4. PİNLER (7) ve MK-6 MUTASYONLARI
 
 Hepsi **davranış** pinidir: gerçek `Program` host'u + gerçek uç + gerçek SQL. `CustomWebApplicationFactory`
 **kullanılmadı** (Testcontainers → Docker ister, bu makinede yok); `AuthRateLimitPinTests`in
@@ -79,6 +79,39 @@ Docker'sız kalıbı izlendi.
 | **15** | süre kontrolü devre dışı | 1 kırmızı — `SURESI_DOLMUS_KOD_400_...` |
 | **16** | register düz kodu DB'ye yazar | **0 KIRMIZI — PİN KÖRDÜ** |
 | **16b** | aynı mutasyon, pin sıkılaştırıldıktan sonra | 1 kırmızı — `DUZ_KOD_VERITABANINDA_SAKLANMAZ` |
+| **17** | doğrulanmış hesap dalı 200'e geri döndürüldü | 1 kırmızı — `DOGRULANMIS_HESAP_VARLIK_ORAKULU_DEGIL` |
+
+### 4.0 DALGA İÇİ DENETİMİN BULDUĞU KUSUR — **BU DALGA ÜRETTİ** (pin 7)
+
+**Bulgu:** `VerifyEmail`, doğrulanmış bir hesap için **200 "E-posta zaten doğrulanmış."**
+dönüyordu. Eski uçta bu **sızıntı değildi** — girdi yalnız 43 karakterlik jetondu, yani o dala
+ancak **geçerli bir jeton taşıyan** biri varabilirdi. LF-5 girdiyi `(e-posta + kod)` yapınca
+aynı dal **saldırgan denetimine açıldı**: tek başına bir e-posta adresi yazan biri
+`200 "zaten doğrulanmış"` ile `400 "kod geçersiz"` farkından **"bu hesap VAR ve DOĞRULANMIŞ"**
+bilgisini okuyabilirdi. Yani kusuru **imza değişikliğinin kendisi** üretti.
+
+Bu, D1'in kendi kabul ölçütünü (*"adres var/yok sızdırmaz"*) çiğniyordu ve **kendi yazdığım
+üst yorum** (*"adresin kayıtlı olup olmadığını ele vermez"*) **fazla iddialıydı** — önerme
+ancak düzeltmeden sonra doğru oldu. **YORUM ≠ ÖLÇÜM** ailesinin bir örneği daha.
+
+**Düzeltme:** doğrulanmış hesap da kayıtsız adresle **aynı 400 + aynı gövde**yi alır ve
+**sayaç da artar** (artmasaydı "sayaç arttı mı" sorusu aynı ayrımı geri açardı). Mesaj yalan
+değil: doğrulanmış hesabın **bekleyen kodu yoktur**, "kod geçersiz" onun için de olgusaldır.
+Kullanıcı bilgi kaybetmez — `resend-verification` zaten doğrulanmış hesaba *"hesabın zaten
+doğrulanmış"* **mailini** atıyor (G2b kalıbı): bilgi **adresin sahibi olan kanaldan** gider,
+HTTP yanıtından değil.
+
+**Pin ayırt edicidir:** yalnız durum koduna bakmaz — doğrulanmış hesabın yanıtı ile **hiç
+kayıt olmamış** bir adresin yanıtının **durum kodu VE gövde olarak eşit** olduğunu ölçer;
+vakum kırıcı olarak gövdenin gerçekten bir hata yanıtı olduğunu da doğrular.
+
+**BEDELİ (dürüst kayıt):** bulgu **push'tan SONRA** çıktı — dalga içi denetimi push'tan önce
+tamamlamam gerekirdi (CLAUDE.md: *"Denetim bulgu çıkarırsa PUSH BEKLER"*). Sonuç: bu dalga
+**tek push değil İKİ push** oldu. Kural ihlali bendedir, gizlenmiyor.
+
+**ÖLÜ YÜZEY (kayıt):** `Messages.EmailAlreadyVerified` artık **hiçbir yerden çağrılmıyor**
+(ölçüldü: kalan kullanım 0). Silinmedi — sabitler dosyasına dokunmak bu dalganın kapsamı
+değil; **launch sonrası temizlik** kalemi olarak kayda geçti.
 
 ### 4.1 KENDİ HATAM — KENDİNE REFERANSLI PİN (MUT-16)
 

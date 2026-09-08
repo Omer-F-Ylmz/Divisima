@@ -865,8 +865,25 @@ namespace Divisima.Bussiness.Concrete
                 return (HttpStatusCode.BadRequest, new ErrorResult(Messages.EmailVerificationInvalid));
             }
 
+            // ── DOGRULANMIS HESAP DA AYNI 400'U ALIR (DALGA ICI DENETIM BULGUSU) ──────────
+            // BU KUSURU BU DALGA URETTI: eski uc YALNIZ jeton aliyordu, yani "zaten
+            // dogrulanmis" dalina ancak GECERLI BIR JETON tasiyan biri varabilirdi ve orada
+            // sizinti YOKTU. LF-5 girdiyi (e-posta + kod) yapinca dal SALDIRGAN DENETIMINE
+            // acildi: 200 "zaten dogrulanmis" ile 400 "kod gecersiz" arasindaki fark, TEK
+            // BASINA E-POSTA ADRESI YAZAN birine "bu hesap VAR ve DOGRULANMIS" derdi.
+            // Kendi yazdigim ust yorum ("adresin kayitli olup olmadigini ele vermez") bu dal
+            // yuzunden FAZLA IDDIALIYDI - onerme ancak bu donusle DOGRU olur.
+            // MESAJ YALAN DEGIL: dogrulanmis hesabin BEKLEYEN KODU YOKTUR, yani "kod
+            // gecersiz" o hesap icin de OLGUSAL OLARAK dogrudur.
+            // SAYAC DA ARTAR - aksi halde "sayac artti mi" sorusu ayni ayrimi geri acardi.
+            // KULLANICI KAYBI YOK: `resend-verification` zaten dogrulanmis hesaba
+            // "hesabin zaten dogrulanmis, giris yapabilirsin" MAILI atiyor (G2b kalibi) -
+            // bilgi kullaniciya ADRESIN SAHIBI OLAN kanaldan gidiyor, HTTP yanitindan degil.
             if (customer.email_verified)
-                return (HttpStatusCode.OK, new SuccessResult(Messages.EmailAlreadyVerified));
+            {
+                await _cache.IncrementAsync(anahtar, DogrulamaKoduOmru);
+                return (HttpStatusCode.BadRequest, new ErrorResult(Messages.EmailVerificationInvalid));
+            }
 
             // ── SURE DOLDU MU ─────────────────────────────────────────────────────────────
             // Ayri mesaj: kullanicinin yapmasi gereken sey FARKLI (yanlis kodda "tekrar yaz",

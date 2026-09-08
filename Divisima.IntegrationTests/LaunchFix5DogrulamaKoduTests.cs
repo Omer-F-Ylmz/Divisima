@@ -196,6 +196,40 @@ namespace Divisima.IntegrationTests
             govde.Should().Contain("süresi doldu", "suresi dolan kodda kullanici YENI KOD istemeli");
         }
 
+        // ── (3b) DOGRULANMIS HESAP, KAYITSIZ ADRESTEN AYIRT EDILEMEZ ─────────────────────
+        //
+        // DALGA ICI DENETIM BULGUSU - KUSURU BU DALGA URETTI. Eski uc yalniz JETON aliyordu;
+        // "zaten dogrulanmis" dalina ancak gecerli jeton tasiyan biri varabilirdi. LF-5 girdiyi
+        // (e-posta + kod) yapinca o dal, TEK BASINA E-POSTA YAZAN birinin sorgulayabilecegi bir
+        // VARLIK ORAKULU haline geldi: 200 "zaten dogrulanmis" <-> 400 "kod gecersiz".
+        //
+        // BU PIN AYIRT EDICIDIR: yalniz durum kodunu degil, IKI FARKLI ADRESIN YANITININ
+        // BIRBIRINE ESIT oldugunu olcer. Kirmizi-once GORULDU - donusum yapilmadan once
+        // dogrulanmis hesap 200 donuyordu ve pin TAM 1 ISIMLI KIRMIZI verdi.
+        [Fact]
+        public async Task DOGRULANMIS_HESAP_VARLIK_ORAKULU_DEGIL()
+        {
+            var (eposta, kod) = await KayitAcAsync();
+            (await DogrulaAsync(eposta, kod)).StatusCode.Should().Be(HttpStatusCode.OK,
+                "on kosul: hesap once GERCEKTEN dogrulanmali");
+
+            // Ayni adres IKINCI kez - artik dogrulanmis bir hesap.
+            var dogrulanmis = await DogrulaAsync(eposta, kod);
+            var dogrulanmisGovde = await dogrulanmis.Content.ReadAsStringAsync();
+
+            // Hic kayit olmamis bir adres - saldirganin kiyaslama tabani.
+            var kayitsiz = await DogrulaAsync(YeniEposta().ToLowerInvariant(), kod);
+            var kayitsizGovde = await kayitsiz.Content.ReadAsStringAsync();
+
+            dogrulanmis.StatusCode.Should().Be(kayitsiz.StatusCode,
+                "DURUM KODU iki adresi ayirt ederse adres varligi sizar");
+            dogrulanmisGovde.Should().Be(kayitsizGovde,
+                "GOVDE iki adresi ayirt ederse adres varligi sizar");
+
+            // VAKUM KIRICI: ikisinin de BOS olup "esit" cikmasi ihtimalini eler.
+            dogrulanmisGovde.Should().Contain("false", "yanit gercekten bir hata yaniti olmali");
+        }
+
         // ── (4) DUZ KOD VERITABANINDA SAKLANMAZ ───────────────────────────────────────────
         [Fact]
         public async Task DUZ_KOD_VERITABANINDA_SAKLANMAZ()

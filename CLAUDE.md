@@ -985,6 +985,10 @@ CAGRILMIYORDU; 14/14 duzeltildi (`esc(ceviri(...))`), sozluge dokunulmadi ·
 "6 haneli kodu gir." · "Tekrar gönder (N)" geri sayimi · "Doğrulama başarısız." ·
 "E-posta doğrulama" (emekli rota basligi) · eski baglanti ekraninin iki cumlesi.
 EN/AR kullanicisi bu alti metni TURKCE gorur.
+**12 (YENI, LF-5) OLU SABIT: `Messages.EmailAlreadyVerified` CAGIRANI 0.** Dalga ici denetim
+bulgusu `VerifyEmail`in "zaten dogrulanmis" dalini kaldirdi (varlik orakuluydu - `58·LF-5`
+bolum 4.0); sabit YERINDE KALDI cunku sabitler dosyasi bu dalganin kapsami degildi. Silinene
+ya da yeniden baglanana kadar YANILTICI YUZEY: metni API'nin ARTIK HIC donmedigi bir sey.
 
 ## ERTELENMIS-DEFTER (acilmaz; baslik + atif)
 
