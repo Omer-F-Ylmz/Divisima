@@ -1297,18 +1297,36 @@
     if (!box) {
       box = document.createElement("div");
       box.id = "dvsVerifyBox";
-      box.style.cssText = "margin-top:14px;padding:14px;border:1px solid #e8e4de;border-radius:10px;background:#faf8f5";
+      // ══ LF-4 - KOYU TEMA KONTRASTI (OLCULEN KUSUR, IKI KUTUDA DA) ═══════════════════
+      // ONCE: sabit acik renkler yaziliydi (`background:#faf8f5`) ama METIN RENGI HIC
+      // VERILMEMISTI. Koyu temada `--ink` **#f0ebe4**'e (beyaza yakin) doner ve miras
+      // alinir -> BEYAZA YAKIN METIN, BEYAZA YAKIN KUTUDA. Kullanici raporu birebir
+      // buydu: "baslik ve 'Tekrar gonder' gorunmuyor".
+      // COZUM: sayfanin KENDI token'lari kullanilir (yeni renk ICAT EDILMEDI); iki temada
+      // da dogru kalir ve palet degisirse KENDILIGINDEN uyar.
+      box.style.cssText =
+        "margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:10px;" +
+        "background:var(--surface);color:var(--ink)";
       host.appendChild(box);
     }
     box.innerHTML =
       '<div style="font-weight:600;margin-bottom:6px">' + ceviri("b_epostani_dogrula") + '</div>' +
-      '<div id="dvsVerifyMsg" style="font-size:13px;color:#6b6b6b;margin-bottom:10px"></div>' +
-      '<input id="dvsVerifyToken" placeholder=ceviri("b_dogrulama_kodu") style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px">' +
+      // KOYU TEMA: asagidaki her ogeye ARTIK ACIK RENK VERILIYOR. Onceki halde
+      // `dvsVerifyResend` `background:#fff` idi ve METIN RENGI YOKTU -> koyu temada
+      // `--ink` (#f0ebe4) miras alinip BEYAZ BUTONDA BEYAZ YAZI olusuyordu; "Tekrar
+      // gonder" GORUNMUYORDU. Ayni sekilde `#6b6b6b` ve `#a32d2d` koyu zeminde okunmuyordu.
+      // Token'lar index.html'de iki tema icin de TANIMLI; yeni renk uretilmedi.
+      '<div id="dvsVerifyMsg" style="font-size:13px;color:var(--muted);margin-bottom:10px"></div>' +
+      '<input id="dvsVerifyToken" placeholder="' + esc(ceviri("b_dogrulama_kodu")) + '" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--ivory);color:var(--ink)">' +
       '<div style="display:flex;gap:8px;margin-top:10px">' +
-      '<button id="dvsVerifyGo" style="padding:9px 16px;border:none;border-radius:8px;background:#111;color:#fff;cursor:pointer">' + ceviri("b_dogrula_btn") + '</button>' +
-      '<button id="dvsVerifyResend" style="padding:9px 16px;border:1px solid #e8e4de;border-radius:8px;background:#fff;cursor:pointer">' + ceviri("b_tekrar_gonder_btn") + '</button>' +
+      '<button id="dvsVerifyGo" style="padding:9px 16px;border:none;border-radius:8px;background:var(--accent);color:#fff;cursor:pointer">' + ceviri("b_dogrula_btn") + '</button>' +
+      // IKINCIL BUTON: `--btn` KULLANILMAZ - o ACIK temada #2b2724 (siyaha yakin) ve
+      // `--ink` de ACIK temada #2b2724'tur; ikisini birlestirmek DUZELTTIGIMIZ HATANIN
+      // AYNASINI acik temada uretirdi (siyah uzerine siyah). Olculdu, tahmin edilmedi.
+      // `--ivory` iki temada da kutunun `--surface` zeminden AYRISIR ve `--ink` ustunde okunur.
+      '<button id="dvsVerifyResend" style="padding:9px 16px;border:1px solid var(--line);border-radius:8px;background:var(--ivory);color:var(--ink);cursor:pointer">' + ceviri("b_tekrar_gonder_btn") + '</button>' +
       "</div>" +
-      '<div id="dvsVerifyErr" style="color:#a32d2d;font-size:12px;margin-top:8px"></div>';
+      '<div id="dvsVerifyErr" style="color:var(--err);font-size:12px;margin-top:8px"></div>';
     // GÜVENLİK-FIX (G2): kayıt ucu artık "bu adres kayıtlı mı" sorusunu YANITLAMIYOR - var olan
     // adres de yeni adres de AYNI 201'i alıyor. Bu yüzden buradaki metin de bir şey VARSAYAMAZ:
     // eskiden "doğrulama kodu gönderildi" diyordu ve zaten hesabı olan kullanıcıya YALAN olurdu.
@@ -1955,7 +1973,7 @@
       "</div></div>" +
 
       '<div class="panel"><h3>' + ceviri("b_kupon") + '</h3>' +
-      '<div style="display:flex;gap:8px"><input id="coCoupon" placeholder=ceviri("b_kupon_kodu") style="flex:1;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px" value="' +
+      '<div style="display:flex;gap:8px"><input id="coCoupon" placeholder="' + esc(ceviri("b_kupon_kodu")) + '" style="flex:1;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px" value="' +
       (checkoutState.coupon ? esc(checkoutState.coupon.code) : "") + '">' +
       '<button class="btn ghost" id="coCouponGo">Uygula</button></div>' +
       '<div id="coCouponMsg" style="font-size:12px;margin-top:6px"></div></div>' +
@@ -2004,12 +2022,12 @@
     if (box.style.display !== "none") { box.style.display = "none"; return; }
     box.style.display = "";
     box.innerHTML =
-      '<input id="adTitle" placeholder=ceviri("b_adres_basligi") style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
-      '<input id="adName" placeholder=ceviri("b_ad_soyad") style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
-      '<input id="adPhone" placeholder=ceviri("b_telefon") style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
-      '<input id="adCity" placeholder=ceviri("b_il") style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
-      '<input id="adDistrict" placeholder=ceviri("b_ilce") style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
-      '<textarea id="adFull" rows="2" placeholder=ceviri("b_acik_adres") style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px"></textarea>' +
+      '<input id="adTitle" placeholder="' + esc(ceviri("b_adres_basligi")) + '" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
+      '<input id="adName" placeholder="' + esc(ceviri("b_ad_soyad")) + '" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
+      '<input id="adPhone" placeholder="' + esc(ceviri("b_telefon")) + '" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
+      '<input id="adCity" placeholder="' + esc(ceviri("b_il")) + '" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
+      '<input id="adDistrict" placeholder="' + esc(ceviri("b_ilce")) + '" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px">' +
+      '<textarea id="adFull" rows="2" placeholder="' + esc(ceviri("b_acik_adres")) + '" style="width:100%;padding:9px 11px;border:1px solid #e8e4de;border-radius:8px;margin-bottom:8px"></textarea>' +
       '<button class="btn sm" id="adSave">Adresi kaydet</button>' +
       '<div id="adErr" style="color:#a32d2d;font-size:12px;margin-top:6px"></div>';
     document.getElementById("adSave").onclick = async function () {
@@ -3267,12 +3285,12 @@
     f.className = "e3-adres-form acc-tile";
     f.style.cssText = "margin-bottom:12px";
     f.innerHTML =
-      '<input id="e3AdBaslik" placeholder=ceviri("b_adres_basligi") style="width:100%;margin-bottom:6px">' +
-      '<input id="e3AdAd" placeholder=ceviri("b_ad_soyad") style="width:100%;margin-bottom:6px">' +
-      '<input id="e3AdTel" placeholder=ceviri("b_telefon") style="width:100%;margin-bottom:6px">' +
-      '<input id="e3AdIl" placeholder=ceviri("b_il") style="width:100%;margin-bottom:6px">' +
-      '<input id="e3AdIlce" placeholder=ceviri("b_ilce") style="width:100%;margin-bottom:6px">' +
-      '<textarea id="e3AdTam" rows="2" placeholder=ceviri("b_acik_adres") style="width:100%;margin-bottom:6px"></textarea>' +
+      '<input id="e3AdBaslik" placeholder="' + esc(ceviri("b_adres_basligi")) + '" style="width:100%;margin-bottom:6px">' +
+      '<input id="e3AdAd" placeholder="' + esc(ceviri("b_ad_soyad")) + '" style="width:100%;margin-bottom:6px">' +
+      '<input id="e3AdTel" placeholder="' + esc(ceviri("b_telefon")) + '" style="width:100%;margin-bottom:6px">' +
+      '<input id="e3AdIl" placeholder="' + esc(ceviri("b_il")) + '" style="width:100%;margin-bottom:6px">' +
+      '<input id="e3AdIlce" placeholder="' + esc(ceviri("b_ilce")) + '" style="width:100%;margin-bottom:6px">' +
+      '<textarea id="e3AdTam" rows="2" placeholder="' + esc(ceviri("b_acik_adres")) + '" style="width:100%;margin-bottom:6px"></textarea>' +
       '<label style="display:block;margin-bottom:8px"><input type="checkbox" id="e3AdVars">' + ceviri("b_varsayilan_adres") + '</label>' +
       '<button class="ao-btn primary" id="e3AdKaydet">Adresi kaydet</button>';
     el.insertBefore(f, el.firstChild);
@@ -3757,7 +3775,16 @@
     if (!box) {
       box = document.createElement("div");
       box.id = "dvsAuthAksiyon";
-      box.style.cssText = "margin-top:14px;padding:14px;border:1px solid #e8e4de;border-radius:10px;background:#faf8f5";
+      // ══ LF-4 - KOYU TEMA KONTRASTI (OLCULEN KUSUR, IKI KUTUDA DA) ═══════════════════
+      // ONCE: sabit acik renkler yaziliydi (`background:#faf8f5`) ama METIN RENGI HIC
+      // VERILMEMISTI. Koyu temada `--ink` **#f0ebe4**'e (beyaza yakin) doner ve miras
+      // alinir -> BEYAZA YAKIN METIN, BEYAZA YAKIN KUTUDA. Kullanici raporu birebir
+      // buydu: "baslik ve 'Tekrar gonder' gorunmuyor".
+      // COZUM: sayfanin KENDI token'lari kullanilir (yeni renk ICAT EDILMEDI); iki temada
+      // da dogru kalir ve palet degisirse KENDILIGINDEN uyar.
+      box.style.cssText =
+        "margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:10px;" +
+        "background:var(--surface);color:var(--ink)";
       host.appendChild(box);
     }
     box.innerHTML = '<div style="font-weight:600;margin-bottom:8px">' + esc(baslik) + "</div>" +

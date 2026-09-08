@@ -257,6 +257,38 @@ namespace Divisima.IntegrationTests
                 "kimlik TASIMAZ - 401 alirlardi ve odeme sonucu SESSIZCE kaybolurdu");
         }
 
+        // LF-4/1: PWA varliklari kapidan MUAF olmali. Tarayici bunlari sayfadan AYRI ve
+        // cogu zaman KIMLIK TASIMADAN ister; 401 alirlarsa PWA kurulumu, service worker
+        // kaydi ve favicon SESSIZCE bozulur. `index.html` MUAF DEGILDIR - asil korunan odur.
+        [Theory]
+        [InlineData("/manifest.json")]
+        [InlineData("/service-worker.js")]
+        [InlineData("/pwa-register.js")]
+        [InlineData("/robots.txt")]
+        public void SOFTLAUNCH_PWA_VARLIKLARI_KAPIDAN_MUAF(string yol)
+        {
+            var conf = File.ReadAllText(Path.Combine(Kok.Value, "ops", "infra", "nginx.conf"));
+            var aktif = DalgaCDagitimSozlesmesiTests.YorumsuzNginx(conf);
+
+            aktif.Should().Contain($"location = {yol}",
+                $"{yol} icin ayri bir location tanimi olmali");
+            // `auth_basic off;` AYNI location blogunda olmali - dosyanin baska yerinde
+            // gecmesi yetmez (LF-1'de ogrenilen ders: dosya geneli sayim yaniltir).
+            var i = aktif.IndexOf($"location = {yol}", StringComparison.Ordinal);
+            var blok = aktif.Substring(i, Math.Min(120, aktif.Length - i));
+            blok.Should().Contain("auth_basic off",
+                $"{yol} soft-launch kapisindan MUAF olmali - tarayici bu istegi kimliksiz yapar");
+        }
+
+        [Fact]
+        public void SOFTLAUNCH_INDEX_HTML_MUAF_DEGIL()
+        {
+            var aktif = DalgaCDagitimSozlesmesiTests.YorumsuzNginx(File.ReadAllText(Path.Combine(Kok.Value, "ops", "infra", "nginx.conf")));
+            // VAKUM KIRICI: muafiyet listesi genisleyip asil sayfayi da acmasin.
+            aktif.Should().NotContain("location = /index.html",
+                "index.html icin muafiyet location'i ACILMAMALI - kapinin korudugu asil yuzey odur");
+        }
+
         [Fact]
         public void SOFTLAUNCH_NOINDEX_TUM_HOSTLARDA()
         {

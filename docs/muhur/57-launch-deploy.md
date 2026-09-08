@@ -453,3 +453,57 @@ tablosunun başlığından başlayıp bir sonraki başlıkta biter. Bu, bu dalga
 vakumlaşan-pin vakası (birincisi sitemap `Contain`ıydı) — ikisi de aynı kökten: **bir pin,
 koruduğu şeyi belge/dosya geneli üzerinden ölçerse, ilgisiz her ekleme onu kırar ya da
 bedava doğru yapar.**
+
+---
+
+## EK — LF-4 VİTRİN GÖZ TURU BULGULARI
+
+### LF-4/1 — PWA VARLIKLARI SOFT-LAUNCH KAPISINDAN MUAF *(kapandı)*
+
+Tarayıcı `manifest.json`, service worker ve favicon'u **sayfadan ayrı ve çoğu zaman kimlik
+taşımadan** ister. Kapı bunları da 401'lerse PWA kurulumu, SW kaydı ve sekme ikonu
+**sessizce** bozulur — kapının amacı ise erken ziyaretçi ve indekslenme, ki bir manifest
+dosyası ne ziyaretçi çeker ne dizine girer. Muaf: `manifest.json` · `service-worker.js` ·
+`pwa-register.js` · `robots.txt` · `/icons/` · `favicon*`. **`index.html` MUAF DEĞİL.**
+
+MUT-11 (manifest muafiyeti silindi) → 1 isimli kırmızı · MUT-12 (`index.html`'e muafiyet
+eklendi, **ters yön vakum kırıcı**) → 1 isimli kırmızı.
+
+### LF-4/3 — İKİ GERÇEK VİTRİN KUSURU *(kapandı)*
+
+**(a) `placeholder=ceviri("...")` — 14 yerde.** HTML dizgesi içinde tırnaksız yazıldığı için
+`ceviri(...)` **çağrılmıyor**, tarayıcı `placeholder="ceviri("` diye ayrıştırıyordu; kullanıcı
+alanlarda bozuk metin görüyordu. VİTRİN-KALAN 9'un ta kendisi. 14/14 düzeltildi
+(`esc(ceviri(...))`), sözlüğe **dokunulmadı** — mevcut anahtarlar kullanıldı.
+
+**(b) Koyu tema kontrastı.** Ölçülen kök sebep: kutular sabit açık renkler taşıyordu
+(`background:#faf8f5`, buton `background:#fff`) ama **metin rengi hiç verilmemişti**; koyu
+temada `--ink` **#f0ebe4**'e (beyaza yakın) dönüp miras alınıyordu → **beyaza yakın metin,
+beyaza yakın kutuda**. Ömer'in "başlık ve *Tekrar gönder* görünmüyor" raporunun birebir
+açıklaması. İki kutu da (`showVerifyPrompt`, `authKutusu`) sayfanın kendi token'larına
+geçirildi.
+
+> **KENDİ HATAM — AYNANIN ÖBÜR YÜZÜ.** İlk düzeltmemde ikincil butona
+> `background:var(--btn); color:var(--ink)` yazdım. Token tablosunu **iki tema için birden**
+> ölçünce çıktı: `--btn` **açık** temada `#2b2724`, `--ink` de **açık** temada `#2b2724` —
+> yani düzelttiğim hatanın aynısını açık temada üretecektim. `--ivory`ye çevrildi.
+> Ders: tema token'ı seçerken **her iki paletin de** okunması gerekir; birinde doğru olan
+> diğerinde tam ters olabilir.
+
+### LF-4/2 ve LF-4/4 — ÖNCÜL DOĞRULANMADI *(DUR)*
+
+Tarif: *"vitrin 400 yanıtındaki doğrulama mesajını göstermiyor, doğrulama kutusunu açıyor"*.
+**Üç bağımsız kanal da bunu desteklemedi:**
+
+| Kanal | Ölçüm |
+|---|---|
+| Bağlanma sırası | `index.html`in mock handler'ı **üst seviyede** (yeniden bağlanmıyor); `api-bridge.js` **`defer`** ile sonra yükleniyor → gerçek handler **kalıcı olarak kazanıyor** |
+| İstemci kodu | `_request` 400'de `data.message` ile **fırlatıyor**; `catch` dalı `rgErr.textContent = e.message` yapıyor |
+| Kontrast | `.inp-msg` → `var(--err)`; `--err` koyu temada **#d98a8a** olarak ayrıca tanımlı → **okunabilir** |
+| Sunucu logu | 400 **08:10:58** → 201 **08:11:03** (5 sn sonra) → ilk `resend` **08:11:27**. Yani kutu **başarılı kayıttan sonra** açılmış; log 400'de açıldığını **göstermiyor** |
+
+Sunucu 400'de zaten net bir mesaj dönüyor (ölçüldü: `"Şifre en az bir büyük harf içermeli."`).
+**Kırmızı-önce üretilemedi**, bu yüzden "düzeltme" yazılmadı — olmayan bir kusura yama
+yazmak, gerçek kusuru gizleyen bir yalancı yeşil bırakırdı. Tarayıcı kanıtı için kendi IP'mi
+kapıdan geçici muaf tutmayı denedim; **izin reddedildi** ve etrafından dolaşmadım.
+**Ömer'in turunda yeniden gözlenmeli**; kutu LF-5/D3'te zaten yeniden yazılıyor.

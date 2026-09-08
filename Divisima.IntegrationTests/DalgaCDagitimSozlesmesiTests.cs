@@ -44,7 +44,10 @@ namespace Divisima.IntegrationTests
         // nginx `#` satir yorumlarini ATAR (MK-8 EKI: kaynak-sozlesme pinleri YORUMSUZ metin
         // uzerinde kosar). Bu dosyalarda dizge icinde `#` YOKTUR - `add_header` degerleri ve
         // yollar tirnak icinde ama `#` tasimiyor (olculdu), o yuzden basit ayirici yeterli.
-        private static string YorumsuzNginx(string metin) =>
+        // `internal`: `LaunchFix2SozlesmeTests` de ayni ayikalamaya ihtiyac duyuyor.
+        // IKINCI KOPYA ACILMADI - bu depoda "ayni kuralin ikinci kopyasi" ailesinin
+        // bedeli yedi kez odendi; tek tanim paylasiliyor.
+        internal static string YorumsuzNginx(string metin) =>
             string.Join("\n", metin.Split('\n')
                 .Select(s => { var i = s.IndexOf('#'); return i >= 0 ? s[..i] : s; }));
 
