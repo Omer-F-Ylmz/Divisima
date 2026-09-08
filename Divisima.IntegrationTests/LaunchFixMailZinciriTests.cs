@@ -224,6 +224,33 @@ namespace Divisima.IntegrationTests
                 "LF-5: dogrulama maili BAGLANTI TASIMAZ - kod maili tiklanacak bir sey icermez");
             mail.Body.Should().NotContain("#/dogrula/",
                 "eski dogrulama rotasi maile GERI GELMEMELI");
+
+            // ══ HALKAYI KAPATAN ASSERT - DALGA ICI DENETIM (baslik 6) BULGUSU ═══════════════
+            //
+            // BOZDUKLARIM karsilastirmasi bir BOSLUK gosterdi: eski pin "maildeki link O HESABIN
+            // GERCEK jetonunu tasiyor" diyordu, yani mail ile hesap arasindaki BAGI olcuyordu.
+            // Yerine konan `\d{6}` asserti yalniz BICIMI olcuyor - kayit yolu her hesaba AYNI
+            // sabit kodu gonderse ya da mailde BASKA bir hesabin kodunu yazsa pin YINE YESIL
+            // kalirdi. LF-5'in pin dosyasi da bu boslugu kapatmiyor: orasi bilinen bir kodun
+            // ozetini satira KENDISI yaziyor, yani KAYIT YOLUNUN urettigi kodu hic gormuyor.
+            //
+            // Bu assert halkayi kapatir: mailden okunan kod, GERCEK uctan O HESABI dogrular.
+            var kod = System.Text.RegularExpressions.Regex.Match(mail.Body, @"kodunuz: (\d{6})").Groups[1].Value;
+            kod.Should().HaveLength(6, "kod govdeden GERCEKTEN cikarilabilmeli");
+
+            var dogrula = await client.GetAsync(
+                "/api/auth/verify-email?email=" + Uri.EscapeDataString(eposta.ToLowerInvariant())
+                + "&code=" + kod);
+            dogrula.StatusCode.Should().Be(HttpStatusCode.OK,
+                "MAILDEKI kod, KAYIT yolunun sakladigi ozetle eslesmeli - mail ile hesap arasindaki BAG budur");
+
+            // VAKUM KIRICI: 200 yetmez, DB'de gercekten degisti mi?
+            await using (var ctx = NewContext())
+            {
+                var m = await ctx.Set<Customer>().AsNoTracking()
+                    .FirstAsync(c => c.email == eposta.ToLowerInvariant());
+                m.email_verified.Should().BeTrue("maildeki kod hesabi GERCEKTEN dogrulamali");
+            }
         }
 
         // ── A1(c) + A2: SIFRE SIFIRLAMA MAILI ────────────────────────────────────────────

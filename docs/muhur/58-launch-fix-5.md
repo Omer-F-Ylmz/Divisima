@@ -66,7 +66,7 @@ ilerlemezdi** — saldırgan istekleri paralel gönderip 5 deneme sınırını t
 
 ---
 
-## 4. PİNLER (7) ve MK-6 MUTASYONLARI
+## 4. PİNLER (8) ve MK-6 MUTASYONLARI
 
 Hepsi **davranış** pinidir: gerçek `Program` host'u + gerçek uç + gerçek SQL. `CustomWebApplicationFactory`
 **kullanılmadı** (Testcontainers → Docker ister, bu makinede yok); `AuthRateLimitPinTests`in
@@ -80,6 +80,7 @@ Docker'sız kalıbı izlendi.
 | **16** | register düz kodu DB'ye yazar | **0 KIRMIZI — PİN KÖRDÜ** |
 | **16b** | aynı mutasyon, pin sıkılaştırıldıktan sonra | 1 kırmızı — `DUZ_KOD_VERITABANINDA_SAKLANMAZ` |
 | **17** | doğrulanmış hesap dalı 200'e geri döndürüldü | 1 kırmızı — `DOGRULANMIS_HESAP_VARLIK_ORAKULU_DEGIL` |
+| **18** | register maile **taze bir kod** yazar (saklanandan farklı) | 1 kırmızı — `DogrulamaMaili_...` · LF-5'in 7 pini **YEŞİL KALDI** |
 
 ### 4.0 DALGA İÇİ DENETİMİN BULDUĞU KUSUR — **BU DALGA ÜRETTİ** (pin 7)
 
@@ -106,8 +107,10 @@ kayıt olmamış** bir adresin yanıtının **durum kodu VE gövde olarak eşit*
 vakum kırıcı olarak gövdenin gerçekten bir hata yanıtı olduğunu da doğrular.
 
 **BEDELİ (dürüst kayıt):** bulgu **push'tan SONRA** çıktı — dalga içi denetimi push'tan önce
-tamamlamam gerekirdi (CLAUDE.md: *"Denetim bulgu çıkarırsa PUSH BEKLER"*). Sonuç: bu dalga
-**tek push değil İKİ push** oldu. Kural ihlali bendedir, gizlenmiyor.
+tamamlamam gerekirdi (CLAUDE.md: *"Denetim bulgu çıkarırsa PUSH BEKLER"*). Aynı denetim, aynı
+sebeple bir **ikinci** bulgu daha üretti (§4.3, pin 8). Sonuç: tarif **tek push** diyordu, bu
+dalga **ÜÇ push** oldu. Kural ihlali bendedir, gizlenmiyor; kökü tek: **denetimi sıraya değil
+sonuna koydum.**
 
 **ÖLÜ YÜZEY (kayıt):** `Messages.EmailAlreadyVerified` artık **hiçbir yerden çağrılmıyor**
 (ölçüldü: kalan kullanım 0). Silinmedi — sabitler dosyasına dokunmak bu dalganın kapsamı
@@ -133,6 +136,29 @@ dosyayı kurup hem beklenti olan pin) **aynı ailesidir**: bir pin, ölçtüğü
 dönüyordu — yani "5 denemeyi aştı mı" kontrolü **her zaman geçiriyordu**. Derleyici bundan
 şikâyet etmez; yakalayan şey davranış piniydi. Yazan ve okuyan artık **tek tip** üzerinde
 anlaşıyor.
+
+---
+
+### 4.3 DENETİM BAŞLIK 6 ("BOZDUKLARIM") BİR KAPSAM BOŞLUĞU GÖSTERDİ (pin 8)
+
+Kırılan pin (`DogrulamaMaili_TIKLANABILIR_LINK_...`) üç şeyi koruyordu; ikisinin karşılığı
+kondu, **biri karşılıksız kaldı**:
+
+| Eski pin ne koruyordu | Yerine ne kondu |
+|---|---|
+| gövde beyan edilen vitrin origin'ini taşır | **daha güçlü**: `NotContain("http")` — hiç URL yok, yanlış origin riski de yok |
+| kullanıcı kodu **elle** girebilir | artık **TEK yol**; `\d{6}` + `DOGRU_KOD_200_DONER...` |
+| link **o hesabın GERÇEK** jetonunu taşır | **KARŞILIKSIZDI** ← boşluk |
+
+`\d{6}` yalnız **biçimi** ölçer: kayıt yolu her hesaba aynı sabit kodu gönderse ya da mailde
+başka bir hesabın kodunu yazsa pin yine **yeşil** kalırdı. LF-5'in kendi pin dosyası da bu
+boşluğu kapatmıyor — orası bilinen bir kodun özetini satıra **kendisi** yazıyor, yani kayıt
+yolunun ürettiği kodu **hiç görmüyor** (MUT-16'daki kendine-referanslılık ailesinin komşusu).
+
+**Kapatıldı:** mail gövdesinden okunan kod **gerçek uçtan o hesabı doğruluyor** (200 **ve**
+DB'de `email_verified` gerçekten `true` — vakum kırıcı). **MUT-18** ayırt edici: register
+maile taze bir kod yazacak şekilde bozulduğunda **yalnız bu pin** kırmızı verdi; LF-5'in
+yedi pini **yeşil kaldı** — yani boşluk gerçekti ve onu yalnız bu assert kapatıyor.
 
 ---
 
