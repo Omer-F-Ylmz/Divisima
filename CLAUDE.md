@@ -976,9 +976,15 @@ COMMIT'ten var, ACILMAMIS).
 3 K7 mesaj/NotEmpty ayrismasi (dort validator, regex AYNI metin FARKLI) · 4 BULGU-3 kalan
 bes satir · 5 `POPULAR_L` AR'da Turkce etiketler · 6 `showLegal` CMS (icerik isi, i18n degil) ·
 7 A-1 arama collation/`LOWER()` -> `42·GUVENLIK-AV-1 · A-1` · 8 A-2 -> `42·GUVENLIK-AV-1` ·
-9 `placeholder=ceviri("...")` ON DORT yerde dizge icinde, `ceviri(` CAGRILMIYOR ->
-`46·GUVENLIK-FIX-2a · SUPHE-6` · 10 anonim katalog yanitinda `Pragma: no-cache` +
-`Cache-Control: private, max-age=60` CELISKISI -> `47·GUVENLIK-FIX-3 · S3`.
+9 **KAPANDI (LF-4)** `placeholder=ceviri("...")` ON DORT yerde dizge icinde, `ceviri(`
+CAGRILMIYORDU; 14/14 duzeltildi (`esc(ceviri(...))`), sozluge dokunulmadi ·
+10 anonim katalog yanitinda `Pragma: no-cache` +
+`Cache-Control: private, max-age=60` CELISKISI -> `47·GUVENLIK-FIX-3 · S3` ·
+**11 (YENI, LF-5) DOGRULAMA KUTUSU METINLERI SABIT TR** - sozluk DOKUNULMAZ karari geregi
+`58·LF-5`te alti yeni metin ceviri ANAHTARI ALMADAN yazildi: "6 haneli kod" (placeholder) ·
+"6 haneli kodu gir." · "Tekrar gönder (N)" geri sayimi · "Doğrulama başarısız." ·
+"E-posta doğrulama" (emekli rota basligi) · eski baglanti ekraninin iki cumlesi.
+EN/AR kullanicisi bu alti metni TURKCE gorur.
 
 ## ERTELENMIS-DEFTER (acilmaz; baslik + atif)
 
