@@ -73,6 +73,7 @@ onlari bayatlatmaz. Okuma usulu: CLAUDE.md B0 · MK-11 (b).
 | 57 | `57-launch-deploy.md` | # 57 · LAUNCH-DEPLOY-1 (LD-1) — SUNUCU KURULUMU | — | 28494 | yeni usul |
 | 58 | `58-launch-fix-5.md` | # 58 · LAUNCH-FIX-5 (LF-5) — E-POSTA DOĞRULAMA = 6 HANELİ KOD | — | 19483 | yeni usul |
 | 59 | `59-skill-ops.md` | # 59 · SKILL-OPS — IKI PROJE SKILL'I (`ops` · `vitrin`) | — | 9178 | yeni usul |
+| 60 | `60-monitoring.md` | # 60 · MON-1 — İZLEME VE ALARM (launch öncesi, kod + ops) | — | 8708 | yeni usul |
 
 **AD CAKISMASI UYARISI:** bu dosya **GF-3 (Eylul 2026)** dalgasinindir. Depoda ayrica
 **GUVENLIK-FIX-3 (Agustos 2026)** vardir ve onun pinleri `GuvenlikFix3SozlesmeTests.cs`

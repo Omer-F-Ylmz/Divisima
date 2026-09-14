@@ -843,6 +843,9 @@ kesilenler) ve `41·ARSIV-1`; ikisi de BAYT-SABIT (MK-11/d), bu tur DOKUNMADI.
 
 ## KAPANANLAR (son uc dalga; oncekiler `docs/muhur/INDEX.md` ile cozulur)
 
+- **MON-1 IZLEME VE ALARM `6d1b015`/60** — `security_events` otomatik okuyucusu (Hangfire */5,
+  outbox maili) · watchdog (3 tur -> mail + tek restart) · 07:00 UTC gunluk ozet. Uc canli kabul
+  uretimde; **log volume 7 gun YAZILAMAZDI** (Dockerfile `mkdir`, olculdu). Sql 438/438 · tam 890/893.
 - **LF-1 DAGITIM ARTEFAKTLARI + LAUNCH GO /56** — uc dagitim blokeri (BL-1/BL-2/BL-3) kapandi;
   **17 mutasyon**, uc ardisik tam dogrulama birebir (Sql 415/415 · tam 826/829, uc kirmizi =
   bilinen Docker uclusu). **GITLEAKS YERELDE OLCEMEDIM** (kurulu degil + Docker yok) — olcut
@@ -899,7 +902,7 @@ sablonu + `docker-compose.prod.yml` · BL-3 olay tipi 12 -> 14 + alarm tablosu. 
 istisna T4-F2 (`55·GF-6` 5.1) DEGISMEDI. **Dagitim sarti:** `ops/deployment-checklist.md`in
 20 sirali IRL adimi (9. `Cookies:Domain` ve 18. `BackgroundJobs:Enabled=true` ATLANAMAZ) +
 **GUNLUK `PaymentAfterTerminal`/`Critical` SQL sorgusu** (o olayin SIEM okuyucusu YOK,
-SignalR `"admins"` grubu BOS — tek okuyucu elle sorgu).
+SignalR `"admins"` grubu BOS — **MON-1 sonrasi: alarm maili + SQL YEDEK kanal**, `60`).
 
 1. **GF-7 (LAUNCH SONRASI) — ILK KALEM T4-F2** (rowversion migration; gerekce ve tetikleyici
    `55·GF-6` bolum 5.1). Sonra: AV-3'un 6b/6c/6d kalani + olu/yaniltici yuzey grubu
@@ -944,6 +947,7 @@ KAPALI kalem yeni bulguyu BASTIRMAZ.** Tam metinler:
   musteri `status=review` ekrani gorur; metin BASLATILDIGI iddiasini TASIMAZ - F6) ·
   **`health` uclari BILINCLI anonim**
   (`AllowAnonymous` ISARETLI — orkestratör probe'lari kimlik tasimaz, **BAGLAYICI**).
+- **`60·MON-1`** — DURUM sutunlu yedi kalem; **Y1 LATENT: RCSI acilirsa alarm kaybi** (uretimde kapali).
 - **`57·LAUNCH-DEPLOY-1`** — uc kalem, ucu de **BAGLAYICI/ACIK**: **SQL Server EXPRESS**
   (lisans karari sirket sahibinin; 10 GB sinir bugunku hacim icin uzak. **TDE YOK** →
   runbook'un "yedekler sifreli" maddesi **yedek DOSYASI** duzeyinde karsilandi: `age` ile

@@ -123,7 +123,10 @@ cd /opt/divisima
 grep -cE '^DIVISIMA_ALARM_EMAIL=[^#]*@' .env               # -> 1 (boş, "", '', yalnız boşluk ve yorumdaki @ 0 verir; değer BASILMAZ)
 install -m 644 ops/monitoring/divisima-monitoring.cron /etc/cron.d/divisima-monitoring
 install -m 644 ops/monitoring/logrotate-divisima-monitoring /etc/logrotate.d/divisima-monitoring
-logrotate -d /etc/logrotate.d/divisima-monitoring           # hata yok
+logrotate -d /etc/logrotate.conf 2>&1 | grep -i error | grep -c divisima   # -> 0
+# DIKKAT: `logrotate -d /etc/logrotate.d/divisima-monitoring` (tek dosya) "insecure permissions"
+# HATASI verir - /var/log 775 root:syslog ve genel `su root adm` satiri yalniz ana conf'ta.
+# Gunluk timer ana conf'u okur; MON-1 canli olcumunde ana conf yolunda hata 0.
 bash ops/monitoring/daily-report.sh                         # -> gelen kutusunda özet GELDİ
 ```
 
