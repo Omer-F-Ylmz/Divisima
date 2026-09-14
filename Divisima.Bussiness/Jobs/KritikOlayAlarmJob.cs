@@ -28,8 +28,12 @@ namespace Divisima.Bussiness.Jobs
     //
     // YERLESME PAYI: imlec id uzerinden ilerler; identity degeri INSERT aninda ayrilir ama satir
     // COMMIT'te gorunur. Acik bir transaction'daki dusuk id, daha buyuk id'li satir islenip imlec
-    // onu gectikten SONRA gorunurse KALICI olarak kacardi. Bu yuzden yalniz `created_at` payindan
-    // eski satirlar okunur. Kalan sinir: payindan uzun acik kalan transaction'in satiri kacar.
+    // onu gectikten SONRA gorunurse KALICI olarak kacardi. Bu yuzden `created_at` payindan eski
+    // satirlar islenir. Kalan sinir: payindan uzun acik kalan transaction'in satiri kacar.
+    //
+    // KESINTISIZ ONEK (MON-1 tur 2, L3/B1 REPRO'SU): imlec yalniz id sirasindaki YERLESMIS onek
+    // kadar ilerler; ilk taze satirda durur. Ilk yazim zaman filtreli okuyup EN BUYUK id'ye
+    // atliyordu - kucuk id'li taze satir, buyuk id'li yerlesmis satirla ayni turda KALICI kaciyordu.
     public class KritikOlayAlarmJob
     {
         public const string KonuOneki = "Divisima ALARM";
@@ -62,6 +66,23 @@ namespace Divisima.Bussiness.Jobs
         // Donus: bu turda yazilan alarm maili sayisi (0/1).
         public async Task<int> RunAsync()
         {
+            var kesim = DateTime.Now - YerlesmePayi;
+            var imlec = await _imlec.OkuAsync();
+            if (imlec == null)
+            {
+                // ILK KOSUM: taban kurulur, GECMIS bildirilmez (dagitimdan onceki olcum/test
+                // olaylari tek bir anlamsiz alarm uretirdi). Gecmis icin gunluk SQL sorgusu durur.
+                // ALICI KONTROLUNDEN ONCE (L3/B2 REPRO'SU): taban DAGITIM ANINDA kurulur. Ilk
+                // yazimda alici bosken kurulmuyordu; alici verildigi ilk tur tabani O AN kurup
+                // arada biriken Critical'lari YUTUYORDU.
+                var enSon = await _olayDal.GetPagedAsync(new PagingRequestDto { page = 1, size = 1 },
+                    e => e.created_at <= kesim, e => e.id, descending: true);
+                var taban = enSon.Items.Count == 0 ? 0 : enSon.Items[0].id;
+                await _imlec.YazAsync(taban);
+                _logger.LogInformation("MON-1 alarm imleci ilk kez kuruldu: {Taban}", taban);
+                return 0;
+            }
+
             var alici = _config[AliciAnahtari]?.Trim();
             if (string.IsNullOrWhiteSpace(alici))
             {
@@ -71,34 +92,23 @@ namespace Divisima.Bussiness.Jobs
                 return 0;
             }
 
-            var kesim = DateTime.Now - YerlesmePayi;
-            var imlec = await _imlec.OkuAsync();
-            if (imlec == null)
-            {
-                // ILK KOSUM: taban kurulur, GECMIS bildirilmez (dagitimdan onceki olcum/test
-                // olaylari tek bir anlamsiz alarm uretirdi). Gecmis icin gunluk SQL sorgusu durur.
-                var enSon = await _olayDal.GetPagedAsync(new PagingRequestDto { page = 1, size = 1 },
-                    e => e.created_at <= kesim, e => e.id, descending: true);
-                var taban = enSon.Items.Count == 0 ? 0 : enSon.Items[0].id;
-                await _imlec.YazAsync(taban);
-                _logger.LogInformation("MON-1 alarm imleci ilk kez kuruldu: {Taban}", taban);
-                return 0;
-            }
-
             var sonIslenen = imlec.Value;
-            var yeni = await _olayDal.GetListNoTrackingAsync(e =>
-                e.id > sonIslenen && e.created_at <= kesim && IzlenenTipler.Contains(e.event_type));
+            var adaylar = await _olayDal.GetListNoTrackingAsync(e =>
+                e.id > sonIslenen && IzlenenTipler.Contains(e.event_type));
+            var yeni = adaylar.OrderBy(e => e.id).TakeWhile(e => e.created_at <= kesim).ToList();
             if (yeni.Count == 0) return 0;
 
-            var yeniImlec = yeni.Max(e => e.id);
+            var yeniImlec = yeni[^1].id;
             var kritikSayisi = yeni.Count(e => e.severity == "Critical");
             var yazilan = 0;
             if (kritikSayisi > 0)
             {
+                // KONU TABLOYLA AYNI KUMEYI SAYAR (L3/B5): toplam = tablodaki satir sayilarinin
+                // toplami; kritik alt sayi parantezde.
                 await _outbox.WriteAsync("EmailNotification", new MailMessageDto
                 {
                     To = alici,
-                    Subject = $"{KonuOneki} - {kritikSayisi} kritik güvenlik olayı",
+                    Subject = $"{KonuOneki} - {yeni.Count} güvenlik olayı ({kritikSayisi} kritik)",
                     Body = KanitMaskesi.Maskele(Govde(yeni, sonIslenen, yeniImlec, kritikSayisi))!,
                 });
                 yazilan = 1;

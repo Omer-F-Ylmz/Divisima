@@ -7,7 +7,7 @@
 #
 # OLCUMLER:
 #   D3 disk      : kok dosya sistemi doluluk yuzdesi                (esik DISK_ESIK, %85)
-#   D3 DB boyutu : DivisimaDb veri dosyalari (.mdf/.ndf) toplam MB  (esik DB_ESIK_MB, 8192;
+#   D3 DB boyutu : Divisima* veri dosyalari (.mdf/.ndf) toplam MB   (esik DB_ESIK_MB, 8192;
 #                  Express siniri 10 GB VERI dosyasi icindir, log dosyasi sayilmaz)
 #   D3 konteyner : projede calismayan ya da unhealthy konteyner
 #   D3 yedek     : bugun (UTC) uretilmis sifreli yedek (divisima-*.bak.age)
@@ -22,6 +22,7 @@ COMPOSE_PROJE=${COMPOSE_PROJE:-divisima}
 DISK_ESIK=${DISK_ESIK:-85}
 DB_ESIK_MB=${DB_ESIK_MB:-8192}
 DB_VERI_DIZIN=${DB_VERI_DIZIN:-/var/lib/docker/volumes/${COMPOSE_PROJE}_mssql_data/_data/data}
+DB_DOSYA_ONEKI=${DB_DOSYA_ONEKI:-Divisima}
 LOG_DIZIN=${LOG_DIZIN:-/var/lib/docker/volumes/${COMPOSE_PROJE}_logs_data/_data}
 YEDEK_DIZIN=${YEDEK_DIZIN:-/var/backups/divisima}
 YEDEK_DESEN=${YEDEK_DESEN:-divisima-*.bak.age}
@@ -44,7 +45,8 @@ fi
 
 # D3 - DB veri dosyasi boyutu
 if [ -d "$DB_VERI_DIZIN" ]; then
-    db_bayt=$(find "$DB_VERI_DIZIN" -maxdepth 1 -type f \( -iname 'DivisimaDb*.mdf' -o -iname 'DivisimaDb*.ndf' \) -printf '%s\n' 2>/dev/null \
+    # Ad CANLIDA olculdu: Divisima.mdf (+ Divisima_log.ldf). master/model/msdb ayni dizinde, sayilmaz.
+    db_bayt=$(find "$DB_VERI_DIZIN" -maxdepth 1 -type f \( -iname "$DB_DOSYA_ONEKI*.mdf" -o -iname "$DB_DOSYA_ONEKI*.ndf" \) -printf '%s\n' 2>/dev/null \
         | awk '{ t += $1; n++ } END { if (n) printf "%d", t }')
 fi
 if [ -z "${db_bayt:-}" ]; then
@@ -83,8 +85,14 @@ fi
 
 # D4 - son 24 saatin ERR/FTL sayisi. Serilog DosyaSablonu: "yyyy-MM-dd HH:mm:ss.fff zzz [LVL] ..."
 # Zaman damgasi konteyner yerel saatidir (UTC); kesim de UTC. Yalniz son 48 saatte
-# degismis dosyalar okunur (30 dosyalik saklama tamamen taranmaz).
-if [ -d "$LOG_DIZIN" ]; then
+# degismis dosyalar okunur (14 gunluk saklamanin tamami taranmaz).
+taze_log=0
+[ -d "$LOG_DIZIN" ] && taze_log=$(find "$LOG_DIZIN" -maxdepth 1 -type f -name 'divisima-*.log' -mmin -2880 2>/dev/null | wc -l)
+if [ -d "$LOG_DIZIN" ] && [ "$taze_log" -eq 0 ]; then
+    # Dizin var ama son 48 saatte yazilmis dosya yok: sayim "0" DEGIL, OLCULEMEDI. Uygulama hic log
+    # yazmiyorsa (MON-1'de canlida olculdu: volume root:root, Serilog 7 gun yazamadi) tek isaret budur.
+    sorun_ekle "API log: son 48 saatte log dosyasi YOK ($LOG_DIZIN) - hata sayimi OLCULEMEDI"
+elif [ -d "$LOG_DIZIN" ]; then
     kesim=$(date -u -d '24 hours ago' '+%Y-%m-%d %H:%M:%S')
     sayim=$(find "$LOG_DIZIN" -maxdepth 1 -type f -name 'divisima-*.log' -mmin -2880 -print0 2>/dev/null \
         | xargs -0 -r cat 2>/dev/null \

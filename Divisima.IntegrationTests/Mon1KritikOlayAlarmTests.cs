@@ -192,6 +192,77 @@ namespace Divisima.IntegrationTests
             imlec.Deger!.Value.Should().BeGreaterThanOrEqualTo(gecmis);
         }
 
+        // ══ L3 / B1 - IMLEC YALNIZ YERLESMIS KESINTISIZ ID ONEKINE KADAR ILERLER ═════════════
+        // ONCEKI HAL (REPRO olculdu): okuma zaman filtreliydi, imlec en buyuk id'ye atliyordu.
+        // Kucuk id'li TAZE satir + buyuk id'li yerlesmis satir ayni turda: buyuk islenir, imlec
+        // onu gecer, kucuk satir BIR DAHA OKUNMAZ.
+        [Fact]
+        public async Task B1_KUCUK_IDLI_TAZE_SATIR_BUYUK_IDLI_YERLESMIS_SATIRLA_KAYBOLMAZ()
+        {
+            if (Skipped()) return;
+            var alici = YeniAlici();
+            var imlec = new BellekImleci();
+            await KosAsync(imlec, alici);
+            var taban = imlec.Deger;
+
+            var taze = await OlayYazAsync("AccountLocked", "Critical", zaman: DateTime.Now);
+            var yerlesmis = await OlayYazAsync("RefreshTokenReuse", "Critical");
+
+            await KosAsync(imlec, alici);
+            imlec.Deger.Should().Be(taban, "onekin ILK satiri taze - imlec onu (ve arkasindakileri) GECMEMELI");
+
+            await using (var ctx = NewContext())
+                await ctx.Set<SecurityEvent>().Where(e => e.id == taze)
+                    .ExecuteUpdateAsync(s => s.SetProperty(e => e.created_at, Yerlesmis));
+
+            (await KosAsync(imlec, alici)).Should().Be(1, "pay dolunca iki olay TEK ozette bildirilir");
+            var govde = (await AlarmMailleriAsync(alici)).Single().Body;
+            govde.Should().Contain($"AccountLocked | 1 | {taze}", "kucuk id'li satir KAYBOLMAMALI");
+            govde.Should().Contain($"RefreshTokenReuse | 1 | {yerlesmis}");
+            imlec.Deger.Should().Be(yerlesmis);
+        }
+
+        // ══ L3 / B2 - TABAN ALICI KONTROLUNDEN ONCE KURULUR ═══════════════════════════════════
+        // ONCEKI HAL (REPRO olculdu): imlec yokken alici bossa taban KURULMUYORDU; alici verildigi
+        // ilk tur tabani O AN kurup arada biriken Critical'lari yutuyordu.
+        [Fact]
+        public async Task B2_ALICI_BOSKEN_TABAN_KURULUR_ARADA_BIRIKEN_CRITICAL_ALICI_VERILINCE_GIDER()
+        {
+            if (Skipped()) return;
+            var alici = YeniAlici();
+            var imlec = new BellekImleci();
+
+            (await KosAsync(imlec, "")).Should().Be(0);
+            imlec.Deger.Should().NotBeNull("dagitim ani tabani alicidan BAGIMSIZ kurulmali");
+
+            var bekleyen = await OlayYazAsync("PaymentAfterTerminal", "Critical");
+            (await KosAsync(imlec, "")).Should().Be(0, "alici hala bos");
+
+            (await KosAsync(imlec, alici)).Should().Be(1, "alici verilince arada biriken Critical GITMELI");
+            (await AlarmMailleriAsync(alici)).Single().Body.Should().Contain($"PaymentAfterTerminal | 1 | {bekleyen}");
+        }
+
+        // ══ L3 / B5 - KONU SATIRI TABLOYLA AYNI KUMEYI SAYAR ══════════════════════════════════
+        [Fact]
+        public async Task B5_KONU_TABLODAKI_TOPLAMI_ve_KRITIK_ALT_SAYISINI_TASIR()
+        {
+            if (Skipped()) return;
+            var alici = YeniAlici();
+            var imlec = new BellekImleci();
+            await KosAsync(imlec, alici);
+            await OlayYazAsync("AccountLocked", "Critical");
+            await OlayYazAsync("PaymentSignatureInvalid", "Warning");
+            await OlayYazAsync("PaymentSignatureInvalid", "Warning");
+
+            (await KosAsync(imlec, alici)).Should().Be(1);
+            var mail = (await AlarmMailleriAsync(alici)).Single();
+            var tabloToplami = Regex.Matches(mail.Body, @"^\w+ \| (\d+) \| ", RegexOptions.Multiline)
+                .Sum(m => int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture));
+            tabloToplami.Should().Be(3, "vakum kirici: tablo iki satir, toplam 3");
+            mail.Subject.Should().Be("Divisima ALARM - 3 güvenlik olayı (1 kritik)",
+                "konudaki sayi tablonun saydigi AYNI kume olmali; kritik alt sayi ayrica gorunur");
+        }
+
         // Kalici imlec: GERCEK Hangfire SQL deposu, IKI ayri depo ornegi ("yeniden baslatma").
         [Fact]
         public async Task HANGFIRE_IMLECI_YENI_DEPO_ORNEGINDE_KORUNUR()

@@ -21,7 +21,7 @@
 
 | Konu | Anlamı |
 |---|---|
-| `Divisima ALARM - N kritik güvenlik olayı` | D1 |
+| `Divisima ALARM - N güvenlik olayı (K kritik)` | D1 (N = tablodaki toplam, K ≥ 1) |
 | `Divisima ALARM - API sağlık kontrolü başarısız` | D2: 3. ardışık hata, **tek** yeniden başlatma denendi |
 | `Divisima ALARM - API hâlâ erişilemiyor` | D2: aynı kesinti sürüyor, saatte bir; yeniden başlatma **yok** |
 | `Divisima ALARM ÇÖZÜLDÜ - API normale döndü` | D2: kesinti bitti |
@@ -42,9 +42,9 @@
   **taşımaz** — outbox payload'ı DB'de düz durur ve mail üçüncü taraf sağlayıcıdan geçer.
 - **İmleç** Hangfire deposundaki `divisima:kritik-olay-alarm` hash'inde (`son_id`). Migration yok;
   uygulama yeniden başlayınca kaybolmaz.
-- **İlk koşum** tabanı kurar, geçmişi bildirmez.
-- **Yerleşme payı 60 sn:** henüz commit'i yerleşmemiş olabilecek satır o turda okunmaz, bir sonraki
-  turda okunur. Gecikme bütçesi: olay → en geç ~5 dk (tur) + 1 dk (pay) + 1 dk (outbox) + SMTP.
+- **İlk koşum** tabanı kurar (alıcı boş olsa bile), geçmişi bildirmez.
+- **Yerleşme payı 60 sn:** imleç id sırasındaki **yerleşmiş kesintisiz önek** kadar ilerler; ilk taze
+  satırda durur, arkasındakiler bir sonraki turda okunur. Gecikme bütçesi: olay → en geç ~5 dk (tur) + 1 dk (pay) + 1 dk (outbox) + SMTP.
 - **Alıcı boşsa** mail yazılmaz, imleç **ilerlemez** (alıcı verilince bekleyenler gider) ve her tur
   `MON-1 ALARM KANALI KAPALI` **ERROR** logu düşer → günlük özetin ERROR sayısında görünür.
 - **Sınır (dürüst kayıt):** 60 sn'den uzun açık kalan bir transaction'ın satırı kaçabilir.
@@ -59,7 +59,10 @@
 - 3. ardışık hatada: `docker compose ... restart api` **bir kez** + alarm maili.
 - Aynı kesintide yeniden başlatma **tekrarlanmaz**; her 12 turda (1 saat) bir uyarı gider.
   Gerekçe: kök sebep DB/disk ise döngüsel restart hiçbir şeyi çözmez, logları kaydırır.
-- İlk 200'de "ÇÖZÜLDÜ" maili, sayaç sıfırlanır.
+- Eşiğe (3 tur) ulaşmış bir kesintiden sonraki ilk 200'de "ÇÖZÜLDÜ" maili gider; eşiğe ulaşmamış
+  (1-2 turluk) kesintide mail gitmez. Her 200'de sayaç sıfırlanır.
+- Restart tek compose dosyasıyla (`-f docker-compose.prod.yml`) yapılır: sunucuda ölçüldü, tek dosya
+  ile prod+db çifti **aynı** konteyneri çözer (proje adı `divisima`).
 - Durum: `/var/lib/divisima-monitoring/watchdog.state` · Log: `/var/log/divisima-watchdog.log`
   (logrotate: haftalık, 8 hafta).
 
@@ -68,26 +71,30 @@
 | Kalem | Ölçüm | Eşik (ortamdan ezilir) |
 |---|---|---|
 | Disk | `df -P /` doluluk % | `DISK_ESIK=85` |
-| DB veri dosyası | `DivisimaDb*.mdf/.ndf` toplamı (volume yolu) — **log dosyası sayılmaz**, Express'in 10 GB sınırı veri dosyası içindir | `DB_ESIK_MB=8192` |
+| DB veri dosyası | `Divisima*.mdf/.ndf` toplamı (volume yolu; ad canlıda ölçüldü: `Divisima.mdf`) — **log dosyası sayılmaz**, Express'in 10 GB sınırı veri dosyası içindir | `DB_ESIK_MB=8192` |
 | Konteyner | compose projesinde `running` olmayan ya da `(unhealthy)` | — |
 | Yedek | bugün (UTC) değişmiş `divisima-*.bak.age` | ≥ 1 |
 | Hata | son 48 saatte değişmiş `divisima-*.log` dosyalarında, son 24 saatin `[ERR]`/`[FTL]` satırları | bilgi |
 
-**Ölçülemeyen kalem SORUN sayılır** — dizin yoksa "normal" yazılmaz.
+**Ölçülemeyen kalem SORUN sayılır** — dizin yoksa ya da son 48 saatte log dosyası yoksa "normal"
+yazılmaz.
 
-### Serilog dosya saklaması (D4 ölçümü)
+### Serilog dosya saklaması (D4)
 
 `Program.cs` File sink: günlük rotasyon + **100 MB'da parçala** (`rollOnFileSizeLimit`) ·
-**`retainedFileCountLimit: 30`** · `logs_data` volume'ünde. Tarifin "14 gün" hedefi **uygulanmadı**:
-saklama **zaten tanımlı** (tarif "yoksa ayarlanır" diyordu) ve 30 değeri DALGA C / C4 kararıdır.
-**Dikkat:** sınır **dosya** sayısıdır, gün değil — 100 MB'ı aşan gürültülü bir gün birden çok
-parça üretir ve daha eski günleri erken siler. Disk üst sınırı ~3 GB'tır.
+**14 günlük zaman sınırı** (`retainedFileTimeLimit`, sayı sınırı yok) · `logs_data` volume'ünde.
+Önceki değer 30 **dosyaydı** (gün değil); kullanıcı kararıyla MON-1'de değişti.
+
+> **MON-1 CANLI BULGUSU:** volume 7 gün boyunca **0 dosya**ydı — Dockerfile `/app/logs`'u yaratmıyordu,
+> volume root:root doğdu ve `USER divisima` yazamadı (SESSİZ). Dockerfile düzeltildi; var olan
+> volume için tek seferlik `chown` dağıtım kaydında. Günlük özetin "son 48 saatte log dosyası YOK"
+> satırı tam bu durumu yakalar.
 
 ## 5. Kurulum (sunucuda, bir kez) ve "kanal çalışıyor mu" kanıtı
 
 ```bash
 cd /opt/divisima
-grep -c '^DIVISIMA_ALARM_EMAIL=' .env                      # -> 1 (değer BASILMAZ)
+grep -c '^DIVISIMA_ALARM_EMAIL=.' .env                     # -> 1 (boş değer 0 verir; değer BASILMAZ)
 install -m 644 ops/monitoring/divisima-monitoring.cron /etc/cron.d/divisima-monitoring
 install -m 644 ops/monitoring/logrotate-divisima-monitoring /etc/logrotate.d/divisima-monitoring
 logrotate -d /etc/logrotate.d/divisima-monitoring           # hata yok

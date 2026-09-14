@@ -206,6 +206,53 @@ namespace Divisima.IntegrationTests
             File.Exists(T("curl.args")).Should().BeFalse("alici yokken SMTP'ye gidilmez");
         }
 
+        // ══ L3 / B4 - .env AYRISTIRMASI COMPOSE ILE AYNI DEGERI URETIR ═══════════════════════
+        // Beklenen degerler BELGEDEN DEGIL, sunucuda `docker compose config` (v5.5.1) ile olculdu:
+        // `x # yorum`->`x` · sondaki bosluk kesilir · tirnak ici `#` korunur, tirnak sonrasi yorum
+        // atilir · `a#b` (bosluksuz) korunur · tek tirnak + sondaki bosluk -> tirnak ici.
+        // ONCEKI HAL: satir-ici yorum ve sondaki bosluk degerde KALIYORDU - uygulama maili
+        // giderken sunucu betiklerinin maili yanlis host/alici ile duserdi.
+        [Fact]
+        public void B4_ENV_SATIR_ICI_YORUM_ve_SONDAKI_BOSLUK_COMPOSE_GIBI_AYRISTIRILIR()
+        {
+            var ortam = MailOrtami(
+                "DIVISIMA_SMTP_HOST=smtp.ornek.test   \n" +
+                "DIVISIMA_SMTP_USER='u@ornek.test'   \n" +
+                "DIVISIMA_SMTP_PASSWORD=a#b\n" +
+                "DIVISIMA_SMTP_FROM=\"Divisima # <no-reply@divisima.net>\" # gonderen\n" +
+                "DIVISIMA_ALARM_EMAIL=alici@ornek.test # ops ekibi\n");
+
+            var (kod, cikti) = Kos("alarm-mail.sh", ortam, "Divisima ALARM - deneme");
+            kod.Should().Be(0, cikti);
+
+            var argumanlar = Oku("curl.args").Split('\n');
+            argumanlar.Should().Contain("smtp://smtp.ornek.test:587", "sondaki bosluk kesilmeli");
+            argumanlar.Should().Contain("alici@ornek.test", "` # ops ekibi` yorumu degere GIRMEMELI");
+            Oku("curl.config").Should().Contain("user = \"u@ornek.test:a#b\"",
+                "tek tirnak soyulur, bosluksuz `#` DEGERIN parcasidir");
+            Oku("curl.stdin").Should().Contain("From: Divisima # <no-reply@divisima.net>\n",
+                "tirnak icindeki `#` korunur, kapanan tirnaktan sonraki yorum atilir");
+        }
+
+        // ══ L3 / B3 - LOG DIZINI VAR AMA DOSYA YOK = OLCULEMEDI ═══════════════════════════════
+        // ONCEKI HAL: son 48 saatte dosya yoksa "ERROR 0 · FATAL 0" + normal konu. Canli sunucuda
+        // tam bu durum olculdu (volume 7 gundur BOS - Serilog yazamiyordu).
+        [Fact]
+        public void B3_LOG_DIZINI_VAR_AMA_TAZE_DOSYA_YOKSA_SORUN_SAYILIR()
+        {
+            var ortam = OzetOrtami("divisima-api-1 running Up 2 hours (healthy)\n");
+            Directory.CreateDirectory(T("bos-log"));
+            File.WriteAllText(T("bos-log/divisima-20200101.log"), "2020-01-01 00:00:00.000 +00:00 [ERR] cok eski\n");
+            File.SetLastWriteTimeUtc(T("bos-log/divisima-20200101.log"), new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+            ortam["LOG_DIZIN"] = BashYolu(T("bos-log"));
+
+            Kos("daily-report.sh", ortam);
+            var mail = Oku("mail.calls");
+            mail.Should().Contain("KONU=Divisima ALARM - günlük özet: 1 sorun");
+            mail.Should().Contain("[SORUN] API log:", "taze log dosyasi yokken hata sayimi OLCULEMEZ");
+            mail.Should().NotContain("ERROR 0 · FATAL 0", "olculemeyen kalem sifir diye raporlanmaz");
+        }
+
         private Dictionary<string, string> OzetOrtami(string dockerCiktisi)
         {
             Stub("df", "printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n/dev/sda1 100 42 58 42%% /\\n'");
@@ -215,8 +262,12 @@ namespace Divisima.IntegrationTests
             Directory.CreateDirectory(T("db"));
             Directory.CreateDirectory(T("log"));
             Directory.CreateDirectory(T("yedek"));
-            File.WriteAllBytes(T("db/DivisimaDb.mdf"), new byte[3 * 1024 * 1024]);
-            File.WriteAllBytes(T("db/DivisimaDb_log.ldf"), new byte[5 * 1024 * 1024]);  // log dosyasi SAYILMAZ
+            // Dosya adlari CANLI SUNUCUDAN olculdu (Divisima.mdf / Divisima_log.ldf). Ilk yazimdaki
+            // "DivisimaDb*.mdf" varsayimi uretimde OLCULEMEDI uretirdi ve pin onu gorebilecek
+            // girdiye sahip degildi - kurgu gercek addan kurulur.
+            File.WriteAllBytes(T("db/Divisima.mdf"), new byte[3 * 1024 * 1024]);
+            File.WriteAllBytes(T("db/Divisima_log.ldf"), new byte[5 * 1024 * 1024]);  // log dosyasi SAYILMAZ
+            File.WriteAllBytes(T("db/master.mdf"), new byte[2 * 1024 * 1024]);        // baska veritabani SAYILMAZ
             File.WriteAllBytes(T("yedek/divisima-bugun.bak.age"), new byte[1]);
 
             var simdi = DateTime.UtcNow;
@@ -281,7 +332,10 @@ namespace Divisima.IntegrationTests
         [Fact]
         public void SMTP_VARSAYILANLARI_ALICI_ANAHTARI_CRON_ve_LOGROTATE_TEK_KAYNAKLA_UYUMLU()
         {
-            string Oku2(string yol) => File.ReadAllText(Path.Combine(Kok.Value, yol));
+            // MUT-20 DERSI (MK-8 EKI): ilk yazim ham metinde ariyordu; `#` ile KAPATILMIS cron
+            // satiri pini yesil birakti (0 kirmizi). Tum dosyalar `#` yorum satirlari ayiklanarak okunur.
+            string Oku2(string yol) => string.Join("\n", File.ReadAllText(Path.Combine(Kok.Value, yol)).Split('\n')
+                .Where(s => !s.TrimStart().StartsWith('#')));
             var compose = Oku2("docker-compose.prod.yml");
             var mail = Oku2("ops/monitoring/alarm-mail.sh");
 

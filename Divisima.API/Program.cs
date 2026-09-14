@@ -277,6 +277,7 @@ var builder = WebApplication.CreateBuilder(args);
 // SESSIZCE kaymasin:
 //   - gunluk dosya + 100 MB'da PARCALA (rollOnFileSizeLimit) -> yazma ASLA sessizce durmaz
 //   - 30 gun saklama -> DataRetentionJob'un outbox penceresiyle ayni buyukluk
+//     (MON-1: 14 GUNLUK ZAMAN sinirina cekildi - kullanici karari, gerekce File cagrisinda)
 //   - shared: false (varsayilan) korunur - tek surec yaziyor
 // ══ GF-5 / K6 - HER IKI SINK DE MASKELI FORMATTER'DAN GECER ═══════════════════════════════
 // Gerekce ve olculen kanit `Divisima.API.Logging.MaskeliFormatter`in basinda. Ozet: sizan
@@ -284,7 +285,7 @@ var builder = WebApplication.CreateBuilder(args);
 // metni), dolayisiyla cagri-yeri maskesi YAPISAL OLARAK yetmiyordu.
 // C4 SAKLAMA PARAMETRELERI KAYBOLMADI: `File`in ITextFormatter alan asiri yuklemesi
 // rollingInterval + rollOnFileSizeLimit + fileSizeLimitBytes + retainedFileCountLimit'in
-// HEPSINI tasiyor; asagidaki dort deger K6 oncesiyle BIREBIR ayni.
+// HEPSINI tasiyor; asagidaki dort deger K6 oncesiyle BIREBIR ayni (saklama MON-1'de degisti).
 builder.Host.UseSerilog((ctx, cfg) => cfg
     .ReadFrom.Configuration(ctx.Configuration)
     .Enrich.FromLogContext()
@@ -296,7 +297,11 @@ builder.Host.UseSerilog((ctx, cfg) => cfg
         rollingInterval: RollingInterval.Day,
         rollOnFileSizeLimit: true,
         fileSizeLimitBytes: 100L * 1024 * 1024,
-        retainedFileCountLimit: 30));
+        // MON-1 (kullanici karari): saklama 14 GUN, dosya sayisi DEGIL. Sayi siniri (eski 30)
+        // 100 MB parcalariyla gun sayisinden kopuyordu: gurultulu bir gun eski gunleri erken
+        // silebiliyordu. Serilog.Sinks.File 5.0.0 bu parametreyi tasiyor (paket imzasi olculdu).
+        retainedFileCountLimit: null,
+        retainedFileTimeLimit: TimeSpan.FromDays(14)));
 
 // B10: Secrets - environment değişkenleri (production'da JWT key + connection string buradan)
 builder.Configuration.AddEnvironmentVariables();

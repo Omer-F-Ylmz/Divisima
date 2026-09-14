@@ -36,6 +36,10 @@ COPY --from=build /app/publish .
 # Dizin BURADA, chown'dan ONCE olusturuluyor; boylece volume ilk mount'ta dogru sahipligi
 # devralir. (Volume sahipliginin imajdaki dizinden devralindigi Dalga C'de olculdu.)
 RUN mkdir -p /app/wwwroot/uploads/products
+# ══ MON-1 - LOG DIZINI DE AYNI ZINCIRE TABI (CANLIDA OLCULDU) ═══════════════════════════════
+# Compose `logs_data:/app/logs` baglar; dizin imajda YOKTU -> volume root:root dogdu ve Serilog
+# File sink 7 gun boyunca SESSIZCE hic dosya yazamadi (uretim volume'u 0 dosya). C2 ile ayni kok.
+RUN mkdir -p /app/logs
 # Açıklayıcı yorum: Dosya sahipliği non-root'a, sadece okuma
 RUN chown -R divisima:divisima /app
 USER divisima

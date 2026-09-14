@@ -386,7 +386,8 @@ Operatörün baktığı yer: **Panel sekmesindeki "Başarısız Arka Plan İşle
 bu kayıtlar `DataRetentionJob` tarafından **silinmez** (yalnız `Processed` olanlar silinir).
 
 - [ ] Yayın sonrası ilk gün panelde bu liste kontrol edildi (boş olması beklenen durumdur)
-- [ ] Log dosyaları: günlük + 100 MB'da parçalanır, 30 dosya saklanır (`Program.cs`).
+- [ ] Log dosyaları: günlük + 100 MB'da parçalanır, **14 gün** saklanır (zaman sınırı, `Program.cs` — MON-1).
+      `/app/logs` volume'ünde dosya **gerçekten oluşuyor** (MON-1'de 7 gün boyunca 0 dosyaydı: dizin root:root).
       Disk planlaması buna göre yapıldı
 
 ### `BackgroundJobs:Enabled` - GÜVENLİK-FIX-3 / #8

@@ -28,16 +28,21 @@ if [ ! -r "$ENV_FILE" ]; then
     exit 2
 fi
 
-# Son eslesen satirin degeri; cevreleyen tek/cift tirnak ve CR soyulur.
+# Son eslesen satirin degeri, `docker compose` ile AYNI kurallarla (sunucuda compose v5.5.1
+# `config` ciktisiyla olculdu, belgeden alinmadi): CR soyulur; tirnakliysa yalniz tirnak ICI
+# alinir (icteki `#` korunur, kapanan tirnaktan sonrasi atilir); tirnaksizsa BOSLUK + `#`
+# yorum baslatir (bosluksuz `a#b` ve sekme + `#` degerin parcasidir) ve sondaki bosluklar kesilir.
 env_oku() {
-    local satir
+    local satir deger
     satir=$(grep -E "^[[:space:]]*$1=" "$ENV_FILE" | tail -n 1 | tr -d '\r')
-    satir=${satir#*=}
-    case $satir in
-        \"*\") satir=${satir#\"}; satir=${satir%\"} ;;
-        \'*\') satir=${satir#\'}; satir=${satir%\'} ;;
+    deger=${satir#*=}
+    case $deger in
+        \"*) deger=${deger#\"}; deger=${deger%%\"*} ;;
+        \'*) deger=${deger#\'}; deger=${deger%%\'*} ;;
+        *)   deger=${deger%% \#*}
+             deger=${deger%"${deger##*[! ]}"} ;;
     esac
-    printf '%s' "$satir"
+    printf '%s' "$deger"
 }
 
 host=$(env_oku DIVISIMA_SMTP_HOST)
