@@ -26,6 +26,7 @@ f) **MK-12 PROSEDUR SKILL'LERI:** SDP ve SUREC `.claude/skills/` altinda proje s
    cagrisiyla yukler, donmezse `Read .claude/skills/<ad>/SKILL.md` ile yukler ve hangisiyle
    yukledigini kapi bolumunde beyan eder (ad + govde bayt). Yuklenmeden olcum/uygulama
    yapilmaz. Skill govdesi CLAUDE.md gibi delta alir (MK-11 c/e); surum baslikta.
+g) B10 her mühürde boşaltılır; kapanan kalemler arşive taşınır, açık kalanlar B10'da kalır. CLAUDE.md 18k'yı aşarsa mühür kapanmaz.
 
 # CLAUDE.md — Divisima Backend calisma kurallari
 
@@ -456,7 +457,7 @@ checkout ile biter.**
 - **`50·GUVENLIK-FIX-4`** — iki kalem (yerel SDK 9 / CI SDK 8, `global.json` YOK - PINLENMEMIS … Dependabot `docker` ekosistemi workflow `services.*.image` ve C# digest literallerini TARAMAZ
 - **`51·GUVENLIK-AV-2`** — iki kalem: **SignalR "admins" alarmi BOS GRUBA yayin yapiyor**
 - **`53·GUVENLIK-AV-3`** — iki kalem: **rezervasyon birikmesi** … **kor eksenler A02 · A03 · A05 · A04**
-- **`55·GUVENLIK-FIX-6`** — … **raporlama siteleri ESKI kuralda** … **terminal siparise gelen odemenin IADESI ELLE** … **`health` uclari BILINCLI anonim** … **BAGLAYICI**
+- **`55·GUVENLIK-FIX-6`** — … **raporlama siteleri ESKI kuralda** … **terminal siparise gelen odemenin IADESI ELLE** … **`health` uclari BILINCLI anonim** … **BAGLAYICI** … T4-F2 (kayip guncelleme) LAUNCH BLOKER olcutu ISTISNASI … `first_order_only` kuponu ESKI kuralda … `KodSatirlari` yalniz satir basi `//` ayikliyor … `SignalR "admins"` alarmi BOS GRUBA yayin yapiyor
 - **`60·MON-1`** — … **Y1 LATENT: RCSI acilirsa alarm kaybi** (uretimde kapali).
 - **`57·LAUNCH-DEPLOY-1`** — … **SQL Server EXPRESS** … **TDE YOK** … **ANAHTAR KAYBI = YEDEK KAYBI** … **`ForwardedHeaders:KnownProxies` = Docker AG GECIDI** … **SOFT-LAUNCH KAPISI ACIK**
 - **`frame-src` SUPHELISI ACIK**

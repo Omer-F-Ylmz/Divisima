@@ -572,7 +572,7 @@ KAPALI kalem yeni bulguyu BASTIRMAZ.** Tam metinler:
   `available` KALICI dusuk. **PROD CHECKLIST: `BackgroundJobs:Enabled=true` -> IRL listesi**) ·
   **kor eksenler A02 · A03 · A05 · A04** (A03'un gerekcesi `frontend/*` DOKUNULMAZ - yasak
   yuzeyde birakilmis bosluk; A04 IKINCI KEZ hicbir goreve girmedi).
-- **`55·GUVENLIK-FIX-6`** — DURUM sutunlu tam liste muhurde (yedi kalem); uc tanesi **ACIK**:
+- **`55·GUVENLIK-FIX-6`** — DURUM sutunlu tam liste muhurde (yedi kalem); alti tanesi **ACIK**, biri **BAGLAYICI** (tablo dogru kaynak: `55` bolum 13; asagida ucu):
   **raporlama siteleri ESKI kuralda** (Dashboard · Merchandising · Recommendation · Seller —
   COD siparisi ciro/siralama/oneride hala `Confirmed`da sayilir, GF-7) · **terminal siparise
   gelen odemenin IADESI ELLE** (otomatik iade `RefundManager`dan gecer, kapsam disiydi;

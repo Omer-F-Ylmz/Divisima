@@ -108,6 +108,8 @@ description: Divisima dalga sureci (degismez) — merkez koordinasyon, DUR, push
   hale gelir ve pin yalan soyler. Yeni yazilan her test altyapisi bu soruyla gecer.
 - **Izleyici adabi**: nabiz >= 300 sn, tur basina TEK konsolide cagri, kota yandiysa bekle.
   Dependabot run'i beklenmez - asil iki workflow (CI + Security) yeter.
+  **Izleyici TEK BETIK:** `python .claude/skills/surec/ci-izle.py <SHA>` - run + job + adim + annotation
+  tek kosuda, JSON ayristirarak (grep job-id deseni EMEKLI: MON-1 ve SADE-3'te bos dondu). Cikis 0/1/2/3.
 - **PAT veya tarayici eklentisi ASLA istenmez.**
 - **Yerel SQL**: `DIVISIMA_TEST_SQL` her zaman set edilir (skip modu kullanilmaz);
   dizgede `Database=` bulunmalidir. LocalDB cokmus durumda ve **`sqllocaldb delete`
