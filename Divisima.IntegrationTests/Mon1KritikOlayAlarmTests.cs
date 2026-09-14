@@ -7,9 +7,11 @@ using Divisima.Core.Utilities.Mail;
 using Divisima.DataAccess.Concrete.EntityFramework;
 using Divisima.Entity.Entities;
 using FluentAssertions;
+using Hangfire;
 using Hangfire.SqlServer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -202,6 +204,24 @@ namespace Divisima.IntegrationTests
 
             var yeniden = new HangfireAlarmImleci(new SqlServerStorage(ConnStr));
             (await yeniden.OkuAsync()).Should().Be(4242, "deger depoda kalici olmali, surec bellegi degil");
+        }
+
+        // Program.cs'in kayit bicimi (AddHangfire + imlec singleton) GERCEK DI ile: imlec
+        // `JobStorage`i CONSTRUCTOR'dan alir; AddHangfire onu kaydetmiyorsa uretimde is her turda
+        // cozumleme hatasiyla duser ve alarm SESSIZCE gitmez. Test host'lari arka plan islerini
+        // kapattigi icin bu yol baska hicbir testte kosmuyor.
+        [Fact]
+        public async Task HANGFIRE_DI_KAYDI_IMLECI_GERCEK_DEPOYLA_COZER()
+        {
+            if (Skipped()) return;
+            var servisler = new ServiceCollection();
+            servisler.AddHangfire(cfg => cfg.UseSqlServerStorage(ConnStr));
+            servisler.AddSingleton<IAlarmImleci, HangfireAlarmImleci>();
+            await using var sp = servisler.BuildServiceProvider();
+
+            var imlec = sp.GetRequiredService<IAlarmImleci>();
+            await imlec.YazAsync(777);
+            (await imlec.OkuAsync()).Should().Be(777, "DI'dan cozulen imlec gercek depoya yazip okuyabilmeli");
         }
 
         // KAYNAK-SOZLESME: kayit Program.cs'te. Davranis kaniti canli sunucuda (muhur 60).
