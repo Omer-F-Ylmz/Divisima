@@ -1,0 +1,11 @@
+# MON-1 - kurulum: cp ops/monitoring/logrotate-divisima-monitoring /etc/logrotate.d/divisima-monitoring
+# Betikler her satirda dosyayi ac-yaz-kapat yapar; copytruncate GEREKMEZ.
+/var/log/divisima-watchdog.log /var/log/divisima-daily-report.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 root adm
+}

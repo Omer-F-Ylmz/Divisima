@@ -136,9 +136,9 @@ Tam liste checklist'tedir; burada yalniz **atlanmayacak** olanlar:
   oldugunu** olcebilir, icerigin hukuki gecerliligini olcemez.
 - **Test verisi temizligi** — soft-launch penceresinde canli DB'ye olcum amacli yazilan her
   satir (urun, hesap) kapi acilmadan silinir. "Defterde yaziyordu" bir dagitim adimi degildir.
-- **`PaymentAfterTerminal` / `Critical` gunluk SQL sorgusu** — bu olayin **otomatik okuyucusu
-  YOKTUR** (SignalR `"admins"` grubu bos, `security_events` icin okuma ucu yok). Sorgu
-  kosulmazsa **elle iade gereken vaka gorulmez**. Operasyon takvimine yazilir.
+- **Alarm kanali (MON-1, `ops/monitoring.md`)**: `Critical` olay 5 dk'da maile, watchdog 3 ardisik hatada TEK restart, 07:00 UTC ozet
+  **normal gunde de gelir** — gelmeyen ozet = kanal bozuk. Alici TEK kaynak `.env` `DIVISIMA_ALARM_EMAIL`; degisince `--force-recreate api`.
+  Gunluk `PaymentAfterTerminal` SQL sorgusu **yedek kanal olarak KALIR** (60 sn yerlesme payi, bos alici). Esik/betik sunucuda ELLE degistirilmez.
 - **Odeme yontemleri `.env` ile acilip kapatilamaz** — gecerli yontem kumesi **derleme zamani
   sabitidir**. "COD'u kapat" demek **misafir siparisini tumden kapatmak** demektir.
 - **`AdminSeed:Enabled`** ilk giristen sonra `false`a cekilir ve parola secret'i rotate edilir.

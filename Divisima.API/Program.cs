@@ -605,6 +605,9 @@ if (arkaPlanIsleri)
         .UseRecommendedSerializerSettings()
         .UseSqlServerStorage(builder.Configuration.GetConnectionString("DivisimaDb")));
     builder.Services.AddHangfireServer();
+    // MON-1 / D1: kritik olay alarminin imleci Hangfire deposunda (gerekce sinifin basinda).
+    // Bayrak false iken depo YOK, dolayisiyla imlec de bu dalin disinda kayitli OLAMAZ.
+    builder.Services.AddSingleton<Divisima.Bussiness.Jobs.IAlarmImleci, Divisima.API.Services.HangfireAlarmImleci>();
 }
 
 // B9: Health checks
@@ -856,6 +859,8 @@ if (arkaPlanIsleri)
     // Açıklayıcı yorum: Veri saklama/temizlik - her gün (eski oturum/outbox/log temizliği)
     RecurringJob.AddOrUpdate<Divisima.Bussiness.Outbox.DataRetentionJob>("data-retention", j => j.RunAsync(), Cron.Daily);
     RecurringJob.AddOrUpdate<Divisima.Bussiness.Jobs.ReservationCleanupJob>("reservation-cleanup", j => j.RunAsync(), "*/5 * * * *"); // her 5 dk süresi dolan rezervasyonlar
+    // MON-1 / D1: security_events'in TEK otomatik okuyucusu - yeni Critical varsa admin e-postasi (ops/monitoring.md)
+    RecurringJob.AddOrUpdate<Divisima.Bussiness.Jobs.KritikOlayAlarmJob>("kritik-olay-alarm", j => j.RunAsync(), "*/5 * * * *");
     RecurringJob.AddOrUpdate<Divisima.Bussiness.Jobs.AbandonedCartReminderJob>("abandoned-cart-reminder", j => j.RunAsync(), Cron.Hourly); // saatlik terk sepet hatırlatması
     RecurringJob.AddOrUpdate<Divisima.Bussiness.Jobs.BirthdayOfferJob>("birthday-offers", j => j.RunAsync(), "0 9 * * *"); // her gün 09:00 doğum günü teklifleri
     RecurringJob.AddOrUpdate<Divisima.Bussiness.Jobs.WinBackJob>("win-back", j => j.RunAsync(), "0 10 * * *"); // her gün 10:00 win-back

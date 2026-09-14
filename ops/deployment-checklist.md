@@ -340,6 +340,11 @@ bir karardır.
 > ve `Critical` olaylarda çağrılan `NotifyAdminsAsync` SignalR `"admins"` grubuna yayın yapar —
 > **o grup BOŞTUR** (`JoinAdminGroup()` çağıranı yok, `51·AV-2` BİLİNEN kalemi). Yani bu olayın
 > bugün **otomatik okuyucusu yoktur**; sorgu koşulmazsa iade gereken vaka GÖRÜLMEZ.
+>
+> **MON-1 EKİ:** artık bir otomatik okuyucu var — Hangfire `kritik-olay-alarm` işi 5 dakikada bir
+> yeni `Critical` olayı `DIVISIMA_ALARM_EMAIL` adresine mail atar (`ops/monitoring.md` §2). Günlük
+> sorgu **kaldırılmadı**: 60 sn'lik yerleşme payını aşan bir transaction'ın satırı alarmdan
+> kaçabilir ve alıcı boş bırakılırsa alarm hiç gitmez. Sorgu **yedek kanaldır**.
 
 ## Zorunlu adımlar
 - [ ] **`Cookies:Domain` üst alan adı biçiminde ayarlandı (`.divisima.net`) — LF-1/K1**
@@ -347,7 +352,7 @@ bir karardır.
       arıza **sessizdi** ve ancak ilk access token süresi dolduğunda (dağıtımdan ~15 dk sonra,
       TÜM kullanıcılarda aynı anda) ortaya çıkardı.
 - [ ] **Günlük `PaymentAfterTerminal` / `Critical` sorgusu operasyon takvimine yazıldı**
-      (20. adım; otomatik okuyucu YOK)
+      (20. adım; MON-1 alarmı `ops/monitoring.md` — sorgu onun yedek kanalıdır)
 - [ ] `Iyzico:BaseUrl` = `https://api.iyzipay.com` (sandbox değil)
 - [ ] `Webhook:AllowedIps` = Iyzico production IP aralıkları
 - [ ] `AllowedOrigins` = yalnız gerçek frontend domain(ler)i
@@ -477,6 +482,18 @@ SELECT id, email, email_verified FROM customers WHERE email = N'omery3899+lf5@gm
 ```
 
 - [ ] Silme sonrası ölçüm: yukarıdaki `SELECT` **0 satır**
+
+## 0c) ALARM KANALI ÇALIŞIYOR MU — KAPIDAN ÖNCE (MON-1)
+
+> **NEDEN KAPIDAN ÖNCE:** kapı açıldıktan sonraki ilk kesinti ya da ilk `PaymentAfterTerminal`
+> alarmı, kanalın çalıştığının **ilk sınaması** olmamalıdır. Kurulum ve usul: `ops/monitoring.md`.
+
+- [ ] `.env`de `DIVISIMA_ALARM_EMAIL` dolu (`grep -c '^DIVISIMA_ALARM_EMAIL=.' .env` → **1**, değer basılmaz)
+- [ ] `/etc/cron.d/divisima-monitoring` ve `/etc/logrotate.d/divisima-monitoring` kurulu
+- [ ] `bash ops/monitoring/daily-report.sh` → gelen kutusunda **günlük özet GELDİ**
+- [ ] Son 24 saatte `/var/log/divisima-watchdog.log` içinde `MAIL GONDERILEMEDI` **0**
+- [ ] API logunda `MON-1 ALARM KANALI KAPALI` **0** (alıcı uygulamaya ulaşmış)
+- [ ] Ertesi sabah 07:00 UTC özeti **kendiliğinden** geldi (cron gerçekten koşuyor)
 
 ## 1) SOFT-LAUNCH KAPISINI KALDIR
 

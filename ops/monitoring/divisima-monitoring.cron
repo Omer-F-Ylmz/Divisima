@@ -1,0 +1,8 @@
+# MON-1 - kurulum: cp ops/monitoring/divisima-monitoring.cron /etc/cron.d/divisima-monitoring
+# (cron.d dosya adinda NOKTA OLMAMALI - uzantili ad sessizce YOK SAYILIR). Ayrinti: ops/monitoring.md
+# Sunucu saat dilimi Etc/UTC (57·LD-1 olculdu); CRON_TZ yine de acikca verilir.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+CRON_TZ=UTC
+*/5 * * * * root /bin/bash /opt/divisima/ops/monitoring/watchdog.sh
+0 7 * * * root /bin/bash /opt/divisima/ops/monitoring/daily-report.sh >> /var/log/divisima-daily-report.log 2>&1

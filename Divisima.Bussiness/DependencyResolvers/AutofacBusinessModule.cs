@@ -164,6 +164,8 @@ namespace Divisima.Bussiness.DependencyResolvers.Autofac
             // ── Veri saklama/temizlik ──
             builder.RegisterType<DataRetentionJob>().AsSelf().InstancePerLifetimeScope();
             builder.RegisterType<Divisima.Bussiness.Jobs.ReservationCleanupJob>().AsSelf().InstancePerLifetimeScope();
+            // MON-1 / D1: IAlarmImleci Program.cs'te, arka plan isleri dalinda kayitli (Hangfire deposu).
+            builder.RegisterType<Divisima.Bussiness.Jobs.KritikOlayAlarmJob>().AsSelf().InstancePerLifetimeScope();
             builder.RegisterType<EfStockReservationDal>().As<IStockReservationDal>().InstancePerLifetimeScope();
 
             // ── Kargo ──

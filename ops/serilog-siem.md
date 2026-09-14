@@ -7,6 +7,12 @@
 > **BOŞ GRUBA** yayın yapar — `NotificationHub.JoinAdminGroup()` çağıranı yoktur
 > (istemci tarafında SignalR 0 geçiş). SIEM launch sonrasıdır.
 >
+> **MON-1 EKİ:** SIEM hâlâ yok, ama `security_events`in **tek otomatik okuyucusu** artık
+> Hangfire `kritik-olay-alarm` işidir: beş tipi (`PaymentAfterTerminal` · `RefreshTokenReuse` ·
+> `PaymentSignatureInvalid` · `AccountLocked` · `ProductImportRejected`) 5 dakikada bir okur,
+> yeni `Critical` varsa admin adresine mail atar. Aşağıdaki tabloda "okuyucusu yoktur" diyen
+> hücreler MON-1 ÖNCESİNİ anlatır. Usul ve eşikler: `ops/monitoring.md`.
+>
 > **NOT (GF-5/K6):** her iki aktif sink de artık `MaskeliFormatter`dan geçer. SIEM sink'i
 > eklenirse **o da aynı formatter'ı almalıdır**; aksi halde EF Core / SQL Server kaynaklı
 > ham istisna metinleri (ör. `Truncated value: '...'`) maskesiz olarak SIEM'e akar.

@@ -99,6 +99,12 @@ services:
       # Kapaliyken suresi dolan stok rezervasyonlari temizlenmez ve satilabilir stok KALICI
       # dusuk kalir (AV-3'te olculdu) - bu yuzden uretimde ACIK.
 
+      # ══ MON-1 / D1 - ALARM ALICISI (ops/monitoring.md) ════════════════════════════════
+      # Uygulamanin kritik olay alarmi bu adrese gider; sunucu betikleri (ops/monitoring/)
+      # AYNI `.env` anahtarini okur - alici TEK kaynakta. `:?` DEGIL: bos deger uygulamayi
+      # durdurmaz (alarm bir yardimci kanal), ama her turda ERROR loglanir ve gunluk ozette gorunur.
+      Monitoring__AlarmEmail: ${DIVISIMA_ALARM_EMAIL:-}
+
     ports:
       # YALNIZ LOOPBACK: API dogrudan internete ACILMAZ; TLS, HSTS, CSP ve gercek istemci
       # IP'si ters proxy'nin isidir (ops/infra/nginx.conf). Bu bagi kaldirmak, nginx'teki
