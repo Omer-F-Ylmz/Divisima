@@ -86,6 +86,9 @@ namespace Divisima.IntegrationTests
             var imlec = new BellekImleci();
             (await KosAsync(imlec, alici)).Should().Be(0, "ilk kosum yalniz taban kurar");
 
+            // MUT-2 DERSI: bu detay govdeye sizdirilinca KanitMaskesi onu (ve bitisik IP'yi) KIRPTI;
+            // ilk yazimdaki assert TAM dizgeyi aradigi icin KOR kaldi (0 kirmizi). Maske ilk 8
+            // karakteri GORUNUR birakir; assert artik o oneki arar.
             var kilit = await OlayYazAsync("AccountLocked", "Critical", ip: "203.0.113.77", detay: "SIZMAMALI-detay-mon1");
             var imza = await OlayYazAsync("PaymentSignatureInvalid", "Warning");
             await OlayYazAsync("LoginFailed", "Warning"); // izlenmeyen tip
@@ -100,8 +103,8 @@ namespace Divisima.IntegrationTests
             mail.Body.Should().Contain($"PaymentSignatureInvalid | 1 | {imza}",
                 "ayni turdaki izlenen Warning olay da ozete girer");
             mail.Body.Should().NotContain("LoginFailed", "izlenen bes tip DISINDAKI olay ozete girmez");
-            mail.Body.Should().NotContain("203.0.113.77", "IP govdeye GIRMEZ");
-            mail.Body.Should().NotContain("SIZMAMALI", "detail govdeye GIRMEZ");
+            mail.Body.Should().NotContain("203.0.11", "IP govdeye GIRMEZ (maskelenmis bicimi dahil)");
+            mail.Body.Should().NotContain("SIZMAMAL", "detail govdeye GIRMEZ (maskelenmis bicimi dahil)");
 
             imlec.Deger.Should().Be(imza, "imlec bu turda islenen en buyuk izlenen id'ye ilerler");
         }

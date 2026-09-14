@@ -118,6 +118,9 @@ namespace Divisima.IntegrationTests
             Say(Oku("mail.calls"), "KONU=Divisima ALARM - API sağlık kontrolü başarısız").Should().Be(1, "3. ardisik hata TEK alarm");
             Say(Oku("docker.calls"), "restart api").Should().Be(1, "3. ardisik hata TEK restart denemesi");
             Oku("docker.calls").Should().Contain("-f /opt/divisima-test/docker-compose.prod.yml", "restart uretim compose'u uzerinden");
+            // MUT-17 DERSI: log ICERIGI olculmuyordu; LOG_FILE'i yok sayan betik yesil kaliyordu.
+            Oku("wd.log").Should().Contain("HATA kod=000 ardisik=3", "tur izi LOG_FILE'a (logrotate kapsamindaki dosya) yazilmali");
+            Oku("wd.log").Should().Contain("YENIDEN_BASLATMA");
 
             Kos("watchdog.sh", ortam);
             Kos("watchdog.sh", ortam);
@@ -165,12 +168,15 @@ namespace Divisima.IntegrationTests
         [Fact]
         public void ALARM_MAILI_PAROLAYI_KOMUT_SATIRINA_KOYMAZ_ve_ENV_DOSYASINI_CALISTIRMAZ()
         {
+            // MUT-13 DERSI: komut satiri ILK SIRADA. Ilk yazimda parola satirindan (tek `"`)
+            // SONRAYDI; `source` o tirnakta sozdizimi hatasiyla dusup komuta HIC ulasmadi ve
+            // pin `source` mutasyonuna KOR kaldi (0 kirmizi).
             var ortam = MailOrtami(
+                $"KOTU=$(touch {BashYolu(T("calisti"))})\n" +
                 "DIVISIMA_SMTP_HOST=smtp.ornek.test\n" +
                 "DIVISIMA_SMTP_USER=\"u@ornek.test\"\n" +
                 "DIVISIMA_SMTP_PASSWORD=p\"q\\r\r\n" +
                 "DIVISIMA_SMTP_FROM=Divisima <no-reply@divisima.net>\n" +
-                $"KOTU=$(touch {BashYolu(T("calisti"))})\n" +
                 "DIVISIMA_ALARM_EMAIL=alici@ornek.test\n");
 
             var (kod, cikti) = Kos("alarm-mail.sh", ortam, "Divisima ALARM - deneme");
