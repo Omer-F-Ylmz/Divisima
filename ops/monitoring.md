@@ -82,19 +82,41 @@ yazılmaz.
 ### Serilog dosya saklaması (D4)
 
 `Program.cs` File sink: günlük rotasyon + **100 MB'da parçala** (`rollOnFileSizeLimit`) ·
-**14 günlük zaman sınırı** (`retainedFileTimeLimit`, sayı sınırı yok) · `logs_data` volume'ünde.
+**14 günlük zaman sınırı** (`retainedFileTimeLimit`) · `logs_data` volume'ünde.
 Önceki değer 30 **dosyaydı** (gün değil); kullanıcı kararıyla MON-1'de değişti.
 
+Sayı sınırı **40 dosya** (40 × 100 MB ≈ 4 GB) disk tavanı olarak zaman sınırıyla **birlikte** durur;
+hangisi önce dolarsa o uygulanır. Yalnız zaman sınırıyla parça sayısı sınırsızdı (MON-1 tur 3'te ölçüldü).
+
 > **MON-1 CANLI BULGUSU:** volume 7 gün boyunca **0 dosya**ydı — Dockerfile `/app/logs`'u yaratmıyordu,
-> volume root:root doğdu ve `USER divisima` yazamadı (SESSİZ). Dockerfile düzeltildi; var olan
-> volume için tek seferlik `chown` dağıtım kaydında. Günlük özetin "son 48 saatte log dosyası YOK"
-> satırı tam bu durumu yakalar.
+> volume root:root doğdu ve `USER divisima` yazamadı (SESSİZ; konteyner içinden `touch` →
+> "Permission denied" ölçüldü). Dockerfile düzeltmesi **yeni** volume'u kurtarır, **var olan**
+> volume'u kurtarmaz. Var olan volume için (uid/gid konteynerden okunur, sabit yazılmaz):
+>
+> ```bash
+> chown "$(docker exec divisima-api-1 id -u):$(docker exec divisima-api-1 id -g)" /var/lib/docker/volumes/divisima_logs_data/_data
+> docker exec divisima-api-1 sh -c 'touch /app/logs/.yazma-denemesi && rm /app/logs/.yazma-denemesi && echo YAZILABILIR'
+> ls /var/lib/docker/volumes/divisima_logs_data/_data/     # birkaç saniye içinde divisima-YYYYMMDD.log GÖRÜNMELİ
+> ```
+>
+> Günlük özetin "son 48 saatte log dosyası YOK" satırı bu durumu yakalar.
+
+### `.env` ayrıştırıcısı — dürüst sınır
+
+`alarm-mail.sh` içindeki `env_oku`, `docker compose`un `.env` gramerinin **tamamı değildir**. Sunucuda
+compose v5.5.1 `config` çıktısıyla **ölçülen ve betikte aynı sonucu veren altı durum**:
+`x # yorum` → `x` · sondaki boşluk kesilir · `"a # b" # yorum` → `a # b` · `a#b` → `a#b` ·
+`'x'   ` → `x` · `x<sekme># y` → sekme yorum başlatmaz.
+**Ölçülmeyen ve ayrışabilecek kenar durumlar (BİLİNEN RİSK):** `$$` ve `${...}` genişletmesi ·
+sondaki sekme · `export` önekli satır (`export KEY=v`) · `KEY = v` (eşittir çevresinde boşluk) · tırnak içinde
+`\"` kaçışı · `KEY= "x"` (eşittirden sonra boşluk + tırnak). Alarm anahtarları bu biçimlerle
+**yazılmaz**; yazılırsa uygulama maili giderken konak maili farklı değer okuyabilir.
 
 ## 5. Kurulum (sunucuda, bir kez) ve "kanal çalışıyor mu" kanıtı
 
 ```bash
 cd /opt/divisima
-grep -c '^DIVISIMA_ALARM_EMAIL=.' .env                     # -> 1 (boş değer 0 verir; değer BASILMAZ)
+grep -cE '^DIVISIMA_ALARM_EMAIL=.*@' .env                  # -> 1 (boş, "", '' ve yalnız boşluk 0 verir; değer BASILMAZ)
 install -m 644 ops/monitoring/divisima-monitoring.cron /etc/cron.d/divisima-monitoring
 install -m 644 ops/monitoring/logrotate-divisima-monitoring /etc/logrotate.d/divisima-monitoring
 logrotate -d /etc/logrotate.d/divisima-monitoring           # hata yok

@@ -222,6 +222,51 @@ namespace Divisima.IntegrationTests
             imlec.Deger.Should().Be(yerlesmis);
         }
 
+        // ══ TUR 3 / YB-2 - GELECEK TARIHLI SATIR IMLECI TIKAMAZ ══════════════════════════════
+        // ONCEKI HAL (denetci REPRO'SU): created_at'i gelecekte olan izlenen satir "taze" sayiliyor,
+        // kesintisiz onek onda DURUYORDU - arkasindaki tum alarmlar saat o ana gelene kadar SINYALSIZ
+        // tikaniyordu (saat geri adimi, TZ degisimi, elle INSERT). Karar: atlanir + TEK WARNING.
+        private sealed class KayitciLogger : Microsoft.Extensions.Logging.ILogger<KritikOlayAlarmJob>
+        {
+            public List<(Microsoft.Extensions.Logging.LogLevel Seviye, string Mesaj)> Kayitlar { get; } = new();
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+            public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+                TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+                Kayitlar.Add((logLevel, formatter(state, exception)));
+        }
+
+        [Fact]
+        public async Task YB2_GELECEK_TARIHLI_SATIR_ATLANIR_TEK_WARNING_ARKASINDAKI_ALARM_GIDER()
+        {
+            if (Skipped()) return;
+            var alici = YeniAlici();
+            var imlec = new BellekImleci();
+            await KosAsync(imlec, alici);
+
+            var gelecek = await OlayYazAsync("PaymentSignatureInvalid", "Warning", zaman: DateTime.Now.AddDays(1));
+            var gercek = await OlayYazAsync("AccountLocked", "Critical");
+
+            var logger = new KayitciLogger();
+            await using (var ctx = NewContext())
+            {
+                var ayar = new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?> { [KritikOlayAlarmJob.AliciAnahtari] = alici })
+                    .Build();
+                var job = new KritikOlayAlarmJob(new EfSecurityEventDal(ctx), new OutboxService(new EfOutboxMessageDal(ctx)),
+                    imlec, ayar, logger);
+                (await job.RunAsync()).Should().Be(1, "gelecek tarihli satir arkasindaki Critical'i TIKAMAMALI");
+            }
+
+            imlec.Deger.Should().Be(gercek, "imlec gelecek tarihli satiri gecip ilerlemeli");
+            var govde = (await AlarmMailleriAsync(alici)).Single().Body;
+            govde.Should().Contain($"AccountLocked | 1 | {gercek}");
+            govde.Should().NotContain("PaymentSignatureInvalid", "gelecek tarihli satir atlanir, ozete girmez");
+            logger.Kayitlar.Count(k => k.Seviye == Microsoft.Extensions.Logging.LogLevel.Warning
+                                       && k.Mesaj.Contains($"gelecek tarihli olay id={gelecek}", StringComparison.Ordinal))
+                .Should().Be(1, "atlanan satir TEK WARNING ile gorunur olmali");
+        }
+
         // ══ L3 / B2 - TABAN ALICI KONTROLUNDEN ONCE KURULUR ═══════════════════════════════════
         // ONCEKI HAL (REPRO olculdu): imlec yokken alici bossa taban KURULMUYORDU; alici verildigi
         // ilk tur tabani O AN kurup arada biriken Critical'lari yutuyordu.

@@ -60,8 +60,11 @@ namespace Divisima.IntegrationTests
 
             sink.Should().Contain("rollingInterval: RollingInterval.Day");
             sink.Should().Contain("retainedFileTimeLimit: TimeSpan.FromDays(14)", "kullanici karari: 14 GUN");
-            sink.Should().Contain("retainedFileCountLimit: null",
-                "sayi siniri acik kalirsa 100 MB parcalari 14 gunden ONCE eski gunleri siler (dosya sayisi != gun)");
+            // TUR 3 / YB-1: sayi siniri KALDIRILINCA disk tavani da kalkti (denetci olctu: 40 x 100 MB
+            // parca silinmedi). Karar: IKI sinir BIRLIKTE - once hangisi dolarsa. 40 x 100 MB ~ 4 GB.
+            sink.Should().Contain("retainedFileCountLimit: 40",
+                "zaman siniri tek basina disk tavani DEGILDIR; sayi siniri tavan olarak kalir");
+            sink.Should().NotContain("retainedFileCountLimit: null", "sinirsiz sayi disk tavanini kaldirir");
 
             Oku("Divisima.API/appsettings.Production.example.json").Should().Contain("14 gun",
                 "operator sablonu saklamayi DOGRU anlatmali");
@@ -100,11 +103,48 @@ namespace Divisima.IntegrationTests
         [InlineData("ops/deployment-checklist.md")]
         public void BELGEDEKI_ALICI_KONTROLU_BOS_DEGERI_YOK_SAYAR(string belge)
         {
-            var satir = Regex.Match(Oku(belge), @"grep -c '\^DIVISIMA_ALARM_EMAIL=[^']*' \.env");
+            var satir = Regex.Match(Oku(belge), @"grep -cE? '\^DIVISIMA_ALARM_EMAIL=[^']*' \.env");
             satir.Success.Should().BeTrue($"vakum kirici: {belge} alici kontrol komutunu tasimali");
 
             KomutuKos(satir.Value, "DIVISIMA_ALARM_EMAIL=\n").Should().Be("0", $"{belge}: BOS alici 'var' sayilmamali");
+            // TUR 3 / YB-3: `=.` deseni bu uc bicimde de 1 veriyordu (denetci olctu).
+            KomutuKos(satir.Value, "DIVISIMA_ALARM_EMAIL=\"\"\n").Should().Be("0", $"{belge}: bos cift tirnak alici DEGIL");
+            KomutuKos(satir.Value, "DIVISIMA_ALARM_EMAIL=''\n").Should().Be("0", $"{belge}: bos tek tirnak alici DEGIL");
+            KomutuKos(satir.Value, "DIVISIMA_ALARM_EMAIL=   \n").Should().Be("0", $"{belge}: yalniz bosluk alici DEGIL");
             KomutuKos(satir.Value, "DIVISIMA_ALARM_EMAIL=a@ornek.test\n").Should().Be("1", $"{belge}: dolu alici bulunmali");
+        }
+
+        // ══ TUR 3 / YB-4 - LOG VOLUME SAHIPLIGI ICIN GERCEK KOMUT ═══════════════════════════
+        // ONCEKI HAL: monitoring.md "chown dagitim kaydinda" diyordu, depoda komut YOKTU.
+        // Dockerfile duzeltmesi YENI volume'u kurtarir; VAR OLAN (root:root dogmus) volume'u
+        // kurtarmaz - o yuzden komut belgede YAZILI olmali. Uid/gid SABIT YAZILMAZ, konteynerden okunur
+        // (canlida olculdu: 999:999, ama imaj degisirse degisebilir).
+        [Theory]
+        [InlineData("ops/monitoring.md")]
+        [InlineData("ops/deployment-checklist.md")]
+        public void LOG_VOLUME_SAHIPLIK_KOMUTU_BELGEDE_GERCEK_KOMUT_OLARAK_DURUR(string belge)
+        {
+            var metin = Oku(belge);
+            metin.Should().Contain(
+                "chown \"$(docker exec divisima-api-1 id -u):$(docker exec divisima-api-1 id -g)\" /var/lib/docker/volumes/divisima_logs_data/_data",
+                $"{belge}: var olan volume'un sahipligi uid/gid KONTEYNERDEN okunarak duzeltilir");
+            metin.Should().Contain("touch /app/logs/", $"{belge}: duzeltmenin ayirt edici kaniti (konteyner icinden yazma) yazili olmali");
+            metin.Should().NotContain("dağıtım kaydında", $"{belge}: komutu baska bir yere havale eden bayat ifade kalmamali");
+        }
+
+        // ══ TUR 3 / YB-3 - BILINEN RISK: env_oku COMPOSE GRAMERININ TAMAMI DEGIL ═══════════
+        // Kullanici karari: duzeltilmez, DURUST SINIR olarak adiyla yazilir. Pin, sinirin belgeden
+        // sessizce silinmesini yakalar (KAYNAK-SOZLESME; davranis ayagi B4 pininde).
+        [Fact]
+        public void ENV_AYRISTIRICI_DURUST_SINIRI_OLCULMEYEN_DURUMLARI_ADIYLA_SAYAR()
+        {
+            var metin = Oku("ops/monitoring.md");
+            // MUT-35 DERSI: ilk capa tum bolumu tariyordu; "sekme" OLCULEN listede de gectigi icin
+            // olculmeyen listeden silinmesi 0 kirmizi verdi. Capa artik YALNIZ olculmeyen cumledir.
+            var bolum = Regex.Match(metin, @"\*\*Ölçülmeyen ve ayrışabilecek kenar durumlar \(BİLİNEN RİSK\):\*\*(.*?)\n\n", RegexOptions.Singleline);
+            bolum.Success.Should().BeTrue("vakum kirici: olculmeyen kenar durumlar cumlesi bulunmali");
+            foreach (var durum in new[] { "`$$`", "sekme", "`export`", "`KEY = v`" })
+                bolum.Groups[1].Value.Should().Contain(durum, $"olculmeyen kenar durum '{durum}' adiyla yazili olmali");
         }
 
         // ══ KURAL-UYUM G2 - SECURITY.md AYNI PARAGRAFTA CELISEN IKI CUMLE ═══════════════════

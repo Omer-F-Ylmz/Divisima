@@ -489,7 +489,11 @@ SELECT id, email, email_verified FROM customers WHERE email = N'omery3899+lf5@gm
 > **NEDEN KAPIDAN ÖNCE:** kapı açıldıktan sonraki ilk kesinti ya da ilk `PaymentAfterTerminal`
 > alarmı, kanalın çalıştığının **ilk sınaması** olmamalıdır. Kurulum ve usul: `ops/monitoring.md`.
 
-- [ ] `.env`de `DIVISIMA_ALARM_EMAIL` dolu (`grep -c '^DIVISIMA_ALARM_EMAIL=.' .env` → **1**, değer basılmaz)
+- [ ] `.env`de `DIVISIMA_ALARM_EMAIL` dolu (`grep -cE '^DIVISIMA_ALARM_EMAIL=.*@' .env` → **1**; boş/`""`/yalnız boşluk 0 verir, değer basılmaz)
+- [ ] API log volume'ü **yazılabilir** (MON-1: 7 gün root:root kaldı, Serilog sessizce yazamadı). Var olan volume için:
+      `chown "$(docker exec divisima-api-1 id -u):$(docker exec divisima-api-1 id -g)" /var/lib/docker/volumes/divisima_logs_data/_data`
+      Kanıt: `docker exec divisima-api-1 sh -c 'touch /app/logs/.yazma-denemesi && rm /app/logs/.yazma-denemesi && echo YAZILABILIR'`
+      ve volume'de `divisima-YYYYMMDD.log` **görünür**
 - [ ] `/etc/cron.d/divisima-monitoring` ve `/etc/logrotate.d/divisima-monitoring` kurulu
 - [ ] `bash ops/monitoring/daily-report.sh` → gelen kutusunda **günlük özet GELDİ**
 - [ ] Son 24 saatte `/var/log/divisima-watchdog.log` içinde `MAIL GONDERILEMEDI` **0**

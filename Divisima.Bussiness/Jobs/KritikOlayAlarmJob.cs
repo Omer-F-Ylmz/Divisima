@@ -95,10 +95,30 @@ namespace Divisima.Bussiness.Jobs
             var sonIslenen = imlec.Value;
             var adaylar = await _olayDal.GetListNoTrackingAsync(e =>
                 e.id > sonIslenen && IzlenenTipler.Contains(e.event_type));
-            var yeni = adaylar.OrderBy(e => e.id).TakeWhile(e => e.created_at <= kesim).ToList();
-            if (yeni.Count == 0) return 0;
-
-            var yeniImlec = yeni[^1].id;
+            // GELECEK TARIHLI SATIR (tur 3 / YB-2): created_at > simdi olan satir "taze" SAYILMAZ -
+            // saat geri adimi, TZ degisimi ya da elle INSERT onu gunlerce taze tutar ve onek onda
+            // durursa arkasindaki TUM alarmlar sinyalsiz tikanir. Atlanir, imlec onu gecer, TEK WARNING.
+            var simdi = DateTime.Now;
+            var yeni = new List<Divisima.Entity.Entities.SecurityEvent>();
+            var yeniImlec = sonIslenen;
+            foreach (var olay in adaylar.OrderBy(e => e.id))
+            {
+                if (olay.created_at > simdi)
+                {
+                    _logger.LogWarning("MON-1 gelecek tarihli olay id={Id} atlandi (created_at simdiden ileride); alarm ozetine GIRMEDI.", olay.id);
+                    yeniImlec = olay.id;
+                    continue;
+                }
+                if (olay.created_at > kesim) break;   // kesintisiz yerlesmis onek burada biter
+                yeni.Add(olay);
+                yeniImlec = olay.id;
+            }
+            if (yeniImlec == sonIslenen) return 0;
+            if (yeni.Count == 0)
+            {
+                await _imlec.YazAsync(yeniImlec);   // yalniz atlanan gelecek tarihli satirlar vardi
+                return 0;
+            }
             var kritikSayisi = yeni.Count(e => e.severity == "Critical");
             var yazilan = 0;
             if (kritikSayisi > 0)

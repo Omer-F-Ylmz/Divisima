@@ -297,10 +297,10 @@ builder.Host.UseSerilog((ctx, cfg) => cfg
         rollingInterval: RollingInterval.Day,
         rollOnFileSizeLimit: true,
         fileSizeLimitBytes: 100L * 1024 * 1024,
-        // MON-1 (kullanici karari): saklama 14 GUN, dosya sayisi DEGIL. Sayi siniri (eski 30)
-        // 100 MB parcalariyla gun sayisinden kopuyordu: gurultulu bir gun eski gunleri erken
-        // silebiliyordu. Serilog.Sinks.File 5.0.0 bu parametreyi tasiyor (paket imzasi olculdu).
-        retainedFileCountLimit: null,
+        // MON-1 (kullanici karari): saklama 14 GUN zaman siniri. Serilog.Sinks.File 5.0.0 bu
+        // parametreyi tasiyor (paket imzasi olculdu). Sayi siniri (40 x 100 MB ~ 4 GB) DISK TAVANI
+        // olarak BIRLIKTE kalir: tur 3'te olculdu, yalniz zaman siniriyla parca sayisi sinirsizdi.
+        retainedFileCountLimit: 40,
         retainedFileTimeLimit: TimeSpan.FromDays(14)));
 
 // B10: Secrets - environment değişkenleri (production'da JWT key + connection string buradan)
