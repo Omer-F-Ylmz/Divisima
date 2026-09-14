@@ -10,9 +10,11 @@ b) Okuma kurali: arsive yalniz somut gerekceyle bakilir (hangi muhur + hangi bas
    once INDEX.md, sonra grep ve dar aralik Read. Bir arsiv dosyasinin tamami okunmaz; "eski
    satir N" atiflari INDEX ile cozulur.
 c) Yeni muhur usulu: dalga muhru docs/muhur/'a YENI dosya (NN siradaki, slug dalga adi);
-   CLAUDE.md'ye YALNIZ operatif delta girer — yeni MK / suzgec girdisi / ders-sayac / tuzak /
-   kurgu sabiti / D-YAN / acik SUPHELI / kuyruk — ilgili B-bolumu basligi capasiyla (MK-7: capa
-   HAM'dan). Dosya-sonu guvenli-ekleme capa deseni EMEKLI. MK-8 surer.
+   CLAUDE.md'ye YALNIZ operatif delta girer, CLAUDE.md'deki basligina: yeni MK -> B4 · tuzak ->
+   5. Bilinen tuzaklar · baglayici karar -> B8 · BILINEN risk -> B9 · suzgec girdisi / ders-sayac /
+   kurgu sabiti-D-YAN / kuyruk / acik SUPHELI -> B10 · ACIK DELTALAR (MK-7: capa HAM'dan).
+   Kapanan kalem muhurden sonra `divisima-defter` arsivine tasinir; arsive YENI delta YAZILMAZ.
+   Dosya-sonu guvenli-ekleme capa deseni EMEKLI. MK-8 surer.
 d) Atif bicimi: satir numarasi yazilmaz; "muhur adi + baslik" (or. MF-4 · KURGU). Muhur metni
    sonradan degistirilmez; duzeltme yeni muhrun ya da ilgili B-satirinin isidir.
 e) Operatif delta isaretci disiplini: tablo/envanter/itiraz listeleri muhurde kalir, CLAUDE.md'ye tek satir
@@ -407,6 +409,70 @@ gecmemis commit checkpoint sayilmaz."**
 **Her commit/push kapisinda HEAD'in bir dal uzerinde oldugu dogrulanir
 (`git symbolic-ref -q --short HEAD`); SHA'ya checkout yapilan her olcum donusu dala
 checkout ile biter.**
+
+---
+
+# B8 — BAGLAYICI KARARLAR (karar cumleleri; gerekce arsivde: `divisima-defter`)
+
+## Baglayici kararlar (00a-sira-kararlar.md)
+
+- `00a:87` - **AutoMapper: 12.0.1'de KAL, bump YOK.**
+- `00a:92` - **Seller modulu**: dokunma, veri duzeyinde kapali, migrate/seed yok.
+- `00a:93` **ZORUNLU ON KOSUL (GUVENLIK DALGASI / G4): modul acilmadan ONCE satici refresh token'i httpOnly cereze tasinmali.**
+- `00a:101` **IKINCI ON KOSUL (GUVENLIK-FIX-2 eki): `SellerAuthManager.Login` kilit kontrolunu SIFRE DOGRULAMASINDAN ONCE yapiyor** … Musteri tarafindaki sira (dogrula -> kilitliyse ve sifre DOGRU ise 403, degilse 401 + sayac artirma YOK) satici tarafina da tasinir ve pinlenir.
+- `00a:106` - **invoice_number**: entegrator (Nilvera) numarasi esas, bizimki ic referans - degisiklik yok.
+- `00a:128` EKSIK INDEKS ESIGI, GERCEK HACIMDE TEKRAR BAKILACAK. … **KORLEMESINE INDEKS EKLENMEZ** (kullanici sarti).
+- `00a:180` JS/DOM TEST KOSUCUSU (Playwright vb.). … **LAUNCH ONCESI EKLENMEZ:**
+- `00a:188` MISAFIR CHECKOUT ENUMERATION ve COP COD SIPARISI. … **KARAR: LAUNCH SONRASI.**
+- `00a:206` - **Iyzico'nun TELEMETRI alan adlari CSP'de ACILMAZ (kalici karar).**
+- `00a:213` - **Auth modeli**: mevcut hibrit korunuyor (access localStorage + refresh httpOnly cookie + kosullu CSRF).
+- `00a:215` - **`EnableRetryOnFailure`: S7'de ACILMADI.**
+
+## Baglayici kararlar (muhurlerden — EK-1)
+
+- `37·MANTIK-FIX-1·MF-2 ONCESI ARA DURUM` - **(a)** `InvoiceManager.cs:76`'nin **BRUT** toplama bagi MF-2'de ACIK HALE GETIRILIP **PINLENECEK**.
+- `38·MANTIK-FIX-2R·ACIK OLCUM (2)` **URETIM KAYNAGI SAYIMA GIRMEDI ve DOKUNULMADI** (C4): `InvoiceManager.cs:24` (`0.20m`)
+- `39·MANTIK-FIX-3·MERKEZ KARARLARI N2` | **N2** | Hata eslemesi once MAKINE-OKUNUR sinyal; yoksa HAM yanit capasi + cift bicim + kirilganlik kaydi |
+- `36·MANTIK-AV-1·DALGA BOLUMLEMESI` **64 bozuk `invoice_items` satiri D-YAN'a** (veri temizligi, fix degil).
+- `37·MANTIK-FIX-1·MF-2 ONCESI ARA DURUM` **InvoiceManager KODUNA DOKUNULMADI (sart aynen korundu).**
+- `37·MF-1·MF-3 SARTLARI` **(a)-(c):** 409 semantigi YENIDEN ACILMAZ · **IKINCI kupon dogrulama noktasi ACILMAZ** … musteri+adres yazimi `PlaceOrder` BASARISINA bagli.
+- `44..48·GF-1..GF-2b` guvenlik kararlari (28) arsivde: `divisima-defter` · B8, tam metin muhur 44-48.
+  kapsam: replay (misafir/uye) · auth_time/step-up · sahiplik 404 / 403 sabitleri · yetki yuzeyleri · sifre ozeti v2 · access iptali · jeton ozeti · refresh cerezi/rotasyon/sekme kilidi · yeniden kullanim alarmi · log maskesi ·
+  yer-tutucu kapisi · HSTS · rate limit (hassas kova) · UTC zaman ekseni · musteriye donen hata metni · URL sema politikasi · renk allowlist · service worker · Google Fonts SRI · 429 hata sinifi · siparis rid · CSP
+- `50·GF-4·K1` `50·GF-4·K4` `50·GF-4·K5` `50·GF-4·K7` **TEDARIK ZINCIRI (dordu tek satirda):** action'lar 40-hane COMMIT SHA'sina pinli · paket kaynagi TEK (`NuGet.config` + `<clear />`, her projede `packages.lock.json`, CI `--locked-mode`) · imaj referansi TEK KAYNAK … **AutoMapper 12.0.1 KALIR** … `NuGetAuditMode=all` UYARI, deprecated adimindaki `\|\| true` BILINCLI.
+- `52·GF-5` **IMZASIZ webhook 404 STATUKO = KABUL EDILMIS RISK** … Girdi sinirlari TEK KAYNAK `GirdiSinirlari` — **ortak RuleBuilder ACILMAZ** … **sema'ya capalanir sabite DEGIL**; `request_id` <=80 + `[A-Za-z0-9._-]` **GUID SARTI ASLA** … Log maskesi GLOBAL: iki Serilog sink'i de `MaskeliFormatter` (`ITextFormatter`), enricher yolu KAPALI, `KanitMaskesi` olcutu GENISLETILMEZ.
+- `55·GF-6` **REPLAY GUARD'I TEK SERVIS:** `request_id` replay kurali (kupon KANONIK + coklu-kume sepet + sizintisiz 400) `SiparisReplayGuardi`de TEK yerde; … Kopya ACILMAZ.
+- `55·GF-6` **DURUM YAZIMI TEK KAPIDAN + TERMINAL KORUMASI:** `OrderManager`da her `order.status` yazimi `DurumYaz` -> `OrderStatusMachine`den gecer … Iyzico'nun IKI dali terminal siparisi DIRILTMEZ: … Iade **ELLE** (BILINEN).
+- `55·GF-6` **COD PARA ANLAMI `Delivered`DA (DAR):** `PaidOrderSpec.IsPaid(byte status, byte paymentType)` - COD yalniz `Delivered`. … Sadakat: `PaymentConfirmedSideEffects` BOLUNMEZ;
+- `55·GF-6/F5-F6` **KUPON LIMITI "HAK CANLI MI" SORUSUDUR** - `PaidOrderSpec`ten BAGIMSIZ kalir … **KARGO TESLIMAT DALI TRANSACTION ICINDE** (`ExecuteInTransactionAsync`):
+- `51·AV-2` **LAUNCH BLOKER OLCUTU:** `KRITIK` **∨** `YUKSEK`+`KIMLIKSIZ-UZAK` **∨** `[PARA]`/`[VERI-BOZAN]`. Digerleri launch SONRASI. … `ADMIN` on kosullu kalem KRITIK OLAMAZ.
+- `51·AV-2` **AV KAPSAMI KUMULATIF MATRISLE OLCULUR; YER DEGISTIRME YASAK.**
+
+# B9 — BILINEN / KABUL EDILMIS RISK (yalniz ACIK/BAGLAYICI basliklar; DURUM sutunlu tam liste ilgili muhurde)
+
+- **`45·GUVENLIK-FIX-1b`** — bes kalem (ayni-saniye jeton penceresi · miras oturumda step-up · 342 olu oturum · IP davranis kaniti yok · K4 gecikmeli aile iptali).
+- **`46·GUVENLIK-FIX-2a`** — uc kalem (Google Fonts SRI YASAK · `admin.html` kendi `imgUrl()` kopyasi · panelde `guvenliHTML`/`guvenliYaz` cagirani yok).
+- **`47·GUVENLIK-FIX-3`** — dort kalem (`lockout_end` YEREL · kismi iptal sonrasi replay 400 · logout bayat cerezle 200 · `expiration` `Z` bicimli).
+- **`50·GUVENLIK-FIX-4`** — iki kalem (yerel SDK 9 / CI SDK 8, `global.json` YOK - PINLENMEMIS … Dependabot `docker` ekosistemi workflow `services.*.image` ve C# digest literallerini TARAMAZ
+- **`51·GUVENLIK-AV-2`** — iki kalem: **SignalR "admins" alarmi BOS GRUBA yayin yapiyor**
+- **`53·GUVENLIK-AV-3`** — iki kalem: **rezervasyon birikmesi** … **kor eksenler A02 · A03 · A05 · A04**
+- **`55·GUVENLIK-FIX-6`** — … **raporlama siteleri ESKI kuralda** … **terminal siparise gelen odemenin IADESI ELLE** … **`health` uclari BILINCLI anonim** … **BAGLAYICI**
+- **`60·MON-1`** — … **Y1 LATENT: RCSI acilirsa alarm kaybi** (uretimde kapali).
+- **`57·LAUNCH-DEPLOY-1`** — … **SQL Server EXPRESS** … **TDE YOK** … **ANAHTAR KAYBI = YEDEK KAYBI** … **`ForwardedHeaders:KnownProxies` = Docker AG GECIDI** … **SOFT-LAUNCH KAPISI ACIK**
+- **`frame-src` SUPHELISI ACIK**
+- **D-7 KISMEN:** admin TAM, vitrin `'unsafe-inline'` KABUL EDILMIS RISK; **CSP FAZ B YOK.**
+
+# B10 · ACIK DELTALAR (yeni delta buraya; kapanan kalem muhurden sonra `divisima-defter` arsivine tasinir)
+
+## Suzgec
+
+## Ders-sayac
+
+## Kurgu / D-YAN
+
+## Kuyruk
+
+## Acik SUPHELI
 
 ---
 

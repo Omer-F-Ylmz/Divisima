@@ -8,6 +8,7 @@ description: Divisima geçmiş dalga kayıtları, kapanmış kararlar ve faz tar
 Kaynak: CLAUDE.md, zemin 9972b0f (SADE turu). Satırlar BAYT-AYNI taşındı; hiçbiri silinmedi.
 Kural cümleleri CLAUDE.md'de kalır; burada gerekçe paragrafları, KALICI DERSLER, geçmiş kayıtlar ve eski B5–B9 durur.
 `<!-- tasindi: ... -->` satırları yalnız gezinti etiketidir: taşınan metne ait değildir, CLAUDE.md'de hangi başlığın altından geldiğini söyler.
+ARŞİV: bu dosyaya YENİ delta yazılmaz; kapanan kalemler mühürden sonra buraya taşınır (CLAUDE.md B0 c). B8 karar cümleleri, GF kapsam satırı ve açık B9 başlıkları CLAUDE.md'de; tam metin burada kalır.
 
 <!-- tasindi: # B0 — MK-11 ARSIV VE MUHUR USULU (ARSIV-1, zemin d8f12dd) altindan -->
 **BOLUM DUZENI:** B0 bu blok · B1 calisma kurallari · B2 SDP v1.3 -> skill `sdp` ·
