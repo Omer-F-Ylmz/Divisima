@@ -386,7 +386,7 @@ Operatörün baktığı yer: **Panel sekmesindeki "Başarısız Arka Plan İşle
 bu kayıtlar `DataRetentionJob` tarafından **silinmez** (yalnız `Processed` olanlar silinir).
 
 - [ ] Yayın sonrası ilk gün panelde bu liste kontrol edildi (boş olması beklenen durumdur)
-- [ ] Log dosyaları: günlük + 100 MB'da parçalanır, **14 gün** saklanır (zaman sınırı, `Program.cs` — MON-1).
+- [ ] Log dosyaları: günlük + 100 MB'da parçalanır, saklama **14 gün + 40 dosya** tavanı (hangisi önce dolarsa; 40 × 100 MB ≈ 4 GB, `Program.cs` — MON-1). Disk planlaması bu tavana göre yapıldı.
       `/app/logs` volume'ünde dosya **gerçekten oluşuyor** (MON-1'de 7 gün boyunca 0 dosyaydı: dizin root:root).
       Disk planlaması buna göre yapıldı
 
@@ -489,7 +489,7 @@ SELECT id, email, email_verified FROM customers WHERE email = N'omery3899+lf5@gm
 > **NEDEN KAPIDAN ÖNCE:** kapı açıldıktan sonraki ilk kesinti ya da ilk `PaymentAfterTerminal`
 > alarmı, kanalın çalıştığının **ilk sınaması** olmamalıdır. Kurulum ve usul: `ops/monitoring.md`.
 
-- [ ] `.env`de `DIVISIMA_ALARM_EMAIL` dolu (`grep -cE '^DIVISIMA_ALARM_EMAIL=.*@' .env` → **1**; boş/`""`/yalnız boşluk 0 verir, değer basılmaz)
+- [ ] `.env`de `DIVISIMA_ALARM_EMAIL` dolu (`grep -cE '^DIVISIMA_ALARM_EMAIL=[^#]*@' .env` → **1**; boş/`""`/yalnız boşluk/yorumdaki `@` 0 verir, değer basılmaz)
 - [ ] API log volume'ü **yazılabilir** (MON-1: 7 gün root:root kaldı, Serilog sessizce yazamadı). Var olan volume için:
       `chown "$(docker exec divisima-api-1 id -u):$(docker exec divisima-api-1 id -g)" /var/lib/docker/volumes/divisima_logs_data/_data`
       Kanıt: `docker exec divisima-api-1 sh -c 'touch /app/logs/.yazma-denemesi && rm /app/logs/.yazma-denemesi && echo YAZILABILIR'`

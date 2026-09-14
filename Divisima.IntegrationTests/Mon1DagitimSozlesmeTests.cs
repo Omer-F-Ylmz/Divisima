@@ -51,7 +51,7 @@ namespace Divisima.IntegrationTests
         // KAYNAK-SOZLESME: Serilog saklamasi yalniz dosya YUVARLANIRKEN uygulanir; 14 gunluk
         // silme davranisi test suresinde gozlenemez. Pin yapilandirmanin KENDISINI olcer.
         [Fact]
-        public void SERILOG_DOSYA_SAKLAMASI_14_GUN_ZAMAN_SINIRIDIR_DOSYA_SAYISI_DEGIL()
+        public void SERILOG_DOSYA_SAKLAMASI_14_GUN_ve_40_DOSYA_TAVANI_BIRLIKTE()
         {
             var program = Yorumsuz(Oku("Divisima.API/Program.cs"), "//");
             var blok = Regex.Match(program, @"\.WriteTo\.File\((.*?)\)\);", RegexOptions.Singleline);
@@ -62,12 +62,17 @@ namespace Divisima.IntegrationTests
             sink.Should().Contain("retainedFileTimeLimit: TimeSpan.FromDays(14)", "kullanici karari: 14 GUN");
             // TUR 3 / YB-1: sayi siniri KALDIRILINCA disk tavani da kalkti (denetci olctu: 40 x 100 MB
             // parca silinmedi). Karar: IKI sinir BIRLIKTE - once hangisi dolarsa. 40 x 100 MB ~ 4 GB.
-            sink.Should().Contain("retainedFileCountLimit: 40",
+            // TUR 4 / N5 (MUT-37 DERSI): ilk capa virgulsuzdu ve "400"u de eslesiyordu - denetci 400
+            // yazdi, pin YESIL kaldi. Capa degeri SONLANDIRAN virgulle ankrajli.
+            sink.Should().Contain("retainedFileCountLimit: 40,",
                 "zaman siniri tek basina disk tavani DEGILDIR; sayi siniri tavan olarak kalir");
             sink.Should().NotContain("retainedFileCountLimit: null", "sinirsiz sayi disk tavanini kaldirir");
 
-            Oku("Divisima.API/appsettings.Production.example.json").Should().Contain("14 gun",
+            // TUR 4 / N6: operatorun okudugu iki belge IKI siniri da anlatmali.
+            Oku("Divisima.API/appsettings.Production.example.json").Should().Contain("14 gun + 40 dosya",
                 "operator sablonu saklamayi DOGRU anlatmali");
+            Oku("ops/deployment-checklist.md").Should().Contain("14 gün + 40 dosya",
+                "checklist disk planlamasi icin tavani anmali");
             Oku("ops/deployment-checklist.md").Should().NotContain("30 dosya saklanır", "bayat saklama cumlesi kalmamali");
         }
 
@@ -111,6 +116,8 @@ namespace Divisima.IntegrationTests
             KomutuKos(satir.Value, "DIVISIMA_ALARM_EMAIL=\"\"\n").Should().Be("0", $"{belge}: bos cift tirnak alici DEGIL");
             KomutuKos(satir.Value, "DIVISIMA_ALARM_EMAIL=''\n").Should().Be("0", $"{belge}: bos tek tirnak alici DEGIL");
             KomutuKos(satir.Value, "DIVISIMA_ALARM_EMAIL=   \n").Should().Be("0", $"{belge}: yalniz bosluk alici DEGIL");
+            // TUR 4 / N3: yorumdaki `@` alici sayilmamali (betik o degeri BOS okur).
+            KomutuKos(satir.Value, "DIVISIMA_ALARM_EMAIL= # ops@ornek.test\n").Should().Be("0", $"{belge}: yorumdaki @ alici DEGIL");
             KomutuKos(satir.Value, "DIVISIMA_ALARM_EMAIL=a@ornek.test\n").Should().Be("1", $"{belge}: dolu alici bulunmali");
         }
 

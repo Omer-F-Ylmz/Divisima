@@ -95,30 +95,30 @@ namespace Divisima.Bussiness.Jobs
             var sonIslenen = imlec.Value;
             var adaylar = await _olayDal.GetListNoTrackingAsync(e =>
                 e.id > sonIslenen && IzlenenTipler.Contains(e.event_type));
-            // GELECEK TARIHLI SATIR (tur 3 / YB-2): created_at > simdi olan satir "taze" SAYILMAZ -
-            // saat geri adimi, TZ degisimi ya da elle INSERT onu gunlerce taze tutar ve onek onda
-            // durursa arkasindaki TUM alarmlar sinyalsiz tikanir. Atlanir, imlec onu gecer, TEK WARNING.
+            // GELECEK TARIHLI SATIR (tur 3 / YB-2 + tur 4 / N1-N2): created_at > simdi olan satir "taze"
+            // SAYILMAZ - saat geri adimi, TZ degisimi ya da elle INSERT onu gunlerce taze tutar ve onek
+            // onda durursa arkasindaki TUM alarmlar sinyalsiz tikanir. ATLANMAZ da: tur 3'te atlanan
+            // Critical icin HIC mail gitmiyordu (denetci olctu). Ozete "gelecek tarihli" ETIKETIYLE ayni
+            // turda girer, imlec ilerler, ayri tolerans esigi YOK; satir basina TEK WARNING.
             var simdi = DateTime.Now;
             var yeni = new List<Divisima.Entity.Entities.SecurityEvent>();
-            var yeniImlec = sonIslenen;
+            var gelecekTarihli = new List<int>();
             foreach (var olay in adaylar.OrderBy(e => e.id))
             {
                 if (olay.created_at > simdi)
                 {
-                    _logger.LogWarning("MON-1 gelecek tarihli olay id={Id} atlandi (created_at simdiden ileride); alarm ozetine GIRMEDI.", olay.id);
-                    yeniImlec = olay.id;
-                    continue;
+                    _logger.LogWarning("MON-1 gelecek tarihli olay id={Id} (created_at simdiden ileride); ozete etiketle alindi.", olay.id);
+                    gelecekTarihli.Add(olay.id);
                 }
-                if (olay.created_at > kesim) break;   // kesintisiz yerlesmis onek burada biter
+                else if (olay.created_at > kesim)
+                {
+                    break;   // kesintisiz yerlesmis onek burada biter
+                }
                 yeni.Add(olay);
-                yeniImlec = olay.id;
             }
-            if (yeniImlec == sonIslenen) return 0;
-            if (yeni.Count == 0)
-            {
-                await _imlec.YazAsync(yeniImlec);   // yalniz atlanan gelecek tarihli satirlar vardi
-                return 0;
-            }
+            if (yeni.Count == 0) return 0;
+
+            var yeniImlec = yeni[^1].id;
             var kritikSayisi = yeni.Count(e => e.severity == "Critical");
             var yazilan = 0;
             if (kritikSayisi > 0)
@@ -129,7 +129,7 @@ namespace Divisima.Bussiness.Jobs
                 {
                     To = alici,
                     Subject = $"{KonuOneki} - {yeni.Count} güvenlik olayı ({kritikSayisi} kritik)",
-                    Body = KanitMaskesi.Maskele(Govde(yeni, sonIslenen, yeniImlec, kritikSayisi))!,
+                    Body = KanitMaskesi.Maskele(Govde(yeni, sonIslenen, yeniImlec, kritikSayisi, gelecekTarihli))!,
                 });
                 yazilan = 1;
             }
@@ -140,7 +140,8 @@ namespace Divisima.Bussiness.Jobs
             return yazilan;
         }
 
-        private static string Govde(List<Divisima.Entity.Entities.SecurityEvent> olaylar, int oncekiImlec, int yeniImlec, int kritikSayisi)
+        private static string Govde(List<Divisima.Entity.Entities.SecurityEvent> olaylar, int oncekiImlec, int yeniImlec, int kritikSayisi,
+            List<int> gelecekTarihli)
         {
             var sb = new StringBuilder();
             sb.Append("Divisima güvenlik alarmı: son turdan beri ").Append(kritikSayisi).Append(" kritik olay.\n");
@@ -151,6 +152,9 @@ namespace Divisima.Bussiness.Jobs
                 var ilkUc = string.Join(", ", grup.OrderBy(e => e.id).Take(3).Select(e => e.id));
                 sb.Append(grup.Key).Append(" | ").Append(grup.Count()).Append(" | ").Append(ilkUc).Append('\n');
             }
+            if (gelecekTarihli.Count > 0)
+                sb.Append("\ngelecek tarihli: id ").Append(string.Join(", ", gelecekTarihli))
+                  .Append(" (created_at şimdiden ileride - sunucu saati ya da elle kayıt incelenmeli)\n");
             sb.Append("\nBu e-posta olay ayrıntısı (IP, müşteri, açıklama) TAŞIMAZ. İnceleme:\n");
             sb.Append("SELECT id, event_type, severity, customer_id, created_at FROM security_events WHERE id BETWEEN ")
               .Append(oncekiImlec + 1).Append(" AND ").Append(yeniImlec).Append(" ORDER BY id;\n");

@@ -43,6 +43,10 @@
 - **İmleç** Hangfire deposundaki `divisima:kritik-olay-alarm` hash'inde (`son_id`). Migration yok;
   uygulama yeniden başlayınca kaybolmaz.
 - **İlk koşum** tabanı kurar (alıcı boş olsa bile), geçmişi bildirmez.
+- **Gelecek tarihli satır** (`created_at` şimdiden ileride — saat geri adımı, TZ değişimi, elle
+  INSERT): **atlanmaz ve zinciri tıkamaz**; aynı turda özete girer ve gövdede
+  `gelecek tarihli: id …` satırıyla **etiketlenir**, satır başına bir WARNING logu düşer. Tolerans
+  eşiği yoktur: 3 sn ileri de 1 saat ileri de aynı işlem görür.
 - **Yerleşme payı 60 sn:** imleç id sırasındaki **yerleşmiş kesintisiz önek** kadar ilerler; ilk taze
   satırda durur, arkasındakiler bir sonraki turda okunur. Gecikme bütçesi: olay → en geç ~5 dk (tur) + 1 dk (pay) + 1 dk (outbox) + SMTP.
 - **Alıcı boşsa** mail yazılmaz, imleç **ilerlemez** (alıcı verilince bekleyenler gider) ve her tur
@@ -116,7 +120,7 @@ sondaki sekme · `export` önekli satır (`export KEY=v`) · `KEY = v` (eşittir
 
 ```bash
 cd /opt/divisima
-grep -cE '^DIVISIMA_ALARM_EMAIL=.*@' .env                  # -> 1 (boş, "", '' ve yalnız boşluk 0 verir; değer BASILMAZ)
+grep -cE '^DIVISIMA_ALARM_EMAIL=[^#]*@' .env               # -> 1 (boş, "", '', yalnız boşluk ve yorumdaki @ 0 verir; değer BASILMAZ)
 install -m 644 ops/monitoring/divisima-monitoring.cron /etc/cron.d/divisima-monitoring
 install -m 644 ops/monitoring/logrotate-divisima-monitoring /etc/logrotate.d/divisima-monitoring
 logrotate -d /etc/logrotate.d/divisima-monitoring           # hata yok

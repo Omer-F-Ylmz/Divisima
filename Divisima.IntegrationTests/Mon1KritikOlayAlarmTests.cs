@@ -237,7 +237,27 @@ namespace Divisima.IntegrationTests
         }
 
         [Fact]
-        public async Task YB2_GELECEK_TARIHLI_SATIR_ATLANIR_TEK_WARNING_ARKASINDAKI_ALARM_GIDER()
+        public async Task N1_GELECEK_TARIHLI_CRITICAL_3SN_ve_1SAAT_AYNI_TURDA_ETIKETLE_MAILE_GIRER()
+        {
+            if (Skipped()) return;
+            var alici = YeniAlici();
+            var imlec = new BellekImleci();
+            await KosAsync(imlec, alici);
+
+            var ucSaniye = await OlayYazAsync("RefreshTokenReuse", "Critical", zaman: DateTime.Now.AddSeconds(3));
+            var birSaat = await OlayYazAsync("AccountLocked", "Critical", zaman: DateTime.Now.AddHours(1));
+
+            (await KosAsync(imlec, alici)).Should().Be(1, "gelecek tarihli Critical'lar AYNI turda alarm uretmeli");
+            imlec.Deger.Should().Be(birSaat, "imlec gelecek tarihli satirlari gecer - tikanma yok");
+            var mail = (await AlarmMailleriAsync(alici)).Single();
+            mail.Body.Should().Contain($"RefreshTokenReuse | 1 | {ucSaniye}", "3 sn ileri tarihli Critical ozete girer (tolerans esigi yok)");
+            mail.Body.Should().Contain($"AccountLocked | 1 | {birSaat}", "1 saat ileri tarihli Critical ozete girer");
+            mail.Body.Should().Contain($"gelecek tarihli: id {ucSaniye}, {birSaat}", "iki satir da ETIKETLE isaretlenir");
+            mail.Subject.Should().Be("Divisima ALARM - 2 güvenlik olayı (2 kritik)");
+        }
+
+        [Fact]
+        public async Task YB2_GELECEK_TARIHLI_SATIR_IMLECI_TIKAMAZ_TEK_WARNING_ETIKETLE_OZETE_GIRER()
         {
             if (Skipped()) return;
             var alici = YeniAlici();
@@ -261,10 +281,11 @@ namespace Divisima.IntegrationTests
             imlec.Deger.Should().Be(gercek, "imlec gelecek tarihli satiri gecip ilerlemeli");
             var govde = (await AlarmMailleriAsync(alici)).Single().Body;
             govde.Should().Contain($"AccountLocked | 1 | {gercek}");
-            govde.Should().NotContain("PaymentSignatureInvalid", "gelecek tarihli satir atlanir, ozete girmez");
+            govde.Should().Contain($"PaymentSignatureInvalid | 1 | {gelecek}", "tur 4: gelecek tarihli satir ozete GIRER");
+            govde.Should().Contain($"gelecek tarihli: id {gelecek}", "etiketle isaretlenir");
             logger.Kayitlar.Count(k => k.Seviye == Microsoft.Extensions.Logging.LogLevel.Warning
                                        && k.Mesaj.Contains($"gelecek tarihli olay id={gelecek}", StringComparison.Ordinal))
-                .Should().Be(1, "atlanan satir TEK WARNING ile gorunur olmali");
+                .Should().Be(1, "gelecek tarihli satir TEK WARNING ile gorunur olmali");
         }
 
         // ══ L3 / B2 - TABAN ALICI KONTROLUNDEN ONCE KURULUR ═══════════════════════════════════
