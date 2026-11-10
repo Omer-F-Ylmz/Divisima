@@ -7,6 +7,8 @@
     <NoWarn>$(NoWarn);CA1707</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="StackExchange.Redis" Version="3.4.31" />
+    <PackageReference Include="System.Text.Json" Version="11.0.0" />
     <ProjectReference Include="..\Divisima.Core\Divisima.Core.csproj" />
   </ItemGroup>
 </Project>
