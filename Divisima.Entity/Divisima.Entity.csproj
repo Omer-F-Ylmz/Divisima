@@ -7,6 +7,11 @@
     <NoWarn>$(NoWarn);CA1707</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="MailKit" Version="5.0.0" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols" Version="8.23.0" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.23.0" />
+    <PackageReference Include="StackExchange.Redis" Version="3.4.35" />
+    <PackageReference Include="System.Text.Json" Version="11.0.0" />
     <ProjectReference Include="..\Divisima.Core\Divisima.Core.csproj" />
   </ItemGroup>
 </Project>
